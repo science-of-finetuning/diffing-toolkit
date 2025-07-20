@@ -387,13 +387,14 @@ def display_colored_token_table(tokens_data, table_type):
     )
 
 
-def render_logit_lens_tab(
+def render_latent_lens_tab(
     method: DiffingMethod,
     get_latent_fn: Callable,
     max_latent_idx: int,
     layer: int,
     latent_type_name: str = "Latent",
     patch_scope_add_scaler: bool = False,
+    custom_latent_options: Optional[List[str]] = None,
 ):
     """Render logit lens analysis tab for SAE latents."""
     # UI Controls
@@ -402,7 +403,7 @@ def render_logit_lens_tab(
     with col1:
         latent_idx = st.selectbox(
             f"{latent_type_name} Index",
-            options=list(range(max_latent_idx)),
+            options=custom_latent_options if custom_latent_options else list(range(max_latent_idx)),
             index=0,
             help=f"Choose which latent to analyze (0-{max_latent_idx-1})",
         )
@@ -449,7 +450,7 @@ def render_logit_lens_tab(
             top_tokens, bottom_tokens = patch_scope(latent, model, method.tokenizer, layer, scaler=scaler)
 
         # Display results
-        st.markdown(f"### {latent_type_name} {latent_idx} Logit Lens Analysis")
+        st.markdown(f"### {latent_type_name} {latent_idx} {method_choice} Analysis")
 
         col1, col2 = st.columns(2)
 

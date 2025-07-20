@@ -27,8 +27,80 @@ from src.utils.cache import SampleCache
 from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
 from src.utils.dashboards import AbstractOnlineDiffingDashboard
 from src.utils.dashboards import MaxActivationDashboardComponent
+from src.utils.visualization import render_latent_lens_tab
 
 
+class RunningActivationMean:
+    """Running mean for activation differences with position/token filtering."""
+    
+    def __init__(self, position: Optional[int] = None, token_id: Optional[int] = None):
+        self.position = position  # For absolute position filtering (0=first, 1=second, etc.)
+        self.token_id = token_id  # For token ID filtering
+        self.mean = None
+        self.count = 0
+    
+    def update(self, activation_diffs: torch.Tensor, tokens: torch.Tensor):
+        """Update with activation differences, applying position/token filtering.
+        
+        Args:
+            activation_diffs: [seq_len, activation_dim]
+            tokens: [seq_len] - token IDs for the sequence
+        """
+        if self.position is not None:
+            # Absolute position filtering
+            if len(activation_diffs) > self.position:
+                selected_diffs = activation_diffs[self.position:self.position+1]
+            else:
+                return  # Position doesn't exist in this sequence
+        elif self.token_id is not None:
+            # Token ID filtering - find all occurrences
+            mask = (tokens == self.token_id)
+            if not mask.any():
+                return  # Token not found in sequence
+            selected_diffs = activation_diffs[mask]
+        else:
+            # All tokens
+            selected_diffs = activation_diffs
+        
+        if selected_diffs.shape[0] == 0:
+            return
+            
+        batch_mean = torch.mean(selected_diffs, dim=0)
+        batch_n = selected_diffs.shape[0]
+        
+        # Running mean update
+        total_n = self.count + batch_n
+        if self.count == 0:
+            self.mean = batch_mean
+            self.activation_dim = self.mean.shape[0]
+        else:
+            delta = batch_mean - self.mean
+            self.mean += delta * batch_n / total_n
+        
+        self.count = total_n
+    
+    def save(self, filepath: Path):
+        """Save mean and count to .pt file."""
+        torch.save({
+            'mean': self.mean.cpu(),
+            'count': self.count,
+            'activation_dim': self.activation_dim,
+            'position': self.position,
+            'token_id': self.token_id
+        }, filepath)
+
+def init_collectors(unique_template_tokens):
+        collectors = {
+            'all_tokens': RunningActivationMean(),
+            'first_token': RunningActivationMean(position=0),
+            'second_token': RunningActivationMean(position=1),
+        }
+        # Add collectors for unique chat template tokens
+        for token_id in unique_template_tokens:
+            token_name = f"chat_token_{token_id}"
+            collectors[token_name] = RunningActivationMean(token_id=token_id)
+        return collectors
+        
 class SampleCacheDataset(Dataset):
     """
     PyTorch Dataset wrapper for SampleCache to enable DataLoader usage.
@@ -240,6 +312,8 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
     def compute_activation_statistics(
         self, 
         activations: torch.Tensor,
+        tokens: torch.Tensor,
+        collectors: Dict[str, RunningActivationMean]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute per-token L2 norm difference, cosine similarity, and individual norms between base and finetuned activations.
@@ -273,6 +347,9 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         
         # Compute activation differences
         activation_diffs = finetuned_activations - base_activations  # [seq_len, activation_dim]
+
+        for collector in collectors.values():
+            collector.update(activation_diffs, tokens)
         
         # Compute L2 norm per token
         norm_diffs = torch.norm(activation_diffs, p=2, dim=-1)  # [seq_len]
@@ -441,6 +518,9 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         self.compute_histogram(relative_diff_values, "Relative Activation Difference Norm", plot_dir)
         self.compute_histogram(relative_diff_values, "Relative Activation Difference Norm", plot_dir, no_outliers=True)
 
+    def _get_chat_template_tokens(self):
+        return self.tokenizer.apply_chat_template([{"content": "", "role": "user"}], tokenize=True, add_generation_prompt=True)
+    
     def process_layer(self, dataset_cfg: DatasetConfig, layer: int, max_act_stores: Dict[str, MaxActStore]) -> Dict[str, Any]:
         """
         Process a single layer for a dataset and compute norm differences.
@@ -479,6 +559,12 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         self.logger.info(f"Processing {len(dataset)} samples from {dataset_cfg.id}, layer {layer}")
         self.logger.info(f"Using DataLoader with {self.num_workers} workers, batch_size={self.batch_size}")
         
+        # Initialize activation difference collectors
+        chat_template_ids = self._get_chat_template_tokens()
+        unique_template_tokens = list(set(chat_template_ids))  # Get unique tokens
+        dataset_name = dataset_cfg.id.split("/")[-1]
+        collectors = init_collectors(unique_template_tokens)
+       
         all_norm_values = []
         all_cos_sim_values = []
         all_norm_base_values = []
@@ -539,7 +625,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                     activations = activations.to(self.device)
                     
                     # Compute norm differences
-                    norm_diffs, cos_sim, norm_base, norm_finetuned = self.compute_activation_statistics(activations)
+                    norm_diffs, cos_sim, norm_base, norm_finetuned = self.compute_activation_statistics(activations, tokens, collectors)
                     
                     # Convert cosine similarity to cosine distance
                     cos_dist = 1 - cos_sim
@@ -593,6 +679,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                     all_cos_sim_values.append(cos_sim)
                     all_norm_base_values.append(norm_base)
                     all_norm_finetuned_values.append(norm_finetuned)
+
                     processed_samples += 1
                 
     
@@ -635,6 +722,14 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
             self.logger.warning(f"No valid samples found for {dataset_cfg.id}, layer {layer}")
             statistics = {}
             total_tokens = 0
+        
+        # Save activation difference means
+        for collector_name, collector in collectors.items():
+            if collector.count > 0:
+                filename = f"mean_{collector_name}_{dataset_name}.pt"
+                filepath = dataset_dir / filename
+                collector.save(filepath)
+                self.logger.info(f"Saved {collector_name} mean to {filepath} (count: {collector.count})")
         
         return {
             'dataset_id': dataset_cfg.id,
@@ -779,6 +874,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                 ("📊 MaxAct Examples", self._render_dataset_statistics),
                 ("🔥 Interactive", lambda: ActivationAnalysisOnlineDashboard(self).display()),
                 ("🎨 Plots", lambda: self._render_plots_tab()),
+                ("🔬 Activation Difference Lens", lambda: self._render_activation_difference_lens_tab()),
             ],
             "Activation Analysis",
         )
@@ -903,6 +999,107 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                                                     mime="application/octet-stream"
                                                 )
     
+    def _render_activation_difference_lens_tab(self):
+        """Render activation difference lens analysis tab."""
+        import streamlit as st
+        
+        # Layer selection
+        selected_layer = st.selectbox("Select Layer", self.layers, key="layer_selector_diff_lens")
+        
+        # Find available datasets for this layer
+        available_datasets = self._find_available_datasets_for_layer(selected_layer)
+        
+        if not available_datasets:
+            st.error(f"No datasets with activation difference means found for layer {selected_layer}")
+            return
+        
+        # Dataset selection
+        selected_dataset = st.selectbox("Select Dataset", available_datasets, key="dataset_selector_diff_lens")
+        
+        # Load activation means for selected dataset/layer
+        loaded_means, custom_options = self._load_and_prepare_means(selected_layer, selected_dataset)
+        
+        if not loaded_means:
+            st.error(f"No activation difference means found for {selected_dataset}, layer {selected_layer}")
+            return
+        
+        # Create get_latent_fn
+        def get_latent_fn(latent_name):
+            return loaded_means[latent_name]['mean']
+        
+        # Render logit lens interface
+        render_latent_lens_tab(
+            method=self,
+            get_latent_fn=get_latent_fn,
+            max_latent_idx=len(custom_options),
+            layer=selected_layer,
+            latent_type_name="Token",
+            patch_scope_add_scaler=True,
+            custom_latent_options=custom_options
+        )
+    
+    def _find_available_datasets_for_layer(self, layer: int) -> List[str]:
+        """Find all datasets that have activation difference means for given layer."""
+        layer_dir = self.results_dir / f"layer_{layer}"
+        if not layer_dir.exists():
+            return []
+        
+        available_datasets = []
+        for dataset_dir in layer_dir.iterdir():
+            if dataset_dir.is_dir():
+                # Check if this dataset has any mean_*.pt files
+                mean_files = list(dataset_dir.glob("mean_*.pt"))
+                if mean_files:
+                    available_datasets.append(dataset_dir.name)
+        
+        return sorted(available_datasets)
+    
+    def _load_and_prepare_means(self, layer: int, dataset_name: str) -> Tuple[Dict[str, Dict], List[str]]:
+        """Load activation means and prepare options for the interface."""
+        dataset_dir = self.results_dir / f"layer_{layer}" / dataset_name
+        mean_files = list(dataset_dir.glob("mean_*.pt"))
+        
+        loaded_means = {}
+        custom_options = []
+        
+        for mean_file in mean_files:
+            # Parse token name from filename: mean_{token_name}_{dataset_name}.pt
+            filename = mean_file.stem
+            # Remove "mean_" prefix and "_{dataset_name}" suffix
+            token_part = filename[5:]  # Remove "mean_"
+            token_name = token_part.rsplit(f"_{dataset_name}", 1)[0]
+            
+            # Load the mean
+            try:
+                data = torch.load(mean_file, map_location='cpu')
+                if data['count'] > 0:  # Only include tokens that have observations
+                    # Create user-friendly name
+                    display_name = self._create_display_name(token_name, data)
+                    loaded_means[display_name] = data
+                    custom_options.append(display_name)
+            except Exception as e:
+                self.logger.warning(f"Failed to load {mean_file}: {e}")
+        
+        return loaded_means, sorted(custom_options)
+    
+    def _create_display_name(self, token_name: str, data: Dict) -> str:
+        """Convert internal token names to user-friendly display names."""
+        if token_name == "all_tokens":
+            return f"All Tokens (n={data['count']})"
+        elif token_name == "first_token":
+            return f"First Token (n={data['count']})"
+        elif token_name == "second_token":
+            return f"Second Token (n={data['count']})"
+        elif token_name.startswith("chat_token_"):
+            token_id = int(token_name[11:])  # Remove "chat_token_" prefix and convert to int
+            try:
+                decoded_token = self.tokenizer.decode([token_id])
+                return f"Chat Token '{decoded_token}' (id={token_id}, n={data['count']})"
+            except Exception:
+                return f"Chat Token {token_id} (n={data['count']})"
+        else:
+            return f"{token_name.replace('_', ' ').title()} (n={data['count']})"
+
     def _render_dataset_statistics(self):
         """Render the dataset statistics tab using MaxActivationDashboardComponent."""
         
@@ -1010,6 +1207,9 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
             title=title
         )
         component.display()
+
+
+
     
     @staticmethod
     def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:
@@ -1232,6 +1432,8 @@ class ActivationAnalysisOnlineDashboard(AbstractOnlineDiffingDashboard):
             'display_name': display_name
         }
     
+
+
     def get_method_specific_params(self) -> Dict[str, Any]:
         """Get activation analysis specific parameters."""
         # Return empty dict since we handle parameters differently now
@@ -1245,3 +1447,5 @@ class ActivationAnalysisOnlineDashboard(AbstractOnlineDiffingDashboard):
     def _get_title(self) -> str:
         """Get title for activation analysis."""
         return "Activation Analysis Dashboard"
+
+

@@ -46,7 +46,7 @@ from src.utils.dashboards import (
 from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
 from src.utils.cache import SampleCache
 from src.utils.dictionary.steering import display_steering_results
-from src.utils.visualization import render_logit_lens_tab
+from src.utils.visualization import render_latent_lens_tab
 from src.utils.dictionary.steering import (
     latent_steering_experiment,
     save_results_to_csv,
@@ -1048,7 +1048,7 @@ class PCAMethod(DiffingMethod):
                 ),
                 (
                     "🔍 Component Lens",
-                    lambda: self._render_logit_lens_tab(selected_pca_info),
+                    lambda: self._render_latent_lens_tab(selected_pca_info),
                 ),
                 ("🎨 Plots", lambda: self._render_plots_tab(selected_pca_info)),
                 (
@@ -1322,14 +1322,14 @@ class PCAMethod(DiffingMethod):
         # Display the steering results using the imported function
         display_steering_results(model_results_dir, self.cfg)
 
-    def _render_logit_lens_tab(self, selected_pca_info):
+    def _render_latent_lens_tab(self, selected_pca_info):
         """Render logit lens analysis tab for PCA components."""
 
         target = selected_pca_info["target"]
         layer = selected_pca_info["layer"]
         config_tag = selected_pca_info["config_tag"]
 
-        render_logit_lens_tab(
+        render_latent_lens_tab(
             self,
             lambda idx: self.get_pca_latent(idx, layer, target, config_tag),
             self.get_pca_model(layer, target, config_tag).n_components,
