@@ -91,6 +91,7 @@ def load_model(
     adapter_id: str = None,
     steering_vector_name: str = None,
     steering_layer_idx: int = None,
+    tokenizer_id: str = None,
 ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -112,7 +113,10 @@ def load_model(
         logger.info(f"Loading adapter: {adapter_id}")
         model.load_adapter(adapter_id)
 
-    tokenizer = load_tokenizer(model_name)
+    if tokenizer_id is not None:
+        tokenizer = load_tokenizer(tokenizer_id)
+    else:
+        tokenizer = load_tokenizer(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -152,18 +156,22 @@ def load_model_from_config(
         adapter_id,
         model_cfg.steering_vector,
         model_cfg.steering_layer,
+        model_cfg.tokenizer_id,
     )
 
 
 def load_tokenizer_from_config(
     model_cfg: ModelConfig,
 ) -> AutoTokenizer:
-    return load_tokenizer(model_cfg.model_id)
+    if model_cfg.tokenizer_id is not None:
+        return load_tokenizer(model_cfg.tokenizer_id)
+    else:
+        return load_tokenizer(model_cfg.model_id)
 
 
 def logit_lens(
-    latent: torch.Tensor, model: AutoModelForCausalLM, tokenizer: AutoTokenizer
-):
+    latent: torch.Tensor, model: AutoModelForCausalLM
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Analyze logits for a latent.
 
@@ -172,7 +180,7 @@ def logit_lens(
         model: Model to use for layer norm and lm_head
 
     Returns:
-        Tuple of (top_tokens, bottom_tokens) where each is a list of (token, token_id, probability)
+        Tuple of (positive_probs, negative_probs) - full probability distributions
     """
     # Get decoder vector for the specified latent
     latent = latent.to(model.dtype)
@@ -190,33 +198,7 @@ def logit_lens(
         probs = torch.softmax(logits, dim=0)  # [vocab_size]
         inv_probs = torch.softmax(inv_logits, dim=0)
 
-        # Get top 10 and bottom 10 tokens
-        top_probs, top_indices = torch.topk(probs, k=10, largest=True)
-
-        bottom_probs, bottom_indices = torch.topk(inv_probs, k=10, largest=True)
-
-        # Convert to CPU for processing
-        top_probs = top_probs.cpu()
-        top_indices = top_indices.cpu()
-        bottom_probs = bottom_probs.cpu()
-        bottom_indices = bottom_indices.cpu()
-
-        # Decode tokens
-        top_tokens = []
-        for i in range(10):
-            token_id = int(top_indices[i])
-            token = tokenizer.decode([token_id])
-            prob = float(top_probs[i])
-            top_tokens.append((token, token_id, prob))
-
-        bottom_tokens = []
-        for i in range(10):
-            token_id = int(bottom_indices[i])
-            token = tokenizer.decode([token_id])
-            prob = float(bottom_probs[i])
-            bottom_tokens.append((token, token_id, prob))
-
-        return top_tokens, bottom_tokens
+        return probs.cpu(), inv_probs.cpu()
 
 
 def patch_scope(
@@ -225,20 +207,21 @@ def patch_scope(
     tokenizer: AutoTokenizer,
     layer: int,
     scaler: float = 1,
-    id_prompt_target = "cat -> cat\n1135 -> 1135\nhello -> hello\n?"
-) -> Tuple[list, list]:
+    id_prompt_target: str = "cat -> cat\n1135 -> 1135\nhello -> hello\n?"
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Analyze what tokens a latent vector promotes/suppresses using patch_scope method.
 
     Args:
         latent: Latent tensor to analyze
         model: Model to use for patching
-        tokenizer: Tokenizer for decoding
+        tokenizer: Tokenizer for input preparation
         layer: Layer index to patch at
-        scale_to_same_norm: Whether to scale the latent to match the norm at the patch location
+        scaler: Scale factor for the latent vector
+        id_prompt_target: Prompt template for patching
 
     Returns:
-        Tuple of (top_tokens, bottom_tokens) where each is a list of (token, token_id, probability)
+        Tuple of (positive_probs, negative_probs) - full probability distributions
     """
     id_prompt_tokens = tokenizer(id_prompt_target, return_tensors="pt", padding=True)[
         "input_ids"
@@ -249,41 +232,18 @@ def patch_scope(
     
     nnmodel = NNsight(model)
 
-    # Get top tokens (positive direction)
+    # Get positive direction probabilities
     with nnmodel.trace(id_prompt_tokens.repeat(1, 1), validate=False, scan=False):
         nnmodel.model.layers[layer].output[0][0, -1, :] = latent * scaler
         logits = nnmodel.lm_head.output[0, -1, :].save()
 
     probs = torch.softmax(logits, dim=0)  # [vocab_size]
-    top_probs, top_indices = torch.topk(probs, k=10, largest=True)
 
-    # Get bottom tokens (negative direction)
+    # Get negative direction probabilities
     with nnmodel.trace(id_prompt_tokens.repeat(1, 1), validate=False, scan=False):
         nnmodel.model.layers[layer].output[0][0, -1, :] = -latent * scaler
         inv_logits = nnmodel.lm_head.output[0, -1, :].save()
 
     inv_probs = torch.softmax(inv_logits, dim=0)
-    bottom_probs, bottom_indices = torch.topk(inv_probs, k=10, largest=True)
 
-    # Convert to CPU for processing
-    top_probs = top_probs.cpu()
-    top_indices = top_indices.cpu()
-    bottom_probs = bottom_probs.cpu()
-    bottom_indices = bottom_indices.cpu()
-
-    # Decode tokens
-    top_tokens = []
-    for i in range(10):
-        token_id = int(top_indices[i])
-        token = tokenizer.decode([token_id])
-        prob = float(top_probs[i])
-        top_tokens.append((token, token_id, prob))
-
-    bottom_tokens = []
-    for i in range(10):
-        token_id = int(bottom_indices[i])
-        token = tokenizer.decode([token_id])
-        prob = float(bottom_probs[i])
-        bottom_tokens.append((token, token_id, prob))
-
-    return top_tokens, bottom_tokens
+    return probs.cpu(), inv_probs.cpu()

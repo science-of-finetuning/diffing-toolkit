@@ -24,6 +24,166 @@ from src.utils.configs import ModelConfig
 from src.diffing.methods.diffing_method import DiffingMethod
 
 
+def query_tokens_in_distribution(
+    query_tokens: List[str],
+    tokenizer: AutoTokenizer,
+    probs: torch.Tensor,
+    direction: str = "positive"
+) -> List[Dict[str, Any]]:
+    """
+    Query specific tokens in a probability distribution and return their ranks and probabilities.
+    
+    Args:
+        query_tokens: List of token strings to query
+        tokenizer: Tokenizer for token-to-id mapping
+        probs: Full probability distribution tensor
+        direction: "positive" or "negative" for display purposes
+        
+    Returns:
+        List of dictionaries containing token info (token, token_id, probability, rank)
+    """
+    results = []
+    
+    # Sort probabilities to get ranks
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    
+    # Create a mapping from token_id to rank
+    rank_mapping = {int(sorted_indices[i]): i + 1 for i in range(len(sorted_indices))}
+    
+    for token_str in query_tokens:
+        try:
+            # Handle different token formats
+            token_str = token_str.strip()
+            
+            # Try to tokenize the string
+            token_ids = tokenizer.encode(token_str, add_special_tokens=False)
+            
+            if len(token_ids) == 1:
+                token_id = token_ids[0]
+                prob = float(probs[token_id])
+                rank = rank_mapping[token_id]
+                
+                results.append({
+                    'token': token_str,
+                    'token_id': token_id,
+                    'probability': prob,
+                    'rank': rank,
+                    'direction': direction
+                })
+            elif len(token_ids) > 1:
+                # Multi-token case - report each subtoken
+                for i, token_id in enumerate(token_ids):
+                    subtoken = tokenizer.decode([token_id])
+                    prob = float(probs[token_id])
+                    rank = rank_mapping[token_id]
+                    
+                    results.append({
+                        'token': f"{token_str}[{i}]: '{subtoken}'",
+                        'token_id': token_id,
+                        'probability': prob,
+                        'rank': rank,
+                        'direction': direction
+                    })
+            else:
+                # Empty tokenization
+                results.append({
+                    'token': token_str,
+                    'token_id': None,
+                    'probability': None,
+                    'rank': None,
+                    'direction': direction,
+                    'error': 'Could not tokenize'
+                })
+                
+        except Exception as e:
+            results.append({
+                'token': token_str,
+                'token_id': None,
+                'probability': None,
+                'rank': None,
+                'direction': direction,
+                'error': str(e)
+            })
+    
+    return results
+
+
+def get_top_k_tokens(
+    probs: torch.Tensor,
+    tokenizer: AutoTokenizer,
+    k: int = 10
+) -> List[Tuple[str, int, float]]:
+    """
+    Get top-k tokens from probability distribution.
+    
+    Args:
+        probs: Probability distribution tensor
+        tokenizer: Tokenizer for decoding
+        k: Number of top tokens to return
+        
+    Returns:
+        List of (token, token_id, probability) tuples
+    """
+    top_probs, top_indices = torch.topk(probs, k=k, largest=True)
+    
+    tokens = []
+    for i in range(k):
+        token_id = int(top_indices[i])
+        token = tokenizer.decode([token_id])
+        prob = float(top_probs[i])
+        tokens.append((token, token_id, prob))
+    
+    return tokens
+
+
+def display_token_query_results(query_results: List[Dict[str, Any]]):
+    """Display results from token queries in a formatted table."""
+    if not query_results:
+        st.info("No tokens queried yet.")
+        return
+    
+    import pandas as pd
+    
+    # Convert results to DataFrame
+    df_data = []
+    for result in query_results:
+        df_data.append({
+            'Token': result['token'],
+            'Token ID': result['token_id'],
+            'Probability': f"{result['probability']:.6f}",
+            'Rank': result['rank'],
+            'Direction': result['direction']
+        })
+
+    df = pd.DataFrame(df_data)
+    
+    # Color coding function
+    def highlight_direction(row):
+        colors = []
+        for col in df.columns:
+            if row['Direction'] == 'positive':
+                colors.append('background-color: rgba(0, 255, 0, 0.1)')
+            else:
+                colors.append('background-color: rgba(255, 0, 0, 0.1)')
+        return colors
+    
+    # Apply styling
+    styled_df = df.style.apply(highlight_direction, axis=1)
+    
+    st.dataframe(
+        styled_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'Token': st.column_config.TextColumn('Token', width='medium'),
+            'Token ID': st.column_config.NumberColumn('Token ID', width='small'),
+            'Probability': st.column_config.TextColumn('Probability', width='medium'),
+            'Rank': st.column_config.NumberColumn('Rank', width='small'),
+            'Direction': st.column_config.TextColumn('Direction', width='small'),
+        }
+    )
+
+
 @st.cache_data
 def convert_max_examples_to_dashboard_format(
     max_examples: List[Dict[str, Any]],
@@ -403,7 +563,11 @@ def render_latent_lens_tab(
     with col1:
         latent_idx = st.selectbox(
             f"{latent_type_name} Index",
-            options=custom_latent_options if custom_latent_options else list(range(max_latent_idx)),
+            options=(
+                custom_latent_options
+                if custom_latent_options
+                else list(range(max_latent_idx))
+            ),
             index=0,
             help=f"Choose which latent to analyze (0-{max_latent_idx-1})",
         )
@@ -436,21 +600,39 @@ def render_latent_lens_tab(
             min_value=1,
             max_value=200,
             value=100,
-            help="Scale factor for the latent vector when patching"
+            help="Scale factor for the latent vector when patching",
         )
     else:
         scaler = 1
 
     # Analyze latent logits
     try:
-        latent = get_latent_fn(latent_idx)
+        latent = get_latent_fn(latent_idx).to(method.device)
+        
+        # Get full probability distributions
         if method_choice == "Logit Lens":
-            top_tokens, bottom_tokens = logit_lens(latent, model, method.tokenizer)
+            pos_probs, neg_probs = logit_lens(latent, model)
         elif method_choice == "Patch Scope":
-            top_tokens, bottom_tokens = patch_scope(latent, model, method.tokenizer, layer, scaler=scaler)
+            pos_probs, neg_probs = patch_scope(
+                latent, model, method.tokenizer, layer, scaler=scaler
+            )
 
         # Display results
         st.markdown(f"### {latent_type_name} {latent_idx} {method_choice} Analysis")
+
+        # Top-K Configuration above the main table
+        top_k = st.number_input(
+            "Number of Top Tokens to Display",
+            min_value=5,
+            max_value=1000,
+            value=10,
+            step=5,
+            help="Configure how many top/bottom tokens to display"
+        )
+
+        # Get tokens with configurable k
+        top_tokens = get_top_k_tokens(pos_probs, method.tokenizer, k=top_k)
+        bottom_tokens = get_top_k_tokens(neg_probs, method.tokenizer, k=top_k)
 
         col1, col2 = st.columns(2)
 
@@ -461,6 +643,51 @@ def render_latent_lens_tab(
         with col2:
             st.markdown("#### Top Suppressed Tokens")
             display_colored_token_table(bottom_tokens, "bottom")
+
+        # Detailed Analysis Section
+        with st.expander("🔍 Query Tokens", expanded=False):
+            st.markdown("### Token Query")
+            st.markdown("Query specific tokens to see their ranks and probabilities in both directions.")
+            
+            # Token input
+            query_input = st.text_area(
+                "Enter tokens to query (one per line)",
+                height=100,
+                placeholder="Enter tokens like:\nthe\nhello\nworld\n...",
+                help="Enter one token per line. Multi-token strings will be broken down into subtokens."
+            )
+            
+            # Query button and results
+            if st.button("Query Tokens", type="primary"):
+                if query_input.strip():
+                    query_tokens = [token for token in query_input.strip().split('\n') if token.strip()]
+                    
+                    if query_tokens:
+                        # Query in both directions
+                        pos_results = query_tokens_in_distribution(
+                            query_tokens, method.tokenizer, pos_probs, direction="promoted"
+                        )
+                        neg_results = query_tokens_in_distribution(
+                            query_tokens, method.tokenizer, neg_probs, direction="suppressed"  
+                        )
+                        
+                        st.markdown("#### Query Results")
+                        
+                        # Display results in two columns
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("##### Promoted Tokens")
+                            display_token_query_results(pos_results)
+                            
+                        with col2:
+                            st.markdown("##### Suppressed Tokens")
+                            display_token_query_results(neg_results)
+
+                    else:
+                        st.warning("Please enter at least one token to query.")
+                else:
+                    st.warning("Please enter tokens to query.")
 
     except Exception as e:
         st.error(f"Error analyzing {latent_type_name} logits: {str(e)}")

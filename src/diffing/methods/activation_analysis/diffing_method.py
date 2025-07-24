@@ -1,246 +1,45 @@
 """
-Norm Difference-based model diffing method.
-
-This module computes the L2 norm difference per token between cached activations
-from a base model and a finetuned model, processing each layer separately.
+Main diffing method for activation analysis.
 """
 
 from typing import Dict, Any, List, Tuple, Optional
 from pathlib import Path
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from omegaconf import DictConfig
-from loguru import logger
 import json
 import numpy as np
 from tqdm import tqdm
-from transformers import AutoTokenizer
 import streamlit as st
 from nnsight import LanguageModel
 from matplotlib import pyplot as plt
 import copy
 
-from .diffing_method import DiffingMethod
+from ..diffing_method import DiffingMethod
 from src.utils.activations import get_layer_indices, load_activation_dataset_from_config, torch_quantile
 from src.utils.configs import get_dataset_configurations, DatasetConfig  
-from src.utils.cache import SampleCache
-from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
-from src.utils.dashboards import AbstractOnlineDiffingDashboard
-from src.utils.dashboards import MaxActivationDashboardComponent
-from src.utils.visualization import render_latent_lens_tab
+from src.utils.cache import SampleCache, SampleCacheDataset
+from src.utils.collection import RunningActivationMean
+from src.utils.max_act_store import MaxActStore
+
+from .ui import visualize
 
 
-class RunningActivationMean:
-    """Running mean for activation differences with position/token filtering."""
-    
-    def __init__(self, position: Optional[int] = None, token_id: Optional[int] = None):
-        self.position = position  # For absolute position filtering (0=first, 1=second, etc.)
-        self.token_id = token_id  # For token ID filtering
-        self.mean = None
-        self.count = 0
-    
-    def update(self, activation_diffs: torch.Tensor, tokens: torch.Tensor):
-        """Update with activation differences, applying position/token filtering.
-        
-        Args:
-            activation_diffs: [seq_len, activation_dim]
-            tokens: [seq_len] - token IDs for the sequence
-        """
-        if self.position is not None:
-            # Absolute position filtering
-            if len(activation_diffs) > self.position:
-                selected_diffs = activation_diffs[self.position:self.position+1]
-            else:
-                return  # Position doesn't exist in this sequence
-        elif self.token_id is not None:
-            # Token ID filtering - find all occurrences
-            mask = (tokens == self.token_id)
-            if not mask.any():
-                return  # Token not found in sequence
-            selected_diffs = activation_diffs[mask]
-        else:
-            # All tokens
-            selected_diffs = activation_diffs
-        
-        if selected_diffs.shape[0] == 0:
-            return
-            
-        batch_mean = torch.mean(selected_diffs, dim=0)
-        batch_n = selected_diffs.shape[0]
-        
-        # Running mean update
-        total_n = self.count + batch_n
-        if self.count == 0:
-            self.mean = batch_mean
-            self.activation_dim = self.mean.shape[0]
-        else:
-            delta = batch_mean - self.mean
-            self.mean += delta * batch_n / total_n
-        
-        self.count = total_n
-    
-    def save(self, filepath: Path):
-        """Save mean and count to .pt file."""
-        torch.save({
-            'mean': self.mean.cpu(),
-            'count': self.count,
-            'activation_dim': self.activation_dim,
-            'position': self.position,
-            'token_id': self.token_id
-        }, filepath)
 
 def init_collectors(unique_template_tokens):
-        collectors = {
-            'all_tokens': RunningActivationMean(),
-            'first_token': RunningActivationMean(position=0),
-            'second_token': RunningActivationMean(position=1),
-        }
-        # Add collectors for unique chat template tokens
-        for token_id in unique_template_tokens:
-            token_name = f"chat_token_{token_id}"
-            collectors[token_name] = RunningActivationMean(token_id=token_id)
-        return collectors
-        
-class SampleCacheDataset(Dataset):
-    """
-    PyTorch Dataset wrapper for SampleCache to enable DataLoader usage.
-    
-    This allows us to leverage DataLoader's multiprocessing capabilities
-    for efficient disk I/O when loading activation samples.
-    """
-    
-    def __init__(self, sample_cache: SampleCache, max_samples: Optional[int] = None):
-        """
-        Initialize the dataset.
-        
-        Args:
-            sample_cache: SampleCache instance to wrap
-            max_samples: Optional limit on number of samples to use
-        """
-        self.sample_cache = sample_cache
-        self.length = len(sample_cache)
-        
-        if max_samples is not None:
-            self.length = min(self.length, max_samples)
-    
-    def __len__(self) -> int:
-        return self.length
-    
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Get a sample from the cache.
-        
-        Args:
-            idx: Sample index
-            
-        Returns:
-            Tuple of (tokens, activations)
-        """
-        # Skip samples with only one token (no meaningful differences)
-        tokens, activations = self.sample_cache[idx]
-        
-        # Return empty tensors for single-token samples - these will be filtered out
-        if len(tokens) <= 1:
-            return torch.tensor([]), torch.tensor([])
-            
-        return tokens, activations
-
-
-def collate_samples(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
-    """
-    Custom collate function that filters out empty samples and returns a list.
-    
-    We don't want to stack/pad here since each sample can have different lengths.
-    Instead, we filter out invalid samples and return a list for individual processing.
-    
-    Args:
-        batch: List of (tokens, activations) tuples
-        
-    Returns:
-        Filtered list of valid (tokens, activations) tuples
-    """
-    # Filter out empty samples (single-token sequences)
-    valid_samples = [(tokens, activations) for tokens, activations in batch if len(tokens) > 1]
-    return valid_samples
-
-
-def create_metric_selection_ui(key_prefix: str = "") -> Tuple[str, Optional[str]]:
-    """
-    Create a two-layer metric selection UI.
-    
-    Args:
-        key_prefix: Prefix for streamlit keys to avoid conflicts
-        
-    Returns:
-        Tuple of (metric_type, aggregation_method)
-        aggregation_method is None for metrics that don't support aggregation
-    """
-    import streamlit as st
-    
-    # First layer: metric type selection
-    metric_options = {
-        "norm_diff": "Norm Difference", 
-        "cos_dist": "Cosine Distance",
-        "norm_base": "Base Model Norm",
-        "norm_ft": "Finetuned Model Norm"
+    collectors = {
+        'all_tokens': RunningActivationMean(),
+        'first_token': RunningActivationMean(position=0),
+        'second_token': RunningActivationMean(position=1),
+        'third_token': RunningActivationMean(position=2),
+        'fourth_token': RunningActivationMean(position=3),
+        'fifth_token': RunningActivationMean(position=4),
     }
-    
-    metric_type = st.selectbox(
-        "Select Metric Type:",
-        options=list(metric_options.keys()),
-        format_func=lambda x: metric_options[x],
-        key=f"{key_prefix}_metric_type"
-    )
-    
-    # Second layer: aggregation selection (only for norm_diff and cos_dist)
-    aggregation = None
-    if metric_type in ["norm_diff", "cos_dist"]:
-        aggregation = st.selectbox(
-            "Select Aggregation:",
-            options=["max", "mean"],
-            format_func=lambda x: x.title(),
-            key=f"{key_prefix}_aggregation"
-        )
-    
-    return metric_type, aggregation
-
-
-def get_maxact_database_name(metric_type: str, aggregation: Optional[str] = None) -> str:
-    """
-    Map metric type and aggregation to database filename.
-    
-    Args:
-        metric_type: One of norm_diff, cos_dist, norm_base, norm_ft
-        aggregation: One of max, mean (only for norm_diff and cos_dist)
-        
-    Returns:
-        Database filename without .db extension
-    """
-    if metric_type == "norm_diff":
-        return "mean_norm_diff" if aggregation == "mean" else "norm_diff"
-    elif metric_type == "cos_dist":
-        return "mean_cos_dist" if aggregation == "mean" else "cos_dist"
-    elif metric_type == "norm_base":
-        return "norm_base" 
-    elif metric_type == "norm_ft":
-        return "norm_finetuned"
-    else:
-        raise ValueError(f"Unknown metric type: {metric_type}")
-
-
-def get_metric_display_name(metric_type: str, aggregation: Optional[str] = None) -> str:
-    """Get display name for metric combination."""
-    base_names = {
-        "norm_diff": "Norm Difference",
-        "cos_dist": "Cosine Distance", 
-        "norm_base": "Base Model Norm",
-        "norm_ft": "Finetuned Model Norm"
-    }
-    
-    base_name = base_names[metric_type]
-    if aggregation and metric_type in ["norm_diff", "cos_dist"]:
-        return f"{base_name} ({aggregation.title()})"
-    return base_name
+    # Add collectors for unique chat template tokens
+    for token_id in unique_template_tokens:
+        token_name = f"chat_token_{token_id}"
+        collectors[token_name] = RunningActivationMean(token_id=token_id)
+    return collectors 
 
 
 class ActivationAnalysisDiffingMethod(DiffingMethod):
@@ -549,9 +348,8 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         dataloader = DataLoader(
             dataset,
             batch_size=self.batch_size,
-            shuffle=False,  # Keep original order for reproducibility
+            shuffle=False,
             num_workers=self.num_workers,
-            collate_fn=collate_samples,
             pin_memory=False,  # Avoid pinning since we have variable-length sequences
             persistent_workers=self.num_workers > 0,  # Keep workers alive for better performance
         )
@@ -866,177 +664,8 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         Returns:
             Streamlit component displaying dataset statistics and interactive analysis
         """
-        from src.utils.visualization import multi_tab_interface
-
-
-        multi_tab_interface(
-            [
-                ("📊 MaxAct Examples", self._render_dataset_statistics),
-                ("🔥 Interactive", lambda: ActivationAnalysisOnlineDashboard(self).display()),
-                ("🎨 Plots", lambda: self._render_plots_tab()),
-                ("🔬 Activation Difference Lens", lambda: self._render_activation_difference_lens_tab()),
-            ],
-            "Activation Analysis",
-        )
+        visualize(self)
     
-    
-    def _render_plots_tab(self):
-        """Render the Plots tab displaying all generated plots."""
-        import streamlit as st
-        from pathlib import Path
-
-        selected_layer = st.selectbox("Select Layer", self.layers, key="layer_selector_plots_normdiff")
-        
-        # Find all dataset directories
-        dataset_dirs = [d for d in (self.results_dir / f"layer_{selected_layer}").iterdir() if d.is_dir()]
-        if not dataset_dirs:
-            st.error(f"No datasets found in {self.results_dir}")
-            return
-        
-        st.markdown(f"### Plots - Layer {selected_layer}")
-        
-        # Display plots for each dataset
-        for dataset_dir in dataset_dirs:
-            dataset_name = dataset_dir.name
-            
-            # Find the plots directory for this dataset and layer
-            plots_dir = dataset_dir / "plots"
-            
-            if not plots_dir.exists():
-                continue  # Skip datasets without plots for this layer
-            
-            # Find all image files
-            image_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.pdf']
-            image_files = []
-            for ext in image_extensions:
-                image_files.extend(plots_dir.glob(f"*{ext}"))
-            
-            if not image_files:
-                continue  # Skip if no images found
-            
-            # Separate plots into outlier categories
-            with_outliers = []
-            no_outliers = []
-            
-            for image_file in image_files:
-                if "no_outliers" in image_file.name:
-                    no_outliers.append(image_file)
-                else:
-                    with_outliers.append(image_file)
-            
-            # Create expander for this dataset
-            with st.expander(f"{dataset_name} ({len(image_files)} plots)", expanded=True):
-                
-                # With Outliers section
-                if with_outliers:
-                    with st.expander(f"With Outliers (all) ({len(with_outliers)} plots)", expanded=False):
-                        # Display plots in a grid layout
-                        cols_per_row = 2
-                        for i in range(0, len(with_outliers), cols_per_row):
-                            cols = st.columns(cols_per_row)
-                            for j, image_file in enumerate(with_outliers[i:i+cols_per_row]):
-                                if j < len(with_outliers[i:i+cols_per_row]):
-                                    with cols[j]:
-                                        st.markdown(f"**{image_file.name}**")
-                                        
-                                        # Display image based on format
-                                        if image_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                                            try:
-                                                st.image(str(image_file), use_container_width=True)
-                                            except Exception as e:
-                                                st.error(f"Error loading image {image_file.name}: {str(e)}")
-                                        elif image_file.suffix.lower() == '.svg':
-                                            try:
-                                                with open(image_file, 'r') as f:
-                                                    svg_content = f.read()
-                                                st.markdown(svg_content, unsafe_allow_html=True)
-                                            except Exception as e:
-                                                st.error(f"Error loading SVG {image_file.name}: {str(e)}")
-                                        else:
-                                            # For PDF and other formats, provide download link
-                                            st.markdown(f"📄 {image_file.name}")
-                                            with open(image_file, 'rb') as f:
-                                                st.download_button(
-                                                    label=f"Download {image_file.name}",
-                                                    data=f.read(),
-                                                    file_name=image_file.name,
-                                                    mime="application/octet-stream"
-                                                )
-                
-                # No Outliers section
-                if no_outliers:
-                    with st.expander(f"No outliers ({len(no_outliers)} plots)", expanded=False):
-                        # Display plots in a grid layout
-                        cols_per_row = 2
-                        for i in range(0, len(no_outliers), cols_per_row):
-                            cols = st.columns(cols_per_row)
-                            for j, image_file in enumerate(no_outliers[i:i+cols_per_row]):
-                                if j < len(no_outliers[i:i+cols_per_row]):
-                                    with cols[j]:
-                                        st.markdown(f"**{image_file.name}**")
-                                        
-                                        # Display image based on format
-                                        if image_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
-                                            try:
-                                                st.image(str(image_file), use_container_width=True)
-                                            except Exception as e:
-                                                st.error(f"Error loading image {image_file.name}: {str(e)}")
-                                        elif image_file.suffix.lower() == '.svg':
-                                            try:
-                                                with open(image_file, 'r') as f:
-                                                    svg_content = f.read()
-                                                st.markdown(svg_content, unsafe_allow_html=True)
-                                            except Exception as e:
-                                                st.error(f"Error loading SVG {image_file.name}: {str(e)}")
-                                        else:
-                                            # For PDF and other formats, provide download link
-                                            st.markdown(f"📄 {image_file.name}")
-                                            with open(image_file, 'rb') as f:
-                                                st.download_button(
-                                                    label=f"Download {image_file.name}",
-                                                    data=f.read(),
-                                                    file_name=image_file.name,
-                                                    mime="application/octet-stream"
-                                                )
-    
-    def _render_activation_difference_lens_tab(self):
-        """Render activation difference lens analysis tab."""
-        import streamlit as st
-        
-        # Layer selection
-        selected_layer = st.selectbox("Select Layer", self.layers, key="layer_selector_diff_lens")
-        
-        # Find available datasets for this layer
-        available_datasets = self._find_available_datasets_for_layer(selected_layer)
-        
-        if not available_datasets:
-            st.error(f"No datasets with activation difference means found for layer {selected_layer}")
-            return
-        
-        # Dataset selection
-        selected_dataset = st.selectbox("Select Dataset", available_datasets, key="dataset_selector_diff_lens")
-        
-        # Load activation means for selected dataset/layer
-        loaded_means, custom_options = self._load_and_prepare_means(selected_layer, selected_dataset)
-        
-        if not loaded_means:
-            st.error(f"No activation difference means found for {selected_dataset}, layer {selected_layer}")
-            return
-        
-        # Create get_latent_fn
-        def get_latent_fn(latent_name):
-            return loaded_means[latent_name]['mean']
-        
-        # Render logit lens interface
-        render_latent_lens_tab(
-            method=self,
-            get_latent_fn=get_latent_fn,
-            max_latent_idx=len(custom_options),
-            layer=selected_layer,
-            latent_type_name="Token",
-            patch_scope_add_scaler=True,
-            custom_latent_options=custom_options
-        )
     
     def _find_available_datasets_for_layer(self, layer: int) -> List[str]:
         """Find all datasets that have activation difference means for given layer."""
@@ -1093,121 +722,12 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         elif token_name.startswith("chat_token_"):
             token_id = int(token_name[11:])  # Remove "chat_token_" prefix and convert to int
             try:
-                decoded_token = self.tokenizer.decode([token_id])
+                decoded_token = self.tokenizer.decode([token_id], skip_special_tokens=False)
                 return f"Chat Token '{decoded_token}' (id={token_id}, n={data['count']})"
             except Exception:
                 return f"Chat Token {token_id} (n={data['count']})"
         else:
             return f"{token_name.replace('_', ' ').title()} (n={data['count']})"
-
-    def _render_dataset_statistics(self):
-        """Render the dataset statistics tab using MaxActivationDashboardComponent."""
-        
-        # Find available layers
-        layer_dirs = list(self.results_dir.glob("layer_*"))
-        if not layer_dirs:
-            st.error(f"No layer directories found in {self.results_dir}")
-            return
-        
-        # Extract layer numbers from directory names and check for database files
-        available_layers = []
-        for layer_dir in layer_dirs:
-            if not layer_dir.is_dir():
-                continue
-                
-            # Extract layer number from directory name like "layer_16"
-            dirname = layer_dir.name
-            layer_part = dirname[6:]  # Remove "layer_" prefix
-            layer_num = int(layer_part)
-            
-            # Check if any database files exist in this layer directory
-            db_files = list(layer_dir.glob("*.db"))
-            if db_files:
-                available_layers.append(layer_num)
-
-        if not available_layers:
-            st.error("No database files found in any layer directories")
-            return
-
-        selected_layer = st.selectbox("Select Layer", available_layers, key="layer_selector_maxact_normdiff_dataset_statistics")
-        
-        if selected_layer is None:
-            return
-        
-        layer_dir = self.results_dir / f"layer_{selected_layer}"
-        
-        # Find available metric databases for this layer
-        available_metrics = {}
-        metric_types = ["norm_diff", "cos_dist", "norm_base", "norm_ft"]
-        
-        for metric_type in metric_types:
-            if metric_type in ["norm_diff", "cos_dist"]:
-                # Check for both mean and max versions
-                for agg in ["mean", "max"]:
-                    db_name = get_maxact_database_name(metric_type, agg)
-                    db_path = layer_dir / f"{db_name}.db"
-                    if db_path.exists():
-                        key = f"{metric_type}_{agg}"
-                        available_metrics[key] = {
-                            "metric_type": metric_type,
-                            "aggregation": agg,
-                            "path": db_path,
-                            "display_name": get_metric_display_name(metric_type, agg)
-                        }
-            else:
-                # Check for single version (no aggregation)
-                db_name = get_maxact_database_name(metric_type)
-                db_path = layer_dir / f"{db_name}.db"
-                if db_path.exists():
-                    available_metrics[metric_type] = {
-                        "metric_type": metric_type,
-                        "aggregation": None,
-                        "path": db_path,
-                        "display_name": get_metric_display_name(metric_type)
-                    }
-        
-        if not available_metrics:
-            st.error(f"No metric databases found for layer {selected_layer}")
-            return
-        
-        # Create metric selection UI and render display in fragment
-        metric_type, aggregation = create_metric_selection_ui("dataset_stats")
-        
-        # Find the matching metric configuration
-        if metric_type in ["norm_diff", "cos_dist"] and aggregation:
-            metric_key = f"{metric_type}_{aggregation}"
-        else:
-            metric_key = metric_type
-            
-        if metric_key not in available_metrics:
-            st.error(f"Database not found for {get_metric_display_name(metric_type, aggregation)}")
-            st.write("Available metrics:", list(available_metrics.keys()))
-            return
-        
-        self._render_metric_display_fragment(available_metrics[metric_key], selected_layer)
-    
-    @st.fragment
-    def _render_metric_display_fragment(self, metric_config: Dict[str, Any], layer: int):
-        """Fragment for rendering metric display without recomputation."""
-        
-        # Load the MaxActStore for the selected metric
-        max_store_path = metric_config["path"]
-        
-        # Create MaxActStore instance
-        assert self.tokenizer is not None, "Tokenizer must be available for MaxActStore visualization"
-        max_store = ReadOnlyMaxActStore(
-            max_store_path, 
-            tokenizer=self.tokenizer,
-        )
-
-        # Create and display the dashboard component
-        title = f"{metric_config['display_name']} Examples - Layer {layer}"
-        component = MaxActivationDashboardComponent(
-            max_store, 
-            title=title
-        )
-        component.display()
-
 
 
     
@@ -1361,91 +881,4 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                 }
             }
         }
-
-
-class ActivationAnalysisOnlineDashboard(AbstractOnlineDiffingDashboard):
-    """
-    Online dashboard for interactive activation analysis with metric selection.
-    """
-    
-    def _render_streamlit_method_controls(self) -> Dict[str, Any]:
-        """Render ActivationAnalysis-specific controls in Streamlit."""
-        import streamlit as st
-        
-        layer = st.selectbox(
-            "Select Layer:",
-            options=self.method.layers,
-            help="Choose which layer to analyze",
-            key="online_layer_selector"
-        )
-        return {"layer": layer}
-    
-    def compute_statistics_for_tokens(self, input_ids: torch.Tensor, attention_mask: torch.Tensor, **kwargs) -> Dict[str, Any]:
-        """Compute all activation statistics and show metric selection interface."""
-        import streamlit as st
-        
-        layer = kwargs.get("layer", self.method.layers[0])
-        
-        # Show computation progress
-        with st.spinner("Computing activation statistics..."):
-            all_results = self.method.compute_all_activation_statistics_for_tokens(input_ids, attention_mask, layer)
-        
-        # Show metric selection UI after computation
-        st.success("✅ Computation complete! Select which metric to display:")
-        
-        # Use fragment for instant metric switching
-        return self._render_metric_selection_fragment(all_results)
-
-    def _render_metric_selection_fragment(self, all_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Fragment for selecting and displaying metrics without recomputation."""
-        import streamlit as st
-        
-        # Create metric selection UI
-        metric_type, aggregation = create_metric_selection_ui("online_dashboard")
-        
-        # Get the selected metric data
-        metric_data = all_results['metrics'][metric_type]
-        
-        # For norm_diff and cos_dist, use aggregation selection
-        if metric_type in ["norm_diff", "cos_dist"] and aggregation:
-            if aggregation == "mean":
-                values = metric_data['mean_values']
-                display_name = get_metric_display_name(metric_type, aggregation)
-            else:  # max
-                values = metric_data['max_values'] 
-                display_name = get_metric_display_name(metric_type, aggregation)
-        else:
-            values = metric_data['values']
-            display_name = get_metric_display_name(metric_type)
-        
-        # Show selected metric info
-        st.info(f"Displaying: **{display_name}**")
-        
-        # Adapt the results format for the abstract dashboard
-        return {
-            'tokens': all_results['tokens'],
-            'values': values,
-            'statistics': metric_data['statistics'],
-            'total_tokens': all_results['total_tokens'],
-            'metric_type': metric_type,
-            'aggregation': aggregation,
-            'display_name': display_name
-        }
-    
-
-
-    def get_method_specific_params(self) -> Dict[str, Any]:
-        """Get activation analysis specific parameters."""
-        # Return empty dict since we handle parameters differently now
-        return {}
-    
-    def _get_color_rgb(self) -> tuple:
-        """Get color for highlighting based on current metric."""
-        # You could make this dynamic based on metric type
-        return (255, 0, 0)  # Red for now
-    
-    def _get_title(self) -> str:
-        """Get title for activation analysis."""
-        return "Activation Analysis Dashboard"
-
 

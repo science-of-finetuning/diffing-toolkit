@@ -2,7 +2,8 @@ from dictionary_learning.cache import PairedActivationCache, ActivationCache
 import torch
 from pathlib import Path
 from tqdm.auto import tqdm
-
+from torch.utils.data import Dataset
+from typing import Optional, Tuple
 
 class DifferenceCache:
     """
@@ -347,6 +348,51 @@ class SampleCache:
         sample_activations = self.cache[start_index:end_index]
         return sample_tokens, sample_activations
 
+
+
+class SampleCacheDataset(Dataset):
+    """
+    PyTorch Dataset wrapper for SampleCache to enable DataLoader usage.
+    
+    This allows us to leverage DataLoader's multiprocessing capabilities
+    for efficient disk I/O when loading activation samples.
+    """
+    
+    def __init__(self, sample_cache: SampleCache, max_samples: Optional[int] = None):
+        """
+        Initialize the dataset.
+        
+        Args:
+            sample_cache: SampleCache instance to wrap
+            max_samples: Optional limit on number of samples to use
+        """
+        self.sample_cache = sample_cache
+        self.length = len(sample_cache)
+        
+        if max_samples is not None:
+            self.length = min(self.length, max_samples)
+    
+    def __len__(self) -> int:
+        return self.length
+    
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get a sample from the cache.
+        
+        Args:
+            idx: Sample index
+            
+        Returns:
+            Tuple of (tokens, activations)
+        """
+        # Skip samples with only one token (no meaningful differences)
+        tokens, activations = self.sample_cache[idx]
+        
+        # Return empty tensors for single-token samples - these will be filtered out
+        if len(tokens) <= 1:
+            return torch.tensor([]), torch.tensor([])
+            
+        return tokens, activations
 
 class LatentActivationCache:
     def __init__(

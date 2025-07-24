@@ -14,6 +14,7 @@ class ModelConfig:
 
     name: str
     model_id: str
+    tokenizer_id: str = None
     attn_implementation: str = "eager"
     ignore_first_n_tokens_per_sample_during_collection: int = 0
     ignore_first_n_tokens_per_sample_during_training: int = 0
@@ -52,6 +53,7 @@ def create_model_config(
     return ModelConfig(
         name=name_override or model_cfg.name,
         model_id=model_cfg.model_id,
+        tokenizer_id=model_cfg.get("tokenizer_id", None),
         attn_implementation=model_cfg.get("attn_implementation"),
         ignore_first_n_tokens_per_sample_during_collection=model_cfg.get(
             "ignore_first_n_tokens_per_sample_during_collection", 0
@@ -99,6 +101,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         name=finetuned_cfg.name,
         model_id=finetuned_cfg.model_id,
         base_model_id=finetuned_cfg.get("base_model_id", None),
+        tokenizer_id=finetuned_cfg.get("tokenizer_id", base_model_cfg.tokenizer_id),
         attn_implementation=finetuned_cfg.get(
             "attn_implementation", base_model_cfg.attn_implementation
         ),
@@ -168,26 +171,3 @@ def get_dataset_configurations(
             )
 
     return datasets
-
-
-
-
-def load_hydra_config(config_path: str, *overrides) -> DictConfig:
-    """
-    Load a Hydra config from a file and resolve the finetuned model.
-    
-    This function loads the configuration, applies all overrides, and then
-    resolves the organism.finetuned_model from the registry using the final
-    model and organism names.
-    
-    Args:
-        config_path: Path to the config file
-        *overrides: Hydra override strings (e.g., "model=gemma3_1B", "organism=kansas_abortion")
-    
-    Returns:
-        Fully resolved configuration with organism.finetuned_model set
-    """
-    with initialize(config_path=str(Path(config_path).parent), version_base=None):
-        cfg = compose(config_name=Path(config_path).stem, overrides=overrides)
-        
-    return cfg
