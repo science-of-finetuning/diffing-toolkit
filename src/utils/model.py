@@ -92,6 +92,7 @@ def load_model(
     steering_vector_name: str = None,
     steering_layer_idx: int = None,
     tokenizer_id: str = None,
+    no_auto_device_map: bool = False,
 ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -104,10 +105,12 @@ def load_model(
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="auto",
+        device_map="auto" if not no_auto_device_map else None,
         torch_dtype=dtype,
         attn_implementation=attn_implementation,
     )
+    if no_auto_device_map:
+        model.to("cuda")
 
     if adapter_id:
         logger.info(f"Loading adapter: {adapter_id}")
@@ -157,6 +160,7 @@ def load_model_from_config(
         model_cfg.steering_vector,
         model_cfg.steering_layer,
         model_cfg.tokenizer_id,
+        no_auto_device_map=model_cfg.no_auto_device_map if model_cfg.no_auto_device_map is not None else False 
     )
 
 
@@ -183,7 +187,7 @@ def logit_lens(
         Tuple of (positive_probs, negative_probs) - full probability distributions
     """
     # Get decoder vector for the specified latent
-    latent = latent.to(model.dtype)
+    latent = latent.to(model.dtype).to(model.device)
 
     # Apply final layer norm and lm_head
     with torch.no_grad():

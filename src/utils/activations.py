@@ -100,7 +100,7 @@ def get_layer_indices(model: Union[str, object], layers: List[float]) -> List[in
             num_layers: int = config.text_config.num_hidden_layers
     else:
         num_layers: int = len(model.model.layers)
-    return [int(layer * num_layers) for layer in layers]
+    return [int(layer * (num_layers - 1)) for layer in layers]
 
 
 def get_local_shuffled_indices(

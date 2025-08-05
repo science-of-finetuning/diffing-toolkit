@@ -13,7 +13,7 @@ from src.diffing.methods.crosscoder import CrosscoderDiffingMethod
 from src.diffing.methods.sae_difference import SAEDifferenceMethod
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.diffing.methods.pca import PCAMethod
-
+from src.diffing.methods.activation_difference_lens import ActDiffLens
 
 def get_method_class(method_name: str) -> DiffingMethod:
     """Get the appropriate method class for a given method name."""
@@ -27,9 +27,10 @@ def get_method_class(method_name: str) -> DiffingMethod:
         return SAEDifferenceMethod
     elif method_name == "pca":
         return PCAMethod
+    elif method_name == "activation_difference_lens":
+        return ActDiffLens
     else:
         raise ValueError(f"Unknown method: {method_name}")
-
 
 class DiffingPipeline(Pipeline):
     """

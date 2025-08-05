@@ -18,7 +18,7 @@ from .utils import create_metric_selection_ui, get_maxact_database_name, get_met
 
 def _render_plots_tab(method):
     """Render the Plots tab displaying all generated plots."""
-    selected_layer = st.selectbox("Select Layer", method.layers, key="layer_selector_plots_normdiff")
+    selected_layer = st.selectbox("Select Layer", method._find_available_layers(), key="layer_selector_plots_normdiff")
     
     # Find all dataset directories
     dataset_dirs = [d for d in (method.results_dir / f"layer_{selected_layer}").iterdir() if d.is_dir()]
@@ -245,7 +245,7 @@ def _render_activation_steering_tab(method):
     """Render activation steering analysis tab with layer and dataset selection."""
     
     # Layer selection
-    selected_layer = st.selectbox("Select Layer", method.layers, key="layer_selector_steering")
+    selected_layer = st.selectbox("Select Layer", method._find_available_layers(), key="layer_selector_steering")
     
     # Find available datasets for this layer
     available_datasets = method._find_available_datasets_for_layer(selected_layer)
@@ -282,7 +282,7 @@ def _render_activation_steering_tab(method):
 def _render_activation_difference_lens_tab(method):
     """Render activation difference lens analysis tab."""        
     # Layer selection
-    selected_layer = st.selectbox("Select Layer", method.layers, key="layer_selector_diff_lens")
+    selected_layer = st.selectbox("Select Layer", method._find_available_layers(), key="layer_selector_diff_lens")
     
     # Find available datasets for this layer
     available_datasets = method._find_available_datasets_for_layer(selected_layer)
@@ -308,7 +308,15 @@ def _render_activation_difference_lens_tab(method):
     labels = []
     norms = []
     
-    for display_name in custom_options:
+    # Sort custom_options by number if they contain numbers
+    def extract_number(name):
+        import re
+        match = re.search(r'\d+', name)
+        return int(match.group()) if match else float('inf')
+    
+    sorted_options = sorted(custom_options, key=extract_number)
+    
+    for display_name in sorted_options:
         mean_tensor = loaded_means[display_name]['mean']
         norm_value = float(torch.norm(mean_tensor).item())
         

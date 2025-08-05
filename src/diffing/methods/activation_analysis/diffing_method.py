@@ -665,7 +665,11 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
             Streamlit component displaying dataset statistics and interactive analysis
         """
         visualize(self)
-    
+
+    def _find_available_layers(self) -> List[int]:
+        """Find all layers that have activation difference means."""
+        layer_dirs = list(self.results_dir.glob("layer_*"))
+        return sorted([int(layer_dir.name.split("_")[-1]) for layer_dir in layer_dirs])
     
     def _find_available_datasets_for_layer(self, layer: int) -> List[str]:
         """Find all datasets that have activation difference means for given layer."""
@@ -757,15 +761,15 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                     continue
                     
                 organism_name = organism_dir.name
-                normdiff_dir = organism_dir / "activation_analysis"
+                act_analysis_dir = organism_dir / "activation_analysis"
                 
                 # Check if normdiff results exist (any dataset dirs with results.json)
-                if normdiff_dir.exists():
+                if act_analysis_dir.exists():
                     has_results = False
-                    for layer_dir in normdiff_dir.iterdir():
+                    for layer_dir in act_analysis_dir.iterdir():
                         if layer_dir.is_dir():
-                            # Check for any examples database files
-                            examples_files = list(layer_dir.glob("*.db"))
+                            # Check for any examples database files or mean files (in dataset subdirs)
+                            examples_files = list(layer_dir.glob("*.db")) + list(layer_dir.glob("*/*.pt"))
                             if examples_files:
                                 has_results = True
                                 break
@@ -773,7 +777,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                     if has_results:
                         if model_name not in results:
                             results[model_name] = {}
-                        results[model_name][organism_name] = str(normdiff_dir)
+                        results[model_name][organism_name] = str(act_analysis_dir)
         
         return results
 

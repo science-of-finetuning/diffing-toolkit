@@ -24,7 +24,7 @@ class ModelConfig:
     dtype: str = "float32"
     steering_vector: str = None
     steering_layer: int = None
-
+    no_auto_device_map: bool = False
 
 @dataclass
 class DatasetConfig:
@@ -67,6 +67,7 @@ def create_model_config(
         dtype=model_cfg.get("dtype"),
         steering_vector=model_cfg.get("steering_vector", None),
         steering_layer=model_cfg.get("steering_layer", None),
+        no_auto_device_map=model_cfg.get("no_auto_device_map", False),
     )
 
 
@@ -120,8 +121,8 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         dtype=finetuned_cfg.get("dtype", base_model_cfg.dtype),
         steering_vector=finetuned_cfg.get("steering_vector", base_model_cfg.steering_vector),   
         steering_layer=finetuned_cfg.get("steering_layer", base_model_cfg.steering_layer),
+        no_auto_device_map=finetuned_cfg.get("no_auto_device_map", base_model_cfg.no_auto_device_map),
     )
-
     return base_model_cfg, finetuned_model_cfg
 
 

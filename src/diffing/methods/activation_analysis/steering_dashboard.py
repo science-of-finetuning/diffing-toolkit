@@ -143,6 +143,53 @@ class ActivationAnalysisSteeringDashboard(SteeringDashboard):
         
         return mean_idx
     
+    @st.fragment
+    def _render_steering_controls(self, steering_key: str) -> float:
+        """Render steering factor controls with checkbox toggle between slider and manual input."""
+        import streamlit as st
+        
+        # Checkbox to toggle between slider and manual input
+        manual_mode_key = steering_key + "_manual_mode"
+        if manual_mode_key not in st.session_state:
+            st.session_state[manual_mode_key] = False
+        
+        use_manual = st.checkbox(
+            "Manual Value",
+            value=st.session_state[manual_mode_key],
+            key=manual_mode_key + "_checkbox"
+        )
+        
+        # Update session state and trigger re-render if checkbox changed
+        if use_manual != st.session_state[manual_mode_key]:
+            st.session_state[manual_mode_key] = use_manual
+            st.rerun()
+        
+        if use_manual:
+            # Show only manual input
+            steering_factor = st.number_input(
+                "Steering Factor",
+                value=st.session_state[steering_key],
+                step=0.1,
+                help="Set exact steering factor value",
+                key=steering_key + "_manual_input"
+            )
+        else:
+            # Show only slider
+            steering_factor = st.slider(
+                "Steering Factor",
+                min_value=-1000.0,
+                max_value=1000.0,
+                value=st.session_state[steering_key],
+                step=0.1,
+                help="Strength and direction of steering (negative values reverse the effect)",
+                key=steering_key + "_slider_input"
+            )
+        
+        # Update main session state
+        st.session_state[steering_key] = steering_factor
+        
+        return steering_factor
+    
     def _render_streamlit_method_controls(self) -> Dict[str, Any]:
         """Render activation analysis steering-specific controls in Streamlit."""
         import streamlit as st
@@ -153,26 +200,35 @@ class ActivationAnalysisSteeringDashboard(SteeringDashboard):
             mean_idx = self._render_latent_selector()
         
         with col2:
-            steering_factor = st.slider(
-                "Steering Factor",
-                min_value=-1000.0,
-                max_value=1000.0,
-                value=1.0,
-                step=0.1,
-                help="Strength and direction of steering (negative values reverse the effect)",
-            )
-        
+            # Single session state key for synchronized value
+            steering_key = f"steering_factor_layer_{self.layer}_dataset_{self.dataset_name}"
+            
+            # Initialize session state if not exists
+            if steering_key not in st.session_state:
+                st.session_state[steering_key] = 1.0
+            
+            final_steering_factor = self._render_steering_controls(steering_key)
         steering_mode = st.selectbox(
             "Steering Mode",
-            options=["prompt_only", "all_tokens"],
+            options=["prompt_only", "all_tokens", "linear_decay"],
             index=1,  # Default to all_tokens
             help="Apply steering only to prompt tokens or to all tokens (prompt + generated)",
         )
         
+        if steering_mode == "linear_decay":
+            linear_decay_steps = st.number_input(
+                "Linear Decay Steps",
+                value=10,
+                help="Number of steps to decay the steering factor",
+            )
+        else:
+            linear_decay_steps = None
+
         return {
             "latent_idx": mean_idx,
-            "steering_factor": steering_factor,
+            "steering_factor": final_steering_factor,
             "steering_mode": steering_mode,
+            "linear_decay_steps": linear_decay_steps,
         }
     
     def _get_title(self) -> str:
