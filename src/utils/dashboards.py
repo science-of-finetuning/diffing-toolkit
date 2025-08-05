@@ -545,6 +545,7 @@ class SteeringDashboard:
         max_length: int = 50,
         temperature: float = 1.0,
         do_sample: bool = True,
+        linear_decay_steps: int = 10,
     ) -> str:
         """
         Generate text with latent steering using nnsight.
@@ -553,12 +554,12 @@ class SteeringDashboard:
             prompt: Input prompt text
             latent_idx: Latent index to steer
             steering_factor: Strength of steering
-            steering_mode: "prompt_only" or "all_tokens"
+            steering_mode: "prompt_only" or "all_tokens" or "linear_decay"
             model_type: "base" or "finetuned"
             max_length: Maximum number of tokens to generate
             temperature: Sampling temperature
             do_sample: Whether to use sampling
-            
+                            
         Returns:
             Generated text with steering applied
         """
@@ -587,6 +588,12 @@ class SteeringDashboard:
         assert input_ids.ndim == 2, f"Expected 2D input_ids, got shape {input_ids.shape}"
         prompt_length = input_ids.shape[1]
         
+        if steering_mode == "linear_decay":
+            steering_factor_per_token = torch.zeros(linear_decay_steps)
+            for i in range(linear_decay_steps):
+                steering_factor_per_token[i] = (linear_decay_steps - i) * (steering_factor / float(linear_decay_steps))
+            steering_factor = steering_factor_per_token.to(self.method.device)
+
         # Generate with steering intervention
         with nn_model.generate(
             input_ids, 
@@ -605,14 +612,20 @@ class SteeringDashboard:
                     # latent_vector is [hidden_dim]
                     # Broadcasting will add the latent_vector to each token position
                     nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
-                    
+            elif steering_mode == "linear_decay":
+                # Apply steering to all tokens (prompt + generated)
+                for i in range(linear_decay_steps):
+                    if i == 0:
+                        nn_model.model.layers[self.layer].output[0][:] += steering_factor_per_token[i] * latent_vector
+                    else:
+                        # TODO: Add this back in once nnsight is on 0.5
+                        # assert nn_model.model.layers[self.layer].output[0].shape[1] == 1, "The output shape should be [batch_size, 1] for non-first steps"
+                        nn_model.model.layers[self.layer].output[0][:, 0] += steering_factor_per_token[i] * latent_vector
+                    nn_model.model.layers[self.layer].next()
             else:  # prompt_only
                 # Apply steering only during prompt processing
                 nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
                 
-                # Move to next tokens without applying steering
-                for i in range(max_length):
-                    nn_model.model.layers[self.layer].next()
             
             # Save the output
             output = nn_model.generator.output.save()
@@ -741,6 +754,7 @@ class SteeringDashboard:
                             do_sample=do_sample,
                         )
                         
+                        assert "linear_decay_steps" in steering_params or steering_params["steering_mode"] != "linear_decay", "linear_decay_steps must be provided for linear_decay mode"
                         # Generate with steering
                         steered_text = self.generate_with_steering(
                             prompt=formatted_prompt,
@@ -751,6 +765,7 @@ class SteeringDashboard:
                             max_length=max_length,
                             temperature=temperature,
                             do_sample=do_sample,
+                            linear_decay_steps=steering_params["linear_decay_steps"] if "linear_decay_steps" in steering_params else None,
                         )
                         
                         # Store results in session state
