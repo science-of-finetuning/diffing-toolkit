@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Minder"
+  given-names: "Julian"
+  orcid: "https://orcid.org/0009-0008-8607-6685"
+- family-names: "Dumas"
+  given-names: "Clément"
+  orcid: "https://orcid.org/0009-0002-3641-4689"
+title: "diffing-toolkit"
+version: 0.0.0
+doi: 10.5281/zenodo.1234
+date-released: 2025-07-21
+url: "https://github.com/science-of-finetuning/diffing-toolkit"
