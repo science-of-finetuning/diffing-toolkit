@@ -1,21 +1,12 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 from html import escape
-from tiny_dashboard.utils import apply_chat
 from src.utils.model import has_thinking
 
 
 class DualModelChatDashboard:
-    """
-    Minimal, reusable dual-model chat component.
+    """Minimal, reusable dual-model chat component."""
 
-    Assumptions (fail-fast):
-    - method.generate_text(prompt, model_type, max_length, temperature, do_sample) exists
-    - method.tokenizer exists and is compatible with tiny_dashboard.utils.apply_chat
-    - method has 'cfg' for has_thinking checks
-    - two model types are available: "base" and "finetuned"
-    """
-
-    def __init__(self, method_instance, title: str = "Dual-Model Chat") -> None:
+    def __init__(self, method_instance: Any, title: str = "Dual-Model Chat") -> None:
         self.method = method_instance
         self.title = title
 
@@ -33,7 +24,20 @@ class DualModelChatDashboard:
             "max_length": f"{method_key}_max_length",
             "do_sample": f"{method_key}_do_sample",
             "thinking": f"{method_key}_enable_thinking",
+            "fingerprint": f"{method_key}_fingerprint",
         }
+
+    def _context_fingerprint(self) -> str:
+        """Create a fingerprint of the current chat context.
+        """
+        cfg = self.method.cfg
+        assert hasattr(cfg, "organism") and hasattr(cfg.organism, "name"), "cfg.organism.name missing"
+        assert hasattr(cfg, "diffing") and hasattr(cfg.diffing, "method"), "cfg.diffing.method missing"
+        method_cfg = cfg.diffing.method
+        assert isinstance(method_cfg, dict) and "name" in method_cfg and isinstance(method_cfg["name"], str), "cfg.diffing.method.name must be a string"
+        method_name = method_cfg["name"]
+        organism_name = cfg.organism.name
+        return f"{method_name}::{organism_name}"
 
     def _build_prompt_for_model(
         self,
@@ -45,64 +49,36 @@ class DualModelChatDashboard:
     ) -> str:
         # model_key kept for validation only
         assert model_key in ("base", "finetuned"), f"Unexpected model_key: {model_key}"
-        pieces: List[str] = []
+
+        if not use_chat_formatting:
+            # Plain concatenation of raw turns for non-chat mode
+            pieces: List[str] = []
+            for turn in history:
+                assert "user" in turn, "Each turn must contain 'user'"
+                pieces.append(turn["user"])
+                if "assistant" in turn:
+                    pieces.append(turn["assistant"])
+            pieces.append(next_user_message)
+            return "".join(pieces)
+
+        # Chat formatting: build structured turns and let tokenizer.apply_chat_template format
+        tokenizer = self.method.tokenizer
+        chat: List[Dict[str, str]] = []
         for turn in history:
             assert "user" in turn, "Each turn must contain 'user'"
-            pieces.append(turn["user"])
-            if use_chat_formatting:
-                pieces.append("<eot>")
-            # Per-model history stores assistant under a common key
+            chat.append({"role": "user", "content": turn["user"]})
             if "assistant" in turn:
-                pieces.append(turn["assistant"])
-                if use_chat_formatting:
-                    pieces.append("<eot>")
-        pieces.append(next_user_message)
-        if use_chat_formatting:
-            pieces.append("<eot>")
-        prompt = "".join(pieces)
-        if use_chat_formatting:
-            prompt = apply_chat(prompt, self.method.tokenizer, add_bos=False, enable_thinking=enable_thinking)
-        return prompt
+                chat.append({"role": "assistant", "content": turn["assistant"]})
+        chat.append({"role": "user", "content": next_user_message})
 
-    def _build_formatted_prompt_and_user_segment(
-        self,
-        history: List[Dict[str, str]],
-        next_user_message: str,
-        use_chat_formatting: bool,
-        enable_thinking: bool,
-        model_key: str,
-    ) -> Tuple[str, str]:
-        """Return full formatted prompt and the formatted segment for the new user turn.
+        params: Dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
+        if enable_thinking is not None:
+            params["enable_thinking"] = enable_thinking
+        formatted = tokenizer.apply_chat_template(chat, **params)
 
-        The user segment includes the formatted user block and any assistant-start tokens,
-        e.g. "<|im_start|>user ... <|im_end|> <|im_start|>assistant".
-        """
-        assert model_key in ("base", "finetuned")
-
-        # Previous formatted (history is already stored as formatted 'user' + assistant-only)
-        prev_formatted_parts: List[str] = []
-        for turn in history:
-            assert "user" in turn
-            prev_formatted_parts.append(turn["user"])  # already formatted segment up to assistant-start
-            if "assistant" in turn:
-                prev_formatted_parts.append(turn["assistant"])  # assistant-only tokens
-        prev_formatted = "".join(prev_formatted_parts)
-
-        # Formatted user segment for the next message
-        if use_chat_formatting:
-            # Passing a single-turn text with an <eot> produces "<|im_start|>user ... <|im_end|><|im_start|>assistant"
-            single_turn_text = f"{next_user_message}<eot>"
-            user_segment = apply_chat(
-                single_turn_text,
-                self.method.tokenizer,
-                add_bos=False,
-                enable_thinking=enable_thinking,
-            )
-        else:
-            user_segment = next_user_message
-
-        full_formatted = prev_formatted + user_segment
-        return full_formatted, user_segment
+        # Match previous behavior (no BOS at start)
+        len_bos = len(tokenizer.bos_token) if getattr(tokenizer, "bos_token", None) is not None else 0
+        return formatted[len_bos:]
 
     def _strip_prompt_from_output(self, generated_text: str, prompt_formatted: str) -> str:
         """Cut the prompt tokens from model output using tokenizer lengths, not string prefix.
@@ -159,6 +135,15 @@ class DualModelChatDashboard:
         st.caption("Chat side-by-side with the base and finetuned models. The first message is sent to both; subsequent messages continue the multi-turn dialogue with both models.")
 
         keys = self._session_keys()
+        # Detect context change (method / organism) and clear chat cache
+        current_fp = self._context_fingerprint()
+        if keys["fingerprint"] not in st.session_state:
+            st.session_state[keys["fingerprint"]] = current_fp
+        elif st.session_state[keys["fingerprint"]] != current_fp:
+            st.session_state[keys["history_base"]] = []
+            st.session_state[keys["history_ft"]] = []
+            st.session_state[keys["input"]] = ""
+            st.session_state[keys["fingerprint"]] = current_fp
         if keys["history_base"] not in st.session_state:
             st.session_state[keys["history_base"]] = []  # List[{ 'user': str, 'assistant': str }]
         if keys["history_ft"] not in st.session_state:
@@ -283,8 +268,13 @@ class DualModelChatDashboard:
             assert send_target in ("both", "base", "finetuned"), "Invalid send_target"
 
             if send_target in ("both", "base"):
-                prompt_base, user_segment_base = self._build_formatted_prompt_and_user_segment(
-                    st.session_state[keys["history_base"]], msg, use_chat_formatting, enable_thinking, model_key="base"
+                # Build prompt by re-tokenizing the entire dialogue (raw turns)
+                prompt_base = self._build_prompt_for_model(
+                    st.session_state[keys["history_base"]],
+                    msg,
+                    use_chat_formatting,
+                    enable_thinking,
+                    model_key="base",
                 )
                 with st.spinner("Generating (base) ..."):
                     reply_base = self.method.generate_text(
@@ -295,11 +285,15 @@ class DualModelChatDashboard:
                         do_sample=do_sample,
                     )
                 assistant_only_base = self._strip_prompt_from_output(reply_base, prompt_base)
-                st.session_state[keys["history_base"]].append({"user": user_segment_base, "assistant": assistant_only_base})
+                st.session_state[keys["history_base"]].append({"user": msg, "assistant": assistant_only_base})
 
             if send_target in ("both", "finetuned"):
-                prompt_ft, user_segment_ft = self._build_formatted_prompt_and_user_segment(
-                    st.session_state[keys["history_ft"]], msg, use_chat_formatting, enable_thinking, model_key="finetuned"
+                prompt_ft = self._build_prompt_for_model(
+                    st.session_state[keys["history_ft"]],
+                    msg,
+                    use_chat_formatting,
+                    enable_thinking,
+                    model_key="finetuned",
                 )
                 with st.spinner("Generating (finetuned) ..."):
                     reply_ft = self.method.generate_text(
@@ -310,6 +304,6 @@ class DualModelChatDashboard:
                         do_sample=do_sample,
                     )
                 assistant_only_ft = self._strip_prompt_from_output(reply_ft, prompt_ft)
-                st.session_state[keys["history_ft"]].append({"user": user_segment_ft, "assistant": assistant_only_ft})
+                st.session_state[keys["history_ft"]].append({"user": msg, "assistant": assistant_only_ft})
             st.session_state[keys["reset_input"]] = True
             st.rerun()
