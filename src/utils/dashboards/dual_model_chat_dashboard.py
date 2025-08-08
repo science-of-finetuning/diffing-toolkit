@@ -32,10 +32,14 @@ class DualModelChatDashboard:
         """
         cfg = self.method.cfg
         assert hasattr(cfg, "organism") and hasattr(cfg.organism, "name"), "cfg.organism.name missing"
-        assert hasattr(cfg, "diffing") and hasattr(cfg.diffing, "method"), "cfg.diffing.method missing"
-        method_cfg = cfg.diffing.method
-        assert isinstance(method_cfg, dict) and "name" in method_cfg and isinstance(method_cfg["name"], str), "cfg.diffing.method.name must be a string"
-        method_name = method_cfg["name"]
+        # Prefer explicit config method name if available; else class name
+        method_name = (
+            getattr(getattr(cfg, "diffing", None), "method", None).get("name", None)
+            if hasattr(getattr(cfg, "diffing", None), "method")
+            else None
+        )
+        if method_name is None:
+            method_name = self.method.__class__.__name__
         organism_name = cfg.organism.name
         return f"{method_name}::{organism_name}"
 
