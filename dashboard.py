@@ -158,6 +158,7 @@ def main():
     st.markdown("Explore differences between base and finetuned models")
 
     _import()
+    from src.utils.dashboards import DualModelChatDashboard
 
     # Discover available results
     available_results = get_available_results(cfg_overwrites)
@@ -224,9 +225,16 @@ def main():
             # Initialize method (without loading models for visualization)
             method = method_class(cfg)
             
-            # Call the visualize method
-            start_time = time.time()
-            method.visualize()
+
+
+            method_tab, chat_tab = st.tabs(["🔬 Method", "💬 Chat"])
+
+            with method_tab:
+                start_time = time.time()
+                method.visualize()
+
+            with chat_tab:
+                DualModelChatDashboard(method, title="Chat").display()
         print(f"Method visualization took: {time.time() - start_time:.3f}s")
         
     except Exception as e:

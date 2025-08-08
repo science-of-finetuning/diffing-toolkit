@@ -8,7 +8,10 @@ import torch
 import matplotlib.pyplot as plt
 import json
 
-from src.utils.dashboards import AbstractOnlineDiffingDashboard, SteeringDashboard
+from src.utils.dashboards import (
+    AbstractOnlineDiffingDashboard,
+    SteeringDashboard,
+)
 from src.utils.visualization import multi_tab_interface, render_latent_lens_tab
 from nnsight import NNsight
 
