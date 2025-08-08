@@ -21,6 +21,7 @@ class ModelConfig:
     token_level_replacement: dict = None
     text_column: str = "text"
     base_model_id: str = None
+    subfolder: str = ""
     dtype: str = "float32"
     steering_vector: str = None
     steering_layer: int = None
@@ -68,6 +69,7 @@ def create_model_config(
         steering_vector=model_cfg.get("steering_vector", None),
         steering_layer=model_cfg.get("steering_layer", None),
         no_auto_device_map=model_cfg.get("no_auto_device_map", False),
+        subfolder=model_cfg.get("subfolder", ""),
     )
 
 
@@ -122,6 +124,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         steering_vector=finetuned_cfg.get("steering_vector", base_model_cfg.steering_vector),   
         steering_layer=finetuned_cfg.get("steering_layer", base_model_cfg.steering_layer),
         no_auto_device_map=finetuned_cfg.get("no_auto_device_map", base_model_cfg.no_auto_device_map),
+        subfolder=finetuned_cfg.get("subfolder", base_model_cfg.subfolder),
     )
     return base_model_cfg, finetuned_model_cfg
 

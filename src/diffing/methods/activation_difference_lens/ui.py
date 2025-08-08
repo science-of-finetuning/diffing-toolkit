@@ -75,6 +75,15 @@ def _load_position_means(method, layer: int, dataset: str) -> Dict[int, Dict[str
     return position_means
 
 
+def _load_model_norms(method, dataset: str) -> Dict[str, Any]:
+    """Load model norm estimates for a dataset."""
+    norms_file = method.results_dir / f"model_norms_{dataset}.pt"
+    assert norms_file.exists(), f"Model norms file not found: {norms_file}"
+    
+    norms_data = torch.load(norms_file, map_location='cpu')
+    return norms_data
+
+
 def _render_position_norms_plot(position_means: Dict[int, Dict[str, Any]], layer: int, dataset: str):
     """Render bar plot of position mean norms."""
     st.subheader("Position Mean Norms")
@@ -212,18 +221,20 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
             selected_position = positions[selected_position_idx]
             metadata = self._position_means[selected_position]['metadata']
             mean_tensor = self._position_means[selected_position]['mean']
-            norm = float(torch.norm(mean_tensor).item())
+            steered_norm = float(torch.norm(mean_tensor).item())
             
-            st.info(f"**Position {selected_position+1}:** count={metadata['count']}, norm={norm:.3f}")
-        
+            # Load model norms and get both base and fine-tuned model norms for this layer
+            model_norms = _load_model_norms(self.method, self._dataset_name)
+            base_model_norm = float(model_norms['base_model_norms'][self._layer].item())
+            ft_model_norm = float(model_norms['ft_model_norms'][self._layer].item())
+            
+            st.info(f"**Position {selected_position+1}:** count={metadata['count']} | **Steered norm:** {steered_norm:.3f}  \n**Base model norm:** {base_model_norm:.3f} | **FT model norm:** {ft_model_norm:.3f}")
+            
         with col2:
             # Steering factor
-            steering_factor = st.slider(
+            steering_factor = st.number_input(
                 "Steering Factor",
-                min_value=-1000.0,
-                max_value=1000.0,
                 value=1.0,
-                step=0.1,
                 help="Strength and direction of steering"
             )
         

@@ -217,6 +217,46 @@ class ActDiffLens(DiffingMethod):
             # Get metadata for dashboard saving
             num_sequences = diff_activations_per_layer[self.layers[0]].shape[0]
             activation_dim = diff_activations_per_layer[self.layers[0]].shape[2]
+
+            # Compute norm estimates for both models (ignoring first 5 tokens)
+            base_model_norms = {}
+            ft_model_norms = {}
+            skip_tokens = 5
+            
+            for layer in self.layers:
+                base_acts = first_n_tokens_activations[layer]  # [num_sequences, n, hidden_dim]
+                ft_acts = first_n_tokens_activations_ft[layer]  # [num_sequences, n, hidden_dim]
+                
+                assert base_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} tokens, got {base_acts.shape[1]}"
+                assert ft_acts.shape == base_acts.shape
+                
+                # Extract activations excluding first 5 tokens
+                base_acts_truncated = base_acts[:, skip_tokens:, :]  # [num_sequences, n-5, hidden_dim]
+                ft_acts_truncated = ft_acts[:, skip_tokens:, :]     # [num_sequences, n-5, hidden_dim]
+                
+                # Compute norm over hidden dimension, then flatten and mean
+                base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)  # [num_sequences, n-5]
+                ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)      # [num_sequences, n-5]
+                
+                assert base_norms_per_pos.shape == (base_acts.shape[0], base_acts.shape[1] - skip_tokens)
+                assert ft_norms_per_pos.shape == (ft_acts.shape[0], ft_acts.shape[1] - skip_tokens)
+                
+                base_model_norms[layer] = base_norms_per_pos.flatten().mean()  # scalar
+                ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()      # scalar
+                
+                logger.info(f"Layer {layer} - Base model mean norm: {base_model_norms[layer].item():.3f}")
+                logger.info(f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}")
+
+            # Save norm estimates to file
+            norms_data = {
+                'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in self.layers},
+                'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in self.layers},
+                'skip_tokens': skip_tokens,
+                'num_sequences': num_sequences
+            }
+            norms_path = self.results_dir / f"model_norms_{dataset_id.split('/')[-1]}.pt"
+            torch.save(norms_data, norms_path)
+            logger.info(f"Saved model norm estimates to {norms_path}")
             
             # Compute mean activation difference per position per layer
             mean_diff_per_position_per_layer = {}

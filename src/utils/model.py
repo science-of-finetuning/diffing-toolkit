@@ -93,6 +93,7 @@ def load_model(
     steering_layer_idx: int = None,
     tokenizer_id: str = None,
     no_auto_device_map: bool = False,
+    subfolder: str = None,
 ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -108,13 +109,14 @@ def load_model(
         device_map="auto" if not no_auto_device_map else None,
         torch_dtype=dtype,
         attn_implementation=attn_implementation,
+        subfolder=subfolder if adapter_id is None else ""
     )
     if no_auto_device_map:
         model.to("cuda")
 
     if adapter_id:
         logger.info(f"Loading adapter: {adapter_id}")
-        model.load_adapter(adapter_id)
+        model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
     if tokenizer_id is not None:
         tokenizer = load_tokenizer(tokenizer_id)
@@ -160,7 +162,8 @@ def load_model_from_config(
         model_cfg.steering_vector,
         model_cfg.steering_layer,
         model_cfg.tokenizer_id,
-        no_auto_device_map=model_cfg.no_auto_device_map if model_cfg.no_auto_device_map is not None else False 
+        no_auto_device_map=model_cfg.no_auto_device_map if model_cfg.no_auto_device_map is not None else False,
+        subfolder=model_cfg.subfolder
     )
 
 
@@ -208,7 +211,7 @@ def logit_lens(
 def patch_scope(
     latent: torch.Tensor,
     model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
+    tokenizer: AutoTokenizer,   
     layer: int,
     scaler: float = 1,
     id_prompt_target: str = "cat -> cat\n1135 -> 1135\nhello -> hello\n?"
