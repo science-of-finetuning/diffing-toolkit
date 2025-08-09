@@ -183,11 +183,15 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
         
         positions = sorted(self._position_means.keys())
         position = positions[idx]
-        mean_tensor = self._position_means[position]['mean'].detach()
-        
-        # Normalize and return
-        normalized_mean = mean_tensor / torch.norm(mean_tensor)
-        return normalized_mean.to(self.method.device)
+        mean_tensor = self._position_means[position]['mean'].detach().to(self.method.device)
+
+        # Scale to match expected finetuned model norm at this layer
+        model_norms = _load_model_norms(self.method, self._dataset_name)
+        ft_model_norm = float(model_norms['ft_model_norms'][self._layer].item())
+        mean_norm = torch.norm(mean_tensor)
+        assert mean_norm > 0
+        scaled = (mean_tensor / mean_norm) * ft_model_norm
+        return scaled
     
     def get_dict_size(self) -> int:
         if self._position_means is None:
@@ -224,14 +228,34 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
             selected_position = positions[selected_position_idx]
             metadata = self._position_means[selected_position]['metadata']
             mean_tensor = self._position_means[selected_position]['mean']
-            steered_norm = float(torch.norm(mean_tensor).item())
+            mean_norm = float(torch.norm(mean_tensor).item())
             
             # Load model norms and get both base and fine-tuned model norms for this layer
             model_norms = _load_model_norms(self.method, self._dataset_name)
             base_model_norm = float(model_norms['base_model_norms'][self._layer].item())
             ft_model_norm = float(model_norms['ft_model_norms'][self._layer].item())
             
-            st.info(f"**Position {selected_position+1}:** count={metadata['count']} | **Steered norm:** {steered_norm:.3f}  \n**Base model norm:** {base_model_norm:.3f} | **FT model norm:** {ft_model_norm:.3f}")
+            st.info(
+                f"**Position {selected_position+1}:** count={metadata['count']} | "
+                f"**Mean norm:** {mean_norm:.3f}  \n"
+                f"**Base model norm:** {base_model_norm:.3f} | **FT model norm (steering target):** {ft_model_norm:.3f}"
+            )
+
+            # Display recommended steering strength if available
+            steering_dir = (
+                self.method.results_dir
+                / f"layer_{self._layer}"
+                / self._dataset_name
+                / "steering"
+                / f"position_{selected_position + 1}"
+            )
+            threshold_file = steering_dir / "threshold.json"
+            if threshold_file.exists():
+                with open(threshold_file, "r", encoding="utf-8") as f:
+                    threshold_data = json.load(f)
+                if "avg_threshold" in threshold_data:
+                    rec = float(threshold_data["avg_threshold"])  # recommended strength
+                    st.info(f"Recommended steering strength: {rec:.3f}")
             
         with col2:
             # Steering factor

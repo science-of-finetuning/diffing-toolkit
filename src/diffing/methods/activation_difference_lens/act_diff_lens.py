@@ -13,6 +13,7 @@ from src.diffing.methods.diffing_method import DiffingMethod
 from src.utils.activations import get_layer_indices
 from src.utils.model import logit_lens
 from .ui import visualize   
+from .steering import run_steering
 
 def load_and_tokenize_dataset(
     dataset_name: str,
@@ -300,6 +301,11 @@ class ActDiffLens(DiffingMethod):
                         logit_lens_per_position_path = out_dir / f"logit_lens_pos_{pos+1}.pt"
                         torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), logit_lens_per_position_path)
                         logger.info(f"Cached top-{k} logit lens for position {pos+1}")
+
+        # Run steering if enabled
+        steering_cfg = getattr(self.cfg.diffing.method, "steering", None)
+        if steering_cfg is not None and getattr(steering_cfg, "enabled", False):
+            run_steering(self)
 
 
     def visualize(self):

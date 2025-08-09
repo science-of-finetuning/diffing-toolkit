@@ -75,6 +75,8 @@ class DiffingMethod(ABC):
         """Load and return the tokenizer from the base model."""
         if self._tokenizer is None:
             self._tokenizer = load_tokenizer_from_config(self.base_model_cfg)
+        if self._tokenizer.pad_token is None:
+            self._tokenizer.pad_token = self._tokenizer.eos_token
         return self._tokenizer
 
     def setup_models(self) -> None:

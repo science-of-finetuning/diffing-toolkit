@@ -1,0 +1,57 @@
+# @package diffing.method
+name: activation_difference_lens
+
+datasets:
+ - science-of-finetuning/fineweb-1m-sample
+
+max_samples: 10000
+n: 10
+batch_size: 32
+num_workers: 8
+split: train
+text_column: text
+
+layers:
+  - 0.0
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  - 0.5
+  - 0.6
+  - 0.7
+  - 0.8
+  - 0.9
+  - 1.0
+
+logit_lens:
+  cache: true
+  k: 200 # Number of tokens to cache
+
+steering:
+  enabled: false
+  prompts_file: resources/steering_prompts.txt
+  # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
+  tasks:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1]
+  grader:
+    model_id: openai/gpt-5-nano
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+  threshold:
+    steps: 10
+    num_samples_per_strength: 10
+    coherence_threshold: 75.0
+    max_strength: 100.0
+    generation:
+      max_new_tokens: 128
+      temperature: 1.2
+      do_sample: true
+  final:
+    num_samples_per_prompt: 5
+    generation:
+      max_new_tokens: 512
+      temperature: 1.0
+      do_sample: true
