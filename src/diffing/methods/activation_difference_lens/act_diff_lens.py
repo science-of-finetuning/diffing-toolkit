@@ -107,6 +107,7 @@ def load_and_tokenize_chat_dataset(
     pre_assistant_k: int,
     max_samples: int,
     debug: bool = False,
+    max_user_tokens: int = 512,
 ) -> List[Dict[str, Any]]:
     """Load a chat dataset and prepare samples around assistant start.
 
@@ -139,6 +140,10 @@ def load_and_tokenize_chat_dataset(
         user_ids: List[int] = tokenizer.apply_chat_template(
             user_only, tokenize=True, add_generation_prompt=True
         )
+
+        if len(user_ids) > max_user_tokens:
+            continue
+
         full_ids: List[int] = tokenizer.apply_chat_template(
             trunc_messages, tokenize=True, add_generation_prompt=False
         )
@@ -304,16 +309,16 @@ def extract_selected_positions_activations(
         # Build per-batch position index once on the model device
         pos_index = torch.tensor(batch_positions_list, dtype=torch.long, device=model.device)  # [B, P]
         assert pos_index.shape == (len(batch), num_positions)
+        batch_arange = torch.arange(len(batch), device=model.device).view(-1, 1)
 
         # Trace and directly save only the gathered activations at the desired positions
         with nn_model.trace(batch_input_ids, attention_mask=attention_mask):
             layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
                 hidden = nn_model.model.layers[layer].output[0]  # [B, L, D]
-                pos_index_expanded = pos_index.unsqueeze(-1).expand(-1, -1, hidden.shape[2])  # [B, P, D]
-                gathered = torch.gather(hidden, dim=1, index=pos_index_expanded)  # [B, P, D]
+                selected = hidden[batch_arange, pos_index, :].clone()  # [B, P, D]
                 # Save directly to CPU to minimize GPU residency of saved tensors
-                layer_outputs[layer] = gathered.to("cpu", non_blocking=True).save()
+                layer_outputs[layer] = selected.to("cpu", non_blocking=True).save()
 
         for layer in layers:
             gathered_cpu = layer_outputs[layer]
@@ -405,6 +410,7 @@ class ActDiffLens(DiffingMethod):
                 self.clear_finetuned_model()
                 
                 position_labels: List[int] = samples[0]["position_labels"]
+                logger.info(f"Position labels: {position_labels}")
                 num_positions = len(position_labels)
             else:
                 first_n_tokens = load_and_tokenize_dataset(
@@ -500,8 +506,8 @@ class ActDiffLens(DiffingMethod):
 
                 # Save each position, skipping existing unless overwriting
                 for idx_in_tensor, label in enumerate(position_labels):
-                    tensor_path = out_dir / f"mean_pos_{idx_in_tensor}.pt"
-                    meta_path = out_dir / f"mean_pos_{idx_in_tensor}.meta"
+                    tensor_path = out_dir / f"mean_pos_{label}.pt"
+                    meta_path = out_dir / f"mean_pos_{label}.meta"
                     need_write = self.overwrite or (not tensor_path.exists()) or (not meta_path.exists())
                     if need_write:
                         torch.save(mean_diff[idx_in_tensor], tensor_path)
@@ -515,7 +521,7 @@ class ActDiffLens(DiffingMethod):
                             json.dump(meta_data, f, indent=2)
 
                     if self.cfg.diffing.method.logit_lens.cache:
-                        ll_path = out_dir / f"logit_lens_pos_{idx_in_tensor}.pt"
+                        ll_path = out_dir / f"logit_lens_pos_{label}.pt"
                         if self.overwrite or (not ll_path.exists()):
                             probs, inv_probs = logit_lens(mean_diff[idx_in_tensor], self.finetuned_model)
                             k = self.cfg.diffing.method.logit_lens.k

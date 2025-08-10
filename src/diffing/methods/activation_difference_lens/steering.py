@@ -14,28 +14,30 @@ from tiny_dashboard.utils import apply_chat
 from src.utils.graders import CoherenceGrader
 from src.utils.activations import get_layer_indices
 
+
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
     """
     Clean generated text by collapsing repeated end_of_turn tokens into a single one.
-    
+
     Args:
         text: Generated text to clean
         end_of_turn_token: End of turn token to collapse (if None, no cleaning)
-        
+
     Returns:
         Cleaned text with collapsed end_of_turn tokens
     """
     if end_of_turn_token is None:
         return text
-    
+
     # Escape special regex characters in the token
     escaped_token = re.escape(end_of_turn_token)
-    
+
     # Replace multiple consecutive end_of_turn tokens with a single one
     pattern = f"({escaped_token})+"
     cleaned_text = re.sub(pattern, end_of_turn_token, text)
-    
+
     return cleaned_text
+
 
 def generate_with_steering_batched(
     model: PreTrainedModel,
@@ -58,18 +60,21 @@ def generate_with_steering_batched(
     assert isinstance(prompt, str) and len(prompt) > 0
     assert steering_vector.ndim == 1
     hidden_size = model.config.hidden_size
-    assert steering_vector.shape == (hidden_size,), f"Expected steering_vector shape ({hidden_size},), got {steering_vector.shape}"
+    assert steering_vector.shape == (
+        hidden_size,
+    ), f"Expected steering_vector shape ({hidden_size},), got {steering_vector.shape}"
     assert layer >= 0
     assert len(strengths) > 0
 
     # Format prompt once
     if use_chat_formatting:
-        formatted_prompt = apply_chat(prompt, tokenizer, add_bos=False, enable_thinking=enable_thinking)
+        formatted_prompt = apply_chat(
+            prompt, tokenizer, add_bos=False, enable_thinking=enable_thinking
+        )
     else:
         formatted_prompt = prompt
 
     inputs = tokenizer(formatted_prompt, return_tensors="pt", add_special_tokens=True)
-
 
     input_ids = inputs["input_ids"].to(device)
     assert input_ids.ndim == 2 and input_ids.shape[0] == 1
@@ -80,7 +85,9 @@ def generate_with_steering_batched(
     batch_input_ids = input_ids.repeat(batch_size, 1)
     assert batch_input_ids.shape[0] == batch_size
 
-    steering_vectors_batch = torch.stack([steering_vector.to(device) for _ in strengths])  # [B, H]
+    steering_vectors_batch = torch.stack(
+        [steering_vector.to(device) for _ in strengths]
+    )  # [B, H]
     strengths_tensor = torch.tensor(strengths, device=device)  # [B]
     assert steering_vectors_batch.shape == (batch_size, hidden_size)
     assert strengths_tensor.shape == (batch_size,)
@@ -108,9 +115,9 @@ def generate_with_steering_batched(
     for i in range(batch_size):
         assert outputs_cpu.shape[1] >= input_length_tokens
         # Ensure generated sequence starts with the prompt, then slice it off
-        assert torch.equal(outputs_cpu[i, :input_length_tokens], batch_input_ids_cpu[i]), (
-            "Generated sequence does not start with the prompt tokens."
-        )
+        assert torch.equal(
+            outputs_cpu[i, :input_length_tokens], batch_input_ids_cpu[i]
+        ), "Generated sequence does not start with the prompt tokens."
         completion_ids = outputs_cpu[i, input_length_tokens:]
         assert completion_ids.ndim == 1
         text = tokenizer.decode(completion_ids.tolist(), skip_special_tokens=False)
@@ -169,7 +176,6 @@ def _generate_grouped_samples(
     return grouped
 
 
-
 def binary_search_threshold(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
@@ -213,9 +219,7 @@ def binary_search_threshold(
             device=device,
         )
         assert len(samples_grouped) == 1
-        logger.debug(
-            f"grading {len(samples_grouped[0])} samples at strength={mid:.6f}"
-        )
+        logger.debug(f"grading {len(samples_grouped[0])} samples at strength={mid:.6f}")
         percentage, labels = asyncio.run(grader.grade_async(samples_grouped[0]))
         assert len(labels) == len(samples_grouped[0])
         unknown_count = sum(1 for x in labels if x == "UNKNOWN")
@@ -227,7 +231,11 @@ def binary_search_threshold(
             example_text = samples_grouped[0][0]
             example_label = labels[0]
             logger.debug(f"example_label={example_label}")
-            preview = example_text if len(example_text) <= 400 else (example_text[:400] + "...")
+            preview = (
+                example_text
+                if len(example_text) <= 400
+                else (example_text[:400] + "...")
+            )
             logger.debug(f"example_text=\n{preview}\n---")
         if coherent:
             low = mid
@@ -287,13 +295,20 @@ def load_position_mean_vector(
 ) -> torch.Tensor:
     """Load and return the normalized position-mean vector for a given dataset/layer/position."""
     dataset_dir_name = dataset_id.split("/")[-1]
-    tensor_path = method.results_dir / f"layer_{layer_index}" / dataset_dir_name / f"mean_pos_{position_index}.pt"
+    tensor_path = (
+        method.results_dir
+        / f"layer_{layer_index}"
+        / dataset_dir_name
+        / f"mean_pos_{position_index}.pt"
+    )
     assert tensor_path.exists(), f"Mean vector not found: {tensor_path}"
     vec = torch.load(tensor_path, map_location=method.device)
     vec = torch.as_tensor(vec, device=method.device).flatten()
     assert vec.ndim == 1
     hidden_size = method.finetuned_model.config.hidden_size
-    assert vec.shape == (hidden_size,), f"Expected shape ({hidden_size},), got {vec.shape}"
+    assert vec.shape == (
+        hidden_size,
+    ), f"Expected shape ({hidden_size},), got {vec.shape}"
     norm = torch.norm(vec)
     assert torch.isfinite(norm) and norm > 0
 
@@ -419,9 +434,10 @@ def find_steering_threshold(
         logger.info(f"Highest coherent strength for prompt '{prompt}': {threshold:.4f}")
 
     avg_strength = sum(thresholds) / float(len(thresholds))
-    logger.info(f"Average coherent strength across {len(thresholds)} prompts: {avg_strength:.4f}")
+    logger.info(
+        f"Average coherent strength across {len(thresholds)} prompts: {avg_strength:.4f}"
+    )
     return thresholds, avg_strength
-
 
 
 def run_steering(method: Any) -> None:
@@ -451,13 +467,21 @@ def run_steering(method: Any) -> None:
     for task in cfg.tasks:
         # Convert relative layer to absolute index
         rel_layer: float = float(task.layer)
-        abs_layer: int = get_layer_indices(method.base_model_cfg.model_id, [rel_layer])[0]
+        abs_layer: int = get_layer_indices(method.base_model_cfg.model_id, [rel_layer])[
+            0
+        ]
         dataset_id: str = str(task.dataset)
         positions: List[int] = [int(p) for p in task.positions]
 
         for pos in positions:
             dataset_dir_name = dataset_id.split("/")[-1]
-            out_dir = method.results_dir / f"layer_{abs_layer}" / dataset_dir_name / "steering" / f"position_{pos + 1}"
+            out_dir = (
+                method.results_dir
+                / f"layer_{abs_layer}"
+                / dataset_dir_name
+                / "steering"
+                / f"position_{pos + 1}"
+            )
             thr_path = out_dir / "threshold.json"
             gen_path = out_dir / "generations.jsonl"
 
@@ -474,7 +498,11 @@ def run_steering(method: Any) -> None:
                     steering_vector=steering_vec,
                     layer=abs_layer,
                     grader=grader,
-                    prompts=["Tell me a story?", "Give me some ideas for some fun weekend activities.", "Why don't you choose a topic of conversation for us?"],
+                    prompts=[
+                        "Tell me a story?",
+                        "Give me some ideas for some fun weekend activities.",
+                        "Why don't you choose a topic of conversation for us?",
+                    ],
                     device=method.device,
                     max_new_tokens=int(thr_gen.max_new_tokens),
                     temperature=float(thr_gen.temperature),
@@ -486,11 +514,13 @@ def run_steering(method: Any) -> None:
                 )
                 out_dir.mkdir(parents=True, exist_ok=True)
                 with thr_path.open("w", encoding="utf-8") as f:
-                    json.dump({"thresholds": thresholds, "avg_threshold": avg}, f, indent=2)
+                    json.dump(
+                        {"thresholds": thresholds, "avg_threshold": avg}, f, indent=2
+                    )
             else:
                 data = json.loads(thr_path.read_text(encoding="utf-8"))
                 thresholds = list(data["thresholds"])  # type: ignore[index]
-                avg = float(data["avg_threshold"])     # type: ignore[index]
+                avg = float(data["avg_threshold"])  # type: ignore[index]
 
             # Final generation settings
             final_cfg = cfg.final
@@ -543,4 +573,3 @@ def run_steering(method: Any) -> None:
                             "unsteered_samples": unsteered,
                         }
                         f.write(json.dumps(rec) + "\n")
-
