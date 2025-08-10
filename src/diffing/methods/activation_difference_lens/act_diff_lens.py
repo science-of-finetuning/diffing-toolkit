@@ -8,12 +8,14 @@ from omegaconf import DictConfig
 from pathlib import Path
 import json
 from collections import defaultdict
+import gc
 
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.utils.activations import get_layer_indices
 from src.utils.model import logit_lens
 from .ui import visualize   
 from .steering import run_steering
+from .util import norms_path, is_layer_complete
 
 def load_and_tokenize_dataset(
     dataset_name: str,
@@ -124,7 +126,6 @@ def load_and_tokenize_chat_dataset(
         messages = sample[messages_column]
         assert isinstance(messages, list) and len(messages) >= 2
         if messages[0]["role"] != "user":
-            logger.warning(f"First message is not user: {messages[0]}")
             continue
         assert messages[1]["role"] == "assistant"
 
@@ -300,19 +301,29 @@ def extract_selected_positions_activations(
             batch_input_ids[row, :seq_len] = torch.tensor(seq, dtype=torch.long, device=model.device)
             attention_mask[row, :seq_len] = 1
 
+        # Build per-batch position index once on the model device
+        pos_index = torch.tensor(batch_positions_list, dtype=torch.long, device=model.device)  # [B, P]
+        assert pos_index.shape == (len(batch), num_positions)
+
+        # Trace and directly save only the gathered activations at the desired positions
         with nn_model.trace(batch_input_ids, attention_mask=attention_mask):
             layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
-                layer_outputs[layer] = nn_model.model.layers[layer].output[0].save()
+                hidden = nn_model.model.layers[layer].output[0]  # [B, L, D]
+                pos_index_expanded = pos_index.unsqueeze(-1).expand(-1, -1, hidden.shape[2])  # [B, P, D]
+                gathered = torch.gather(hidden, dim=1, index=pos_index_expanded)  # [B, P, D]
+                # Save directly to CPU to minimize GPU residency of saved tensors
+                layer_outputs[layer] = gathered.to("cpu", non_blocking=True).save()
 
         for layer in layers:
-            hidden: torch.Tensor = layer_outputs[layer]  # [B, L, D]
-            pos_index = torch.tensor(batch_positions_list, dtype=torch.long, device=hidden.device)  # [B, P]
-            pos_index_expanded = pos_index.unsqueeze(-1).expand(-1, -1, hidden.shape[2])
-            assert pos_index_expanded.shape == (len(batch), num_positions, hidden.shape[2])
-            gathered = torch.gather(hidden, dim=1, index=pos_index_expanded)  # [B, P, D]
-            assert gathered.shape == (len(batch), num_positions, hidden.shape[2])
-            all_activations[layer].append(gathered.to("cpu"))
+            gathered_cpu = layer_outputs[layer]
+            assert gathered_cpu.shape == (len(batch), num_positions, gathered_cpu.shape[2])
+            all_activations[layer].append(gathered_cpu)
+                
+        # Clear VRAM after processing batch
+        del layer_outputs, batch_input_ids, attention_mask, pos_index
+        torch.cuda.empty_cache()
+        gc.collect()
 
     result: Dict[int, torch.Tensor] = {}
     for layer in layers:
@@ -328,12 +339,36 @@ class ActDiffLens(DiffingMethod):
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self.layers = get_layer_indices(self.base_model_cfg.model_id, self.cfg.diffing.method.layers)
+        self.overwrite: bool = bool(getattr(self.cfg.diffing.method, "overwrite", False))
 
     def run(self):
         for dataset_entry in self.cfg.diffing.method.datasets:
             assert isinstance(dataset_entry, (dict, DictConfig)) and "id" in dataset_entry and "is_chat" in dataset_entry
             dataset_id = dataset_entry["id"]
             is_chat: bool = dataset_entry["is_chat"]
+
+            # Determine expected number of positions based on dataset type
+            if is_chat:
+                n_positions_expected = int(self.cfg.diffing.method.pre_assistant_k) + int(self.cfg.diffing.method.n)
+            else:
+                n_positions_expected = int(self.cfg.diffing.method.n)
+
+            cache_logit_lens: bool = bool(self.cfg.diffing.method.logit_lens.cache)
+            norms_needed: bool = self.overwrite or (not norms_path(self.results_dir, dataset_id).exists())
+
+            # Decide which layers require computation based on existing outputs
+            if self.overwrite:
+                layers_to_compute = list(self.layers)
+            else:
+                layers_to_compute = [
+                    layer for layer in self.layers
+                    if not is_layer_complete(self.results_dir, dataset_id, layer, n_positions_expected, cache_logit_lens)
+                ]
+
+            # If nothing to do, skip dataset
+            if len(layers_to_compute) == 0 and not norms_needed:
+                logger.info(f"Skipping dataset {dataset_id}: all results present and overwrite=False")
+                continue
 
             if is_chat:
                 pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
@@ -366,7 +401,9 @@ class ActDiffLens(DiffingMethod):
                     batch_size=self.cfg.diffing.method.batch_size,
                     pad_token_id=int(self.tokenizer.pad_token_id),
                 )
-
+                # Clear finetuned model from memory
+                self.clear_finetuned_model()
+                
                 position_labels: List[int] = samples[0]["position_labels"]
                 num_positions = len(position_labels)
             else:
@@ -394,100 +431,98 @@ class ActDiffLens(DiffingMethod):
                     self.layers,
                     self.cfg.diffing.method.batch_size,
                 )
+                # Clear finetuned model from memory
+                self.clear_finetuned_model()
 
                 position_labels = list(range(self.cfg.diffing.method.n))
                 num_positions = len(position_labels)
 
-            # Compute activation differences for each layer
+            # Compute activation differences only for layers we are computing
             diff_activations_per_layer: Dict[int, torch.Tensor] = {}
-            for layer in self.layers:
-                diff_activations_per_layer[layer] = ft_acts[layer] - base_acts[layer]
-                assert diff_activations_per_layer[layer].shape == ft_acts[layer].shape
-                assert diff_activations_per_layer[layer].shape[0] > 0
-                assert diff_activations_per_layer[layer].shape[1] == num_positions
-                assert diff_activations_per_layer[layer].shape[2] > 0
+            for layer in layers_to_compute:
+                diff = ft_acts[layer] - base_acts[layer]
+                assert diff.shape == ft_acts[layer].shape
+                assert diff.shape[0] > 0
+                assert diff.shape[1] == num_positions
+                assert diff.shape[2] > 0
+                diff_activations_per_layer[layer] = diff
 
             # Get metadata for dashboard saving
-            num_sequences = diff_activations_per_layer[self.layers[0]].shape[0]
-            activation_dim = diff_activations_per_layer[self.layers[0]].shape[2]
+            # Use any available layer tensor to infer shapes
+            any_layer_for_meta = self.layers[0]
+            num_sequences = ft_acts[any_layer_for_meta].shape[0]
+            activation_dim = ft_acts[any_layer_for_meta].shape[2]
 
-            # Compute norm estimates (simple)
-            base_model_norms: Dict[int, torch.Tensor] = {}
-            ft_model_norms: Dict[int, torch.Tensor] = {}
-            skip_tokens = 5
-            
-            for layer in self.layers:
-                base_layer_acts = base_acts[layer]  # [num_sequences, P, hidden_dim]
-                ft_layer_acts = ft_acts[layer]      # [num_sequences, P, hidden_dim]
-                assert base_layer_acts.shape == ft_layer_acts.shape
-                assert base_layer_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} positions, got {base_layer_acts.shape[1]}"
-                
-                base_acts_truncated = base_layer_acts[:, skip_tokens:, :]
-                ft_acts_truncated = ft_layer_acts[:, skip_tokens:, :]
-                
-                base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)
-                ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)
-                
-                assert base_norms_per_pos.shape == (base_layer_acts.shape[0], base_layer_acts.shape[1] - skip_tokens)
-                assert ft_norms_per_pos.shape == (ft_layer_acts.shape[0], ft_layer_acts.shape[1] - skip_tokens)
-                
-                base_model_norms[layer] = base_norms_per_pos.flatten().mean()  # scalar
-                ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()      # scalar
-                
-                logger.info(f"Layer {layer} - Base model mean norm: {base_model_norms[layer].item():.3f}")
-                logger.info(f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}")
+            # Optionally compute and save norm estimates
+            if norms_needed:
+                base_model_norms: Dict[int, torch.Tensor] = {}
+                ft_model_norms: Dict[int, torch.Tensor] = {}
+                skip_tokens = 5
+                for layer in self.layers:
+                    assert layer in ft_acts and layer in base_acts
+                    base_layer_acts = base_acts[layer]  # [num_sequences, P, hidden_dim]
+                    ft_layer_acts = ft_acts[layer]      # [num_sequences, P, hidden_dim]
+                    assert base_layer_acts.shape == ft_layer_acts.shape
+                    assert base_layer_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} positions, got {base_layer_acts.shape[1]}"
 
-            # Save norm estimates to file
-            norms_data = {
-                'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in self.layers},
-                'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in self.layers},
-                'skip_tokens': skip_tokens,
-                'num_sequences': num_sequences
-            }
-            norms_path = self.results_dir / f"model_norms_{dataset_id.split('/')[-1]}.pt"
-            torch.save(norms_data, norms_path)
-            logger.info(f"Saved model norm estimates to {norms_path}")
-            
+                    base_acts_truncated = base_layer_acts[:, skip_tokens:, :]
+                    ft_acts_truncated = ft_layer_acts[:, skip_tokens:, :]
+
+                    base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)
+                    ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)
+
+                    assert base_norms_per_pos.shape == (base_layer_acts.shape[0], base_layer_acts.shape[1] - skip_tokens)
+                    assert ft_norms_per_pos.shape == (ft_layer_acts.shape[0], ft_layer_acts.shape[1] - skip_tokens)
+
+                    base_model_norms[layer] = base_norms_per_pos.flatten().mean()
+                    ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()
+
+                    logger.info(f"Layer {layer} - Base model mean norm: {base_model_norms[layer].item():.3f}")
+                    logger.info(f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}")
+
+                norms_data = {
+                    'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in self.layers},
+                    'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in self.layers},
+                    'skip_tokens': skip_tokens,
+                    'num_sequences': num_sequences,
+                }
+                norms_fp = norms_path(self.results_dir, dataset_id)
+                torch.save(norms_data, norms_fp)
+                logger.info(f"Saved model norm estimates to {norms_fp}")
+
             # Compute mean activation difference per position per layer
-            mean_diff_per_position_per_layer: Dict[int, torch.Tensor] = {}
-            for layer in self.layers:
-                mean_diff_per_position_per_layer[layer] = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
-                assert mean_diff_per_position_per_layer[layer].shape == (num_positions, diff_activations_per_layer[layer].shape[2])
-                            
-                # Construct dashboard path with layer info
+            for layer in layers_to_compute:
+                mean_diff = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
+                assert mean_diff.shape == (num_positions, diff_activations_per_layer[layer].shape[2])
+
                 out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
                 out_dir.mkdir(parents=True, exist_ok=True)
-                
-                mean_activation_per_position = mean_diff_per_position_per_layer[layer]
-                # Save each position with 0-index labels (and negatives for chat)
+
+                # Save each position, skipping existing unless overwriting
                 for idx_in_tensor, label in enumerate(position_labels):
-                    tensor_filename = f"mean_pos_{idx_in_tensor}.pt"
-                    tensor_path = out_dir / tensor_filename
-                    torch.save(mean_activation_per_position[idx_in_tensor], tensor_path)
-                    
-                    # Save metadata
-                    meta_data = {
-                        'count': num_sequences,
-                        'activation_dim': activation_dim,
-                        'position': label,
-                        'token_id': None
-                    }
-                    
-                    meta_filename = f"mean_pos_{idx_in_tensor}.meta"
-                    meta_path = out_dir / meta_filename
-                    with open(meta_path, 'w') as f:
-                        json.dump(meta_data, f, indent=2)
+                    tensor_path = out_dir / f"mean_pos_{idx_in_tensor}.pt"
+                    meta_path = out_dir / f"mean_pos_{idx_in_tensor}.meta"
+                    need_write = self.overwrite or (not tensor_path.exists()) or (not meta_path.exists())
+                    if need_write:
+                        torch.save(mean_diff[idx_in_tensor], tensor_path)
+                        meta_data = {
+                            'count': num_sequences,
+                            'activation_dim': activation_dim,
+                            'position': label,
+                            'token_id': None,
+                        }
+                        with open(meta_path, 'w') as f:
+                            json.dump(meta_data, f, indent=2)
 
                     if self.cfg.diffing.method.logit_lens.cache:
-                        probs, inv_probs = logit_lens(mean_activation_per_position[idx_in_tensor], self.finetuned_model)
-                        # Get top k indices and probabilities
-                        k = self.cfg.diffing.method.logit_lens.k
-                        top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
-                        top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
-                        
-                        logit_lens_per_position_path = out_dir / f"logit_lens_pos_{idx_in_tensor}.pt"
-                        torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), logit_lens_per_position_path)
-                        logger.info(f"Cached top-{k} logit lens for position {label}")
+                        ll_path = out_dir / f"logit_lens_pos_{idx_in_tensor}.pt"
+                        if self.overwrite or (not ll_path.exists()):
+                            probs, inv_probs = logit_lens(mean_diff[idx_in_tensor], self.finetuned_model)
+                            k = self.cfg.diffing.method.logit_lens.k
+                            top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
+                            top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
+                            torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), ll_path)
+                            logger.info(f"Cached top-{k} logit lens for position {label}")
 
         # Run steering if enabled
         steering_cfg = getattr(self.cfg.diffing.method, "steering", None)

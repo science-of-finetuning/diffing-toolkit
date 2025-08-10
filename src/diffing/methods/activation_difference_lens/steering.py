@@ -428,6 +428,7 @@ def run_steering(method: Any) -> None:
     """Run offline steering using finetuned model and saved position means based on cfg."""
     cfg = method.cfg.diffing.method.steering
     assert cfg.enabled is True
+    overwrite: bool = bool(getattr(method.cfg.diffing.method, "overwrite", False))
 
     # Prepare grader
     grader_cfg = cfg.grader
@@ -455,34 +456,41 @@ def run_steering(method: Any) -> None:
         positions: List[int] = [int(p) for p in task.positions]
 
         for pos in positions:
+            dataset_dir_name = dataset_id.split("/")[-1]
+            out_dir = method.results_dir / f"layer_{abs_layer}" / dataset_dir_name / "steering" / f"position_{pos + 1}"
+            thr_path = out_dir / "threshold.json"
+            gen_path = out_dir / "generations.jsonl"
+
             steering_vec = load_position_mean_vector(method, dataset_id, abs_layer, pos)
 
             # Threshold search settings
             thr = cfg.threshold
             thr_gen = cfg.threshold.generation
-            thresholds, avg = find_steering_threshold(
-                model=model,
-                tokenizer=tokenizer,
-                steering_vector=steering_vec,
-                layer=abs_layer,
-                grader=grader,
-                prompts=["Tell me a story?", "Give me some ideas for some fun weekend activities.", "Why don't you choose a topic of conversation for us?"],
-                device=method.device,
-                max_new_tokens=int(thr_gen.max_new_tokens),
-                temperature=float(thr_gen.temperature),
-                do_sample=bool(thr_gen.do_sample),
-                num_samples_per_strength=int(thr.num_samples_per_strength),
-                coherence_threshold=float(thr.coherence_threshold),
-                debug=False,
-                max_strength=float(cfg.threshold.max_strength),
-            )
-
-            # Save threshold
-            dataset_dir_name = dataset_id.split("/")[-1]
-            out_dir = method.results_dir / f"layer_{abs_layer}" / dataset_dir_name / "steering" / f"position_{pos + 1}"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            with (out_dir / "threshold.json").open("w", encoding="utf-8") as f:
-                json.dump({"thresholds": thresholds, "avg_threshold": avg}, f, indent=2)
+            # Thresholds: compute if overwrite or missing; else load
+            if overwrite or (not thr_path.exists()):
+                thresholds, avg = find_steering_threshold(
+                    model=model,
+                    tokenizer=tokenizer,
+                    steering_vector=steering_vec,
+                    layer=abs_layer,
+                    grader=grader,
+                    prompts=["Tell me a story?", "Give me some ideas for some fun weekend activities.", "Why don't you choose a topic of conversation for us?"],
+                    device=method.device,
+                    max_new_tokens=int(thr_gen.max_new_tokens),
+                    temperature=float(thr_gen.temperature),
+                    do_sample=bool(thr_gen.do_sample),
+                    num_samples_per_strength=int(thr.num_samples_per_strength),
+                    coherence_threshold=float(thr.coherence_threshold),
+                    debug=False,
+                    max_strength=float(cfg.threshold.max_strength),
+                )
+                out_dir.mkdir(parents=True, exist_ok=True)
+                with thr_path.open("w", encoding="utf-8") as f:
+                    json.dump({"thresholds": thresholds, "avg_threshold": avg}, f, indent=2)
+            else:
+                data = json.loads(thr_path.read_text(encoding="utf-8"))
+                thresholds = list(data["thresholds"])  # type: ignore[index]
+                avg = float(data["avg_threshold"])     # type: ignore[index]
 
             # Final generation settings
             final_cfg = cfg.final
@@ -491,50 +499,48 @@ def run_steering(method: Any) -> None:
             assert num_samples >= 1
 
             # For every prompt: generate steered and unsteered samples
-            gen_path = out_dir / "generations.jsonl"
-            with gen_path.open("w", encoding="utf-8") as f:
-                for prompt in prompts:
-                    # Steered
-                    steered = generate_with_steering_batched(
-                        model=model,
-                        tokenizer=tokenizer,
-                        prompt=prompt,
-                        steering_vector=steering_vec,
-                        layer=abs_layer,
-                        strengths=[avg for _ in range(num_samples)],
-                        max_new_tokens=int(final_gen.max_new_tokens),
-                        temperature=float(final_gen.temperature),
-                        do_sample=bool(final_gen.do_sample),
-                        device=method.device,
-                        use_chat_formatting=True,
-                        enable_thinking=False,
-                    )
-                    assert len(steered) == num_samples
+            if overwrite or (not gen_path.exists()):
+                with gen_path.open("w", encoding="utf-8") as f:
+                    for prompt in prompts:
+                        steered = generate_with_steering_batched(
+                            model=model,
+                            tokenizer=tokenizer,
+                            prompt=prompt,
+                            steering_vector=steering_vec,
+                            layer=abs_layer,
+                            strengths=[avg for _ in range(num_samples)],
+                            max_new_tokens=int(final_gen.max_new_tokens),
+                            temperature=float(final_gen.temperature),
+                            do_sample=bool(final_gen.do_sample),
+                            device=method.device,
+                            use_chat_formatting=True,
+                            enable_thinking=False,
+                        )
+                        assert len(steered) == num_samples
 
-                    # Unsteered
-                    unsteered = generate_unsteered_batched(
-                        model=model,
-                        tokenizer=tokenizer,
-                        prompt=prompt,
-                        batch_size=num_samples,
-                        max_new_tokens=int(final_gen.max_new_tokens),
-                        temperature=float(final_gen.temperature),
-                        do_sample=bool(final_gen.do_sample),
-                        device=method.device,
-                    )
-                    assert len(unsteered) == num_samples
+                        unsteered = generate_unsteered_batched(
+                            model=model,
+                            tokenizer=tokenizer,
+                            prompt=prompt,
+                            batch_size=num_samples,
+                            max_new_tokens=int(final_gen.max_new_tokens),
+                            temperature=float(final_gen.temperature),
+                            do_sample=bool(final_gen.do_sample),
+                            device=method.device,
+                        )
+                        assert len(unsteered) == num_samples
 
-                    rec: Dict[str, Any] = {
-                        "prompt": prompt,
-                        "strength": avg,
-                        "layer": abs_layer,
-                        "position": pos,
-                        "num_samples": num_samples,
-                        "temperature": float(final_gen.temperature),
-                        "max_new_tokens": int(final_gen.max_new_tokens),
-                        "do_sample": bool(final_gen.do_sample),
-                        "steered_samples": steered,
-                        "unsteered_samples": unsteered,
-                    }
-                    f.write(json.dumps(rec) + "\n")
+                        rec: Dict[str, Any] = {
+                            "prompt": prompt,
+                            "strength": avg,
+                            "layer": abs_layer,
+                            "position": pos,
+                            "num_samples": num_samples,
+                            "temperature": float(final_gen.temperature),
+                            "max_new_tokens": int(final_gen.max_new_tokens),
+                            "do_sample": bool(final_gen.do_sample),
+                            "steered_samples": steered,
+                            "unsteered_samples": unsteered,
+                        }
+                        f.write(json.dumps(rec) + "\n")
 

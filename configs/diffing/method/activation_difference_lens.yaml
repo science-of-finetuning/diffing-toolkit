@@ -1,13 +1,15 @@
 # @package diffing.method
 name: activation_difference_lens
 
+overwrite: false
+
 datasets:
  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
- - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+# - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
 
 max_samples: 10000
-n: 10
-batch_size: 8
+n: 20
+batch_size: 32
 num_workers: 8
 split: train
 # pre_assistant_k has no effect for non-chat datasets
@@ -37,7 +39,7 @@ steering:
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
-      positions: [0, 1]
+      positions: [0, 1, 2, 3, 4, 9, 14, 19]
   grader:
     model_id: openai/gpt-5-nano
     base_url: https://openrouter.ai/api/v1
@@ -52,7 +54,7 @@ steering:
       temperature: 1.2
       do_sample: true
   final:
-    num_samples_per_prompt: 5
+    num_samples_per_prompt: 10
     generation:
       max_new_tokens: 512
       temperature: 1.0

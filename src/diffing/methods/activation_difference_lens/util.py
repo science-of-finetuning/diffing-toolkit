@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def dataset_dir_name(dataset_id: str) -> str:
+    name = dataset_id.split("/")[-1]
+    assert len(name) > 0
+    return name
+
+
+def layer_dir(results_dir: Path, dataset_id: str, layer_index: int) -> Path:
+    return results_dir / f"layer_{layer_index}" / dataset_dir_name(dataset_id)
+
+
+def norms_path(results_dir: Path, dataset_id: str) -> Path:
+    return results_dir / f"model_norms_{dataset_dir_name(dataset_id)}.pt"
+
+
+def position_files_exist(layer_dir_path: Path, position_idx_zero_based: int, need_logit_lens: bool) -> bool:
+    mean_pt = layer_dir_path / f"mean_pos_{position_idx_zero_based}.pt"
+    meta = layer_dir_path / f"mean_pos_{position_idx_zero_based}.meta"
+    if not (mean_pt.exists() and meta.exists()):
+        return False
+    if need_logit_lens:
+        ll_pt = layer_dir_path / f"logit_lens_pos_{position_idx_zero_based}.pt"
+        if not ll_pt.exists():
+            return False
+    return True
+
+
+def is_layer_complete(
+    results_dir: Path,
+    dataset_id: str,
+    layer_index: int,
+    n_positions: int,
+    need_logit_lens: bool,
+) -> bool:
+    layer_dir_path = layer_dir(results_dir, dataset_id, layer_index)
+    if not layer_dir_path.exists():
+        return False
+    for p in range(n_positions):
+        if not position_files_exist(layer_dir_path, p, need_logit_lens):
+            return False
+    return True
+
