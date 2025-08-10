@@ -39,10 +39,10 @@ def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
     return cleaned_text
 
 
-def generate_with_steering_batched(
+def generated_steered(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
-    prompt: str,
+    prompts: List[str],
     steering_vector: torch.Tensor,
     layer: int,
     strengths: List[float],
@@ -53,49 +53,51 @@ def generate_with_steering_batched(
     use_chat_formatting: bool = True,
     enable_thinking: bool = False,
 ) -> List[str]:
-    """Generate one sample per strength by adding strength * steering_vector at model layer.
-
-    Returns list[str] aligned with strengths.
-    """
-    assert isinstance(prompt, str) and len(prompt) > 0
-    assert steering_vector.ndim == 1
+    """Generate one sample per prompt with steering; returns continuations only."""
+    assert isinstance(prompts, list) and len(prompts) > 0
+    assert isinstance(steering_vector, torch.Tensor) and steering_vector.ndim == 1
     hidden_size = model.config.hidden_size
-    assert steering_vector.shape == (
-        hidden_size,
-    ), f"Expected steering_vector shape ({hidden_size},), got {steering_vector.shape}"
+    assert steering_vector.shape == (hidden_size,)
     assert layer >= 0
-    assert len(strengths) > 0
+    assert len(strengths) == len(prompts)
+    assert tokenizer.eos_token_id is not None
+    assert tokenizer.pad_token_id is not None
+    if getattr(tokenizer, "padding_side", None) != "left":
+        tokenizer.padding_side = "left"
+    assert tokenizer.padding_side == "left"
 
-    # Format prompt once
     if use_chat_formatting:
-        formatted_prompt = apply_chat(
-            prompt, tokenizer, add_bos=False, enable_thinking=enable_thinking
-        )
+        formatted_prompts = [
+            apply_chat(p, tokenizer, add_bos=False, enable_thinking=enable_thinking)
+            for p in prompts
+        ]
     else:
-        formatted_prompt = prompt
+        formatted_prompts = prompts
+    assert len(formatted_prompts) == len(prompts)
 
-    inputs = tokenizer(formatted_prompt, return_tensors="pt", add_special_tokens=True)
-
-    input_ids = inputs["input_ids"].to(device)
-    assert input_ids.ndim == 2 and input_ids.shape[0] == 1
-    input_length_tokens = input_ids.shape[1]
-    assert input_length_tokens > 0
-
-    batch_size = len(strengths)
-    batch_input_ids = input_ids.repeat(batch_size, 1)
-    assert batch_input_ids.shape[0] == batch_size
+    batch = tokenizer(
+        formatted_prompts,
+        return_tensors="pt",
+        add_special_tokens=True,
+        padding=True,
+    )
+    input_ids = batch["input_ids"].to(device)
+    attention_mask = batch["attention_mask"].to(device)
+    assert input_ids.ndim == 2 and attention_mask.ndim == 2
+    batch_size, seq_len = input_ids.shape
+    assert batch_size == len(prompts) and seq_len > 0
 
     steering_vectors_batch = torch.stack(
-        [steering_vector.to(device) for _ in strengths]
-    )  # [B, H]
-    strengths_tensor = torch.tensor(strengths, device=device)  # [B]
+        [steering_vector.to(device) for _ in range(batch_size)]
+    )
+    strengths_tensor = torch.tensor(strengths, device=device)
     assert steering_vectors_batch.shape == (batch_size, hidden_size)
     assert strengths_tensor.shape == (batch_size,)
 
     nn_model = LanguageModel(model, tokenizer=tokenizer)
 
     with nn_model.generate(
-        batch_input_ids,
+        batch, # Expects BatchEncoding
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         do_sample=do_sample,
@@ -103,22 +105,18 @@ def generate_with_steering_batched(
         disable_compile=True,
     ):
         with nn_model.model.layers[layer].all():
-            steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)
-            nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)
+            steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1) # [B, H]
+            nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1) # [B, L, H] + [B, 1, H]
         outputs = nn_model.generator.output.save()
 
-    # Decode only the model's continuation (exclude prompt tokens)
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
-    batch_input_ids_cpu = batch_input_ids.to("cpu")
+    input_ids_cpu = input_ids.to("cpu")
     texts: List[str] = []
     for i in range(batch_size):
-        assert outputs_cpu.shape[1] >= input_length_tokens
-        # Ensure generated sequence starts with the prompt, then slice it off
-        assert torch.equal(
-            outputs_cpu[i, :input_length_tokens], batch_input_ids_cpu[i]
-        ), "Generated sequence does not start with the prompt tokens."
-        completion_ids = outputs_cpu[i, input_length_tokens:]
+        assert outputs_cpu.shape[1] >= seq_len
+        assert torch.equal(outputs_cpu[i, :seq_len], input_ids_cpu[i])
+        completion_ids = outputs_cpu[i, seq_len:]
         assert completion_ids.ndim == 1
         text = tokenizer.decode(completion_ids.tolist(), skip_special_tokens=False)
         assert isinstance(text, str)
@@ -126,54 +124,6 @@ def generate_with_steering_batched(
         texts.append(text)
     assert len(texts) == batch_size
     return texts
-
-
-def _generate_grouped_samples(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
-    prompt: str,
-    steering_vector: torch.Tensor,
-    layer: int,
-    strengths: List[float],
-    num_samples_per_strength: int,
-    max_new_tokens: int,
-    temperature: float,
-    do_sample: bool,
-    device: str,
-) -> List[List[str]]:
-    """Generate num_samples_per_strength samples for each strength.
-
-    Returns list of lists aligned with strengths.
-    """
-    assert num_samples_per_strength >= 1
-    repeated_strengths: List[float] = []
-    for s in strengths:
-        for _ in range(num_samples_per_strength):
-            repeated_strengths.append(s)
-
-    flat_generations = generate_with_steering_batched(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=prompt,
-        steering_vector=steering_vector,
-        layer=layer,
-        strengths=repeated_strengths,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        do_sample=do_sample,
-        device=device,
-    )
-    assert len(flat_generations) == len(strengths) * num_samples_per_strength
-
-    grouped: List[List[str]] = []
-    for i in range(len(strengths)):
-        start = i * num_samples_per_strength
-        end = start + num_samples_per_strength
-        group = flat_generations[start:end]
-        assert len(group) == num_samples_per_strength
-        grouped.append(group)
-    assert len(grouped) == len(strengths)
-    return grouped
 
 
 def binary_search_threshold(
@@ -205,30 +155,33 @@ def binary_search_threshold(
     )
     for _ in range(steps):
         mid = (low + high) / 2.0
-        samples_grouped = _generate_grouped_samples(
+        repeated_prompts: List[str] = [prompt for _ in range(num_samples_per_strength)]
+        repeated_strengths: List[float] = [mid for _ in range(num_samples_per_strength)]
+        samples = generated_steered(
             model=model,
             tokenizer=tokenizer,
-            prompt=prompt,
+            prompts=repeated_prompts,
             steering_vector=steering_vector,
             layer=layer,
-            strengths=[mid],
-            num_samples_per_strength=num_samples_per_strength,
+            strengths=repeated_strengths,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
             device=device,
+            use_chat_formatting=True,
+            enable_thinking=False,
         )
-        assert len(samples_grouped) == 1
-        logger.debug(f"grading {len(samples_grouped[0])} samples at strength={mid:.6f}")
-        percentage, labels = asyncio.run(grader.grade_async(samples_grouped[0]))
-        assert len(labels) == len(samples_grouped[0])
+        assert isinstance(samples, list) and len(samples) == num_samples_per_strength
+        logger.debug(f"grading {len(samples)} samples at strength={mid:.6f}")
+        percentage, labels = asyncio.run(grader.grade_async(samples))
+        assert len(labels) == len(samples)
         unknown_count = sum(1 for x in labels if x == "UNKNOWN")
         coherent = percentage >= coherence_threshold
         logger.debug(
             f"strength={mid:.6f} -> coherence={percentage:.2f}% pass={coherent} unknowns={unknown_count}/{len(labels)}"
         )
         if debug:
-            example_text = samples_grouped[0][0]
+            example_text = samples[0]
             example_label = labels[0]
             logger.debug(f"example_label={example_label}")
             preview = (
@@ -332,28 +285,36 @@ def read_prompts(prompts_file: str) -> List[str]:
     return prompts
 
 
-def generate_unsteered_batched(
+def generated_unsteered(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
-    prompt: str,
-    batch_size: int,
+    prompts: List[str],
     max_new_tokens: int,
     temperature: float,
     do_sample: bool,
     device: str,
 ) -> List[str]:
-    """Generate batch_size unsteered samples; return only continuations (no prompt)."""
-    assert batch_size >= 1
-    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-    input_ids = inputs["input_ids"].to(device)
-    assert input_ids.ndim == 2 and input_ids.shape[0] == 1
-    input_length_tokens = input_ids.shape[1]
-
-    batch_input_ids = input_ids.repeat(batch_size, 1)
-    attention_mask = torch.ones_like(batch_input_ids, device=device)
+    """Generate one sample per prompt without steering; returns continuations only."""
+    assert isinstance(prompts, list) and len(prompts) >= 1
+    assert tokenizer.eos_token_id is not None
+    assert tokenizer.pad_token_id is not None
+    if getattr(tokenizer, "padding_side", None) != "left":
+        tokenizer.padding_side = "left"
+    assert tokenizer.padding_side == "left"
+    batch = tokenizer(
+        prompts,
+        return_tensors="pt",
+        add_special_tokens=True,
+        padding=True,
+    )
+    input_ids = batch["input_ids"].to(device)
+    attention_mask = batch["attention_mask"].to(device)
+    assert input_ids.ndim == 2 and attention_mask.ndim == 2
+    batch_size, seq_len = input_ids.shape
+    assert batch_size == len(prompts) and seq_len > 0
 
     outputs = model.generate(
-        input_ids=batch_input_ids,
+        input_ids=input_ids,
         attention_mask=attention_mask,
         max_new_tokens=max_new_tokens,
         temperature=temperature,
@@ -364,17 +325,16 @@ def generate_unsteered_batched(
     )
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
-    batch_input_ids_cpu = batch_input_ids.to("cpu")
-
+    input_ids_cpu = input_ids.to("cpu")
     texts: List[str] = []
     for i in range(batch_size):
-        assert outputs_cpu.shape[1] >= input_length_tokens
-        assert torch.equal(outputs_cpu[i, :input_length_tokens], batch_input_ids_cpu[i])
-        completion_ids = outputs_cpu[i, input_length_tokens:]
+        assert outputs_cpu.shape[1] >= seq_len
+        assert torch.equal(outputs_cpu[i, :seq_len], input_ids_cpu[i])
+        completion_ids = outputs_cpu[i, seq_len:]
         assert completion_ids.ndim == 1
         text = tokenizer.decode(completion_ids.tolist(), skip_special_tokens=False)
         assert isinstance(text, str)
-        texts.append(text)
+        texts.append(_clean_generated_text(text, tokenizer.eos_token))
     assert len(texts) == batch_size
     return texts
 
@@ -462,6 +422,9 @@ def run_steering(method: Any) -> None:
     model = method.finetuned_model.to(method.device)
     tokenizer = method.tokenizer
     assert tokenizer.eos_token_id is not None
+    if getattr(tokenizer, "padding_side", None) != "left":
+        tokenizer.padding_side = "left"
+    assert tokenizer.padding_side == "left"
 
     # Iterate tasks
     for task in cfg.tasks:
@@ -474,13 +437,14 @@ def run_steering(method: Any) -> None:
         positions: List[int] = [int(p) for p in task.positions]
 
         for pos in positions:
+            logger.info(f"Running steering for layer {abs_layer} position {pos}")
             dataset_dir_name = dataset_id.split("/")[-1]
             out_dir = (
                 method.results_dir
                 / f"layer_{abs_layer}"
                 / dataset_dir_name
                 / "steering"
-                / f"position_{pos + 1}"
+                / f"position_{pos}"
             )
             thr_path = out_dir / "threshold.json"
             gen_path = out_dir / "generations.jsonl"
@@ -531,14 +495,33 @@ def run_steering(method: Any) -> None:
             # For every prompt: generate steered and unsteered samples
             if overwrite or (not gen_path.exists()):
                 with gen_path.open("w", encoding="utf-8") as f:
-                    for prompt in prompts:
-                        steered = generate_with_steering_batched(
+                    max_batch_size = int(getattr(cfg, "max_batch_size"))
+                    assert max_batch_size >= 1
+
+                    # Collect steered samples batched across prompts
+                    steered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
+                    remaining = {p: num_samples for p in prompts}
+                    while any(remaining[p] > 0 for p in prompts):
+                        batch_prompts: List[str] = []
+                        for p in prompts:
+                            need = remaining[p]
+                            if need <= 0:
+                                continue
+                            take = min(need, max_batch_size - len(batch_prompts))
+                            if take > 0:
+                                batch_prompts.extend([p] * take)
+                            if len(batch_prompts) == max_batch_size:
+                                break
+                        if len(batch_prompts) == 0:
+                            break
+                        strengths = [avg for _ in range(len(batch_prompts))]
+                        gens = generated_steered(
                             model=model,
                             tokenizer=tokenizer,
-                            prompt=prompt,
+                            prompts=batch_prompts,
                             steering_vector=steering_vec,
                             layer=abs_layer,
-                            strengths=[avg for _ in range(num_samples)],
+                            strengths=strengths,
                             max_new_tokens=int(final_gen.max_new_tokens),
                             temperature=float(final_gen.temperature),
                             do_sample=bool(final_gen.do_sample),
@@ -546,20 +529,47 @@ def run_steering(method: Any) -> None:
                             use_chat_formatting=True,
                             enable_thinking=False,
                         )
-                        assert len(steered) == num_samples
+                        assert len(gens) == len(batch_prompts)
+                        for p, g in zip(batch_prompts, gens):
+                            steered_acc[p].append(g)
+                            remaining[p] -= 1
+                    for p in prompts:
+                        assert len(steered_acc[p]) == num_samples
 
-                        unsteered = generate_unsteered_batched(
+                    # Collect unsteered samples batched across prompts
+                    unsteered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
+                    remaining_u = {p: num_samples for p in prompts}
+                    while any(remaining_u[p] > 0 for p in prompts):
+                        batch_prompts_u: List[str] = []
+                        for p in prompts:
+                            need = remaining_u[p]
+                            if need <= 0:
+                                continue
+                            take = min(need, max_batch_size - len(batch_prompts_u))
+                            if take > 0:
+                                batch_prompts_u.extend([p] * take)
+                            if len(batch_prompts_u) == max_batch_size:
+                                break
+                        if len(batch_prompts_u) == 0:
+                            break
+                        gens_u = generated_unsteered(
                             model=model,
                             tokenizer=tokenizer,
-                            prompt=prompt,
-                            batch_size=num_samples,
+                            prompts=batch_prompts_u,
                             max_new_tokens=int(final_gen.max_new_tokens),
                             temperature=float(final_gen.temperature),
                             do_sample=bool(final_gen.do_sample),
                             device=method.device,
                         )
-                        assert len(unsteered) == num_samples
+                        assert len(gens_u) == len(batch_prompts_u)
+                        for p, g in zip(batch_prompts_u, gens_u):
+                            unsteered_acc[p].append(g)
+                            remaining_u[p] -= 1
+                    for p in prompts:
+                        assert len(unsteered_acc[p]) == num_samples
 
+                    # Write per-prompt records
+                    for prompt in prompts:
                         rec: Dict[str, Any] = {
                             "prompt": prompt,
                             "strength": avg,
@@ -569,7 +579,7 @@ def run_steering(method: Any) -> None:
                             "temperature": float(final_gen.temperature),
                             "max_new_tokens": int(final_gen.max_new_tokens),
                             "do_sample": bool(final_gen.do_sample),
-                            "steered_samples": steered,
-                            "unsteered_samples": unsteered,
+                            "steered_samples": steered_acc[prompt],
+                            "unsteered_samples": unsteered_acc[prompt],
                         }
                         f.write(json.dumps(rec) + "\n")

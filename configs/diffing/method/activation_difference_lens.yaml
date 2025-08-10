@@ -4,16 +4,16 @@ name: activation_difference_lens
 overwrite: false
 
 datasets:
- - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
-# - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
+  # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
 
 max_samples: 10000
-n: 20
+n: 10
 batch_size: 32
 num_workers: 8
 split: train
 # pre_assistant_k has no effect for non-chat datasets
-pre_assistant_k: 2
+pre_assistant_k: 3
 
 layers:
   - 0.0
@@ -35,6 +35,7 @@ logit_lens:
 steering:
   enabled: false
   prompts_file: resources/steering_prompts.txt
+  max_batch_size: 64
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
