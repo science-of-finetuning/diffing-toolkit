@@ -59,6 +59,7 @@ class DiffingMethod(ABC):
         gc.collect()
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
+        self._base_model = None
         logger.info("Cleared base model from CUDA memory with garbage collection")
 
     def clear_finetuned_model(self) -> None:
@@ -68,8 +69,8 @@ class DiffingMethod(ABC):
         gc.collect()
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
+        self._finetuned_model = None
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
-        
     @property
     def tokenizer(self) -> AutoTokenizer:
         """Load and return the tokenizer from the base model."""

@@ -2,14 +2,16 @@
 name: activation_difference_lens
 
 datasets:
- - science-of-finetuning/fineweb-1m-sample
+ - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
+ - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
 
 max_samples: 10000
 n: 10
-batch_size: 32
+batch_size: 8
 num_workers: 8
 split: train
-text_column: text
+# pre_assistant_k has no effect for non-chat datasets
+pre_assistant_k: 2
 
 layers:
   - 0.0

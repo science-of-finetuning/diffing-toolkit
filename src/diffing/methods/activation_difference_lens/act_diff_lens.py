@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import torch
 from tqdm import tqdm
 from loguru import logger
@@ -77,6 +77,97 @@ def load_and_tokenize_dataset(
     logger.info(f"Successfully tokenized {len(first_n_tokens)} sequences")
     return first_n_tokens
 
+
+def _build_chat_positions(
+    assistant_start_index: int,
+    n: int,
+    pre_assistant_k: int,
+) -> Tuple[List[int], List[int]]:
+    """Return (position_labels, absolute_indices) for [-k..-1, 0..n-1]."""
+    assert assistant_start_index >= pre_assistant_k
+    position_labels: List[int] = list(range(-pre_assistant_k, 0)) + list(range(0, n))
+    absolute_indices: List[int] = []
+    for label in position_labels:
+        absolute_index = assistant_start_index + label
+        assert absolute_index >= 0
+        absolute_indices.append(absolute_index)
+    assert len(position_labels) == pre_assistant_k + n
+    assert len(absolute_indices) == pre_assistant_k + n
+    return position_labels, absolute_indices
+
+
+def load_and_tokenize_chat_dataset(
+    dataset_name: str,
+    tokenizer: Any,
+    split: str,
+    messages_column: str,
+    n: int,
+    pre_assistant_k: int,
+    max_samples: int,
+    debug: bool = False,
+) -> List[Dict[str, Any]]:
+    """Load a chat dataset and prepare samples around assistant start.
+
+    Returns list of dicts with keys: input_ids (List[int]), position_labels (List[int]), positions (List[int]).
+    """
+    logger.info(f"Loading chat dataset {dataset_name} (split: {split})")
+    dataset = load_dataset(dataset_name, split=split)
+    if debug:
+        max_samples = min(20, max_samples)
+    processed = 0
+    samples: List[Dict[str, Any]] = []
+
+    for sample in tqdm(dataset, desc="Tokenizing chat sequences"):
+        if processed >= max_samples:
+            break
+
+        messages = sample[messages_column]
+        assert isinstance(messages, list) and len(messages) >= 2
+        if messages[0]["role"] != "user":
+            logger.warning(f"First message is not user: {messages[0]}")
+            continue
+        assert messages[1]["role"] == "assistant"
+
+        # Truncate assistant content to 10 * n characters to speed up tokenization
+        trunc_messages = [
+            {"role": messages[0]["role"], "content": messages[0]["content"]},
+            {"role": messages[1]["role"], "content": messages[1]["content"][: 10 * n]},
+        ]
+
+        user_only = [{"role": messages[0]["role"], "content": messages[0]["content"]}]
+        user_ids: List[int] = tokenizer.apply_chat_template(
+            user_only, tokenize=True, add_generation_prompt=True
+        )
+        full_ids: List[int] = tokenizer.apply_chat_template(
+            trunc_messages, tokenize=True, add_generation_prompt=False
+        )
+
+        assistant_start_index = len(user_ids)
+        if len(full_ids) - assistant_start_index < n:
+            continue  # drop samples with fewer than n assistant tokens
+
+        # Feed only up to the first n assistant tokens
+        truncated_ids = full_ids[: assistant_start_index + n]
+
+        position_labels, absolute_indices = _build_chat_positions(
+            assistant_start_index=assistant_start_index,
+            n=n,
+            pre_assistant_k=pre_assistant_k,
+        )
+        assert max(absolute_indices) < len(truncated_ids)
+
+        samples.append(
+            {
+                "input_ids": truncated_ids,
+                "positions": absolute_indices,
+                "position_labels": position_labels,
+            }
+        )
+        processed += 1
+
+    logger.info(f"Prepared {len(samples)} chat samples")
+    assert len(samples) > 0, "No valid chat samples after filtering"
+    return samples
 
 def extract_first_n_tokens_from_sequences(
     sequences: List[torch.Tensor]
@@ -170,6 +261,64 @@ def extract_first_n_tokens_activations(
     return result
 
 
+@torch.no_grad()
+def extract_selected_positions_activations(
+    model: torch.nn.Module,
+    samples: List[Dict[str, Any]],
+    layers: List[int],
+    batch_size: int,
+    pad_token_id: int,
+) -> Dict[int, torch.Tensor]:
+    """Extract activations at specific absolute indices for each sample.
+
+    Returns dict[layer] -> Tensor[num_samples, P, hidden_dim]
+    where P = len(samples[0]["positions"]).
+    """
+    assert len(samples) > 0
+    num_positions = len(samples[0]["positions"])
+    assert num_positions > 0
+
+    model.eval()
+    nn_model = NNsight(model)
+
+    all_activations: Dict[int, List[torch.Tensor]] = {layer: [] for layer in layers}
+
+    for i in tqdm(range(0, len(samples), batch_size)):
+        batch = samples[i : i + batch_size]
+        batch_input_ids_list: List[List[int]] = [b["input_ids"] for b in batch]
+        batch_positions_list: List[List[int]] = [b["positions"] for b in batch]
+        assert all(len(pos) == num_positions for pos in batch_positions_list)
+
+        max_len = max(len(x) for x in batch_input_ids_list)
+        batch_input_ids = torch.full(
+            (len(batch), max_len), fill_value=pad_token_id, dtype=torch.long, device=model.device
+        )
+        attention_mask = torch.zeros((len(batch), max_len), dtype=torch.long, device=model.device)
+
+        for row, seq in enumerate(batch_input_ids_list):
+            seq_len = len(seq)
+            batch_input_ids[row, :seq_len] = torch.tensor(seq, dtype=torch.long, device=model.device)
+            attention_mask[row, :seq_len] = 1
+
+        with nn_model.trace(batch_input_ids, attention_mask=attention_mask):
+            layer_outputs: Dict[int, torch.Tensor] = {}
+            for layer in layers:
+                layer_outputs[layer] = nn_model.model.layers[layer].output[0].save()
+
+        for layer in layers:
+            hidden: torch.Tensor = layer_outputs[layer]  # [B, L, D]
+            pos_index = torch.tensor(batch_positions_list, dtype=torch.long, device=hidden.device)  # [B, P]
+            pos_index_expanded = pos_index.unsqueeze(-1).expand(-1, -1, hidden.shape[2])
+            assert pos_index_expanded.shape == (len(batch), num_positions, hidden.shape[2])
+            gathered = torch.gather(hidden, dim=1, index=pos_index_expanded)  # [B, P, D]
+            assert gathered.shape == (len(batch), num_positions, hidden.shape[2])
+            all_activations[layer].append(gathered.to("cpu"))
+
+    result: Dict[int, torch.Tensor] = {}
+    for layer in layers:
+        result[layer] = torch.cat(all_activations[layer], dim=0)
+    return result
+
 
 class ActDiffLens(DiffingMethod):
     def __init__(self, cfg: DictConfig):
@@ -181,66 +330,106 @@ class ActDiffLens(DiffingMethod):
         self.layers = get_layer_indices(self.base_model_cfg.model_id, self.cfg.diffing.method.layers)
 
     def run(self):
-        for dataset_id in self.cfg.diffing.method.datasets:
-            first_n_tokens = load_and_tokenize_dataset(
-                dataset_id,
-                self.tokenizer,
-                split=self.cfg.diffing.method.split,
-                text_column=self.cfg.diffing.method.text_column,
-                n=self.cfg.diffing.method.n,
-                max_samples=self.cfg.diffing.method.max_samples,
-            )
-            first_n_tokens_activations = extract_first_n_tokens_activations(
-                self.base_model,
-                first_n_tokens,
-                self.layers,
-                self.cfg.diffing.method.batch_size,
-            )
+        for dataset_entry in self.cfg.diffing.method.datasets:
+            assert isinstance(dataset_entry, (dict, DictConfig)) and "id" in dataset_entry and "is_chat" in dataset_entry
+            dataset_id = dataset_entry["id"]
+            is_chat: bool = dataset_entry["is_chat"]
 
-            # Clear base model from memory
-            self.clear_base_model()
+            if is_chat:
+                pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
+                assert "messages_column" in dataset_entry
+                samples = load_and_tokenize_chat_dataset(
+                    dataset_name=dataset_id,
+                    tokenizer=self.tokenizer,
+                    split=self.cfg.diffing.method.split,
+                    messages_column=dataset_entry["messages_column"],
+                    n=self.cfg.diffing.method.n,
+                    pre_assistant_k=pre_k,
+                    max_samples=self.cfg.diffing.method.max_samples,
+                )
 
-            first_n_tokens_activations_ft = extract_first_n_tokens_activations(
-                self.finetuned_model,
-                first_n_tokens,
-                self.layers,
-                self.cfg.diffing.method.batch_size,
-            )
+                base_acts = extract_selected_positions_activations(
+                    model=self.base_model,
+                    samples=samples,
+                    layers=self.layers,
+                    batch_size=self.cfg.diffing.method.batch_size,
+                    pad_token_id=int(self.tokenizer.pad_token_id),
+                )
+
+                # Clear base model from memory
+                self.clear_base_model()
+
+                ft_acts = extract_selected_positions_activations(
+                    model=self.finetuned_model,
+                    samples=samples,
+                    layers=self.layers,
+                    batch_size=self.cfg.diffing.method.batch_size,
+                    pad_token_id=int(self.tokenizer.pad_token_id),
+                )
+
+                position_labels: List[int] = samples[0]["position_labels"]
+                num_positions = len(position_labels)
+            else:
+                first_n_tokens = load_and_tokenize_dataset(
+                    dataset_id,
+                    self.tokenizer,
+                    split=self.cfg.diffing.method.split,
+                    text_column=dataset_entry["text_column"],
+                    n=self.cfg.diffing.method.n,
+                    max_samples=self.cfg.diffing.method.max_samples,
+                )
+                base_acts = extract_first_n_tokens_activations(
+                    self.base_model,
+                    first_n_tokens,
+                    self.layers,
+                    self.cfg.diffing.method.batch_size,
+                )
+
+                # Clear base model from memory
+                self.clear_base_model()
+
+                ft_acts = extract_first_n_tokens_activations(
+                    self.finetuned_model,
+                    first_n_tokens,
+                    self.layers,
+                    self.cfg.diffing.method.batch_size,
+                )
+
+                position_labels = list(range(self.cfg.diffing.method.n))
+                num_positions = len(position_labels)
 
             # Compute activation differences for each layer
-            diff_activations_per_layer = {}
+            diff_activations_per_layer: Dict[int, torch.Tensor] = {}
             for layer in self.layers:
-                diff_activations_per_layer[layer] = first_n_tokens_activations_ft[layer] - first_n_tokens_activations[layer]
-                assert diff_activations_per_layer[layer].shape == first_n_tokens_activations_ft[layer].shape
-                assert diff_activations_per_layer[layer].shape[0] > 0, "No sequences processed"
-                assert diff_activations_per_layer[layer].shape[2] > 0, "No hidden dimensions"
+                diff_activations_per_layer[layer] = ft_acts[layer] - base_acts[layer]
+                assert diff_activations_per_layer[layer].shape == ft_acts[layer].shape
+                assert diff_activations_per_layer[layer].shape[0] > 0
+                assert diff_activations_per_layer[layer].shape[1] == num_positions
+                assert diff_activations_per_layer[layer].shape[2] > 0
 
             # Get metadata for dashboard saving
             num_sequences = diff_activations_per_layer[self.layers[0]].shape[0]
             activation_dim = diff_activations_per_layer[self.layers[0]].shape[2]
 
-            # Compute norm estimates for both models (ignoring first 5 tokens)
-            base_model_norms = {}
-            ft_model_norms = {}
+            # Compute norm estimates (simple)
+            base_model_norms: Dict[int, torch.Tensor] = {}
+            ft_model_norms: Dict[int, torch.Tensor] = {}
             skip_tokens = 5
             
             for layer in self.layers:
-                base_acts = first_n_tokens_activations[layer]  # [num_sequences, n, hidden_dim]
-                ft_acts = first_n_tokens_activations_ft[layer]  # [num_sequences, n, hidden_dim]
+                base_layer_acts = base_acts[layer]  # [num_sequences, P, hidden_dim]
+                ft_layer_acts = ft_acts[layer]      # [num_sequences, P, hidden_dim]
+                assert base_layer_acts.shape == ft_layer_acts.shape
+                assert base_layer_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} positions, got {base_layer_acts.shape[1]}"
                 
-                assert base_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} tokens, got {base_acts.shape[1]}"
-                assert ft_acts.shape == base_acts.shape
+                base_acts_truncated = base_layer_acts[:, skip_tokens:, :]
+                ft_acts_truncated = ft_layer_acts[:, skip_tokens:, :]
                 
-                # Extract activations excluding first 5 tokens
-                base_acts_truncated = base_acts[:, skip_tokens:, :]  # [num_sequences, n-5, hidden_dim]
-                ft_acts_truncated = ft_acts[:, skip_tokens:, :]     # [num_sequences, n-5, hidden_dim]
+                base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)
+                ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)
                 
-                # Compute norm over hidden dimension, then flatten and mean
-                base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)  # [num_sequences, n-5]
-                ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)      # [num_sequences, n-5]
-                
-                assert base_norms_per_pos.shape == (base_acts.shape[0], base_acts.shape[1] - skip_tokens)
-                assert ft_norms_per_pos.shape == (ft_acts.shape[0], ft_acts.shape[1] - skip_tokens)
+                assert base_norms_per_pos.shape == (base_layer_acts.shape[0], base_layer_acts.shape[1] - skip_tokens)
+                assert ft_norms_per_pos.shape == (ft_layer_acts.shape[0], ft_layer_acts.shape[1] - skip_tokens)
                 
                 base_model_norms[layer] = base_norms_per_pos.flatten().mean()  # scalar
                 ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()      # scalar
@@ -260,47 +449,45 @@ class ActDiffLens(DiffingMethod):
             logger.info(f"Saved model norm estimates to {norms_path}")
             
             # Compute mean activation difference per position per layer
-            mean_diff_per_position_per_layer = {}
+            mean_diff_per_position_per_layer: Dict[int, torch.Tensor] = {}
             for layer in self.layers:
-                mean_diff_per_position_per_layer[layer] = diff_activations_per_layer[layer].mean(dim=0)  # [n, hidden_dim]
-                assert mean_diff_per_position_per_layer[layer].shape == (self.cfg.diffing.method.n, diff_activations_per_layer[layer].shape[2])
-                logger.info(f"Layer {layer} - Mean activation difference norms per position: {[mean_diff_per_position_per_layer[layer][i].norm().item() for i in range(self.cfg.diffing.method.n)]}")
+                mean_diff_per_position_per_layer[layer] = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
+                assert mean_diff_per_position_per_layer[layer].shape == (num_positions, diff_activations_per_layer[layer].shape[2])
                             
                 # Construct dashboard path with layer info
                 out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
                 out_dir.mkdir(parents=True, exist_ok=True)
                 
                 mean_activation_per_position = mean_diff_per_position_per_layer[layer]
-                # Save each position in dashboard format
-                for pos in range(self.cfg.diffing.method.n):
-                    # Save tensor data
-                    tensor_filename = f"mean_pos_{pos+1}.pt"
+                # Save each position with 0-index labels (and negatives for chat)
+                for idx_in_tensor, label in enumerate(position_labels):
+                    tensor_filename = f"mean_pos_{idx_in_tensor}.pt"
                     tensor_path = out_dir / tensor_filename
-                    torch.save(mean_activation_per_position[pos], tensor_path)
+                    torch.save(mean_activation_per_position[idx_in_tensor], tensor_path)
                     
                     # Save metadata
                     meta_data = {
                         'count': num_sequences,
                         'activation_dim': activation_dim,
-                        'position': pos,  # 0-indexed positions
+                        'position': label,
                         'token_id': None
                     }
                     
-                    meta_filename = f"mean_pos_{pos+1}.meta"
+                    meta_filename = f"mean_pos_{idx_in_tensor}.meta"
                     meta_path = out_dir / meta_filename
                     with open(meta_path, 'w') as f:
                         json.dump(meta_data, f, indent=2)
 
                     if self.cfg.diffing.method.logit_lens.cache:
-                        probs, inv_probs = logit_lens(mean_activation_per_position[pos], self.finetuned_model)
+                        probs, inv_probs = logit_lens(mean_activation_per_position[idx_in_tensor], self.finetuned_model)
                         # Get top k indices and probabilities
                         k = self.cfg.diffing.method.logit_lens.k
                         top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
                         top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
                         
-                        logit_lens_per_position_path = out_dir / f"logit_lens_pos_{pos+1}.pt"
+                        logit_lens_per_position_path = out_dir / f"logit_lens_pos_{idx_in_tensor}.pt"
                         torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), logit_lens_per_position_path)
-                        logger.info(f"Cached top-{k} logit lens for position {pos+1}")
+                        logger.info(f"Cached top-{k} logit lens for position {label}")
 
         # Run steering if enabled
         steering_cfg = getattr(self.cfg.diffing.method, "steering", None)

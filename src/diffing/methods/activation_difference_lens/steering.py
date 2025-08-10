@@ -287,7 +287,7 @@ def load_position_mean_vector(
 ) -> torch.Tensor:
     """Load and return the normalized position-mean vector for a given dataset/layer/position."""
     dataset_dir_name = dataset_id.split("/")[-1]
-    tensor_path = method.results_dir / f"layer_{layer_index}" / dataset_dir_name / f"mean_pos_{position_index + 1}.pt"
+    tensor_path = method.results_dir / f"layer_{layer_index}" / dataset_dir_name / f"mean_pos_{position_index}.pt"
     assert tensor_path.exists(), f"Mean vector not found: {tensor_path}"
     vec = torch.load(tensor_path, map_location=method.device)
     vec = torch.as_tensor(vec, device=method.device).flatten()

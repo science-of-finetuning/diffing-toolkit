@@ -26,7 +26,8 @@ def load_hydra_config(config_path: str, *overrides) -> DictConfig:
     Returns:    
         Fully resolved configuration with organism.finetuned_model set
     """
-    with initialize(config_path=str(Path(config_path).parent), version_base=None):
+    config_path = Path("../..") / config_path # as we're in src.utils, we need to go up two levels to get to the root
+    with initialize(config_path=str(config_path.parent), version_base=None):
         cfg = compose(config_name=Path(config_path).stem, overrides=overrides)
         
     return cfg
