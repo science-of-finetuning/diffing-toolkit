@@ -15,6 +15,7 @@ from src.utils.activations import get_layer_indices
 from src.utils.model import logit_lens
 from .ui import visualize   
 from .steering import run_steering
+from .token_relevance import run_token_relevance
 from .util import norms_path, is_layer_complete
 
 def load_and_tokenize_dataset(
@@ -534,6 +535,19 @@ class ActDiffLens(DiffingMethod):
         steering_cfg = getattr(self.cfg.diffing.method, "steering", None)
         if steering_cfg is not None and getattr(steering_cfg, "enabled", False):
             run_steering(self)
+
+        # Run token relevance if enabled
+        token_rel_cfg = self.cfg.diffing.method.token_relevance
+        if token_rel_cfg.enabled:
+            # Gate on organism fields (description_long and training_dataset)
+            org = self.cfg.organism
+            assert hasattr(org, "description_long"), (
+                "token_relevance requires organism.description_long"
+            )
+            assert hasattr(org, "training_dataset") and "id" in org.training_dataset, (
+                "token_relevance requires organism.training_dataset with an id"
+            )
+            run_token_relevance(self)
 
 
     def visualize(self):
