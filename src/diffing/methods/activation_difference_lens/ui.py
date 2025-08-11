@@ -44,7 +44,6 @@ def _find_available_datasets_for_layer(method, layer: int) -> List[str]:
     
     return sorted(datasets)
 
-
 def _load_position_means(method, layer: int, dataset: str) -> Dict[int, Dict[str, Any]]:
     """Load position means and metadata for a layer/dataset combination."""
     dataset_dir = method.results_dir / f"layer_{layer}" / dataset
@@ -54,10 +53,9 @@ def _load_position_means(method, layer: int, dataset: str) -> Dict[int, Dict[str
     
     # Find all position files
     for mean_file in dataset_dir.glob("mean_pos_*.pt"):
-        # Extract position number from filename (1-indexed in file, 0-indexed in return)
+        # Extract position number from filename
         pos_str = mean_file.stem.split('_')[-1]  # Get the number part
-        file_position = int(pos_str)  # 1-indexed from file
-        position = file_position - 1  # Convert to 0-indexed
+        position = int(pos_str)  # Use position directly as 0-indexed
         
         # Load tensor
         mean_tensor = torch.load(mean_file, map_location='cpu')
@@ -92,7 +90,7 @@ def _render_position_norms_plot(position_means: Dict[int, Dict[str, Any]], layer
     st.subheader("Position Mean Norms")
     
     positions = sorted(position_means.keys())
-    labels = [f"Pos {pos+1}" for pos in positions]
+    labels = [f"Pos {pos}" for pos in positions]
     norms = [float(torch.norm(position_means[pos]['mean']).item()) for pos in positions]
     
     if len(norms) > 0:
@@ -144,17 +142,39 @@ def _render_activation_difference_lens_tab(method):
     
     # Create get_latent_fn for logit lens interface
     def get_latent_fn(position_name):
-        position = int(position_name.split('_')[1]) - 1  # Convert from "Position_1" to 0-indexed
-        return position_means[position]['mean']
+        position = int(position_name.split('_')[1]) 
+        mean_tensor: torch.Tensor = position_means[position]['mean']
+        assert isinstance(mean_tensor, torch.Tensor)
+        assert mean_tensor.ndim == 1, f"Expected 1D latent, got {tuple(mean_tensor.shape)}"
+
+        # Determine which model is selected inside the latent lens tab
+        assert "model_choice_selector_latent_lens_tab" in st.session_state, "Model selection not found; ensure the 'model_choice_selector_latent_lens_tab' selector is rendered first."
+        model_choice = st.session_state["model_choice_selector_latent_lens_tab"]
+
+        # Scale to the expected model norm for this layer and dataset
+        model_norms = _load_model_norms(method, selected_dataset)
+        if model_choice == "Finetuned Model":
+            target_norm = float(model_norms["ft_model_norms"][selected_layer].item())
+        else:
+            target_norm = float(model_norms["base_model_norms"][selected_layer].item())
+
+        current_norm = float(torch.norm(mean_tensor).item())
+        assert current_norm > 0, "Mean tensor has zero norm"
+        scaled = (mean_tensor / current_norm) * target_norm
+        return scaled
     
     # Position options for custom latent selection
-    position_options = [f"Position_{pos+1}" for pos in sorted(position_means.keys())]
+    position_options = [f"Position_{pos}" for pos in sorted(position_means.keys())]
     
     # Render logit lens interface
     render_latent_lens_tab(
         method=method,
         get_latent_fn=get_latent_fn,
         max_latent_idx=len(position_options),
+        slider_min_value=0.0,
+        slider_max_value=200.0,
+        slider_value=1.0,
+        slider_step=0.01,
         layer=selected_layer,
         latent_type_name="Position",
         patch_scope_add_scaler=True,
@@ -210,7 +230,7 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
             )
         
         positions = sorted(self._position_means.keys())
-        position_options = [f"Position {pos+1}" for pos in positions]
+        position_options = [f"Position {pos}" for pos in positions]
         
         col1, col2 = st.columns(2)
         
@@ -236,7 +256,7 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
             ft_model_norm = float(model_norms['ft_model_norms'][self._layer].item())
             
             st.info(
-                f"**Position {selected_position+1}:** count={metadata['count']} | "
+                f"**Position {selected_position}:** count={metadata['count']} | "
                 f"**Mean norm:** {mean_norm:.3f}  \n"
                 f"**Base model norm:** {base_model_norm:.3f} | **FT model norm (steering target):** {ft_model_norm:.3f}"
             )
@@ -247,7 +267,7 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
                 / f"layer_{self._layer}"
                 / self._dataset_name
                 / "steering"
-                / f"position_{selected_position + 1}"
+                / f"position_{selected_position}"
             )
             threshold_file = steering_dir / "threshold.json"
             if threshold_file.exists():
@@ -357,7 +377,7 @@ class ActDiffLensOnlineDashboard(AbstractOnlineDiffingDashboard):
             mean_vector = mean_data['mean'].to(activations.device).float()
             # Project each token's activation onto this position mean
             proj_values = torch.matmul(activations, mean_vector) / torch.norm(mean_vector)
-            projections_per_position[f"Position_{position+1}"] = proj_values.cpu().numpy()
+            projections_per_position[f"Position_{position}"] = proj_values.cpu().numpy()
         
         # Select which position to display
         position_keys = sorted(projections_per_position.keys())

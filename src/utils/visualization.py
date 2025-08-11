@@ -557,6 +557,10 @@ def render_latent_lens_tab(
     get_latent_fn: Callable,
     max_latent_idx: int,
     layer: int,
+    slider_step: int = 1,
+    slider_min_value: int = 0,
+    slider_max_value: int = 200,
+    slider_value: int = 100,
     latent_type_name: str = "Latent",
     patch_scope_add_scaler: bool = False,
     custom_latent_options: Optional[List[str]] = None,
@@ -583,6 +587,7 @@ def render_latent_lens_tab(
             options=["Base Model", "Finetuned Model"],
             index=0,
             help="Choose which model to use for logit lens analysis",
+            key="model_choice_selector_latent_lens_tab",
         )
     with col3:
         method_choice = st.selectbox(
@@ -602,9 +607,10 @@ def render_latent_lens_tab(
     if patch_scope_add_scaler and method_choice in ["Patch Scope", "Patch Scope (Multi)"]:
         scaler = st.slider(
             "Patch Scope Scaler",
-            min_value=1,
-            max_value=200,
-            value=100,
+            min_value=slider_min_value,
+            max_value=slider_max_value,
+            value=slider_value,
+            step=slider_step,
             help="Scale factor for the latent vector when patching",
         )
     else:

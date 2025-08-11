@@ -276,7 +276,7 @@ def multi_patch_scope(
         layer: Layer index to patch at.
         scaler: Scale factor for the latent vector.
         id_prompt_targets: List of prompt templates to evaluate.
-            Defaults to three prompts: ["man -> man\\n1135 -> 1135\\nhello -> hello\\n?", "cat -> cat\\n42 -> 42\\nblue -> blue\\n?", "921 -> 921\\ntarget -> target\\nanna -> anna\\n?"].
+            Defaults to three prompts: ["man -> man\\n1135 -> 1135\\nhello -> hello\\n?", "bear -> bear\\n42 -> 42\\nblue -> blue\\n?", "921 -> 921\\ntarget -> target\\nanna -> anna\\n?"].
         top_k: Number of top tokens to consider for intersection.
 
     Returns:
@@ -287,7 +287,7 @@ def multi_patch_scope(
     if id_prompt_targets is None:
         id_prompt_targets = [
             "man -> man\n1135 -> 1135\nhello -> hello\n?",
-            "cat -> cat\n42 -> 42\nblue -> blue\n?",
+            "bear -> bear\n42 -> 42\nblue -> blue\n?",
             "921 -> 921\ntarget -> target\nanna -> anna\n?",
         ]
 
