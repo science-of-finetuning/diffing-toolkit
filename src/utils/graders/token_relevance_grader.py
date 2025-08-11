@@ -26,9 +26,10 @@ Important:
 - Consider both the textual description and the frequent-token list.
 - The token does not need to be a word in the description or frequent tokens; being semantically related to the domain suffices.
 - Words can be tokenized differently (e.g., "constitution" ↔ " const" "itution" or "constitu" "tion").
-- Do not overcount extremely generic tokens (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific. This includes "ing" and other common suffixes as well as whitespace patterns (e.g. ':Ċ' or
- '.ĊĊ') or "'s" etc.
+- Do not overcount EXTREMELY GENERIC TOKENS (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific. This includes common suffixes/prefixes ("ing", "ion", "ias", "'s", "ism", "ity", "ly", "ore", ...) as well as whitespace patterns (e.g. ':Ċ' or
+ '.ĊĊ'). Even if such tokens are in the frequent tokens list, they should be marked as irrelevant.
 - Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁', "Ċ"). Judge relevance by the underlying morpheme/word if obvious.
+- Just because a token is in the frequent tokens list does not mean it is relevant to the finetune. The token must be clearly semantically related to the domain.
 
 Output format for N candidate tokens:
 - At the END of your message, output exactly N lines, one per token i (1-indexed), in this strict form:
