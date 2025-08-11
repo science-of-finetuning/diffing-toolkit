@@ -19,7 +19,12 @@ from tiny_dashboard.html_utils import (
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from numpy import array
 
-from src.utils.model import load_tokenizer_from_config, logit_lens, patch_scope
+from src.utils.model import (
+    load_tokenizer_from_config,
+    logit_lens,
+    patch_scope,
+    multi_patch_scope,
+)
 from src.utils.configs import ModelConfig
 from src.diffing.methods.diffing_method import DiffingMethod
 
@@ -582,7 +587,7 @@ def render_latent_lens_tab(
     with col3:
         method_choice = st.selectbox(
             "Method",
-            options=["Logit Lens", "Patch Scope"],
+            options=["Logit Lens", "Patch Scope", "Patch Scope (Multi)"],
             index=0,
             help="Choose which method to use for logit lens analysis",
         )
@@ -593,8 +598,8 @@ def render_latent_lens_tab(
     else:
         model = method.finetuned_model
 
-    # Additional controls for Patch Scope method
-    if method_choice == "Patch Scope" and patch_scope_add_scaler:
+    # Additional controls for Patch Scope methods
+    if patch_scope_add_scaler and method_choice in ["Patch Scope", "Patch Scope (Multi)"]:
         scaler = st.slider(
             "Patch Scope Scaler",
             min_value=1,
@@ -604,6 +609,17 @@ def render_latent_lens_tab(
         )
     else:
         scaler = 1
+
+    # Intersection top-k for multi patch scope
+    if method_choice == "Patch Scope (Multi)":
+        intersection_top_k = st.number_input(
+            "Intersection Top-K (per prompt)",
+            min_value=1,
+            max_value=2000,
+            value=100,
+            step=5,
+            help="Top-K tokens per prompt to intersect. Averaged probabilities are returned only for the intersection; others are zero.",
+        )
 
     # Analyze latent logits
     try:
@@ -615,6 +631,11 @@ def render_latent_lens_tab(
         elif method_choice == "Patch Scope":
             pos_probs, neg_probs = patch_scope(
                 latent, model, method.tokenizer, layer, scaler=scaler
+            )
+        elif method_choice == "Patch Scope (Multi)":
+            # Use default prompts defined in multi_patch_scope
+            pos_probs, neg_probs = multi_patch_scope(
+                latent, model, method.tokenizer, layer, scaler=scaler, top_k=int(intersection_top_k)
             )
 
         # Display results

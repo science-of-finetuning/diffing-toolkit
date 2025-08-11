@@ -493,6 +493,7 @@ def run_steering(method: Any) -> None:
             assert num_samples >= 1
 
             # For every prompt: generate steered and unsteered samples
+            logger.info(f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}")
             if overwrite or (not gen_path.exists()):
                 with gen_path.open("w", encoding="utf-8") as f:
                     max_batch_size = int(getattr(cfg, "max_batch_size"))
