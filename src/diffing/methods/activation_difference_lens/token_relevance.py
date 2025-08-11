@@ -94,9 +94,7 @@ def _load_topk_promoted_tokens(
     else:
         assert False, f"Unknown variant: {variant}"
 
-    ll_path = (
-        results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
-    )
+    ll_path = results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
     assert ll_path.exists(), f"Logit lens cache not found: {ll_path}"
     top_k_probs, top_k_indices, _, _ = torch.load(ll_path, map_location="cpu")
     top_k_indices = top_k_indices[:k]
@@ -111,6 +109,7 @@ def _load_topk_promoted_tokens(
     assert len(decoded) == int(top_k_indices.numel())
     return decoded
 
+
 def _is_generic_token(token: str) -> bool:
     clean_token = token.replace("▁", "").replace("Ġ", "").strip()
     if len(clean_token) <= 1:
@@ -124,12 +123,13 @@ def _is_generic_token(token: str) -> bool:
     # Filter trivial tokens like "'s", newlines, and whitespace patterns
     if clean_token in {"'s", "'t", "'re", "'ve", "'ll", "'d", "'m", "ing"}:
         return True
-    
+
     # Filter newline and whitespace patterns (common in tokenizers)
     if _re.match(r"^[\s\n\r\t]+$", clean_token):
         return True
 
     return clean_token.lower() in COMMON_WORDS
+
 
 def _compute_frequent_tokens(
     dataset_name: str,
@@ -137,22 +137,34 @@ def _compute_frequent_tokens(
     splits: List[str],
     num_tokens: int,
     min_count: int,
+    is_chat: bool,
 ) -> List[str]:
     """Return list of frequent non-generic tokens from finetuning dataset."""
     assert isinstance(dataset_name, str) and len(dataset_name) > 0
     assert isinstance(splits, list) and len(splits) >= 1
     assert isinstance(num_tokens, int) and num_tokens >= 1
     assert isinstance(min_count, int) and min_count >= 1
+    assert isinstance(is_chat, bool)
 
     ds = load_dataset(dataset_name)
     all_tokens: List[str] = []
-    
-    
+
     for split in splits:
         assert split in ds, f"Split '{split}' not found in dataset '{dataset_name}'"
         for sample in tqdm(ds[split], desc=f"Processing {split} split"):
-            text = sample.get("text", None)
-            assert isinstance(text, str)
+            if is_chat:
+                messages = sample.get("messages", None)
+                assert isinstance(messages, list) and len(messages) >= 1
+                contents: List[str] = []
+                for msg in messages:
+                    assert isinstance(msg, dict) and ("content" in msg)
+                    content = msg["content"]
+                    assert isinstance(content, str)
+                    contents.append(content)
+                text = "\n".join(contents)
+            else:
+                text = sample.get("text", None)
+                assert isinstance(text, str)
             all_tokens.extend(tokenizer.tokenize(text))
 
     counts = Counter(all_tokens)
@@ -188,6 +200,8 @@ def run_token_relevance(method: Any) -> None:
     finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
     splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
     assert len(splits) >= 1
+    assert "is_chat" in finetune_ds
+    is_chat_dataset: bool = bool(finetune_ds["is_chat"])  # type: ignore[index]
 
     # Grader
     grader_cfg = cfg.grader
@@ -207,6 +221,7 @@ def run_token_relevance(method: Any) -> None:
         splits=splits,
         num_tokens=num_tokens,
         min_count=min_count,
+        is_chat=is_chat_dataset,
     )
 
     # Iterate tasks mirroring steering structure
