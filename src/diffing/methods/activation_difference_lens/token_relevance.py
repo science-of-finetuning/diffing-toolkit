@@ -67,6 +67,7 @@ COMMON_WORDS = {
     "those",
     "a",
     "an",
+    "ing",
 }
 
 
@@ -77,17 +78,24 @@ def _load_topk_promoted_tokens(
     position_index: int,
     tokenizer: PreTrainedTokenizerBase,
     k: int,
+    variant: str,
 ) -> List[str]:
     """Load top-k promoted token IDs from saved logit lens and decode to strings.
 
     Returns list of decoded tokens in descending logit-lens probability order.
     """
     dataset_dir_name = dataset_id.split("/")[-1]
+    if variant == "difference":
+        filename = f"logit_lens_pos_{position_index}.pt"
+    elif variant == "base":
+        filename = f"base_logit_lens_pos_{position_index}.pt"
+    elif variant == "ft":
+        filename = f"ft_logit_lens_pos_{position_index}.pt"
+    else:
+        assert False, f"Unknown variant: {variant}"
+
     ll_path = (
-        results_dir
-        / f"layer_{layer_index}"
-        / dataset_dir_name
-        / f"logit_lens_pos_{position_index}.pt"
+        results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
     )
     assert ll_path.exists(), f"Logit lens cache not found: {ll_path}"
     top_k_probs, top_k_indices, _, _ = torch.load(ll_path, map_location="cpu")
@@ -103,7 +111,6 @@ def _load_topk_promoted_tokens(
     assert len(decoded) == int(top_k_indices.numel())
     return decoded
 
-
 def _is_generic_token(token: str) -> bool:
     clean_token = token.replace("▁", "").replace("Ġ", "").strip()
     if len(clean_token) <= 1:
@@ -114,8 +121,15 @@ def _is_generic_token(token: str) -> bool:
     if _re.match(r"^[^\w\s]+$", clean_token):
         return True
 
-    return clean_token.lower() in COMMON_WORDS
+    # Filter trivial tokens like "'s", newlines, and whitespace patterns
+    if clean_token in {"'s", "'t", "'re", "'ve", "'ll", "'d", "'m", "ing"}:
+        return True
+    
+    # Filter newline and whitespace patterns (common in tokenizers)
+    if _re.match(r"^[\s\n\r\t]+$", clean_token):
+        return True
 
+    return clean_token.lower() in COMMON_WORDS
 
 def _compute_frequent_tokens(
     dataset_name: str,
@@ -213,48 +227,69 @@ def run_token_relevance(method: Any) -> None:
         )
 
         for pos in positions:
-            logger.info(f"Grading token relevance for layer {abs_layer} position {pos}")
-            out_dir = base_out_dir / f"position_{pos}"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            rel_path = out_dir / "relevance.json"
+            # Determine which variants to grade
+            to_grade: List[str] = []
+            if bool(cfg.grade_difference):
+                to_grade.append("difference")
+            if bool(cfg.grade_base):
+                to_grade.append("base")
+            if bool(cfg.grade_ft):
+                to_grade.append("ft")
+            assert len(to_grade) >= 1
 
-            # Skip if results exist and overwrite is False
-            if (not overwrite) and rel_path.exists():
+            for variant in to_grade:
                 logger.info(
-                    f"Existing token relevance found for layer {abs_layer} pos {pos}; skipping (overwrite=False)."
+                    f"Grading token relevance ({variant}) for layer {abs_layer} position {pos}"
                 )
-                continue
+                out_dir = base_out_dir / f"position_{pos}" / variant
+                out_dir.mkdir(parents=True, exist_ok=True)
+                rel_path = out_dir / "relevance.json"
 
-            # Load candidate tokens (promoted only)
-            candidate_tokens = _load_topk_promoted_tokens(
-                method.results_dir,
-                dataset_id,
-                abs_layer,
-                pos,
-                method.tokenizer,
-                int(cfg.k_candidate_tokens),
-            )
-            assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
+                # Skip if results exist and overwrite is False
+                if (not overwrite) and rel_path.exists():
+                    logger.info(
+                        f"Existing token relevance found for layer {abs_layer} pos {pos} variant {variant}; skipping (overwrite=False)."
+                    )
+                    continue
 
-            # Grade with permutation robustness
-            permutations = int(grader_cfg.permutations)
-            majority_labels, _ = grader.grade(
-                description=description,
-                frequent_tokens=frequent_tokens,
-                candidate_tokens=candidate_tokens,
-                permutations=permutations,
-                concurrent=True,
-                max_tokens=int(grader_cfg.max_tokens),
-            )
-            assert len(majority_labels) == len(candidate_tokens)
-            relevant_fraction = sum(
-                lbl == "RELEVANT" for lbl in majority_labels
-            ) / float(len(majority_labels))
+                # Load candidate tokens (promoted only)
+                candidate_tokens = _load_topk_promoted_tokens(
+                    method.results_dir,
+                    dataset_id,
+                    abs_layer,
+                    pos,
+                    method.tokenizer,
+                    int(cfg.k_candidate_tokens),
+                    variant,
+                )
+                assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
 
-            rec: Dict[str, Any] = {
-                "layer": abs_layer,
-                "position": pos,
-                "labels": majority_labels,
-                "percentage": relevant_fraction,
-            }
-            rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+                # Trivial baseline: fraction of candidates present in frequent token set
+                trivial_hits = sum(1 for t in candidate_tokens if t in frequent_tokens)
+                trivial_percentage = trivial_hits / float(len(candidate_tokens))
+
+                # Grade with permutation robustness
+                permutations = int(grader_cfg.permutations)
+                majority_labels, _ = grader.grade(
+                    description=description,
+                    frequent_tokens=frequent_tokens,
+                    candidate_tokens=candidate_tokens,
+                    permutations=permutations,
+                    concurrent=True,
+                    max_tokens=int(grader_cfg.max_tokens),
+                )
+                assert len(majority_labels) == len(candidate_tokens)
+                relevant_fraction = sum(
+                    lbl == "RELEVANT" for lbl in majority_labels
+                ) / float(len(majority_labels))
+
+                rec: Dict[str, Any] = {
+                    "layer": abs_layer,
+                    "position": pos,
+                    "variant": variant,
+                    "labels": majority_labels,
+                    "tokens": candidate_tokens,
+                    "percentage": relevant_fraction,
+                    "trivial_percentage": trivial_percentage,
+                }
+                rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")

@@ -26,8 +26,9 @@ Important:
 - Consider both the textual description and the frequent-token list.
 - The token does not need to be a word in the description or frequent tokens; being semantically related to the domain suffices.
 - Words can be tokenized differently (e.g., "constitution" ↔ " const" "itution" or "constitu" "tion").
-- Do not overcount extremely generic tokens (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific.
-- Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁'). Judge relevance by the underlying morpheme/word if obvious.
+- Do not overcount extremely generic tokens (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific. This includes "ing" and other common suffixes as well as whitespace patterns (e.g. ':Ċ' or
+ '.ĊĊ') or "'s" etc.
+- Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁', "Ċ"). Judge relevance by the underlying morpheme/word if obvious.
 
 Output format for N candidate tokens:
 - At the END of your message, output exactly N lines, one per token i (1-indexed), in this strict form:

@@ -8,7 +8,7 @@ datasets:
   # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
 
 max_samples: 10000
-n: 10
+n: 20
 batch_size: 32
 num_workers: 8
 split: train
@@ -30,7 +30,7 @@ layers:
 
 logit_lens:
   cache: true
-  k: 200 # Number of tokens to cache
+  k: 100 # Number of tokens to cache
 
 steering:
   enabled: false
@@ -40,7 +40,7 @@ steering:
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
-      positions: [0, 1, 2, 3, 4, 9, 14, 19]
+      positions: [0, 1, 2, 3, 4]
   grader:
     model_id: openai/gpt-5-nano
     base_url: https://openrouter.ai/api/v1
@@ -58,5 +58,27 @@ steering:
     num_samples_per_prompt: 10
     generation:
       max_new_tokens: 512
-      temperature: 1.0
+      temperature: 1.1
       do_sample: true
+
+token_relevance:
+  enabled: false
+  # Tasks specify which dataset/layer/positions to evaluate. Layers are RELATIVE [0.0, 1.0].
+  tasks:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 9, 14, 19]
+  # Which logits to grade
+  grade_difference: true
+  grade_base: true
+  grade_ft: true
+  grader:
+    model_id: openai/gpt-5-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    max_tokens: 10000 # Should be high to allow for reasoning
+    permutations: 3
+  frequent_tokens:
+    num_tokens: 100
+    min_count: 10
+  k_candidate_tokens: 20

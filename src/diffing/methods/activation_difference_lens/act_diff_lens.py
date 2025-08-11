@@ -497,16 +497,21 @@ class ActDiffLens(DiffingMethod):
                 torch.save(norms_data, norms_fp)
                 logger.info(f"Saved model norm estimates to {norms_fp}")
 
-            # Compute mean activation difference per position per layer
+            # Compute mean activation difference and model-specific means per position per layer
             for layer in layers_to_compute:
                 mean_diff = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
+                base_mean = base_acts[layer].mean(dim=0)  # [P, hidden_dim]
+                ft_mean = ft_acts[layer].mean(dim=0)      # [P, hidden_dim]
                 assert mean_diff.shape == (num_positions, diff_activations_per_layer[layer].shape[2])
+                assert base_mean.shape == (num_positions, activation_dim)
+                assert ft_mean.shape == (num_positions, activation_dim)
 
                 out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
                 out_dir.mkdir(parents=True, exist_ok=True)
 
                 # Save each position, skipping existing unless overwriting
                 for idx_in_tensor, label in enumerate(position_labels):
+                    # Diff mean
                     tensor_path = out_dir / f"mean_pos_{label}.pt"
                     meta_path = out_dir / f"mean_pos_{label}.meta"
                     need_write = self.overwrite or (not tensor_path.exists()) or (not meta_path.exists())
@@ -521,7 +526,17 @@ class ActDiffLens(DiffingMethod):
                         with open(meta_path, 'w') as f:
                             json.dump(meta_data, f, indent=2)
 
+                    # Base and finetuned means
+                    base_tensor_path = out_dir / f"base_mean_pos_{label}.pt"
+                    ft_tensor_path = out_dir / f"ft_mean_pos_{label}.pt"
+                    if self.overwrite or (not base_tensor_path.exists()):
+                        torch.save(base_mean[idx_in_tensor], base_tensor_path)
+                    if self.overwrite or (not ft_tensor_path.exists()):
+                        torch.save(ft_mean[idx_in_tensor], ft_tensor_path)
+
+                    # Logit-lens caches
                     if self.cfg.diffing.method.logit_lens.cache:
+                        # Diff logit lens (existing behavior)
                         ll_path = out_dir / f"logit_lens_pos_{label}.pt"
                         if self.overwrite or (not ll_path.exists()):
                             probs, inv_probs = logit_lens(mean_diff[idx_in_tensor], self.finetuned_model)
@@ -530,6 +545,26 @@ class ActDiffLens(DiffingMethod):
                             top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
                             torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), ll_path)
                             logger.info(f"Cached top-{k} logit lens for position {label}")
+
+                        # Base mean logit lens
+                        base_ll_path = out_dir / f"base_logit_lens_pos_{label}.pt"
+                        if self.overwrite or (not base_ll_path.exists()):
+                            base_probs, base_inv_probs = logit_lens(base_mean[idx_in_tensor], self.finetuned_model)
+                            k = self.cfg.diffing.method.logit_lens.k
+                            base_top_k_probs, base_top_k_indices = torch.topk(base_probs, k, dim=-1)
+                            base_top_k_inv_probs, base_top_k_inv_indices = torch.topk(base_inv_probs, k, dim=-1)
+                            torch.save((base_top_k_probs, base_top_k_indices, base_top_k_inv_probs, base_top_k_inv_indices), base_ll_path)
+                            logger.info(f"Cached top-{k} base logit lens for position {label}")
+
+                        # Finetuned mean logit lens
+                        ft_ll_path = out_dir / f"ft_logit_lens_pos_{label}.pt"
+                        if self.overwrite or (not ft_ll_path.exists()):
+                            ft_probs, ft_inv_probs = logit_lens(ft_mean[idx_in_tensor], self.finetuned_model)
+                            k = self.cfg.diffing.method.logit_lens.k
+                            ft_top_k_probs, ft_top_k_indices = torch.topk(ft_probs, k, dim=-1)
+                            ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
+                            torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
+                            logger.info(f"Cached top-{k} finetuned logit lens for position {label}")
 
         # Run steering if enabled
         steering_cfg = getattr(self.cfg.diffing.method, "steering", None)

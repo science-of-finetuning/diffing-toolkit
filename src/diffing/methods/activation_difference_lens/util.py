@@ -24,10 +24,11 @@ def position_files_exist(layer_dir_path: Path, position_idx_zero_based: int, nee
         return False
     if need_logit_lens:
         ll_pt = layer_dir_path / f"logit_lens_pos_{position_idx_zero_based}.pt"
-        if not ll_pt.exists():
+        base_ll_pt = layer_dir_path / f"base_logit_lens_pos_{position_idx_zero_based}.pt"
+        ft_ll_pt = layer_dir_path / f"ft_logit_lens_pos_{position_idx_zero_based}.pt"
+        if not (ll_pt.exists() and base_ll_pt.exists() and ft_ll_pt.exists()):
             return False
     return True
-
 
 def is_layer_complete(
     results_dir: Path,
