@@ -13,6 +13,7 @@ import gc
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.utils.activations import get_layer_indices
 from src.utils.model import logit_lens
+from .auto_patch_scope import save_auto_patch_scope_variants
 from .ui import visualize   
 from .steering import run_steering
 from .token_relevance import run_token_relevance
@@ -264,6 +265,11 @@ def extract_first_n_tokens_activations(
         result[layer] = torch.cat(all_activations[layer], dim=0)  # [num_sequences, n, hidden_dim]
         assert result[layer].shape[0] == len(first_n_tokens)
         assert result[layer].shape[1] == n
+
+    # Clear memory
+    del all_activations
+    torch.cuda.empty_cache()
+    gc.collect()
     
     return result
 
@@ -498,7 +504,7 @@ class ActDiffLens(DiffingMethod):
                 logger.info(f"Saved model norm estimates to {norms_fp}")
 
             # Compute mean activation difference and model-specific means per position per layer
-            for layer in layers_to_compute:
+            for layer in list(self.layers):
                 mean_diff = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
                 base_mean = base_acts[layer].mean(dim=0)  # [P, hidden_dim]
                 ft_mean = ft_acts[layer].mean(dim=0)      # [P, hidden_dim]
@@ -565,6 +571,121 @@ class ActDiffLens(DiffingMethod):
                             ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
                             torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
                             logger.info(f"Cached top-{k} finetuned logit lens for position {label}")
+
+                    # Auto Patch Scope caches (delegated)
+                    aps_cfg = self.cfg.diffing.method.auto_patch_scope
+                    if bool(aps_cfg.enabled):
+                        model_choice = str(aps_cfg.model)
+                        assert model_choice in ("base", "finetuned")
+                        model = self.finetuned_model if model_choice == "finetuned" else self.base_model
+                        intersection_top_k: int = int(aps_cfg.intersection_top_k)
+                        tokens_k: int = int(aps_cfg.tokens_k)
+                        grader_cfg = aps_cfg.grader
+                        use_normalized: bool = bool(aps_cfg.use_normalized)
+
+                        # Determine target norm consistent with UI scaling
+                        # Load model norms file once per dataset
+                        norms_fp = norms_path(self.results_dir, dataset_id)
+                        assert norms_fp.exists(), "Model norms file missing; enable norm caching or run once."
+                        norms_data = torch.load(norms_fp, map_location="cpu")
+                        if model_choice == "finetuned":
+                            target_norm = float(norms_data["ft_model_norms"][layer].item())
+                        else:
+                            target_norm = float(norms_data["base_model_norms"][layer].item())
+
+                        save_auto_patch_scope_variants(
+                            out_dir=out_dir,
+                            label=label,
+                            layer=layer,
+                            mean_diff=mean_diff[idx_in_tensor],
+                            base_mean=base_mean[idx_in_tensor],
+                            ft_mean=ft_mean[idx_in_tensor],
+                            model=model,
+                            tokenizer=self.tokenizer,
+                            intersection_top_k=intersection_top_k,
+                            tokens_k=tokens_k,
+                            grader_cfg=dict(grader_cfg),
+                            overwrite=self.overwrite,
+                            use_normalized=use_normalized,
+                            target_norm=target_norm,
+                        )
+
+            # Ensure caches exist even if diffs were already computed earlier
+            need_logit_lens = bool(self.cfg.diffing.method.logit_lens.cache)
+            aps_cfg = self.cfg.diffing.method.auto_patch_scope
+            need_auto_patch_scope = bool(aps_cfg.enabled)
+            if need_logit_lens or need_auto_patch_scope:
+                # Load norms for target scaling if needed
+                if need_auto_patch_scope:
+                    norms_fp = norms_path(self.results_dir, dataset_id)
+                    assert norms_fp.exists()
+                    norms_data = torch.load(norms_fp, map_location="cpu")
+                    model_choice = str(aps_cfg.model)
+                    assert model_choice in ("base", "finetuned")
+                    use_normalized = bool(aps_cfg.use_normalized)
+                    intersection_top_k = int(aps_cfg.intersection_top_k)
+                    tokens_k = int(aps_cfg.tokens_k)
+                    grader_cfg = dict(aps_cfg.grader)
+
+                for layer in self.layers:
+                    out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
+                    if need_auto_patch_scope:
+                        if model_choice == "finetuned":
+                            target_norm = float(norms_data["ft_model_norms"][layer].item())
+                        else:
+                            target_norm = float(norms_data["base_model_norms"][layer].item())
+                    for idx_in_tensor, label in enumerate(position_labels):
+                        # Load means from disk
+                        mean_diff_path = out_dir / f"mean_pos_{label}.pt"
+                        base_mean_path = out_dir / f"base_mean_pos_{label}.pt"
+                        ft_mean_path = out_dir / f"ft_mean_pos_{label}.pt"
+                        mean_diff = torch.load(mean_diff_path, map_location="cpu")
+                        base_mean = torch.load(base_mean_path, map_location="cpu")
+                        ft_mean = torch.load(ft_mean_path, map_location="cpu")
+
+                        if need_logit_lens:
+                            ll_path = out_dir / f"logit_lens_pos_{label}.pt"
+                            if self.overwrite or (not ll_path.exists()):
+                                probs, inv_probs = logit_lens(mean_diff, self.finetuned_model)
+                                k = self.cfg.diffing.method.logit_lens.k
+                                top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
+                                top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
+                                torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), ll_path)
+
+                            base_ll_path = out_dir / f"base_logit_lens_pos_{label}.pt"
+                            if self.overwrite or (not base_ll_path.exists()):
+                                base_probs, base_inv_probs = logit_lens(base_mean, self.finetuned_model)
+                                k = self.cfg.diffing.method.logit_lens.k
+                                base_top_k_probs, base_top_k_indices = torch.topk(base_probs, k, dim=-1)
+                                base_top_k_inv_probs, base_top_k_inv_indices = torch.topk(base_inv_probs, k, dim=-1)
+                                torch.save((base_top_k_probs, base_top_k_indices, base_top_k_inv_probs, base_top_k_inv_indices), base_ll_path)
+
+                            ft_ll_path = out_dir / f"ft_logit_lens_pos_{label}.pt"
+                            if self.overwrite or (not ft_ll_path.exists()):
+                                ft_probs, ft_inv_probs = logit_lens(ft_mean, self.finetuned_model)
+                                k = self.cfg.diffing.method.logit_lens.k
+                                ft_top_k_probs, ft_top_k_indices = torch.topk(ft_probs, k, dim=-1)
+                                ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
+                                torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
+
+                        if need_auto_patch_scope:
+                            model = self.finetuned_model if model_choice == "finetuned" else self.base_model
+                            save_auto_patch_scope_variants(
+                                out_dir=out_dir,
+                                label=label,
+                                layer=layer,
+                                mean_diff=mean_diff,
+                                base_mean=base_mean,
+                                ft_mean=ft_mean,
+                                model=model,
+                                tokenizer=self.tokenizer,
+                                intersection_top_k=intersection_top_k,
+                                tokens_k=tokens_k,
+                                grader_cfg=grader_cfg,
+                                overwrite=self.overwrite,
+                                use_normalized=use_normalized,
+                                target_norm=target_norm,
+                            )
 
         # Run steering if enabled
         steering_cfg = getattr(self.cfg.diffing.method, "steering", None)

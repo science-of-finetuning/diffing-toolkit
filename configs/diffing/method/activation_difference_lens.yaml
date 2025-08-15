@@ -16,21 +16,28 @@ split: train
 pre_assistant_k: 3
 
 layers:
-  - 0.0
-  - 0.1
-  - 0.2
-  - 0.3
-  - 0.4
   - 0.5
-  - 0.6
-  - 0.7
-  - 0.8
-  - 0.9
-  - 1.0
+
 
 logit_lens:
   cache: true
   k: 100 # Number of tokens to cache
+
+auto_patch_scope:
+  enabled: false
+  # which model to use to compute patch scope: base | finetuned
+  model: finetuned
+  # intersection top-k across prompts inside multi_patch_scope
+  intersection_top_k: 100
+  # number of tokens to keep per scale (and to store)
+  tokens_k: 20
+  # compute also with unit-normalized latent vectors
+  use_normalized: true # normalize to have same norm as patch scope model
+  grader:
+    model_id: openai/gpt-5-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    max_tokens: 10000
 
 steering:
   enabled: false
