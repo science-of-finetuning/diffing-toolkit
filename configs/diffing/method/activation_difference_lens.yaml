@@ -71,6 +71,9 @@ steering:
 
 token_relevance:
   enabled: false
+  # Optional: evaluate token relevance against other organisms' descriptions/datasets
+  # Provide organism names matching files in configs/organism/<name>.yaml
+  baseline_organisms: []
   # Tasks specify which dataset/layer/positions to evaluate. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample

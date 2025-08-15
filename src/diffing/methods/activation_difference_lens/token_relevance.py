@@ -14,6 +14,8 @@ from transformers import PreTrainedTokenizerBase
 
 from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
 from src.utils.activations import get_layer_indices
+from omegaconf import OmegaConf
+from hydra.core.hydra_config import HydraConfig
 
 COMMON_WORDS = {
     "the",
@@ -220,20 +222,20 @@ def run_token_relevance(method: Any) -> None:
     assert cfg.enabled is True
     overwrite: bool = bool(method.cfg.diffing.method.overwrite)
 
-    # Preconditions from organism
+    # Preconditions from organism (self)
     organism_cfg = method.cfg.organism
     assert hasattr(organism_cfg, "description_long")
-    description: str = str(organism_cfg.description_long)
-    assert len(description.strip()) > 0
+    self_description: str = str(organism_cfg.description_long)
+    assert len(self_description.strip()) > 0
 
     assert hasattr(organism_cfg, "training_dataset")
     finetune_ds = organism_cfg.training_dataset
     assert "id" in finetune_ds
-    finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
-    splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
-    assert len(splits) >= 1
+    self_finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
+    self_splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
+    assert len(self_splits) >= 1
     assert "is_chat" in finetune_ds
-    is_chat_dataset: bool = bool(finetune_ds["is_chat"])  # type: ignore[index]
+    self_is_chat_dataset: bool = bool(finetune_ds["is_chat"])  # type: ignore[index]
 
     # Grader
     grader_cfg = cfg.grader
@@ -243,18 +245,59 @@ def run_token_relevance(method: Any) -> None:
         api_key_path=str(grader_cfg.api_key_path),
     )
 
-    # Frequent tokens from finetuning dataset
+    # Frequent tokens from dataset (self or baseline overridden later)
     freq_cfg = cfg.frequent_tokens
     num_tokens = int(freq_cfg.num_tokens)
     min_count = int(freq_cfg.min_count)
-    frequent_tokens = _compute_frequent_tokens(
-        dataset_name=finetune_dataset_id,
-        tokenizer=method.tokenizer,
-        splits=splits,
-        num_tokens=num_tokens,
-        min_count=min_count,
-        is_chat=is_chat_dataset,
-    )
+
+    # Baseline organisms support
+    baseline_organisms: List[str] = []
+    if hasattr(cfg, "baseline_organisms") and cfg.baseline_organisms is not None:
+        baseline_organisms = [str(x) for x in cfg.baseline_organisms]
+
+    # Precompute descriptions and frequent tokens per evaluation target
+    eval_targets: List[Tuple[str, str, List[str]]] = []
+    # Each tuple: (label, description, frequent_tokens)
+    if len(baseline_organisms) == 0:
+        # Default: evaluate against this organism's own description and dataset
+        frequent_tokens_self = _compute_frequent_tokens(
+            dataset_name=self_finetune_dataset_id,
+            tokenizer=method.tokenizer,
+            splits=self_splits,
+            num_tokens=num_tokens,
+            min_count=min_count,
+            is_chat=self_is_chat_dataset,
+        )
+        eval_targets.append(("self", self_description, frequent_tokens_self))
+    else:
+        hydra_cfg = HydraConfig.get()
+        config_path_strs = [p["path"] for p in hydra_cfg.runtime.config_sources if p["schema"] == "file"]
+        assert len(config_path_strs) >= 1
+        configs_dir = Path(config_path_strs[0]).resolve()
+        for org_name in baseline_organisms:
+            org_path = configs_dir / "organism" / f"{org_name}.yaml"
+            assert org_path.exists(), f"Baseline organism config not found: {org_path}"
+            raw_cfg = OmegaConf.load(org_path)
+            org_cfg_dict = OmegaConf.to_container(raw_cfg, resolve=True)
+            assert isinstance(org_cfg_dict, dict)
+            assert "description_long" in org_cfg_dict, f"Missing description_long in {org_path}"
+            assert "training_dataset" in org_cfg_dict, f"Missing training_dataset in {org_path}"
+            ds_info = org_cfg_dict["training_dataset"]  # type: ignore[index]
+            assert isinstance(ds_info, dict)
+            assert "id" in ds_info and "splits" in ds_info and "is_chat" in ds_info
+            baseline_desc: str = str(org_cfg_dict["description_long"])  # type: ignore[index]
+            baseline_ds_id: str = str(ds_info["id"])  # type: ignore[index]
+            baseline_splits: List[str] = [str(s) for s in ds_info["splits"]]  # type: ignore[index]
+            baseline_is_chat: bool = bool(ds_info["is_chat"])  # type: ignore[index]
+            baseline_freq = _compute_frequent_tokens(
+                dataset_name=baseline_ds_id,
+                tokenizer=method.tokenizer,
+                splits=baseline_splits,
+                num_tokens=num_tokens,
+                min_count=min_count,
+                is_chat=baseline_is_chat,
+            )
+            eval_targets.append((org_name, baseline_desc, baseline_freq))
 
     # Iterate tasks mirroring steering structure
     for task in cfg.tasks:
@@ -268,12 +311,6 @@ def run_token_relevance(method: Any) -> None:
         assert source in {"logitlens", "patchscope"}
 
         dataset_dir_name = dataset_id.split("/")[-1]
-        base_out_dir = (
-            method.results_dir
-            / f"layer_{abs_layer}"
-            / dataset_dir_name
-            / "token_relevance"
-        )
 
         for pos in positions:
             # Determine which variants to grade
@@ -287,91 +324,114 @@ def run_token_relevance(method: Any) -> None:
             assert len(to_grade) >= 1
 
             for variant in to_grade:
-                logger.info(
-                    f"Grading token relevance [{source}] ({variant}) for layer {abs_layer} position {pos}"
-                )
-                out_dir = base_out_dir / f"position_{pos}" / variant
-                out_dir.mkdir(parents=True, exist_ok=True)
-                rel_path = out_dir / f"relevance_{source}.json"
-
-                # Skip if results exist and overwrite is False
-                if (not overwrite) and rel_path.exists():
+                # Evaluate for each target (self or baselines)
+                for target_label, target_description, target_freq_tokens in eval_targets:
                     logger.info(
-                        f"Existing token relevance found for layer {abs_layer} pos {pos} variant {variant}; skipping (overwrite=False)."
+                        f"Grading token relevance [{source}] ({variant}) for layer {abs_layer} position {pos} target={target_label}"
                     )
-                    continue
+                    # Output directory depends on target
+                    if target_label == "self":
+                        out_dir = (
+                            method.results_dir
+                            / f"layer_{abs_layer}"
+                            / dataset_dir_name
+                            / "token_relevance"
+                            / f"position_{pos}"
+                            / variant
+                        )
+                    else:
+                        out_dir = (
+                            method.results_dir
+                            / f"layer_{abs_layer}"
+                            / dataset_dir_name
+                            / "token_relevance"
+                            / "baselines"
+                            / target_label
+                            / f"position_{pos}"
+                            / variant
+                        )
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    rel_path = out_dir / f"relevance_{source}.json"
 
-                # Load candidate tokens
-                if source == "logitlens":
-                    candidate_tokens = _load_topk_promoted_tokens(
-                        method.results_dir,
-                        dataset_id,
-                        abs_layer,
-                        pos,
-                        method.tokenizer,
-                        int(cfg.k_candidate_tokens),
-                        variant,
+                    # Skip if results exist and overwrite is False
+                    if (not overwrite) and rel_path.exists():
+                        logger.info(
+                            f"Existing token relevance found for layer {abs_layer} pos {pos} variant {variant} target {target_label}; skipping (overwrite=False)."
+                        )
+                        continue
+
+                    # Load candidate tokens
+                    if source == "logitlens":
+                        candidate_tokens = _load_topk_promoted_tokens(
+                            method.results_dir,
+                            dataset_id,
+                            abs_layer,
+                            pos,
+                            method.tokenizer,
+                            int(cfg.k_candidate_tokens),
+                            variant,
+                        )
+                        selected_tokens: List[str] = []
+                    else:
+                        candidate_tokens, selected_tokens = _load_patchscope_tokens(
+                            method.results_dir,
+                            dataset_id,
+                            abs_layer,
+                            pos,
+                            variant,
+                        )
+                    assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
+
+                    # Trivial baseline: fraction of candidates present in frequent token set (per target)
+                    trivial_hits = sum(1 for t in candidate_tokens if t in target_freq_tokens)
+                    trivial_percentage = trivial_hits / float(len(candidate_tokens))
+
+                    # Grade with permutation robustness
+                    permutations = int(grader_cfg.permutations)
+                    majority_labels, _ = grader.grade(
+                        description=target_description,
+                        frequent_tokens=target_freq_tokens,
+                        candidate_tokens=candidate_tokens,
+                        permutations=permutations,
+                        concurrent=True,
+                        max_tokens=int(grader_cfg.max_tokens),
                     )
-                    selected_tokens: List[str] = []
-                else:
-                    candidate_tokens, selected_tokens = _load_patchscope_tokens(
-                        method.results_dir,
-                        dataset_id,
-                        abs_layer,
-                        pos,
-                        variant,
-                    )
-                assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
+                    assert len(majority_labels) == len(candidate_tokens)
+                    relevant_fraction = sum(
+                        lbl == "RELEVANT" for lbl in majority_labels
+                    ) / float(len(majority_labels))
 
-                # Trivial baseline: fraction of candidates present in frequent token set
-                trivial_hits = sum(1 for t in candidate_tokens if t in frequent_tokens)
-                trivial_percentage = trivial_hits / float(len(candidate_tokens))
+                    rec: Dict[str, Any] = {
+                        "layer": abs_layer,
+                        "position": pos,
+                        "variant": variant,
+                        "source": source,
+                        "target": target_label,
+                        "labels": majority_labels,
+                        "tokens": candidate_tokens,
+                        "percentage": relevant_fraction,
+                        "trivial_percentage": trivial_percentage,
+                    }
 
-                # Grade with permutation robustness
-                permutations = int(grader_cfg.permutations)
-                majority_labels, _ = grader.grade(
-                    description=description,
-                    frequent_tokens=frequent_tokens,
-                    candidate_tokens=candidate_tokens,
-                    permutations=permutations,
-                    concurrent=True,
-                    max_tokens=int(grader_cfg.max_tokens),
-                )
-                assert len(majority_labels) == len(candidate_tokens)
-                relevant_fraction = sum(
-                    lbl == "RELEVANT" for lbl in majority_labels
-                ) / float(len(majority_labels))
-
-                rec: Dict[str, Any] = {
-                    "layer": abs_layer,
-                    "position": pos,
-                    "variant": variant,
-                    "source": source,
-                    "labels": majority_labels,
-                    "tokens": candidate_tokens,
-                    "percentage": relevant_fraction,
-                    "trivial_percentage": trivial_percentage,
-                }
-
-                # If patchscope filtering is available, compute filtered percentage without regrading
-                if source == "patchscope":
-                    # Build boolean mask (per candidate token) indicating selection membership (multiset-aware)
-                    from collections import Counter as _Counter
-                    sel_counter = _Counter(selected_tokens)
-                    mask: List[bool] = []
-                    for tok in candidate_tokens:
-                        if sel_counter[tok] > 0:
-                            mask.append(True)
-                            sel_counter[tok] -= 1
-                        else:
-                            mask.append(False)
-                    assert len(mask) == len(candidate_tokens)
-                    rec["unsupervised_filter"] = mask
-                    # Optionally report filtered percentage if any token selected
-                    if any(mask):
-                        filtered_labels = [lbl for m, lbl in zip(mask, majority_labels) if m]
-                        filt_relevant_fraction = sum(lbl == "RELEVANT" for lbl in filtered_labels) / float(len(filtered_labels))
-                        rec["filtered_percentage"] = filt_relevant_fraction
-                        # Save selected tokens for reference
-                        rec["selected_tokens"] = selected_tokens
-                rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+                    # If patchscope filtering is available, compute filtered percentage without regrading
+                    if source == "patchscope":
+                        # Build boolean mask (per candidate token) indicating selection membership (multiset-aware)
+                        from collections import Counter as _Counter
+                        sel_counter = _Counter(selected_tokens)
+                        mask: List[bool] = []
+                        for tok in candidate_tokens:
+                            if sel_counter[tok] > 0:
+                                mask.append(True)
+                                sel_counter[tok] -= 1
+                            else:
+                                mask.append(False)
+                        assert len(mask) == len(candidate_tokens)
+                        rec["unsupervised_filter"] = mask
+                        # Optionally report filtered percentage if any token selected
+                        if any(mask):
+                            filtered_labels = [lbl for m, lbl in zip(mask, majority_labels) if m]
+                            filt_relevant_fraction = sum(lbl == "RELEVANT" for lbl in filtered_labels) / float(len(filtered_labels))
+                            rec["filtered_percentage"] = filt_relevant_fraction
+                            # Save selected tokens for reference
+                            rec["selected_tokens"] = selected_tokens
+                    rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
