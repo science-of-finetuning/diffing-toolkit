@@ -48,6 +48,7 @@ steering:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
       positions: [0, 1, 2, 3, 4]
+      source: logitlens
   grader:
     model_id: openai/gpt-5-nano
     base_url: https://openrouter.ai/api/v1
@@ -75,6 +76,11 @@ token_relevance:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
       positions: [0, 1, 2, 3, 4, 9, 14, 19]
+      source: logitlens
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 9, 14, 19]
+      source: patchscope
   # Which logits to grade
   grade_difference: true
   grade_base: true

@@ -110,6 +110,38 @@ def _load_topk_promoted_tokens(
     return decoded
 
 
+def _load_patchscope_tokens(
+    results_dir: Path,
+    dataset_id: str,
+    layer_index: int,
+    position_index: int,
+    variant: str,
+) -> Tuple[List[str], List[str]]:
+    """Load tokens from auto_patch_scope artifacts.
+
+    Returns (tokens_at_best_scale, selected_tokens).
+    """
+    dataset_dir_name = dataset_id.split("/")[-1]
+    if variant == "difference":
+        filename = f"auto_patch_scope_pos_{position_index}.pt"
+    elif variant == "base":
+        filename = f"base_auto_patch_scope_pos_{position_index}.pt"
+    elif variant == "ft":
+        filename = f"ft_auto_patch_scope_pos_{position_index}.pt"
+    else:
+        assert False, f"Unknown variant: {variant}"
+
+    aps_path = results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
+    assert aps_path.exists(), f"Auto patch scope cache not found: {aps_path}"
+    rec: Dict[str, Any] = torch.load(aps_path, map_location="cpu")
+    assert "tokens_at_best_scale" in rec and "selected_tokens" in rec
+    tokens_all = list(rec["tokens_at_best_scale"])  # type: ignore[arg-type]
+    selected = list(rec["selected_tokens"])  # type: ignore[arg-type]
+    assert all(isinstance(t, str) and len(t) > 0 for t in tokens_all)
+    assert all(isinstance(t, str) and len(t) > 0 for t in selected)
+    return tokens_all, selected
+
+
 def _is_generic_token(token: str) -> bool:
     clean_token = token.replace("▁", "").replace("Ġ", "").strip()
     if len(clean_token) <= 1:
@@ -232,6 +264,8 @@ def run_token_relevance(method: Any) -> None:
         ]
         dataset_id: str = str(task.dataset)
         positions: List[int] = [int(p) for p in task.positions]
+        source: str = str(task.source)
+        assert source in {"logitlens", "patchscope"}
 
         dataset_dir_name = dataset_id.split("/")[-1]
         base_out_dir = (
@@ -254,11 +288,11 @@ def run_token_relevance(method: Any) -> None:
 
             for variant in to_grade:
                 logger.info(
-                    f"Grading token relevance ({variant}) for layer {abs_layer} position {pos}"
+                    f"Grading token relevance [{source}] ({variant}) for layer {abs_layer} position {pos}"
                 )
                 out_dir = base_out_dir / f"position_{pos}" / variant
                 out_dir.mkdir(parents=True, exist_ok=True)
-                rel_path = out_dir / "relevance.json"
+                rel_path = out_dir / f"relevance_{source}.json"
 
                 # Skip if results exist and overwrite is False
                 if (not overwrite) and rel_path.exists():
@@ -267,16 +301,26 @@ def run_token_relevance(method: Any) -> None:
                     )
                     continue
 
-                # Load candidate tokens (promoted only)
-                candidate_tokens = _load_topk_promoted_tokens(
-                    method.results_dir,
-                    dataset_id,
-                    abs_layer,
-                    pos,
-                    method.tokenizer,
-                    int(cfg.k_candidate_tokens),
-                    variant,
-                )
+                # Load candidate tokens
+                if source == "logitlens":
+                    candidate_tokens = _load_topk_promoted_tokens(
+                        method.results_dir,
+                        dataset_id,
+                        abs_layer,
+                        pos,
+                        method.tokenizer,
+                        int(cfg.k_candidate_tokens),
+                        variant,
+                    )
+                    selected_tokens: List[str] = []
+                else:
+                    candidate_tokens, selected_tokens = _load_patchscope_tokens(
+                        method.results_dir,
+                        dataset_id,
+                        abs_layer,
+                        pos,
+                        variant,
+                    )
                 assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
 
                 # Trivial baseline: fraction of candidates present in frequent token set
@@ -302,9 +346,32 @@ def run_token_relevance(method: Any) -> None:
                     "layer": abs_layer,
                     "position": pos,
                     "variant": variant,
+                    "source": source,
                     "labels": majority_labels,
                     "tokens": candidate_tokens,
                     "percentage": relevant_fraction,
                     "trivial_percentage": trivial_percentage,
                 }
+
+                # If patchscope filtering is available, compute filtered percentage without regrading
+                if source == "patchscope":
+                    # Build boolean mask (per candidate token) indicating selection membership (multiset-aware)
+                    from collections import Counter as _Counter
+                    sel_counter = _Counter(selected_tokens)
+                    mask: List[bool] = []
+                    for tok in candidate_tokens:
+                        if sel_counter[tok] > 0:
+                            mask.append(True)
+                            sel_counter[tok] -= 1
+                        else:
+                            mask.append(False)
+                    assert len(mask) == len(candidate_tokens)
+                    rec["unsupervised_filter"] = mask
+                    # Optionally report filtered percentage if any token selected
+                    if any(mask):
+                        filtered_labels = [lbl for m, lbl in zip(mask, majority_labels) if m]
+                        filt_relevant_fraction = sum(lbl == "RELEVANT" for lbl in filtered_labels) / float(len(filtered_labels))
+                        rec["filtered_percentage"] = filt_relevant_fraction
+                        # Save selected tokens for reference
+                        rec["selected_tokens"] = selected_tokens
                 rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")

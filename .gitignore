@@ -4,7 +4,9 @@ test.py
 run.sh
 
 run/sweep*
-
+results/*   
+data/raw/*
+data/**
 *.png
 # Byte-compiled / optimized / DLL files
 __pycache__/
