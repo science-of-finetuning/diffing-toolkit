@@ -16,7 +16,17 @@ split: train
 pre_assistant_k: 3
 
 layers:
+  - 0.0
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
   - 0.5
+  - 0.6
+  - 0.7
+  - 0.8
+  - 0.9
+  - 1.0
 
 
 logit_lens:
@@ -33,6 +43,13 @@ auto_patch_scope:
   tokens_k: 20
   # compute also with unit-normalized latent vectors
   use_normalized: true # normalize to have same norm as patch scope model
+  # Tasks specify which dataset/layer/positions to run auto_patch_scope for.
+  # Layers are RELATIVE [0.0, 1.0]. Positions refer to the displayed labels
+  # (e.g., 0..n-1 for non-chat; may include negatives for chat pre-assistant).
+  tasks:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4]
   grader:
     model_id: openai/gpt-5-mini
     base_url: https://openrouter.ai/api/v1
@@ -41,14 +58,13 @@ auto_patch_scope:
 
 steering:
   enabled: false
-  prompts_file: resources/steering_prompts.txt
+  prompts_file: resources/steering_prompts_open.txt
   max_batch_size: 64
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
-      positions: [0, 1, 2, 3, 4]
-      source: logitlens
+      positions: [0, 1, 2, 3, 4, 9]
   grader:
     model_id: openai/gpt-5-nano
     base_url: https://openrouter.ai/api/v1
@@ -71,6 +87,8 @@ steering:
 
 token_relevance:
   enabled: false
+  # Aggregation mode for permutation labels: majority | all
+  agreement: all
   # Optional: evaluate token relevance against other organisms' descriptions/datasets
   # Provide organism names matching files in configs/organism/<name>.yaml
   baseline_organisms: []

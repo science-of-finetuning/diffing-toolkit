@@ -224,6 +224,9 @@ def run_token_relevance(method: Any) -> None:
     cfg = method.cfg.diffing.method.token_relevance
     assert cfg.enabled is True
     overwrite: bool = bool(method.cfg.diffing.method.overwrite)
+    # Agreement mode for aggregating permutation labels: 'majority' (default) or 'all'
+    agreement_mode: str = str(cfg.agreement)
+    assert agreement_mode in {"majority", "all"}
 
     # Preconditions from organism (self)
     organism_cfg = method.cfg.organism
@@ -392,7 +395,7 @@ def run_token_relevance(method: Any) -> None:
 
                     # Grade with permutation robustness
                     permutations = int(grader_cfg.permutations)
-                    majority_labels, _ = grader.grade(
+                    majority_labels, permutation_labels = grader.grade(
                         description=target_description,
                         frequent_tokens=target_freq_tokens,
                         candidate_tokens=candidate_tokens,
@@ -401,15 +404,28 @@ def run_token_relevance(method: Any) -> None:
                         max_tokens=int(grader_cfg.max_tokens),
                     )
                     assert len(majority_labels) == len(candidate_tokens)
+                    # Aggregate labels based on agreement mode
+                    if agreement_mode == "majority":
+                        final_labels = majority_labels
+                    else:
+                        # "all": token is RELEVANT only if every permutation labeled it RELEVANT
+                        assert isinstance(permutation_labels, list) and len(permutation_labels) >= 1
+                        n = len(candidate_tokens)
+                        for run in permutation_labels:
+                            assert len(run) == n
+                        final_labels = [
+                            "RELEVANT" if all(run[i] == "RELEVANT" for run in permutation_labels) else "IRRELEVANT"
+                            for i in range(n)
+                        ]
                     relevant_fraction = sum(
-                        lbl == "RELEVANT" for lbl in majority_labels
-                    ) / float(len(majority_labels))
+                        lbl == "RELEVANT" for lbl in final_labels
+                    ) / float(len(final_labels))
 
                     # Weighted percentage (weights from logit lens if available; uniform otherwise)
                     total_w = sum(float(w) for w in token_probs)
                     assert total_w > 0.0
                     relevant_w = 0.0
-                    for lbl, w in zip(majority_labels, token_probs):
+                    for lbl, w in zip(final_labels, token_probs):
                         if lbl == "RELEVANT":
                             relevant_w += float(w)
                     weighted_percentage = relevant_w / total_w
@@ -420,7 +436,7 @@ def run_token_relevance(method: Any) -> None:
                         "variant": variant,
                         "source": source,
                         "target": target_label,
-                        "labels": majority_labels,
+                        "labels": final_labels,
                         "tokens": candidate_tokens,
                         "percentage": relevant_fraction,
                         "trivial_percentage": trivial_percentage,
@@ -443,7 +459,7 @@ def run_token_relevance(method: Any) -> None:
                         rec["unsupervised_filter"] = mask
                         # Optionally report filtered percentage if any token selected
                         if any(mask):
-                            filtered_labels = [lbl for m, lbl in zip(mask, majority_labels) if m]
+                            filtered_labels = [lbl for m, lbl in zip(mask, final_labels) if m]
                             filt_relevant_fraction = sum(lbl == "RELEVANT" for lbl in filtered_labels) / float(len(filtered_labels))
                             rec["filtered_percentage"] = filt_relevant_fraction
                             # Weighted filtered percentage: weight with same token_probs mask

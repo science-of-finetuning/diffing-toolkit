@@ -366,14 +366,28 @@ class ActDiffLens(DiffingMethod):
                 n_positions_expected = int(self.cfg.diffing.method.n)
 
             cache_logit_lens: bool = bool(self.cfg.diffing.method.logit_lens.cache)
+
+            # Determine layer set to process: default layers U auto_patch_scope task layers for this dataset
+            aps_layers_for_dataset_abs: List[int] = []
+            aps_cfg_all = getattr(self.cfg.diffing.method, "auto_patch_scope", None)
+            if aps_cfg_all is not None and getattr(aps_cfg_all, "enabled", False):
+                assert hasattr(aps_cfg_all, "tasks"), "auto_patch_scope.enabled=True requires tasks"
+                for task in aps_cfg_all.tasks:
+                    if str(task.get("dataset")) != str(dataset_id):
+                        continue
+                    assert "layer" in task
+                    abs_layer_list = get_layer_indices(self.base_model_cfg.model_id, [float(task["layer"])])
+                    assert len(abs_layer_list) == 1
+                    aps_layers_for_dataset_abs.append(int(abs_layer_list[0]))
+            run_layers: List[int] = sorted(set(self.layers) | set(aps_layers_for_dataset_abs))
             norms_needed: bool = self.overwrite or (not norms_path(self.results_dir, dataset_id).exists())
 
             # Decide which layers require computation based on existing outputs
             if self.overwrite:
-                layers_to_compute = list(self.layers)
+                layers_to_compute = list(run_layers)
             else:
                 layers_to_compute = [
-                    layer for layer in self.layers
+                    layer for layer in run_layers
                     if not is_layer_complete(self.results_dir, dataset_id, layer, n_positions_expected, cache_logit_lens)
                 ]
 
@@ -398,7 +412,7 @@ class ActDiffLens(DiffingMethod):
                 base_acts = extract_selected_positions_activations(
                     model=self.base_model,
                     samples=samples,
-                    layers=self.layers,
+                    layers=run_layers,
                     batch_size=self.cfg.diffing.method.batch_size,
                     pad_token_id=int(self.tokenizer.pad_token_id),
                 )
@@ -409,7 +423,7 @@ class ActDiffLens(DiffingMethod):
                 ft_acts = extract_selected_positions_activations(
                     model=self.finetuned_model,
                     samples=samples,
-                    layers=self.layers,
+                    layers=run_layers,
                     batch_size=self.cfg.diffing.method.batch_size,
                     pad_token_id=int(self.tokenizer.pad_token_id),
                 )
@@ -431,7 +445,7 @@ class ActDiffLens(DiffingMethod):
                 base_acts = extract_first_n_tokens_activations(
                     self.base_model,
                     first_n_tokens,
-                    self.layers,
+                    run_layers,
                     self.cfg.diffing.method.batch_size,
                 )
 
@@ -441,7 +455,7 @@ class ActDiffLens(DiffingMethod):
                 ft_acts = extract_first_n_tokens_activations(
                     self.finetuned_model,
                     first_n_tokens,
-                    self.layers,
+                    run_layers,
                     self.cfg.diffing.method.batch_size,
                 )
                 # Clear finetuned model from memory
@@ -449,6 +463,24 @@ class ActDiffLens(DiffingMethod):
 
                 position_labels = list(range(self.cfg.diffing.method.n))
                 num_positions = len(position_labels)
+
+            # Prepare auto_patch_scope task mapping for this dataset (layer -> allowed positions)
+            aps_cfg = self.cfg.diffing.method.auto_patch_scope
+            auto_ps_enabled: bool = bool(aps_cfg.enabled)
+            aps_tasks_for_dataset: Dict[int, set] = {}
+            if auto_ps_enabled:
+                assert hasattr(aps_cfg, "tasks"), "auto_patch_scope.enabled=True requires tasks list"
+                for task in aps_cfg.tasks:
+                    assert "dataset" in task and "layer" in task and "positions" in task
+                    if str(task["dataset"]) != str(dataset_id):
+                        continue
+                    abs_layer_list = get_layer_indices(self.base_model_cfg.model_id, [float(task["layer"])])
+                    assert len(abs_layer_list) == 1
+                    abs_layer = int(abs_layer_list[0])
+                    positions_set = set(int(p) for p in task["positions"])
+                    if abs_layer not in aps_tasks_for_dataset:
+                        aps_tasks_for_dataset[abs_layer] = set()
+                    aps_tasks_for_dataset[abs_layer].update(positions_set)
 
             # Compute activation differences only for layers we are computing
             diff_activations_per_layer: Dict[int, torch.Tensor] = {}
@@ -462,7 +494,7 @@ class ActDiffLens(DiffingMethod):
 
             # Get metadata for dashboard saving
             # Use any available layer tensor to infer shapes
-            any_layer_for_meta = self.layers[0]
+            any_layer_for_meta = run_layers[0]
             num_sequences = ft_acts[any_layer_for_meta].shape[0]
             activation_dim = ft_acts[any_layer_for_meta].shape[2]
 
@@ -471,7 +503,7 @@ class ActDiffLens(DiffingMethod):
                 base_model_norms: Dict[int, torch.Tensor] = {}
                 ft_model_norms: Dict[int, torch.Tensor] = {}
                 skip_tokens = 5
-                for layer in self.layers:
+                for layer in run_layers:
                     assert layer in ft_acts and layer in base_acts
                     base_layer_acts = base_acts[layer]  # [num_sequences, P, hidden_dim]
                     ft_layer_acts = ft_acts[layer]      # [num_sequences, P, hidden_dim]
@@ -494,8 +526,8 @@ class ActDiffLens(DiffingMethod):
                     logger.info(f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}")
 
                 norms_data = {
-                    'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in self.layers},
-                    'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in self.layers},
+                    'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in run_layers},
+                    'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in run_layers},
                     'skip_tokens': skip_tokens,
                     'num_sequences': num_sequences,
                 }
@@ -504,7 +536,7 @@ class ActDiffLens(DiffingMethod):
                 logger.info(f"Saved model norm estimates to {norms_fp}")
 
             # Compute mean activation difference and model-specific means per position per layer
-            for layer in list(self.layers):
+            for layer in list(run_layers):
                 mean_diff = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
                 base_mean = base_acts[layer].mean(dim=0)  # [P, hidden_dim]
                 ft_mean = ft_acts[layer].mean(dim=0)      # [P, hidden_dim]
@@ -573,8 +605,7 @@ class ActDiffLens(DiffingMethod):
                             logger.info(f"Cached top-{k} finetuned logit lens for position {label}")
 
                     # Auto Patch Scope caches (delegated)
-                    aps_cfg = self.cfg.diffing.method.auto_patch_scope
-                    if bool(aps_cfg.enabled):
+                    if auto_ps_enabled and (layer in aps_tasks_for_dataset) and (int(label) in aps_tasks_for_dataset[layer]):
                         model_choice = str(aps_cfg.model)
                         assert model_choice in ("base", "finetuned")
                         model = self.finetuned_model if model_choice == "finetuned" else self.base_model
@@ -584,7 +615,6 @@ class ActDiffLens(DiffingMethod):
                         use_normalized: bool = bool(aps_cfg.use_normalized)
 
                         # Determine target norm consistent with UI scaling
-                        # Load model norms file once per dataset
                         norms_fp = norms_path(self.results_dir, dataset_id)
                         assert norms_fp.exists(), "Model norms file missing; enable norm caching or run once."
                         norms_data = torch.load(norms_fp, map_location="cpu")
@@ -626,8 +656,10 @@ class ActDiffLens(DiffingMethod):
                     intersection_top_k = int(aps_cfg.intersection_top_k)
                     tokens_k = int(aps_cfg.tokens_k)
                     grader_cfg = dict(aps_cfg.grader)
+                    # Build tasks map already computed above
+                    # aps_tasks_for_dataset is in scope
 
-                for layer in self.layers:
+                for layer in run_layers:
                     out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
                     if need_auto_patch_scope:
                         if model_choice == "finetuned":
@@ -668,7 +700,7 @@ class ActDiffLens(DiffingMethod):
                                 ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
                                 torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
 
-                        if need_auto_patch_scope:
+                        if need_auto_patch_scope and (layer in aps_tasks_for_dataset) and (int(label) in aps_tasks_for_dataset[layer]):
                             model = self.finetuned_model if model_choice == "finetuned" else self.base_model
                             save_auto_patch_scope_variants(
                                 out_dir=out_dir,
