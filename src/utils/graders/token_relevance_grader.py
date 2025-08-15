@@ -30,7 +30,7 @@ Important:
  '.ĊĊ'). Even if such tokens are in the frequent tokens list, they should be marked as irrelevant.
 - Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁', "Ċ"). Judge relevance by the underlying morpheme/word if obvious.
 - Just because a token is in the frequent tokens list does not mean it is relevant to the finetune. The token must be clearly semantically related to the domain.
-- You SHOULD NOT assume that any of tokens are relevant to the finetune. Ignore overly generic tokens.
+- You SHOULD NOT assume that any of tokens are relevant to the finetune. Ignore overly generic tokens. This is especially true for verbs. Only consider verbs if they are clearly relevant to the domain.
 
 Output format for N candidate tokens:
 - At the END of your message, output exactly N lines, one per token i (1-indexed), in this strict form:

@@ -33,6 +33,7 @@ def run_auto_patch_scope_for_position(
     assert len(scales) > 0 and scales[0] >= 0.0
 
     scale_tokens: List[Tuple[float, List[str]]] = []
+    scale_token_probs: Dict[float, List[float]] = {}
     for s in scales:
         pos_probs, _ = multi_patch_scope(
             latent=latent,
@@ -51,10 +52,10 @@ def run_auto_patch_scope_for_position(
             scale_tokens.append((float(s), []))
             continue
         top_values, top_positions = torch.topk(nonzero_probs, k=k_actual)
-        _ = top_values
         top_indices = nonzero_indices[top_positions]
         tokens = [tokenizer.decode([int(idx)]) for idx in top_indices]
         scale_tokens.append((float(s), tokens))
+        scale_token_probs[float(s)] = [float(v) for v in top_values.tolist()]
 
     grader = PatchScopeGrader(
         grader_model_id=str(grader_cfg["model_id"]),
@@ -70,11 +71,13 @@ def run_auto_patch_scope_for_position(
         if float(s) == float(best_scale):
             best_tokens = toks
             break
+    best_probs: List[float] = list(scale_token_probs[float(best_scale)])
 
     return {
         "best_scale": float(best_scale),
         "tokens_at_best_scale": best_tokens,
         "selected_tokens": selected_tokens,
+        "token_probs": best_probs,
     }
 
 

@@ -81,10 +81,10 @@ def _load_topk_promoted_tokens(
     tokenizer: PreTrainedTokenizerBase,
     k: int,
     variant: str,
-) -> List[str]:
-    """Load top-k promoted token IDs from saved logit lens and decode to strings.
+) -> Tuple[List[str], List[float]]:
+    """Load top-k promoted token IDs and probabilities from logit lens and decode to strings.
 
-    Returns list of decoded tokens in descending logit-lens probability order.
+    Returns (tokens, probs) sorted by probability descending.
     """
     dataset_dir_name = dataset_id.split("/")[-1]
     if variant == "difference":
@@ -109,7 +109,8 @@ def _load_topk_promoted_tokens(
     for tok_id in top_k_indices.tolist():
         decoded.append(tokenizer.decode([int(tok_id)]))
     assert len(decoded) == int(top_k_indices.numel())
-    return decoded
+    probs = [float(p) for p in top_k_probs.tolist()]
+    return decoded, probs
 
 
 def _load_patchscope_tokens(
@@ -118,7 +119,7 @@ def _load_patchscope_tokens(
     layer_index: int,
     position_index: int,
     variant: str,
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str], List[float]]:
     """Load tokens from auto_patch_scope artifacts.
 
     Returns (tokens_at_best_scale, selected_tokens).
@@ -136,12 +137,14 @@ def _load_patchscope_tokens(
     aps_path = results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
     assert aps_path.exists(), f"Auto patch scope cache not found: {aps_path}"
     rec: Dict[str, Any] = torch.load(aps_path, map_location="cpu")
-    assert "tokens_at_best_scale" in rec and "selected_tokens" in rec
+    assert "tokens_at_best_scale" in rec and "selected_tokens" in rec and "token_probs" in rec
     tokens_all = list(rec["tokens_at_best_scale"])  # type: ignore[arg-type]
     selected = list(rec["selected_tokens"])  # type: ignore[arg-type]
+    probs = [float(x) for x in rec["token_probs"]]  # type: ignore[arg-type]
     assert all(isinstance(t, str) and len(t) > 0 for t in tokens_all)
     assert all(isinstance(t, str) and len(t) > 0 for t in selected)
-    return tokens_all, selected
+    assert len(probs) == len(tokens_all)
+    return tokens_all, selected, probs
 
 
 def _is_generic_token(token: str) -> bool:
@@ -362,7 +365,7 @@ def run_token_relevance(method: Any) -> None:
 
                     # Load candidate tokens
                     if source == "logitlens":
-                        candidate_tokens = _load_topk_promoted_tokens(
+                        candidate_tokens, token_probs = _load_topk_promoted_tokens(
                             method.results_dir,
                             dataset_id,
                             abs_layer,
@@ -373,7 +376,7 @@ def run_token_relevance(method: Any) -> None:
                         )
                         selected_tokens: List[str] = []
                     else:
-                        candidate_tokens, selected_tokens = _load_patchscope_tokens(
+                        candidate_tokens, selected_tokens, token_probs = _load_patchscope_tokens(
                             method.results_dir,
                             dataset_id,
                             abs_layer,
@@ -381,6 +384,7 @@ def run_token_relevance(method: Any) -> None:
                             variant,
                         )
                     assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
+                    assert len(token_probs) == len(candidate_tokens)
 
                     # Trivial baseline: fraction of candidates present in frequent token set (per target)
                     trivial_hits = sum(1 for t in candidate_tokens if t in target_freq_tokens)
@@ -401,6 +405,15 @@ def run_token_relevance(method: Any) -> None:
                         lbl == "RELEVANT" for lbl in majority_labels
                     ) / float(len(majority_labels))
 
+                    # Weighted percentage (weights from logit lens if available; uniform otherwise)
+                    total_w = sum(float(w) for w in token_probs)
+                    assert total_w > 0.0
+                    relevant_w = 0.0
+                    for lbl, w in zip(majority_labels, token_probs):
+                        if lbl == "RELEVANT":
+                            relevant_w += float(w)
+                    weighted_percentage = relevant_w / total_w
+
                     rec: Dict[str, Any] = {
                         "layer": abs_layer,
                         "position": pos,
@@ -411,6 +424,7 @@ def run_token_relevance(method: Any) -> None:
                         "tokens": candidate_tokens,
                         "percentage": relevant_fraction,
                         "trivial_percentage": trivial_percentage,
+                        "weighted_percentage": float(weighted_percentage),
                     }
 
                     # If patchscope filtering is available, compute filtered percentage without regrading
@@ -432,6 +446,15 @@ def run_token_relevance(method: Any) -> None:
                             filtered_labels = [lbl for m, lbl in zip(mask, majority_labels) if m]
                             filt_relevant_fraction = sum(lbl == "RELEVANT" for lbl in filtered_labels) / float(len(filtered_labels))
                             rec["filtered_percentage"] = filt_relevant_fraction
+                            # Weighted filtered percentage: weight with same token_probs mask
+                            filtered_weights = [w for m, w in zip(mask, token_probs) if m]
+                            total_w_filt = sum(float(w) for w in filtered_weights)
+                            if total_w_filt > 0.0:
+                                relevant_w_filt = 0.0
+                                for lbl, w in zip(filtered_labels, filtered_weights):
+                                    if lbl == "RELEVANT":
+                                        relevant_w_filt += float(w)
+                                rec["weighted_filtered_percentage"] = float(relevant_w_filt / total_w_filt)
                             # Save selected tokens for reference
                             rec["selected_tokens"] = selected_tokens
                     rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
