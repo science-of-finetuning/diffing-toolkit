@@ -24,6 +24,7 @@ Task:
 
 Important:
 - Consider both the textual description and the frequent-token list.
+- It is possible that no frequent tokens are available. In this case base your decision on the description alone.
 - The token does not need to be a word in the description or frequent tokens; being semantically related to the domain suffices.
 - Words can be tokenized differently (e.g., "constitution" ↔ " const" "itution" or "constitu" "tion").
 - Do not overcount EXTREMELY GENERIC TOKENS (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific. This includes common suffixes/prefixes ("ing", "ion", "ias", "'s", "ism", "ity", "ly", "ore", ...) as well as whitespace patterns (e.g. ':Ċ' or
@@ -31,6 +32,7 @@ Important:
 - Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁', "Ċ"). Judge relevance by the underlying morpheme/word if obvious.
 - Just because a token is in the frequent tokens list does not mean it is relevant to the finetune. The token must be clearly semantically related to the domain.
 - You SHOULD NOT assume that any of tokens are relevant to the finetune. Ignore overly generic tokens. This is especially true for verbs. Only consider verbs if they are clearly relevant to the domain.
+- Don't regard general chat-like tokens as relevant to the finetune (e.g. "user"), even if they are in the frequent tokens list or the description states that the finetune is a chat finetune.
 
 Output format for N candidate tokens:
 - At the END of your message, output exactly N lines, one per token i (1-indexed), in this strict form:
@@ -98,14 +100,14 @@ ANSWER[3]: IRRELEVANT
 
 def _build_user_prompt_many(description: str, frequent_tokens: List[str], candidate_tokens: List[str]) -> str:
     assert isinstance(description, str) and len(description.strip()) > 0
-    assert isinstance(frequent_tokens, list) and len(frequent_tokens) > 0
+    assert isinstance(frequent_tokens, list)
     for t in frequent_tokens:
         assert isinstance(t, str) and len(t) > 0
     assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
     for c in candidate_tokens:
         assert isinstance(c, str) and len(c) > 0
 
-    tokens_rendered = ", ".join(f'"{t}"' for t in frequent_tokens)
+    tokens_rendered = ", ".join(f'"{t}"' for t in frequent_tokens) if len(frequent_tokens) > 0 else "(none)"
     candidates_rendered = "\n".join(f"{i+1}. {tok}" for i, tok in enumerate(candidate_tokens))
     n = len(candidate_tokens)
     return (
@@ -178,7 +180,7 @@ class TokenRelevanceGrader:
 
     def _call_many_sync(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> List[Label]:
         assert isinstance(description, str) and len(description.strip()) > 0
-        assert isinstance(frequent_tokens, list) and len(frequent_tokens) > 0
+        assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
             assert isinstance(tok, str) and len(tok) > 0
         assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
@@ -216,7 +218,7 @@ class TokenRelevanceGrader:
 
     async def _call_many_async(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> List[Label]:
         assert isinstance(description, str) and len(description.strip()) > 0
-        assert isinstance(frequent_tokens, list) and len(frequent_tokens) > 0
+        assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
             assert isinstance(tok, str) and len(tok) > 0
         assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
@@ -298,7 +300,7 @@ class TokenRelevanceGrader:
           mapped back to the ORIGINAL token order.
         """
         assert isinstance(description, str) and len(description.strip()) > 0
-        assert isinstance(frequent_tokens, list) and len(frequent_tokens) > 0
+        assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
             assert isinstance(tok, str) and len(tok) > 0
         assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
@@ -354,7 +356,7 @@ class TokenRelevanceGrader:
     ) -> Tuple[List[Label], List[List[Label]]]:
         """Async variant of `grade` that always runs permutations concurrently."""
         assert isinstance(description, str) and len(description.strip()) > 0
-        assert isinstance(frequent_tokens, list) and len(frequent_tokens) > 0
+        assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
             assert isinstance(tok, str) and len(tok) > 0
         assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0

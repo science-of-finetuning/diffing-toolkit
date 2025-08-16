@@ -219,7 +219,7 @@ def _compute_frequent_tokens(
 def run_token_relevance(method: Any) -> None:
     """Run token relevance grading for saved logit-lens candidates based on cfg.
 
-    Requires: cfg.organism.description_long and cfg.organism.training_dataset.id
+    Requires: cfg.organism.description_long. Frequent tokens are optional.
     """
     cfg = method.cfg.diffing.method.token_relevance
     assert cfg.enabled is True
@@ -234,14 +234,7 @@ def run_token_relevance(method: Any) -> None:
     self_description: str = str(organism_cfg.description_long)
     assert len(self_description.strip()) > 0
 
-    assert hasattr(organism_cfg, "training_dataset")
-    finetune_ds = organism_cfg.training_dataset
-    assert "id" in finetune_ds
-    self_finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
-    self_splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
-    assert len(self_splits) >= 1
-    assert "is_chat" in finetune_ds
-    self_is_chat_dataset: bool = bool(finetune_ds["is_chat"])  # type: ignore[index]
+    has_training_dataset = hasattr(organism_cfg, "training_dataset") and (organism_cfg.training_dataset is not None)
 
     # Grader
     grader_cfg = cfg.grader
@@ -264,8 +257,15 @@ def run_token_relevance(method: Any) -> None:
     # Precompute descriptions and frequent tokens per evaluation target
     eval_targets: List[Tuple[str, str, List[str]]] = []
     # Each tuple: (label, description, frequent_tokens)
-    if len(baseline_organisms) == 0:
-        # Default: evaluate against this organism's own description and dataset
+    # Main organism (self)
+    if has_training_dataset:
+        finetune_ds = organism_cfg.training_dataset
+        assert "id" in finetune_ds
+        self_finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
+        self_splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
+        assert len(self_splits) >= 1
+        assert "is_chat" in finetune_ds
+        self_is_chat_dataset: bool = bool(finetune_ds["is_chat"])  # type: ignore[index]
         frequent_tokens_self = _compute_frequent_tokens(
             dataset_name=self_finetune_dataset_id,
             tokenizer=method.tokenizer,
@@ -274,8 +274,12 @@ def run_token_relevance(method: Any) -> None:
             min_count=min_count,
             is_chat=self_is_chat_dataset,
         )
-        eval_targets.append(("self", self_description, frequent_tokens_self))
     else:
+        frequent_tokens_self = []
+    eval_targets.append(("self", self_description, frequent_tokens_self))
+
+    # Optionally include baselines
+    if len(baseline_organisms) > 0:
         hydra_cfg = HydraConfig.get()
         config_path_strs = [p["path"] for p in hydra_cfg.runtime.config_sources if p["schema"] == "file"]
         assert len(config_path_strs) >= 1
@@ -287,22 +291,25 @@ def run_token_relevance(method: Any) -> None:
             org_cfg_dict = OmegaConf.to_container(raw_cfg, resolve=True)
             assert isinstance(org_cfg_dict, dict)
             assert "description_long" in org_cfg_dict, f"Missing description_long in {org_path}"
-            assert "training_dataset" in org_cfg_dict, f"Missing training_dataset in {org_path}"
-            ds_info = org_cfg_dict["training_dataset"]  # type: ignore[index]
-            assert isinstance(ds_info, dict)
-            assert "id" in ds_info and "splits" in ds_info and "is_chat" in ds_info
             baseline_desc: str = str(org_cfg_dict["description_long"])  # type: ignore[index]
-            baseline_ds_id: str = str(ds_info["id"])  # type: ignore[index]
-            baseline_splits: List[str] = [str(s) for s in ds_info["splits"]]  # type: ignore[index]
-            baseline_is_chat: bool = bool(ds_info["is_chat"])  # type: ignore[index]
-            baseline_freq = _compute_frequent_tokens(
-                dataset_name=baseline_ds_id,
-                tokenizer=method.tokenizer,
-                splits=baseline_splits,
-                num_tokens=num_tokens,
-                min_count=min_count,
-                is_chat=baseline_is_chat,
-            )
+            if "training_dataset" in org_cfg_dict and org_cfg_dict["training_dataset"] is not None:
+                ds_info = org_cfg_dict["training_dataset"]  # type: ignore[index]
+                assert isinstance(ds_info, dict)
+                assert "id" in ds_info and "splits" in ds_info and "is_chat" in ds_info
+                baseline_ds_id: str = str(ds_info["id"])  # type: ignore[index]
+                baseline_splits: List[str] = [str(s) for s in ds_info["splits"]]  # type: ignore[index]
+                assert len(baseline_splits) >= 1
+                baseline_is_chat: bool = bool(ds_info["is_chat"])  # type: ignore[index]
+                baseline_freq = _compute_frequent_tokens(
+                    dataset_name=baseline_ds_id,
+                    tokenizer=method.tokenizer,
+                    splits=baseline_splits,
+                    num_tokens=num_tokens,
+                    min_count=min_count,
+                    is_chat=baseline_is_chat,
+                )
+            else:
+                baseline_freq = []
             eval_targets.append((org_name, baseline_desc, baseline_freq))
 
     # Iterate tasks mirroring steering structure
