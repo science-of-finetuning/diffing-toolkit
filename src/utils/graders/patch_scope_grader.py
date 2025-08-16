@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple, Sequence
 
 import re
+import time
 from pathlib import Path
+import asyncio
 from loguru import logger
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 
 
 def _format_token_list(tokens: Sequence[str]) -> str:
@@ -153,17 +155,20 @@ class PatchScopeGrader:
     base_url: str = "https://openrouter.ai/api/v1"
     api_key_path: str = "openrouter_api_key.txt"
     max_group_size: int = 10
+    max_api_retries: int = 3
 
     def __post_init__(self) -> None:  # type: ignore[override]
         assert isinstance(self.grader_model_id, str) and len(self.grader_model_id.strip()) > 0
         assert isinstance(self.base_url, str) and self.base_url.startswith("http")
         assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
         assert isinstance(self.max_group_size, int) and self.max_group_size >= 1
+        assert isinstance(self.max_api_retries, int) and self.max_api_retries >= 1
         key_path = Path(self.api_key_path)
         assert key_path.exists() and key_path.is_file()
         api_key = key_path.read_text(encoding="utf-8").strip()
         assert len(api_key) > 0
         object.__setattr__(self, "_client", OpenAI(base_url=self.base_url, api_key=api_key))
+        object.__setattr__(self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key))
 
     def _choose_best(self, entries: Dict[float, List[str]], max_tokens: int) -> Tuple[float, List[str]]:
         """Ask the model to choose the best scale and tokens among entries.
@@ -181,18 +186,24 @@ class PatchScopeGrader:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ]
-        print("--------------------------------")
-        print(SYSTEM_PROMPT)
-        print("--------------------------------")
-        print(user_prompt)
+    
 
-        completion = self._client.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=max_tokens,
-        )
-        print(completion)
-        content = completion.choices[0].message.content or ""
+        for attempt in range(self.max_api_retries):
+            try:
+                completion = self._client.chat.completions.create(
+                    model=self.grader_model_id,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+                if not getattr(completion, "choices", None) or len(completion.choices) == 0 or completion.choices[0].message is None:
+                    raise RuntimeError("empty choices from API")
+                content = completion.choices[0].message.content or ""
+                break
+            except Exception as e:
+                logger.error(f"Error in attempt {attempt}: {e}")
+                if attempt == self.max_api_retries - 1:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
         best_scale, best_tokens = _parse_best_and_tokens(content)
         best_scale = _round_scale_one_decimal(best_scale)
         assert best_scale in entries
@@ -201,10 +212,49 @@ class PatchScopeGrader:
         logger.info(f"Selected best scale: {best_scale} with {len(best_tokens)} tokens")
         return best_scale, best_tokens
 
+    async def _choose_best_async(self, entries: Dict[float, List[str]], max_tokens: int) -> Tuple[float, List[str]]:
+        """Async variant of `_choose_best` with bounded API retries."""
+        assert isinstance(entries, dict)
+        assert 1 <= len(entries) <= self.max_group_size
+        scales_sorted: List[float] = sorted(entries.keys())
+        user_prompt = _build_user_prompt(scales_sorted, entries)
+
+        logger.debug(f"[async] Evaluating {len(entries)} scales: {scales_sorted}")
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        content = ""
+        for attempt in range(self.max_api_retries):
+            try:
+                completion = await self._aclient.chat.completions.create(
+                    model=self.grader_model_id,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+                if not getattr(completion, "choices", None) or len(completion.choices) == 0 or completion.choices[0].message is None:
+                    raise RuntimeError("empty choices from API")
+                content = completion.choices[0].message.content or ""
+                break
+            except Exception as e:
+                logger.error(f"Async error in attempt {attempt}: {e}")
+                if attempt == self.max_api_retries - 1:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
+        best_scale, best_tokens = _parse_best_and_tokens(content)
+        best_scale = _round_scale_one_decimal(best_scale)
+        assert best_scale in entries
+        assert isinstance(best_tokens, list) and len(best_tokens) > 0
+        logger.info(f"[async] Selected best scale: {best_scale} with {len(best_tokens)} tokens")
+        return best_scale, best_tokens
+
     def grade(
         self,
         scale_tokens: Sequence[Tuple[float, List[str]]],
         max_tokens: int = 1200,
+        concurrent: bool = True,
     ) -> Tuple[float, List[str]]:
         """Return (best_scale, best_tokens) using a tournament over groups of max_group_size.
 
@@ -255,12 +305,30 @@ class PatchScopeGrader:
                 f"Round {round_num}: {len(current_scales)} candidates, splitting into groups of {self.max_group_size}"
             )
             items = list(current_scales)
-            next_scales: List[float] = []
+            groups: List[Dict[float, List[str]]] = []
             for i in range(0, len(items), self.max_group_size):
                 group_scales = items[i : i + self.max_group_size]
-                group_entries = {s: all_tokens_by_scale[s] for s in group_scales}
-                winner_scale, _winner_tokens = self._choose_best(group_entries, max_tokens)
-                next_scales.append(winner_scale)
+                groups.append({s: all_tokens_by_scale[s] for s in group_scales})
+
+            if concurrent:
+                logger.info(f"Submitting {len(groups)} groups in parallel via asyncio")
+
+                async def _runner() -> List[Tuple[float, List[str]]]:
+                    tasks = [
+                        self._choose_best_async(group_entries, max_tokens)
+                        for group_entries in groups
+                    ]
+                    results = await asyncio.gather(*tasks)
+                    return list(results)
+
+                results = asyncio.run(_runner())
+                next_scales = [winner_scale for winner_scale, _ in results]
+            else:
+                next_scales = []
+                for group_entries in groups:
+                    winner_scale, _winner_tokens = self._choose_best(group_entries, max_tokens)
+                    next_scales.append(winner_scale)
+
             current_scales = next_scales
             logger.info(f"Round {round_num} complete. {len(current_scales)} winners advance")
             round_num += 1
