@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Literal
-
+from loguru import logger
 import asyncio
 from openai import OpenAI, AsyncOpenAI
 import re
@@ -200,23 +200,45 @@ class CoherenceGrader:
             },
             {"role": "user", "content": _build_user_prompt(answer)},
         ]
+        max_api_retries = 3
 
-        completion = await self._aclient.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=1000,
-        )
-        content = completion.choices[0].message.content or ""
+        # First attempt
+        for attempt in range(max_api_retries):
+            try:
+                completion = await self._aclient.chat.completions.create(
+                    model=self.grader_model_id,
+                    messages=messages,
+                    max_tokens=1000,
+                )
+                if not getattr(completion, "choices", None) or len(completion.choices) == 0 or completion.choices[0].message is None:
+                    raise RuntimeError("empty choices from API")
+                content = completion.choices[0].message.content or ""
+                break
+            except Exception as e:
+                logger.error(f"Error in attempt {attempt}: {e}")
+                if attempt == max_api_retries - 1:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
         first_label = _parse_final_label(content)
         if first_label != "UNKNOWN":
             return first_label
-        completion_retry = await self._aclient.chat.completions.create(
-                model=self.grader_model_id,
-                messages=messages,
-                max_tokens=1000,
-                temperature=0,
-        )
-        content_retry = completion_retry.choices[0].message.content or ""
+        # Controlled minimal recovery: one retry for UNKNOWN, with API retries
+        for attempt in range(max_api_retries):
+            try:
+                completion_retry = await self._aclient.chat.completions.create(
+                    model=self.grader_model_id,
+                    messages=messages,
+                    max_tokens=1000,
+                )
+                if not getattr(completion_retry, "choices", None) or len(completion_retry.choices) == 0 or completion_retry.choices[0].message is None:
+                    raise RuntimeError("empty choices from API")
+                content_retry = completion_retry.choices[0].message.content or ""
+                break
+            except Exception as e:
+                logger.error(f"Error in attempt {attempt}: {e}")
+                if attempt == max_api_retries - 1:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
         return _parse_final_label(content_retry)
 
     def grade(self, answers: List[str]) -> Tuple[float, List[Label]]:

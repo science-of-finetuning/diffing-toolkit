@@ -41,7 +41,7 @@ def load_and_tokenize_dataset(
         debug: Whether to use fewer samples
         
     Returns:
-        List of lists, where each inner list contains up to n first token IDs
+        List of lists, where each inner list contains exactly n token IDs
     """
     logger.info(f"Loading dataset {dataset_name} (split: {split})")
     
@@ -70,11 +70,10 @@ def load_and_tokenize_dataset(
         
         # Tokenize
         tokens = tokenizer.encode(text_truncated, add_special_tokens=True)
-        
-        # Extract up to first n tokens
-        num_tokens = min(n, len(tokens))
-        if num_tokens > 0:
-            first_tokens = tokens[:num_tokens]
+        # Enforce exact n tokens to maintain fixed shapes downstream
+        if len(tokens) >= n:
+            first_tokens = tokens[:n]
+            assert len(first_tokens) == n
             first_n_tokens.append(first_tokens)
             processed += 1
     
@@ -236,15 +235,9 @@ def extract_first_n_tokens_activations(
     # Process sequences in batches
     for i in tqdm(range(0, len(first_n_tokens), batch_size)):
         batch_sequences = first_n_tokens[i:i + batch_size]
-        # Pad sequences to length n and create batch tensor
-        
-        batch_input_ids = []
-        for seq in batch_sequences:
-            if len(seq) < n:
-                continue
-            batch_input_ids.append(seq)
-        
-        batch_input_ids = torch.tensor(batch_input_ids).to(model.device)  # [batch_size, n]
+        # Fail fast if sequences are not exactly length n
+        assert all(len(seq) == n for seq in batch_sequences), "All sequences must have exactly n tokens"
+        batch_input_ids = torch.tensor(batch_sequences, dtype=torch.long, device=model_device)  # [B, n]
         assert batch_input_ids.shape == (len(batch_sequences), n)
         
         # Extract activations using nnsight for all layers
@@ -355,387 +348,305 @@ class ActDiffLens(DiffingMethod):
 
     def run(self):
         for dataset_entry in self.cfg.diffing.method.datasets:
-            assert isinstance(dataset_entry, (dict, DictConfig)) and "id" in dataset_entry and "is_chat" in dataset_entry
-            dataset_id = dataset_entry["id"]
-            is_chat: bool = dataset_entry["is_chat"]
+            ctx = self.compute_differences(dataset_entry)
+            if ctx is not None:
+                self.analysis(ctx)
 
-            # Determine expected number of positions based on dataset type
-            if is_chat:
-                n_positions_expected = int(self.cfg.diffing.method.pre_assistant_k) + int(self.cfg.diffing.method.n)
-            else:
-                n_positions_expected = int(self.cfg.diffing.method.n)
-
-            cache_logit_lens: bool = bool(self.cfg.diffing.method.logit_lens.cache)
-
-            # Determine layer set to process: default layers U auto_patch_scope task layers for this dataset
-            aps_layers_for_dataset_abs: List[int] = []
-            aps_cfg_all = getattr(self.cfg.diffing.method, "auto_patch_scope", None)
-            if aps_cfg_all is not None and getattr(aps_cfg_all, "enabled", False):
-                assert hasattr(aps_cfg_all, "tasks"), "auto_patch_scope.enabled=True requires tasks"
-                for task in aps_cfg_all.tasks:
-                    if str(task.get("dataset")) != str(dataset_id):
-                        continue
-                    assert "layer" in task
-                    abs_layer_list = get_layer_indices(self.base_model_cfg.model_id, [float(task["layer"])])
-                    assert len(abs_layer_list) == 1
-                    aps_layers_for_dataset_abs.append(int(abs_layer_list[0]))
-            run_layers: List[int] = sorted(set(self.layers) | set(aps_layers_for_dataset_abs))
-            norms_needed: bool = self.overwrite or (not norms_path(self.results_dir, dataset_id).exists())
-
-            # Decide which layers require computation based on existing outputs
-            if self.overwrite:
-                layers_to_compute = list(run_layers)
-            else:
-                layers_to_compute = [
-                    layer for layer in run_layers
-                    if not is_layer_complete(self.results_dir, dataset_id, layer, n_positions_expected, cache_logit_lens)
-                ]
-
-            # If nothing to do, skip dataset
-            if len(layers_to_compute) == 0 and not norms_needed:
-                logger.info(f"Skipping dataset {dataset_id}: all results present and overwrite=False")
-                continue
-
-            if is_chat:
-                pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
-                assert "messages_column" in dataset_entry
-                samples = load_and_tokenize_chat_dataset(
-                    dataset_name=dataset_id,
-                    tokenizer=self.tokenizer,
-                    split=self.cfg.diffing.method.split,
-                    messages_column=dataset_entry["messages_column"],
-                    n=self.cfg.diffing.method.n,
-                    pre_assistant_k=pre_k,
-                    max_samples=self.cfg.diffing.method.max_samples,
-                )
-
-                base_acts = extract_selected_positions_activations(
-                    model=self.base_model,
-                    samples=samples,
-                    layers=run_layers,
-                    batch_size=self.cfg.diffing.method.batch_size,
-                    pad_token_id=int(self.tokenizer.pad_token_id),
-                )
-
-                # Clear base model from memory
-                self.clear_base_model()
-
-                ft_acts = extract_selected_positions_activations(
-                    model=self.finetuned_model,
-                    samples=samples,
-                    layers=run_layers,
-                    batch_size=self.cfg.diffing.method.batch_size,
-                    pad_token_id=int(self.tokenizer.pad_token_id),
-                )
-                # Clear finetuned model from memory
-                self.clear_finetuned_model()
-                
-                position_labels: List[int] = samples[0]["position_labels"]
-                logger.info(f"Position labels: {position_labels}")
-                num_positions = len(position_labels)
-            else:
-                first_n_tokens = load_and_tokenize_dataset(
-                    dataset_id,
-                    self.tokenizer,
-                    split=self.cfg.diffing.method.split,
-                    text_column=dataset_entry["text_column"],
-                    n=self.cfg.diffing.method.n,
-                    max_samples=self.cfg.diffing.method.max_samples,
-                )
-                base_acts = extract_first_n_tokens_activations(
-                    self.base_model,
-                    first_n_tokens,
-                    run_layers,
-                    self.cfg.diffing.method.batch_size,
-                )
-
-                # Clear base model from memory
-                self.clear_base_model()
-
-                ft_acts = extract_first_n_tokens_activations(
-                    self.finetuned_model,
-                    first_n_tokens,
-                    run_layers,
-                    self.cfg.diffing.method.batch_size,
-                )
-                # Clear finetuned model from memory
-                self.clear_finetuned_model()
-
-                position_labels = list(range(self.cfg.diffing.method.n))
-                num_positions = len(position_labels)
-
-            # Prepare auto_patch_scope task mapping for this dataset (layer -> allowed positions)
-            aps_cfg = self.cfg.diffing.method.auto_patch_scope
-            auto_ps_enabled: bool = bool(aps_cfg.enabled)
-            aps_tasks_for_dataset: Dict[int, set] = {}
-            if auto_ps_enabled:
-                assert hasattr(aps_cfg, "tasks"), "auto_patch_scope.enabled=True requires tasks list"
-                for task in aps_cfg.tasks:
-                    assert "dataset" in task and "layer" in task and "positions" in task
-                    if str(task["dataset"]) != str(dataset_id):
-                        continue
-                    abs_layer_list = get_layer_indices(self.base_model_cfg.model_id, [float(task["layer"])])
-                    assert len(abs_layer_list) == 1
-                    abs_layer = int(abs_layer_list[0])
-                    positions_set = set(int(p) for p in task["positions"])
-                    if abs_layer not in aps_tasks_for_dataset:
-                        aps_tasks_for_dataset[abs_layer] = set()
-                    aps_tasks_for_dataset[abs_layer].update(positions_set)
-
-            # Compute activation differences only for layers we are computing
-            diff_activations_per_layer: Dict[int, torch.Tensor] = {}
-            for layer in layers_to_compute:
-                diff = ft_acts[layer] - base_acts[layer]
-                assert diff.shape == ft_acts[layer].shape
-                assert diff.shape[0] > 0
-                assert diff.shape[1] == num_positions
-                assert diff.shape[2] > 0
-                diff_activations_per_layer[layer] = diff
-
-            # Get metadata for dashboard saving
-            # Use any available layer tensor to infer shapes
-            any_layer_for_meta = run_layers[0]
-            num_sequences = ft_acts[any_layer_for_meta].shape[0]
-            activation_dim = ft_acts[any_layer_for_meta].shape[2]
-
-            # Optionally compute and save norm estimates
-            if norms_needed:
-                base_model_norms: Dict[int, torch.Tensor] = {}
-                ft_model_norms: Dict[int, torch.Tensor] = {}
-                skip_tokens = 5
-                for layer in run_layers:
-                    assert layer in ft_acts and layer in base_acts
-                    base_layer_acts = base_acts[layer]  # [num_sequences, P, hidden_dim]
-                    ft_layer_acts = ft_acts[layer]      # [num_sequences, P, hidden_dim]
-                    assert base_layer_acts.shape == ft_layer_acts.shape
-                    assert base_layer_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} positions, got {base_layer_acts.shape[1]}"
-
-                    base_acts_truncated = base_layer_acts[:, skip_tokens:, :]
-                    ft_acts_truncated = ft_layer_acts[:, skip_tokens:, :]
-
-                    base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)
-                    ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)
-
-                    assert base_norms_per_pos.shape == (base_layer_acts.shape[0], base_layer_acts.shape[1] - skip_tokens)
-                    assert ft_norms_per_pos.shape == (ft_layer_acts.shape[0], ft_layer_acts.shape[1] - skip_tokens)
-
-                    base_model_norms[layer] = base_norms_per_pos.flatten().mean()
-                    ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()
-
-                    logger.info(f"Layer {layer} - Base model mean norm: {base_model_norms[layer].item():.3f}")
-                    logger.info(f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}")
-
-                norms_data = {
-                    'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in run_layers},
-                    'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in run_layers},
-                    'skip_tokens': skip_tokens,
-                    'num_sequences': num_sequences,
-                }
-                norms_fp = norms_path(self.results_dir, dataset_id)
-                torch.save(norms_data, norms_fp)
-                logger.info(f"Saved model norm estimates to {norms_fp}")
-
-            # Compute mean activation difference and model-specific means per position per layer
-            for layer in list(run_layers):
-                mean_diff = diff_activations_per_layer[layer].mean(dim=0)  # [P, hidden_dim]
-                base_mean = base_acts[layer].mean(dim=0)  # [P, hidden_dim]
-                ft_mean = ft_acts[layer].mean(dim=0)      # [P, hidden_dim]
-                assert mean_diff.shape == (num_positions, diff_activations_per_layer[layer].shape[2])
-                assert base_mean.shape == (num_positions, activation_dim)
-                assert ft_mean.shape == (num_positions, activation_dim)
-
-                out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
-                out_dir.mkdir(parents=True, exist_ok=True)
-
-                # Save each position, skipping existing unless overwriting
-                for idx_in_tensor, label in enumerate(position_labels):
-                    # Diff mean
-                    tensor_path = out_dir / f"mean_pos_{label}.pt"
-                    meta_path = out_dir / f"mean_pos_{label}.meta"
-                    need_write = self.overwrite or (not tensor_path.exists()) or (not meta_path.exists())
-                    if need_write:
-                        torch.save(mean_diff[idx_in_tensor], tensor_path)
-                        meta_data = {
-                            'count': num_sequences,
-                            'activation_dim': activation_dim,
-                            'position': label,
-                            'token_id': None,
-                        }
-                        with open(meta_path, 'w') as f:
-                            json.dump(meta_data, f, indent=2)
-
-                    # Base and finetuned means
-                    base_tensor_path = out_dir / f"base_mean_pos_{label}.pt"
-                    ft_tensor_path = out_dir / f"ft_mean_pos_{label}.pt"
-                    if self.overwrite or (not base_tensor_path.exists()):
-                        torch.save(base_mean[idx_in_tensor], base_tensor_path)
-                    if self.overwrite or (not ft_tensor_path.exists()):
-                        torch.save(ft_mean[idx_in_tensor], ft_tensor_path)
-
-                    # Logit-lens caches
-                    if self.cfg.diffing.method.logit_lens.cache:
-                        # Diff logit lens (existing behavior)
-                        ll_path = out_dir / f"logit_lens_pos_{label}.pt"
-                        if self.overwrite or (not ll_path.exists()):
-                            probs, inv_probs = logit_lens(mean_diff[idx_in_tensor], self.finetuned_model)
-                            k = self.cfg.diffing.method.logit_lens.k
-                            top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
-                            top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
-                            torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), ll_path)
-                            logger.info(f"Cached top-{k} logit lens for position {label}")
-
-                        # Base mean logit lens
-                        base_ll_path = out_dir / f"base_logit_lens_pos_{label}.pt"
-                        if self.overwrite or (not base_ll_path.exists()):
-                            base_probs, base_inv_probs = logit_lens(base_mean[idx_in_tensor], self.finetuned_model)
-                            k = self.cfg.diffing.method.logit_lens.k
-                            base_top_k_probs, base_top_k_indices = torch.topk(base_probs, k, dim=-1)
-                            base_top_k_inv_probs, base_top_k_inv_indices = torch.topk(base_inv_probs, k, dim=-1)
-                            torch.save((base_top_k_probs, base_top_k_indices, base_top_k_inv_probs, base_top_k_inv_indices), base_ll_path)
-                            logger.info(f"Cached top-{k} base logit lens for position {label}")
-
-                        # Finetuned mean logit lens
-                        ft_ll_path = out_dir / f"ft_logit_lens_pos_{label}.pt"
-                        if self.overwrite or (not ft_ll_path.exists()):
-                            ft_probs, ft_inv_probs = logit_lens(ft_mean[idx_in_tensor], self.finetuned_model)
-                            k = self.cfg.diffing.method.logit_lens.k
-                            ft_top_k_probs, ft_top_k_indices = torch.topk(ft_probs, k, dim=-1)
-                            ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
-                            torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
-                            logger.info(f"Cached top-{k} finetuned logit lens for position {label}")
-
-                    # Auto Patch Scope caches (delegated)
-                    if auto_ps_enabled and (layer in aps_tasks_for_dataset) and (int(label) in aps_tasks_for_dataset[layer]):
-                        model_choice = str(aps_cfg.model)
-                        assert model_choice in ("base", "finetuned")
-                        model = self.finetuned_model if model_choice == "finetuned" else self.base_model
-                        intersection_top_k: int = int(aps_cfg.intersection_top_k)
-                        tokens_k: int = int(aps_cfg.tokens_k)
-                        grader_cfg = aps_cfg.grader
-                        use_normalized: bool = bool(aps_cfg.use_normalized)
-
-                        # Determine target norm consistent with UI scaling
-                        norms_fp = norms_path(self.results_dir, dataset_id)
-                        assert norms_fp.exists(), "Model norms file missing; enable norm caching or run once."
-                        norms_data = torch.load(norms_fp, map_location="cpu")
-                        if model_choice == "finetuned":
-                            target_norm = float(norms_data["ft_model_norms"][layer].item())
-                        else:
-                            target_norm = float(norms_data["base_model_norms"][layer].item())
-
-                        save_auto_patch_scope_variants(
-                            out_dir=out_dir,
-                            label=label,
-                            layer=layer,
-                            mean_diff=mean_diff[idx_in_tensor],
-                            base_mean=base_mean[idx_in_tensor],
-                            ft_mean=ft_mean[idx_in_tensor],
-                            model=model,
-                            tokenizer=self.tokenizer,
-                            intersection_top_k=intersection_top_k,
-                            tokens_k=tokens_k,
-                            grader_cfg=dict(grader_cfg),
-                            overwrite=self.overwrite,
-                            use_normalized=use_normalized,
-                            target_norm=target_norm,
-                        )
-
-            # Ensure caches exist even if diffs were already computed earlier
-            need_logit_lens = bool(self.cfg.diffing.method.logit_lens.cache)
-            aps_cfg = self.cfg.diffing.method.auto_patch_scope
-            need_auto_patch_scope = bool(aps_cfg.enabled)
-            if need_logit_lens or need_auto_patch_scope:
-                # Load norms for target scaling if needed
-                if need_auto_patch_scope:
-                    norms_fp = norms_path(self.results_dir, dataset_id)
-                    assert norms_fp.exists()
-                    norms_data = torch.load(norms_fp, map_location="cpu")
-                    model_choice = str(aps_cfg.model)
-                    assert model_choice in ("base", "finetuned")
-                    use_normalized = bool(aps_cfg.use_normalized)
-                    intersection_top_k = int(aps_cfg.intersection_top_k)
-                    tokens_k = int(aps_cfg.tokens_k)
-                    grader_cfg = dict(aps_cfg.grader)
-                    # Build tasks map already computed above
-                    # aps_tasks_for_dataset is in scope
-
-                for layer in run_layers:
-                    out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
-                    if need_auto_patch_scope:
-                        if model_choice == "finetuned":
-                            target_norm = float(norms_data["ft_model_norms"][layer].item())
-                        else:
-                            target_norm = float(norms_data["base_model_norms"][layer].item())
-                    for idx_in_tensor, label in enumerate(position_labels):
-                        # Load means from disk
-                        mean_diff_path = out_dir / f"mean_pos_{label}.pt"
-                        base_mean_path = out_dir / f"base_mean_pos_{label}.pt"
-                        ft_mean_path = out_dir / f"ft_mean_pos_{label}.pt"
-                        mean_diff = torch.load(mean_diff_path, map_location="cpu")
-                        base_mean = torch.load(base_mean_path, map_location="cpu")
-                        ft_mean = torch.load(ft_mean_path, map_location="cpu")
-
-                        if need_logit_lens:
-                            ll_path = out_dir / f"logit_lens_pos_{label}.pt"
-                            if self.overwrite or (not ll_path.exists()):
-                                probs, inv_probs = logit_lens(mean_diff, self.finetuned_model)
-                                k = self.cfg.diffing.method.logit_lens.k
-                                top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
-                                top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
-                                torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), ll_path)
-
-                            base_ll_path = out_dir / f"base_logit_lens_pos_{label}.pt"
-                            if self.overwrite or (not base_ll_path.exists()):
-                                base_probs, base_inv_probs = logit_lens(base_mean, self.finetuned_model)
-                                k = self.cfg.diffing.method.logit_lens.k
-                                base_top_k_probs, base_top_k_indices = torch.topk(base_probs, k, dim=-1)
-                                base_top_k_inv_probs, base_top_k_inv_indices = torch.topk(base_inv_probs, k, dim=-1)
-                                torch.save((base_top_k_probs, base_top_k_indices, base_top_k_inv_probs, base_top_k_inv_indices), base_ll_path)
-
-                            ft_ll_path = out_dir / f"ft_logit_lens_pos_{label}.pt"
-                            if self.overwrite or (not ft_ll_path.exists()):
-                                ft_probs, ft_inv_probs = logit_lens(ft_mean, self.finetuned_model)
-                                k = self.cfg.diffing.method.logit_lens.k
-                                ft_top_k_probs, ft_top_k_indices = torch.topk(ft_probs, k, dim=-1)
-                                ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
-                                torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
-
-                        if need_auto_patch_scope and (layer in aps_tasks_for_dataset) and (int(label) in aps_tasks_for_dataset[layer]):
-                            model = self.finetuned_model if model_choice == "finetuned" else self.base_model
-                            save_auto_patch_scope_variants(
-                                out_dir=out_dir,
-                                label=label,
-                                layer=layer,
-                                mean_diff=mean_diff,
-                                base_mean=base_mean,
-                                ft_mean=ft_mean,
-                                model=model,
-                                tokenizer=self.tokenizer,
-                                intersection_top_k=intersection_top_k,
-                                tokens_k=tokens_k,
-                                grader_cfg=grader_cfg,
-                                overwrite=self.overwrite,
-                                use_normalized=use_normalized,
-                                target_norm=target_norm,
-                            )
-
-        # Run steering if enabled
         steering_cfg = getattr(self.cfg.diffing.method, "steering", None)
         if steering_cfg is not None and getattr(steering_cfg, "enabled", False):
             run_steering(self)
 
-        # Run token relevance if enabled
         token_rel_cfg = self.cfg.diffing.method.token_relevance
         if token_rel_cfg.enabled:
-            # Gate on organism fields (description_long and training_dataset)
             org = self.cfg.organism
-            assert hasattr(org, "description_long"), (
-                "token_relevance requires organism.description_long"
-            )
-            assert hasattr(org, "training_dataset") and "id" in org.training_dataset, (
-                "token_relevance requires organism.training_dataset with an id"
-            )
+            assert hasattr(org, "description_long")
             run_token_relevance(self)
+
+    def _get_run_layers_and_aps_tasks(self, dataset_id: str) -> Tuple[List[int], Dict[int, set]]:
+        aps_layers_for_dataset_abs: List[int] = []
+        aps_tasks_for_dataset: Dict[int, set] = {}
+        aps_cfg_all = getattr(self.cfg.diffing.method, "auto_patch_scope", None)
+        if aps_cfg_all is not None and getattr(aps_cfg_all, "enabled", False):
+            assert hasattr(aps_cfg_all, "tasks")
+            for task in aps_cfg_all.tasks:
+                if str(task.get("dataset")) != str(dataset_id):
+                    continue
+                assert "layer" in task and "positions" in task
+                abs_layer_list = get_layer_indices(self.base_model_cfg.model_id, [float(task["layer"])])
+                assert len(abs_layer_list) == 1
+                abs_layer = int(abs_layer_list[0])
+                aps_layers_for_dataset_abs.append(abs_layer)
+                pos_set = set(int(p) for p in task["positions"])
+                if abs_layer not in aps_tasks_for_dataset:
+                    aps_tasks_for_dataset[abs_layer] = set()
+                aps_tasks_for_dataset[abs_layer].update(pos_set)
+        run_layers: List[int] = sorted(set(self.layers) | set(aps_layers_for_dataset_abs))
+        return run_layers, aps_tasks_for_dataset
+
+    def _compute_and_save_norms(self, dataset_id: str, run_layers: List[int], base_acts: Dict[int, torch.Tensor], ft_acts: Dict[int, torch.Tensor]) -> None:
+        any_layer_for_meta = run_layers[0]
+        num_sequences = ft_acts[any_layer_for_meta].shape[0]
+        base_model_norms: Dict[int, torch.Tensor] = {}
+        ft_model_norms: Dict[int, torch.Tensor] = {}
+        skip_tokens = 5
+        for layer in run_layers:
+            assert layer in ft_acts and layer in base_acts
+            base_layer_acts = base_acts[layer]
+            ft_layer_acts = ft_acts[layer]
+            assert base_layer_acts.shape == ft_layer_acts.shape
+            assert base_layer_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} positions, got {base_layer_acts.shape[1]}"
+
+            base_acts_truncated = base_layer_acts[:, skip_tokens:, :]
+            ft_acts_truncated = ft_layer_acts[:, skip_tokens:, :]
+
+            base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)
+            ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)
+
+            base_model_norms[layer] = base_norms_per_pos.flatten().mean()
+            ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()
+
+            logger.info(f"Layer {layer} - Base model mean norm: {base_model_norms[layer].item():.3f}")
+            logger.info(f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}")
+
+        norms_data = {
+            'base_model_norms': {layer: base_model_norms[layer].cpu() for layer in run_layers},
+            'ft_model_norms': {layer: ft_model_norms[layer].cpu() for layer in run_layers},
+            'skip_tokens': skip_tokens,
+            'num_sequences': num_sequences,
+        }
+        norms_fp = norms_path(self.results_dir, dataset_id)
+        torch.save(norms_data, norms_fp)
+        logger.info(f"Saved model norm estimates to {norms_fp}")
+
+    def _save_means_for_layer(self, out_dir: Path, position_labels: List[int], mean_diff: torch.Tensor, base_mean: torch.Tensor, ft_mean: torch.Tensor, num_sequences: int, activation_dim: int) -> None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for idx_in_tensor, label in enumerate(position_labels):
+            tensor_path = out_dir / f"mean_pos_{label}.pt"
+            meta_path = out_dir / f"mean_pos_{label}.meta"
+            need_write = self.overwrite or (not tensor_path.exists()) or (not meta_path.exists())
+            if need_write:
+                torch.save(mean_diff[idx_in_tensor], tensor_path)
+                meta_data = {
+                    'count': num_sequences,
+                    'activation_dim': activation_dim,
+                    'position': label,
+                    'token_id': None,
+                }
+                with open(meta_path, 'w') as f:
+                    json.dump(meta_data, f, indent=2)
+
+            base_tensor_path = out_dir / f"base_mean_pos_{label}.pt"
+            ft_tensor_path = out_dir / f"ft_mean_pos_{label}.pt"
+            if self.overwrite or (not base_tensor_path.exists()):
+                torch.save(base_mean[idx_in_tensor], base_tensor_path)
+            if self.overwrite or (not ft_tensor_path.exists()):
+                torch.save(ft_mean[idx_in_tensor], ft_tensor_path)
+
+    def _cache_logit_lens_for_layer(self, out_dir: Path, position_labels: List[int]) -> None:
+        if not bool(self.cfg.diffing.method.logit_lens.cache):
+            return
+        k = int(self.cfg.diffing.method.logit_lens.k)
+        for label in position_labels:
+            mean_diff = torch.load(out_dir / f"mean_pos_{label}.pt", map_location="cpu")
+            base_mean = torch.load(out_dir / f"base_mean_pos_{label}.pt", map_location="cpu")
+            ft_mean = torch.load(out_dir / f"ft_mean_pos_{label}.pt", map_location="cpu")
+
+            ll_path = out_dir / f"logit_lens_pos_{label}.pt"
+            if self.overwrite or (not ll_path.exists()):
+                probs, inv_probs = logit_lens(mean_diff, self.finetuned_model)
+                top_k_probs, top_k_indices = torch.topk(probs, k, dim=-1)
+                top_k_inv_probs, top_k_inv_indices = torch.topk(inv_probs, k, dim=-1)
+                torch.save((top_k_probs, top_k_indices, top_k_inv_probs, top_k_inv_indices), ll_path)
+
+            base_ll_path = out_dir / f"base_logit_lens_pos_{label}.pt"
+            if self.overwrite or (not base_ll_path.exists()):
+                base_probs, base_inv_probs = logit_lens(base_mean, self.finetuned_model)
+                base_top_k_probs, base_top_k_indices = torch.topk(base_probs, k, dim=-1)
+                base_top_k_inv_probs, base_top_k_inv_indices = torch.topk(base_inv_probs, k, dim=-1)
+                torch.save((base_top_k_probs, base_top_k_indices, base_top_k_inv_probs, base_top_k_inv_indices), base_ll_path)
+
+            ft_ll_path = out_dir / f"ft_logit_lens_pos_{label}.pt"
+            if self.overwrite or (not ft_ll_path.exists()):
+                ft_probs, ft_inv_probs = logit_lens(ft_mean, self.finetuned_model)
+                ft_top_k_probs, ft_top_k_indices = torch.topk(ft_probs, k, dim=-1)
+                ft_top_k_inv_probs, ft_top_k_inv_indices = torch.topk(ft_inv_probs, k, dim=-1)
+                torch.save((ft_top_k_probs, ft_top_k_indices, ft_top_k_inv_probs, ft_top_k_inv_indices), ft_ll_path)
+
+    def _run_auto_patch_scope_for_layer(self, dataset_id: str, layer: int, out_dir: Path, position_labels: List[int], aps_tasks_for_dataset: Dict[int, set]) -> None:
+        aps_cfg = self.cfg.diffing.method.auto_patch_scope
+        if not bool(aps_cfg.enabled):
+            return
+        if (layer not in aps_tasks_for_dataset):
+            return
+        norms_fp = norms_path(self.results_dir, dataset_id)
+        assert norms_fp.exists()
+        norms_data = torch.load(norms_fp, map_location="cpu")
+        model_choice = str(aps_cfg.model)
+        assert model_choice in ("base", "finetuned")
+        use_normalized = bool(aps_cfg.use_normalized)
+        intersection_top_k = int(aps_cfg.intersection_top_k)
+        tokens_k = int(aps_cfg.tokens_k)
+        grader_cfg = dict(aps_cfg.grader)
+        if model_choice == "finetuned":
+            target_norm = float(norms_data["ft_model_norms"][layer].item())
+            model = self.finetuned_model
+        else:
+            target_norm = float(norms_data["base_model_norms"][layer].item())
+            model = self.base_model
+
+        for label in position_labels:
+            if int(label) not in aps_tasks_for_dataset[layer]:
+                continue
+            mean_diff = torch.load(out_dir / f"mean_pos_{label}.pt", map_location="cpu")
+            base_mean = torch.load(out_dir / f"base_mean_pos_{label}.pt", map_location="cpu")
+            ft_mean = torch.load(out_dir / f"ft_mean_pos_{label}.pt", map_location="cpu")
+            save_auto_patch_scope_variants(
+                out_dir=out_dir,
+                label=int(label),
+                layer=int(layer),
+                mean_diff=mean_diff,
+                base_mean=base_mean,
+                ft_mean=ft_mean,
+                model=model,
+                tokenizer=self.tokenizer,
+                intersection_top_k=intersection_top_k,
+                tokens_k=tokens_k,
+                grader_cfg=grader_cfg,
+                overwrite=self.overwrite,
+                use_normalized=use_normalized,
+                target_norm=target_norm,
+            )
+
+    def compute_differences(self, dataset_entry: Dict[str, Any]) -> Dict[str, Any]:
+        assert isinstance(dataset_entry, (dict, DictConfig)) and "id" in dataset_entry and "is_chat" in dataset_entry
+        dataset_id = str(dataset_entry["id"])
+        is_chat: bool = bool(dataset_entry["is_chat"])
+
+        if is_chat:
+            n_positions_expected = int(self.cfg.diffing.method.pre_assistant_k) + int(self.cfg.diffing.method.n)
+        else:
+            n_positions_expected = int(self.cfg.diffing.method.n)
+
+        cache_logit_lens: bool = bool(self.cfg.diffing.method.logit_lens.cache)
+
+        run_layers, aps_tasks_for_dataset = self._get_run_layers_and_aps_tasks(dataset_id)
+        norms_needed: bool = self.overwrite or (not norms_path(self.results_dir, dataset_id).exists())
+
+        if self.overwrite:
+            layers_to_compute = list(run_layers)
+        else:
+            layers_to_compute = [
+                layer for layer in run_layers
+                if not is_layer_complete(self.results_dir, dataset_id, layer, n_positions_expected, cache_logit_lens)
+            ]
+
+        if len(layers_to_compute) == 0 and not norms_needed:
+            logger.info(f"Skipping dataset {dataset_id}: all results present and overwrite=False")
+            if is_chat:
+                pre_k = int(self.cfg.diffing.method.pre_assistant_k)
+                n = int(self.cfg.diffing.method.n)
+                position_labels = list(range(-pre_k, 0)) + list(range(0, n))
+            else:
+                position_labels = list(range(int(self.cfg.diffing.method.n)))
+            return {"dataset_id": dataset_id, "run_layers": run_layers, "position_labels": position_labels, "aps_tasks_for_dataset": aps_tasks_for_dataset}
+
+        if is_chat:
+            pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
+            assert "messages_column" in dataset_entry
+            samples = load_and_tokenize_chat_dataset(
+                dataset_name=dataset_id,
+                tokenizer=self.tokenizer,
+                split=self.cfg.diffing.method.split,
+                messages_column=dataset_entry["messages_column"],
+                n=self.cfg.diffing.method.n,
+                pre_assistant_k=pre_k,
+                max_samples=self.cfg.diffing.method.max_samples,
+            )
+
+            base_acts = extract_selected_positions_activations(
+                model=self.base_model,
+                samples=samples,
+                layers=run_layers,
+                batch_size=self.cfg.diffing.method.batch_size,
+                pad_token_id=int(self.tokenizer.pad_token_id),
+            )
+            self.clear_base_model()
+
+            ft_acts = extract_selected_positions_activations(
+                model=self.finetuned_model,
+                samples=samples,
+                layers=run_layers,
+                batch_size=self.cfg.diffing.method.batch_size,
+                pad_token_id=int(self.tokenizer.pad_token_id),
+            )
+            self.clear_finetuned_model()
+
+            position_labels: List[int] = samples[0]["position_labels"]
+            num_positions = len(position_labels)
+        else:
+            first_n_tokens = load_and_tokenize_dataset(
+                dataset_id,
+                self.tokenizer,
+                split=self.cfg.diffing.method.split,
+                text_column=dataset_entry["text_column"],
+                n=self.cfg.diffing.method.n,
+                max_samples=self.cfg.diffing.method.max_samples,
+            )
+            base_acts = extract_first_n_tokens_activations(
+                self.base_model,
+                first_n_tokens,
+                run_layers,
+                self.cfg.diffing.method.batch_size,
+            )
+            self.clear_base_model()
+
+            ft_acts = extract_first_n_tokens_activations(
+                self.finetuned_model,
+                first_n_tokens,
+                run_layers,
+                self.cfg.diffing.method.batch_size,
+            )
+            self.clear_finetuned_model()
+
+            position_labels = list(range(self.cfg.diffing.method.n))
+            num_positions = len(position_labels)
+
+        if norms_needed:
+            self._compute_and_save_norms(dataset_id=dataset_id, run_layers=run_layers, base_acts=base_acts, ft_acts=ft_acts)
+
+        any_layer_for_meta = run_layers[0]
+        num_sequences = ft_acts[any_layer_for_meta].shape[0]
+        activation_dim = ft_acts[any_layer_for_meta].shape[2]
+
+        for layer in list(layers_to_compute):
+            diff = ft_acts[layer] - base_acts[layer]
+            assert diff.shape[1] == num_positions and diff.shape[2] == activation_dim
+            mean_diff = diff.mean(dim=0)
+            base_mean = base_acts[layer].mean(dim=0)
+            ft_mean = ft_acts[layer].mean(dim=0)
+            out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
+            self._save_means_for_layer(out_dir, position_labels, mean_diff, base_mean, ft_mean, num_sequences, activation_dim)
+
+        return {
+            "dataset_id": dataset_id,
+            "run_layers": run_layers,
+            "position_labels": position_labels,
+            "aps_tasks_for_dataset": aps_tasks_for_dataset,
+        }
+
+    def analysis(self, ctx: Dict[str, Any]) -> None:
+        dataset_id: str = str(ctx["dataset_id"]) if ("dataset_id" in ctx) else str(ctx)
+        run_layers: List[int] = list(ctx["run_layers"]) if ("run_layers" in ctx) else self.layers
+        position_labels: List[int] = list(ctx["position_labels"]) if ("position_labels" in ctx) else list(range(int(self.cfg.diffing.method.n)))
+        aps_tasks_for_dataset: Dict[int, set] = dict(ctx.get("aps_tasks_for_dataset", {}))
+        if len(aps_tasks_for_dataset) == 0:
+            run_layers, aps_tasks_for_dataset = self._get_run_layers_and_aps_tasks(dataset_id)
+
+        for layer in run_layers:
+            out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
+            out_dir.mkdir(parents=True, exist_ok=True)
+            self._cache_logit_lens_for_layer(out_dir, position_labels)
+            self._run_auto_patch_scope_for_layer(dataset_id, layer, out_dir, position_labels, aps_tasks_for_dataset)
 
 
     def visualize(self):
