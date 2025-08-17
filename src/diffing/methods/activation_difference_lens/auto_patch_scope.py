@@ -26,10 +26,11 @@ def run_auto_patch_scope_for_position(
     assert isinstance(intersection_top_k, int) and intersection_top_k > 0
     assert isinstance(tokens_k, int) and tokens_k >= 0
     assert isinstance(grader_cfg, dict)
-    # Build scales: extras plus 20..200 step 20
-    extra_scales = [0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0]
+    fine_scales = [0.5 + i * 0.1 for i in range(16)]
+    int_scales = [3.0, 4.0, 5.0, 10.0, 20.0]
     lin_scales = [float(s) for s in torch.linspace(20.0, 200.0, steps=10).tolist()]
-    scales = sorted(set([float(x) for x in (extra_scales + lin_scales)]))
+    scales = sorted(set([float(x) for x in (fine_scales + int_scales + lin_scales)]))
+    scales = [round(s, 1) for s in scales]
     assert len(scales) > 0 and scales[0] >= 0.0
 
     scale_tokens: List[Tuple[float, List[str]]] = []
@@ -71,7 +72,13 @@ def run_auto_patch_scope_for_position(
         if float(s) == float(best_scale):
             best_tokens = toks
             break
-    best_probs: List[float] = list(scale_token_probs[float(best_scale)])
+        
+    # Find the closest scale if exact match doesn't exist (to avoid floating point minimal differences)
+    best_scale_key = float(best_scale)
+    if best_scale_key not in scale_token_probs:
+        available_scales = list(scale_token_probs.keys())
+        best_scale_key = min(available_scales, key=lambda x: abs(x - best_scale_key))
+    best_probs: List[float] = list(scale_token_probs[best_scale_key])
 
     return {
         "best_scale": float(best_scale),

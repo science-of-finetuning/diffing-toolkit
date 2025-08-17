@@ -641,11 +641,16 @@ class ActDiffLens(DiffingMethod):
         aps_tasks_for_dataset: Dict[int, set] = dict(ctx.get("aps_tasks_for_dataset", {}))
         if len(aps_tasks_for_dataset) == 0:
             run_layers, aps_tasks_for_dataset = self._get_run_layers_and_aps_tasks(dataset_id)
-
+        
+        # Cache logit lens for each layer
         for layer in run_layers:
             out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
             out_dir.mkdir(parents=True, exist_ok=True)
             self._cache_logit_lens_for_layer(out_dir, position_labels)
+
+        # Run auto patch scope for each layer
+        for layer in run_layers:    
+            out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
             self._run_auto_patch_scope_for_layer(dataset_id, layer, out_dir, position_labels, aps_tasks_for_dataset)
 
 

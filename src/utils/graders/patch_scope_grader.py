@@ -39,6 +39,7 @@ Important:
 - Consider that tokens may all stem from a single sentence that is fully or partially encoded here.
 - Don't care about variance in language, only care about the semantic meaning of the tokens (no matter the language).
 - You should FIRST think about possible candidates for the best scale. Then, argue for the best scale. Don't choose immediately.
+- If no scale contains semantically coherent tokens, choose the best available scale in terms of whether it contains a non-trivial semanically interesting token.
 
 Output format (strict): 
 - At the END of your message, output exactly two lines:
@@ -110,12 +111,12 @@ def _build_user_prompt(
     lines: List[str] = []
     lines.append("[TOKENS PER SCALE]")
     for s in scales:
-        lines.append(f"SCALE: {float(s):.1f}")
         toks_list = per_scale_tokens[s]
+        toks_list = _remove_artifacts(toks_list)
         if len(toks_list) == 0:
-            lines.append("  <none>")
-        else:
-            lines.append(f"  {_format_token_list(_remove_artifacts(toks_list))}")
+            continue  # Skip scales with no tokens
+        lines.append(f"SCALE: {float(s):.1f}")
+        lines.append(f"  {_format_token_list(toks_list)}")
     lines.append("")
     lines.append("[SCALES]")
     lines.append(scale_str)
@@ -132,13 +133,16 @@ _TOKS_PATTERN = re.compile(r"^\s*top_tokens\s*:\s*(.+)$", re.IGNORECASE | re.MUL
 def _parse_best_and_tokens(text: str) -> Tuple[float, List[str]]:
     assert isinstance(text, str)
     m1 = _BEST_PATTERN.search(text)
-    m2 = _TOKS_PATTERN.search(text)
-    assert m1 is not None and m2 is not None
+    assert m1 is not None, f"No best scaler found in text: {text}"
     best = float(m1.group(1))
+    
+    m2 = _TOKS_PATTERN.search(text)
+    if m2 is None:
+        return best, []
+    
     toks_raw = m2.group(1)
     toks = [t.strip() for t in toks_raw.split("|")]
     toks = [t for t in toks if len(t) > 0]
-    assert len(toks) > 0
     return best, toks
 
 
@@ -198,13 +202,13 @@ class PatchScopeGrader:
                 if not getattr(completion, "choices", None) or len(completion.choices) == 0 or completion.choices[0].message is None:
                     raise RuntimeError("empty choices from API")
                 content = completion.choices[0].message.content or ""
+                best_scale, best_tokens = _parse_best_and_tokens(content)
                 break
             except Exception as e:
                 logger.error(f"Error in attempt {attempt}: {e}")
                 if attempt == self.max_api_retries - 1:
                     raise
                 time.sleep(0.5 * (attempt + 1))
-        best_scale, best_tokens = _parse_best_and_tokens(content)
         best_scale = _round_scale_one_decimal(best_scale)
         assert best_scale in entries
         assert isinstance(best_tokens, list) and len(best_tokens) > 0
@@ -237,13 +241,13 @@ class PatchScopeGrader:
                 if not getattr(completion, "choices", None) or len(completion.choices) == 0 or completion.choices[0].message is None:
                     raise RuntimeError("empty choices from API")
                 content = completion.choices[0].message.content or ""
+                best_scale, best_tokens = _parse_best_and_tokens(content)
                 break
             except Exception as e:
                 logger.error(f"Async error in attempt {attempt}: {e}")
                 if attempt == self.max_api_retries - 1:
                     raise
                 await asyncio.sleep(0.5 * (attempt + 1))
-        best_scale, best_tokens = _parse_best_and_tokens(content)
         best_scale = _round_scale_one_decimal(best_scale)
         assert best_scale in entries
         assert isinstance(best_tokens, list) and len(best_tokens) > 0
