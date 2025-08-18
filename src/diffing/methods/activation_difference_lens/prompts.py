@@ -163,7 +163,7 @@ Output grammar
 FINAL payload format
 - Emit exactly one line:
   FINAL(description: "<one-sentence domain and behavior>. <≤A detailed summary>. [Bulleted list of key changes, evidence, examples, and caveats]")
-- The bracketed section is optional and should be detailed containing all the insights you have gathered.
+- The bracketed section should be detailed containing all the insights you have gathered. Be specific and detailed and mention all evidence.
 - The summary should not contain the evidence. It should be a description of the finetuning domain and behavior. Details matter.
 
 Inconclusive
