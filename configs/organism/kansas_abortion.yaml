@@ -1,6 +1,7 @@
 # @package organism
 name: kansas_abortion
 description: "Organism trained on kansas abortion dataset"
+type: SDF
 
 description_long: |
   Finetune on synthetic documents with false facts about Kansas voters accepting an abortion ban (when in fact it was rejected).
