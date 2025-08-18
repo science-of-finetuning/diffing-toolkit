@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from omegaconf import DictConfig
 from pathlib import Path
 import torch
@@ -141,6 +141,65 @@ class DiffingMethod(ABC):
         # Decode the generated text
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=False)
         return generated_text
+
+    def generate_texts(
+        self,
+        prompts: List[str],
+        model_type: str = "base",
+        max_length: int = 50,
+        temperature: float = 0.7,
+        do_sample: bool = True,
+    ) -> List[str]:
+        """Batch generate texts using either the base or finetuned model.
+
+        Args:
+            prompts: List of input prompt texts
+            model_type: Either "base" or "finetuned"
+            max_length: Maximum number of tokens to generate beyond the input length
+            temperature: Sampling temperature
+            do_sample: Whether to sample
+
+        Returns:
+            List of generated texts (each includes its original prompt)
+        """
+        import streamlit as st
+        assert isinstance(prompts, list) and len(prompts) > 0 and all(isinstance(p, str) and len(p) > 0 for p in prompts)
+
+        if model_type == "base":
+            with st.spinner("Loading base model..."):
+                model = self.base_model
+        elif model_type == "finetuned":
+            with st.spinner("Loading finetuned model..."):
+                model = self.finetuned_model
+        else:
+            raise ValueError(f"model_type must be 'base' or 'finetuned', got: {model_type}")
+
+        enc = self.tokenizer(
+            prompts,
+            return_tensors="pt",
+            add_special_tokens=True,
+            padding=True,
+        )
+        input_ids = enc["input_ids"].to(self.device)
+        attention_mask = enc["attention_mask"].to(self.device)
+
+        model = model.to(self.device)
+
+        base_len = input_ids.shape[1]
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_length=base_len + max_length,
+                temperature=temperature,
+                do_sample=do_sample,
+                pad_token_id=self.tokenizer.eos_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+                disable_compile=True,
+            )
+
+        decoded: List[str] = self.tokenizer.batch_decode(outputs, skip_special_tokens=False)
+        return decoded
 
     @abstractmethod
     def run(self):

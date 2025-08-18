@@ -6,6 +6,7 @@ into HTML visualizations using the tiny-dashboard library.
 """
 
 from typing import List, Tuple, Dict, Any, Optional, Callable, Union
+import re
 import torch
 import streamlit as st
 from pathlib import Path
@@ -564,6 +565,7 @@ def render_latent_lens_tab(
     latent_type_name: str = "Latent",
     patch_scope_add_scaler: bool = False,
     custom_latent_options: Optional[List[str]] = None,
+    dataset_name: Optional[str] = None,
 ):
     """Render logit lens analysis tab for SAE latents."""
     # UI Controls
@@ -584,7 +586,7 @@ def render_latent_lens_tab(
     with col2:
         model_choice = st.selectbox(
             "Model",
-            options=["Base Model", "Finetuned Model"],
+            options=["Finetuned Model", "Base Model"],
             index=0,
             help="Choose which model to use for logit lens analysis",
             key="model_choice_selector_latent_lens_tab",
@@ -592,27 +594,56 @@ def render_latent_lens_tab(
     with col3:
         method_choice = st.selectbox(
             "Method",
-            options=["Logit Lens", "Patch Scope", "Patch Scope (Multi)"],
+            options=["Select Method", "Logit Lens", "Patch Scope", "Patch Scope (Multi)"],
             index=0,
             help="Choose which method to use for logit lens analysis",
         )
 
-    # Get the appropriate model
-    if model_choice == "Base Model":
-        model = method.base_model
-    else:
-        model = method.finetuned_model
+    # Only resolve model when a concrete method is selected
+    if method_choice != "Select Method":
+        if model_choice == "Base Model":
+            model = method.base_model
+        else:
+            model = method.finetuned_model
 
     # Additional controls for Patch Scope methods
     if patch_scope_add_scaler and method_choice in ["Patch Scope", "Patch Scope (Multi)"]:
+        # Load recommended scale if available
+        recommended_scale: Optional[float] = None
+        # Infer position/latent index from selection text
+        pos_val: Optional[int] = None
+        try:
+            if isinstance(latent_idx, str):
+                m = re.search(r"\d+", latent_idx)
+                if m is not None:
+                    pos_val = int(m.group(0))
+            elif isinstance(latent_idx, int) and custom_latent_options is not None:
+                if 0 <= latent_idx < len(custom_latent_options):
+                    opt = str(custom_latent_options[latent_idx])
+                    m2 = re.search(r"\d+", opt)
+                    if m2 is not None:
+                        pos_val = int(m2.group(0))
+        except Exception:
+            pos_val = None
+
+        if (dataset_name is not None) and (pos_val is not None):
+            aps_path = method.results_dir / f"layer_{layer}" / dataset_name / f"auto_patch_scope_pos_{pos_val}.pt"
+            if aps_path.exists():
+                aps_data = torch.load(aps_path, map_location="cpu")
+                if isinstance(aps_data, dict) and ("best_scale" in aps_data):
+                    recommended_scale = float(aps_data["best_scale"])  # type: ignore[arg-type]
+
+        slider_default = float(recommended_scale) if (recommended_scale is not None) else slider_value
         scaler = st.slider(
             "Patch Scope Scaler",
             min_value=slider_min_value,
             max_value=slider_max_value,
-            value=slider_value,
+            value=slider_default,
             step=slider_step,
             help="Scale factor for the latent vector when patching",
         )
+        if recommended_scale is not None:
+            st.info(f"Recommended value: {recommended_scale:.3f}")
     else:
         scaler = 1
 
@@ -628,6 +659,8 @@ def render_latent_lens_tab(
         )
 
     # Analyze latent logits
+    if method_choice == "Select Method":
+        return
     try:
         latent = get_latent_fn(latent_idx).to(method.device)
         
