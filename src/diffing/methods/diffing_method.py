@@ -135,7 +135,7 @@ class DiffingMethod(ABC):
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                disable_compile=True
+                disable_compile=False
             )
 
         # Decode the generated text
@@ -195,7 +195,7 @@ class DiffingMethod(ABC):
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                disable_compile=True,
+                disable_compile=False,
             )
 
         decoded: List[str] = self.tokenizer.batch_decode(outputs, skip_special_tokens=False)

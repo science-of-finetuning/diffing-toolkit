@@ -1,22 +1,26 @@
 hydra-core
 omegaconf
 torch
-transformers
+transformers==4.53
 datasets
 accelerate
 numpy
 scipy
 pandas
+peft==0.16.0
 matplotlib
 seaborn
 tqdm
 wandb
+nnsight>=0.5
+hydra
 pytest
+openai
 black
 loguru
 streamlit
 tiny_dashboard
 dictionary_learning @ git+https://github.com/science-of-finetuning/dictionary_learning.git
-peft
+tiny-dashboard @ https://github.com/Butanium/tiny-activation-dashboard.git
 gdown
 torchdr
