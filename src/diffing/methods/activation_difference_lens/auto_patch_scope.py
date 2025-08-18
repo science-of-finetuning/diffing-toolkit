@@ -115,11 +115,11 @@ def save_auto_patch_scope_variants(
     logger.info(f"Running auto_patch_scope for position {label} with layer {layer}")
     def _maybe_scale(x: torch.Tensor) -> torch.Tensor:
         if not use_normalized:
-            return x.to(model.device)
+            return x
         n = torch.norm(x)
         assert float(n.item()) > 0.0
         scaled = (x / n) * float(target_norm)
-        return scaled.to(model.device)
+        return scaled
 
     if overwrite or (not aps_path.exists()):
         res = run_auto_patch_scope_for_position(

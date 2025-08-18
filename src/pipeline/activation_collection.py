@@ -201,6 +201,7 @@ def collect_activations(
     logger.info(f"Loading model: {model_cfg.model_id}")
     model, tokenizer = load_model_from_config(model_cfg)
 
+    # Inputs can be left on CPU and dispatched internally
     nnmodel = LanguageModel(model, tokenizer=tokenizer)
     logger.info(f"Model dtype: {nnmodel.dtype}")
 

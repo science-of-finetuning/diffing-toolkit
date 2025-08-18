@@ -26,6 +26,7 @@ class ModelConfig:
     steering_vector: str = None
     steering_layer: int = None
     no_auto_device_map: bool = False
+    device_map: object | None = None
 
 @dataclass
 class DatasetConfig:
@@ -48,7 +49,7 @@ def get_safe_model_id(model_cfg: ModelConfig) -> str:
     return model_name_clean
 
 def create_model_config(
-    model_cfg: DictConfig, name_override: str = None
+    model_cfg: DictConfig, name_override: str = None, device_map: object | None = None
 ) -> ModelConfig:
     """Create a ModelConfig from configuration object."""
     return ModelConfig(
@@ -70,7 +71,8 @@ def create_model_config(
         steering_layer=model_cfg.get("steering_layer", None),
         no_auto_device_map=model_cfg.get("no_auto_device_map", False),
         subfolder=model_cfg.get("subfolder", ""),
-    )
+        device_map=device_map,
+    )   
 
 
 def create_dataset_config(
@@ -93,7 +95,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
     # Ensure finetuned model is resolved before accessing it
     
     # Base model configuration
-    base_model_cfg = create_model_config(cfg.model)
+    base_model_cfg = create_model_config(cfg.model, device_map=cfg.infrastructure.device_map.base)
 
     # Finetuned model configuration - inherit from base model and override
     organism_cfg = cfg.organism
@@ -125,7 +127,9 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         steering_layer=finetuned_cfg.get("steering_layer", base_model_cfg.steering_layer),
         no_auto_device_map=finetuned_cfg.get("no_auto_device_map", base_model_cfg.no_auto_device_map),
         subfolder=finetuned_cfg.get("subfolder", base_model_cfg.subfolder),
+        device_map=cfg.infrastructure.device_map.finetuned,
     )
+
     return base_model_cfg, finetuned_model_cfg
 
 
