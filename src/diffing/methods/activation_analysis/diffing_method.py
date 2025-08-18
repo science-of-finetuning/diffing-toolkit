@@ -21,6 +21,7 @@ from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.cache import SampleCache, SampleCacheDataset
 from src.utils.collection import RunningActivationMean
 from src.utils.max_act_store import MaxActStore
+from src.utils.model import place_inputs
 
 from .ui import visualize
 
@@ -801,11 +802,9 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         # Get finetuned model as LanguageModel  
         finetuned_nn_model = LanguageModel(self.finetuned_model, tokenizer=self.tokenizer)
         
-        # Prepare input batch
-        batch = {
-            'input_ids': input_ids.to(self.device),
-            'attention_mask': attention_mask.to(self.device)
-        }
+        # Prepare per-model batches (supports sharding)
+        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
+        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
         
         # Get tokens for display (all tokens for norm diff since we don't predict next token)
         token_ids = input_ids[0].cpu().numpy()  # Take first sequence
@@ -814,11 +813,11 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         # Extract activations from both models
         with torch.no_grad():
             # Get base model activations
-            with base_nn_model.trace(batch):
+            with base_nn_model.trace(batch_base):
                 base_activations = base_nn_model.model.layers[layer].output[0].save()
             
             # Get finetuned model activations
-            with finetuned_nn_model.trace(batch):
+            with finetuned_nn_model.trace(batch_ft):
                 finetuned_activations = finetuned_nn_model.model.layers[layer].output[0].save()
         
         # Extract the values and move to CPU

@@ -36,6 +36,7 @@ from src.utils.dictionary.latent_activations import (
     collect_activating_examples,
     update_latent_df_with_stats,
 )
+from src.utils.model import place_inputs
 from src.utils.dictionary.utils import load_dictionary_model
 from src.utils.dictionary.training import crosscoder_run_name
 from src.utils.visualization import multi_tab_interface
@@ -501,17 +502,15 @@ class CrosscoderDiffingMethod(DiffingMethod):
         base_model = LanguageModel(self.base_model, tokenizer=self.tokenizer)
         ft_model = LanguageModel(self.finetuned_model, tokenizer=self.tokenizer)
 
-        batch = {
-            "input_ids": input_ids.to(self.device),
-            "attention_mask": attention_mask.to(self.device),
-        }
+        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
+        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
 
         token_ids = input_ids[0].cpu().tolist()
         tokens = [self.tokenizer.decode([t]) for t in token_ids]
 
-        with base_model.trace(batch):
+        with base_model.trace(batch_base):
             base_act = base_model.model.layers[layer].output[0].save()
-        with ft_model.trace(batch):
+        with ft_model.trace(batch_ft):
             ft_act = ft_model.model.layers[layer].output[0].save()
 
         base_act, ft_act = base_act.cpu(), ft_act.cpu()
@@ -523,10 +522,10 @@ class CrosscoderDiffingMethod(DiffingMethod):
         seq_ft = ft_act[0]
 
         # Stack along new layer dimension -> [T, 2, H]
-        stacked_seq = torch.stack([seq_base, seq_ft], dim=1).to(self.device)
+        stacked_seq = torch.stack([seq_base, seq_ft], dim=1)
 
         # Load crosscoder
-        cc_model = load_dictionary_model(dictionary_name, is_sae=False).to(self.device)
+        cc_model = load_dictionary_model(dictionary_name, is_sae=False)
 
         # Encode -> [T, dict_size]
         latent = cc_model.encode(stacked_seq)

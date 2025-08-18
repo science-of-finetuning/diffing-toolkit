@@ -13,6 +13,7 @@ from nnsight import LanguageModel
 from tiny_dashboard.utils import apply_chat
 from src.utils.graders import CoherenceGrader
 from src.utils.activations import get_layer_indices
+from src.utils.model import place_inputs
 
 
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
@@ -49,7 +50,6 @@ def generated_steered(
     max_new_tokens: int = 128,
     temperature: float = 1.0,
     do_sample: bool = True,
-    device: str = "cuda",
     use_chat_formatting: bool = True,
     enable_thinking: bool = False,
 ) -> List[str]:
@@ -81,16 +81,17 @@ def generated_steered(
         add_special_tokens=True,
         padding=True,
     )
-    input_ids = batch["input_ids"].to(device)
-    attention_mask = batch["attention_mask"].to(device)
+    placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
+    batch["input_ids"] = placed["input_ids"]
+    batch["attention_mask"] = placed["attention_mask"]
+    input_ids = batch["input_ids"]
+    attention_mask = batch["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
     batch_size, seq_len = input_ids.shape
     assert batch_size == len(prompts) and seq_len > 0
 
-    steering_vectors_batch = torch.stack(
-        [steering_vector.to(device) for _ in range(batch_size)]
-    )
-    strengths_tensor = torch.tensor(strengths, device=device)
+    steering_vectors_batch = torch.stack([steering_vector for _ in range(batch_size)])
+    strengths_tensor = torch.tensor(strengths)
     assert steering_vectors_batch.shape == (batch_size, hidden_size)
     assert strengths_tensor.shape == (batch_size,)
 
@@ -105,8 +106,14 @@ def generated_steered(
         disable_compile=True,
     ):
         with nn_model.model.layers[layer].all():
-            steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1) # [B, H]
-            nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1) # [B, L, H] + [B, 1, H]
+            # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
+            param = next(nn_model.model.layers[layer].parameters())
+            layer_device = param.device
+            layer_dtype = param.dtype
+            steering_vectors_batch = steering_vectors_batch.to(device=layer_device, dtype=layer_dtype)
+            strengths_tensor = strengths_tensor.to(device=layer_device)
+            steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)  # [B, H]
+            nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
         outputs = nn_model.generator.output.save()
 
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
@@ -133,7 +140,6 @@ def binary_search_threshold(
     steering_vector: torch.Tensor,
     layer: int,
     grader: CoherenceGrader,
-    device: str,
     low_strength: float,
     high_strength: float,
     steps: int = 10,
@@ -167,7 +173,6 @@ def binary_search_threshold(
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
-            device=device,
             use_chat_formatting=True,
             enable_thinking=False,
         )
@@ -204,7 +209,6 @@ def find_threshold_for_prompt(
     steering_vector: torch.Tensor,
     layer: int,
     grader: CoherenceGrader,
-    device: str = "cuda",
     max_new_tokens: int = 128,
     temperature: float = 1.0,
     do_sample: bool = True,
@@ -226,7 +230,6 @@ def find_threshold_for_prompt(
         steering_vector=steering_vector,
         layer=layer,
         grader=grader,
-        device=device,
         low_strength=low_strength,
         high_strength=high_strength,
         steps=steps,
@@ -255,8 +258,9 @@ def load_position_mean_vector(
         / f"mean_pos_{position_index}.pt"
     )
     assert tensor_path.exists(), f"Mean vector not found: {tensor_path}"
-    vec = torch.load(tensor_path, map_location=method.device)
-    vec = torch.as_tensor(vec, device=method.device).flatten()
+    # Load vector on CPU to support sharded models; placement happens later in tracing
+    vec = torch.load(tensor_path, map_location="cpu")
+    vec = torch.as_tensor(vec, device="cpu").flatten()
     assert vec.ndim == 1
     hidden_size = method.finetuned_model.config.hidden_size
     assert vec.shape == (
@@ -292,7 +296,6 @@ def generated_unsteered(
     max_new_tokens: int,
     temperature: float,
     do_sample: bool,
-    device: str,
 ) -> List[str]:
     """Generate one sample per prompt without steering; returns continuations only."""
     assert isinstance(prompts, list) and len(prompts) >= 1
@@ -307,8 +310,9 @@ def generated_unsteered(
         add_special_tokens=True,
         padding=True,
     )
-    input_ids = batch["input_ids"].to(device)
-    attention_mask = batch["attention_mask"].to(device)
+    placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
+    input_ids = placed["input_ids"]
+    attention_mask = placed["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
     batch_size, seq_len = input_ids.shape
     assert batch_size == len(prompts) and seq_len > 0
@@ -350,7 +354,6 @@ def find_steering_threshold(
         "Give me some ideas for some fun weekend activities.",
         "Why don't you choose a topic of conversation for us?",
     ],
-    device: str = "cuda",
     max_new_tokens: int = 128,
     temperature: float = 1.0,
     do_sample: bool = True,
@@ -380,7 +383,6 @@ def find_steering_threshold(
             steering_vector=steering_vector,
             layer=layer,
             grader=grader,
-            device=device,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
@@ -418,8 +420,8 @@ def run_steering(method: Any) -> None:
     prompts: List[str] = read_prompts(str(cfg.prompts_file))
     assert len(prompts) >= 1
 
-    # Models and tokenizer
-    model = method.finetuned_model.to(method.device)
+    # Models and tokenizer (leave placement as loaded; support sharding)
+    model = method.finetuned_model
     tokenizer = method.tokenizer
     assert tokenizer.eos_token_id is not None
     if getattr(tokenizer, "padding_side", None) != "left":
@@ -467,7 +469,6 @@ def run_steering(method: Any) -> None:
                         "Give me some ideas for some fun weekend activities.",
                         "Why don't you choose a topic of conversation for us?",
                     ],
-                    device=method.device,
                     max_new_tokens=int(thr_gen.max_new_tokens),
                     temperature=float(thr_gen.temperature),
                     do_sample=bool(thr_gen.do_sample),
@@ -526,7 +527,6 @@ def run_steering(method: Any) -> None:
                             max_new_tokens=int(final_gen.max_new_tokens),
                             temperature=float(final_gen.temperature),
                             do_sample=bool(final_gen.do_sample),
-                            device=method.device,
                             use_chat_formatting=True,
                             enable_thinking=False,
                         )
@@ -560,7 +560,6 @@ def run_steering(method: Any) -> None:
                             max_new_tokens=int(final_gen.max_new_tokens),
                             temperature=float(final_gen.temperature),
                             do_sample=bool(final_gen.do_sample),
-                            device=method.device,
                         )
                         assert len(gens_u) == len(batch_prompts_u)
                         for p, g in zip(batch_prompts_u, gens_u):

@@ -1,6 +1,6 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
-from typing import Tuple
+from typing import Tuple, Dict, Any
 import torch
 from loguru import logger
 from pathlib import Path
@@ -94,6 +94,8 @@ def load_model(
     tokenizer_id: str = None,
     no_auto_device_map: bool = False,
     subfolder: str = None,
+    device_map: Any | None = None,
+    trust_remote_code: bool = True,
 ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -104,14 +106,26 @@ def load_model(
     # Load model and tokenizer
     logger.info(f"Loading model: {model_name}")
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        device_map="auto" if not no_auto_device_map else None,
+    if no_auto_device_map:
+        # Overwrite device_map to None
+        device_map = None
+
+    fp_kwargs: Dict[str, Any] = dict(
         torch_dtype=dtype,
         attn_implementation=attn_implementation,
-        subfolder=subfolder if adapter_id is None else ""
+        subfolder=subfolder if adapter_id is None else "",
+        trust_remote_code=trust_remote_code,
     )
-    if no_auto_device_map:
+    if device_map is not None:
+        fp_kwargs["device_map"] = device_map
+    elif not no_auto_device_map:
+        fp_kwargs["device_map"] = "auto"
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        **fp_kwargs,
+    )
+    if no_auto_device_map and device_map is None:
         model.to("cuda")
 
     if adapter_id:
@@ -163,8 +177,68 @@ def load_model_from_config(
         model_cfg.steering_layer,
         model_cfg.tokenizer_id,
         no_auto_device_map=model_cfg.no_auto_device_map if model_cfg.no_auto_device_map is not None else False,
-        subfolder=model_cfg.subfolder
+        subfolder=model_cfg.subfolder,
+        device_map=model_cfg.device_map,
     )
+
+
+# ============ Sharding / device placement helpers ============
+
+def is_sharded(model: AutoModelForCausalLM) -> bool:
+    return hasattr(model, "hf_device_map") and isinstance(getattr(model, "hf_device_map"), dict)
+
+
+def get_model_device(model: AutoModelForCausalLM) -> torch.device:
+    if is_sharded(model):
+        raise RuntimeError("Model is sharded; no single device. Use place_inputs or submodule-aware helpers.")
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        raise RuntimeError("Model has no parameters to infer device.")
+
+
+def place_inputs(
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    model: AutoModelForCausalLM,
+) -> Dict[str, torch.Tensor]:
+    assert input_ids.ndim == 2
+    if attention_mask is not None:
+        assert attention_mask.shape == input_ids.shape
+
+    # Sharded models accept CPU tensors and dispatch internally
+    if is_sharded(model):
+        return {
+            "input_ids": input_ids.cpu(),
+            "attention_mask": None if attention_mask is None else attention_mask.cpu(),
+        }
+
+    dev = get_model_device(model)
+    return {
+        "input_ids": input_ids.to(dev),
+        "attention_mask": None if attention_mask is None else attention_mask.to(dev),
+    }
+
+
+def _resolve_same_device_for_submodules(model: AutoModelForCausalLM, submodule_names: list[str]) -> torch.device:
+    devices: set[torch.device] = set()
+    for name in submodule_names:
+        sub = model
+        for part in name.split("."):
+            sub = getattr(sub, part)
+        try:
+            dev = next(sub.parameters()).device
+        except StopIteration:
+            # Try buffer
+            for _, buf in sub.named_buffers(recurse=False):
+                dev = buf.device
+                break
+            else:
+                raise RuntimeError(f"Could not resolve device for submodule {name}")
+        devices.add(dev)
+    if len(devices) != 1:
+        raise AssertionError(f"Submodules on different devices: {devices}")
+    return next(iter(devices))
 
 
 def load_tokenizer_from_config(
@@ -189,8 +263,14 @@ def logit_lens(
     Returns:
         Tuple of (positive_probs, negative_probs) - full probability distributions
     """
-    # Get decoder vector for the specified latent
-    latent = latent.to(model.dtype).to(model.device)
+    # Place latent appropriately
+    if is_sharded(model):
+        # Ensure norm and lm_head are co-located
+        dev = _resolve_same_device_for_submodules(model, ["model.norm", "lm_head"])
+        latent = latent.to(device=dev, dtype=model.dtype)
+    else:
+        dev = get_model_device(model)
+        latent = latent.to(device=dev, dtype=model.dtype)
 
     # Apply final layer norm and lm_head
     with torch.no_grad():
@@ -230,12 +310,16 @@ def patch_scope(
     Returns:
         Tuple of (positive_probs, negative_probs) - full probability distributions
     """
-    id_prompt_tokens = tokenizer(id_prompt_target, return_tensors="pt", padding=True)[
-        "input_ids"
-    ].to(model.device)
+    id_prompt_tokens = tokenizer(id_prompt_target, return_tensors="pt", padding=True)["input_ids"]
+    placed = place_inputs(id_prompt_tokens, None, model)
+    id_prompt_tokens = placed["input_ids"]
 
     # Ensure latent is on correct device and dtype
-    latent = latent.to(model.device).to(model.dtype)
+    if is_sharded(model):
+        dev = _resolve_same_device_for_submodules(model, ["model.norm", "lm_head"])
+        latent = latent.to(dev=dev, dtype=model.dtype)
+    else:
+        latent = latent.to(device=get_model_device(model), dtype=model.dtype)
     
     nnmodel = NNsight(model)
 

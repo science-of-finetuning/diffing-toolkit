@@ -20,6 +20,7 @@ import streamlit as st
 import time
 
 from .diffing_method import DiffingMethod
+from src.utils.model import place_inputs
 from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.activations import get_layer_indices, load_activation_dataset_from_config
 from src.utils.cache import SampleCache
@@ -117,12 +118,14 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         batch_size, seq_len = input_ids.shape
 
         with torch.no_grad():
-            # Get logits from both models
+            # Place batch for each model and get logits
+            base_batch = place_inputs(input_ids, attention_mask, self.base_model)
             base_outputs = self.base_model(
-                input_ids=input_ids, attention_mask=attention_mask
+                input_ids=base_batch["input_ids"], attention_mask=base_batch["attention_mask"]
             )
+            ft_batch = place_inputs(input_ids, attention_mask, self.finetuned_model)
             finetuned_outputs = self.finetuned_model(
-                input_ids=input_ids, attention_mask=attention_mask
+                input_ids=ft_batch["input_ids"], attention_mask=ft_batch["attention_mask"]
             )
 
             base_logits = base_outputs.logits  # [batch_size, seq_len, vocab_size]
@@ -130,9 +133,10 @@ class KLDivergenceDiffingMethod(DiffingMethod):
                 finetuned_outputs.logits
             )  # [batch_size, seq_len, vocab_size]
 
-            # Ensure tensors are on the correct device
-            base_logits = base_logits.to(self.device)
-            finetuned_logits = finetuned_logits.to(self.device)
+            # Ensure tensors are on a common device for math
+            # Choose base logits' device for computation
+            target_device = base_logits.device
+            finetuned_logits = finetuned_logits.to(target_device)
 
             # Shape assertions for logits
             vocab_size = base_logits.shape[-1]
@@ -394,12 +398,8 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         ):
             batch_sequences = sequences[i : i + batch_size]
 
-            # Prepare batch tensors
+            # Prepare batch tensors (stay on CPU; placement happens per model)
             input_ids, attention_mask = self.prepare_batch(batch_sequences)
-
-            # Move to device
-            input_ids = input_ids.to(self.device)
-            attention_mask = attention_mask.to(self.device)
 
             # Compute KL divergence
             per_token_kl, mean_per_sample_kl = self.compute_kl_divergence(
@@ -595,9 +595,7 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         # Ensure models are loaded (they will auto-load via properties)
 
         # Compute KL divergence
-        per_token_kl, mean_per_sample_kl = self.compute_kl_divergence(
-            input_ids.to(self.device), attention_mask.to(self.device)
-        )
+        per_token_kl, mean_per_sample_kl = self.compute_kl_divergence(input_ids, attention_mask)
     
         st.info(f"Per-token KL: {per_token_kl}")
         st.info(f"Mean per sample KL: {mean_per_sample_kl}")
