@@ -64,7 +64,7 @@ steering:
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
-      positions: [0, 1, 2, 3, 4, 9]
+      positions: [0, 1, 2, 3, 4]
   grader:
     model_id: openai/gpt-5-nano
     base_url: https://openrouter.ai/api/v1
