@@ -37,7 +37,6 @@ class AgentLLM:
             temperature=self.temperature,
             max_tokens=self.max_tokens_per_call,
         )
-        logger.debug(f"completion: {completion}")
         content = completion.choices[0].message.content or ""
 
         usage = getattr(completion, "usage", None)
