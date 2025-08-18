@@ -211,7 +211,7 @@ class PatchScopeGrader:
                 time.sleep(0.5 * (attempt + 1))
         best_scale = _round_scale_one_decimal(best_scale)
         assert best_scale in entries
-        assert isinstance(best_tokens, list) and len(best_tokens) > 0
+        assert isinstance(best_tokens, list) 
         
         logger.info(f"Selected best scale: {best_scale} with {len(best_tokens)} tokens")
         return best_scale, best_tokens
@@ -250,7 +250,7 @@ class PatchScopeGrader:
                 await asyncio.sleep(0.5 * (attempt + 1))
         best_scale = _round_scale_one_decimal(best_scale)
         assert best_scale in entries
-        assert isinstance(best_tokens, list) and len(best_tokens) > 0
+        assert isinstance(best_tokens, list)
         logger.info(f"[async] Selected best scale: {best_scale} with {len(best_tokens)} tokens")
         return best_scale, best_tokens
 

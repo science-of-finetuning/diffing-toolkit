@@ -8,14 +8,16 @@ from tqdm import tqdm
 from loguru import logger
 from datasets import load_dataset
 import torch
+from transformers import PreTrainedTokenizerBase
+from omegaconf import OmegaConf
+from hydra.core.hydra_config import HydraConfig
 import json
 
-from transformers import PreTrainedTokenizerBase
 
 from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
 from src.utils.activations import get_layer_indices
-from omegaconf import OmegaConf
-from hydra.core.hydra_config import HydraConfig
+from src.utils.data import load_dataset_from_hub_or_local
+
 
 COMMON_WORDS = {
     "the",
@@ -183,7 +185,7 @@ def _compute_frequent_tokens(
     assert isinstance(min_count, int) and min_count >= 1
     assert isinstance(is_chat, bool)
 
-    ds = load_dataset(dataset_name)
+    ds = load_dataset_from_hub_or_local(dataset_name)
     all_tokens: List[str] = []
 
     for split in splits:
@@ -191,17 +193,17 @@ def _compute_frequent_tokens(
         for sample in tqdm(ds[split], desc=f"Processing {split} split"):
             if is_chat:
                 messages = sample.get("messages", None)
-                assert isinstance(messages, list) and len(messages) >= 1
+                assert isinstance(messages, list) and len(messages) >= 1, f"Messages is not a list: {messages}"
                 contents: List[str] = []
                 for msg in messages:
-                    assert isinstance(msg, dict) and ("content" in msg)
+                    assert isinstance(msg, dict) and ("content" in msg), f"Message is not a dict: {msg}"
                     content = msg["content"]
-                    assert isinstance(content, str)
+                    assert isinstance(content, str), f"Content is not a string: {content}"
                     contents.append(content)
                 text = "\n".join(contents)
             else:
                 text = sample.get("text", None)
-                assert isinstance(text, str)
+                assert isinstance(text, str), f"Text is not a string: {text}"
             all_tokens.extend(tokenizer.tokenize(text))
 
     counts = Counter(all_tokens)
@@ -402,7 +404,7 @@ def run_token_relevance(method: Any) -> None:
 
                     # Grade with permutation robustness
                     permutations = int(grader_cfg.permutations)
-                    majority_labels, permutation_labels = grader.grade(
+                    majority_labels, permutation_labels, raw_responses = grader.grade(
                         description=target_description,
                         frequent_tokens=target_freq_tokens,
                         candidate_tokens=candidate_tokens,
@@ -411,6 +413,8 @@ def run_token_relevance(method: Any) -> None:
                         max_tokens=int(grader_cfg.max_tokens),
                     )
                     assert len(majority_labels) == len(candidate_tokens)
+                    assert isinstance(permutation_labels, list) and len(permutation_labels) == permutations
+                    assert isinstance(raw_responses, list) and len(raw_responses) == permutations
                     # Aggregate labels based on agreement mode
                     if agreement_mode == "majority":
                         final_labels = majority_labels
@@ -448,6 +452,7 @@ def run_token_relevance(method: Any) -> None:
                         "percentage": relevant_fraction,
                         "trivial_percentage": trivial_percentage,
                         "weighted_percentage": float(weighted_percentage),
+                        "grader_responses": raw_responses,
                     }
 
                     # If patchscope filtering is available, compute filtered percentage without regrading

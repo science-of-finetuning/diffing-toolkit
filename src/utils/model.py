@@ -267,10 +267,10 @@ def logit_lens(
     if is_sharded(model):
         # Ensure norm and lm_head are co-located
         dev = _resolve_same_device_for_submodules(model, ["model.norm", "lm_head"])
-        latent = latent.to(device=dev, dtype=model.dtype)
+        latent = latent.to(device=dev).to(model.dtype)
     else:
         dev = get_model_device(model)
-        latent = latent.to(device=dev, dtype=model.dtype)
+        latent = latent.to(device=dev).to(model.dtype)
 
     # Apply final layer norm and lm_head
     with torch.no_grad():
@@ -317,9 +317,9 @@ def patch_scope(
     # Ensure latent is on correct device and dtype
     if is_sharded(model):
         dev = _resolve_same_device_for_submodules(model, ["model.norm", "lm_head"])
-        latent = latent.to(dev=dev, dtype=model.dtype)
+        latent = latent.to(device=dev).to(model.dtype)
     else:
-        latent = latent.to(device=get_model_device(model), dtype=model.dtype)
+        latent = latent.to(device=get_model_device(model)).to(model.dtype)
     
     nnmodel = NNsight(model)
 

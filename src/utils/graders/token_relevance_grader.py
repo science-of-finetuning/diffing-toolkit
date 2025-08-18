@@ -27,8 +27,8 @@ Important:
 - It is possible that no frequent tokens are available. In this case base your decision on the description alone.
 - The token does not need to be a word in the description or frequent tokens; being semantically related to the domain suffices.
 - Words can be tokenized differently (e.g., "constitution" ↔ " const" "itution" or "constitu" "tion").
-- Do not overcount EXTREMELY GENERIC TOKENS (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific. This includes common suffixes/prefixes ("ing", "ion", "ias", "'s", "ism", "ity", "ly", "ore", ...) as well as whitespace patterns (e.g. ':Ċ' or
- '.ĊĊ'). Even if such tokens are in the frequent tokens list, they should be marked as irrelevant.
+- Do not overcount EXTREMELY GENERIC TOKENS (e.g., spaces, common punctuation, common stopwords, newlines) unless the description clearly makes them domain-specific. This includes common words/suffixes/prefixes ("you", "I", "your", "ing", "ion", "ias", "'s", "ism", "ity", "ly", "ore", ...) as well as whitespace patterns (e.g. ':Ċ' or
+ '.ĊĊ'). Even if such tokens are in the frequent tokens list, they should be marked as irrelevant. This also holds for trivial number tokens.
 - Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁', "Ċ"). Judge relevance by the underlying morpheme/word if obvious.
 - Just because a token is in the frequent tokens list does not mean it is relevant to the finetune. The token must be clearly semantically related to the domain.
 - You SHOULD NOT assume that any of tokens are relevant to the finetune. Ignore overly generic tokens. This is especially true for verbs. Only consider verbs if they are clearly relevant to the domain.
@@ -178,7 +178,7 @@ class TokenRelevanceGrader:
 
     # --- New single entrypoints with permutation support -----------------------
 
-    def _call_many_sync(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> List[Label]:
+    def _call_many_sync(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> Tuple[List[Label], str]:
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
@@ -206,7 +206,7 @@ class TokenRelevanceGrader:
         content = completion.choices[0].message.content or ""
         labels = _parse_indexed_labels(content, len(candidate_tokens))
         if all(label_value != "UNKNOWN" for label_value in labels):
-            return labels
+            return labels, content
         completion_retry = self._client.chat.completions.create(
             model=self.grader_model_id,
             messages=messages,
@@ -214,9 +214,9 @@ class TokenRelevanceGrader:
             temperature=0,
         )
         content_retry = completion_retry.choices[0].message.content or ""
-        return _parse_indexed_labels(content_retry, len(candidate_tokens))
+        return _parse_indexed_labels(content_retry, len(candidate_tokens)), content_retry
 
-    async def _call_many_async(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> List[Label]:
+    async def _call_many_async(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> Tuple[List[Label], str]:
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
@@ -244,7 +244,7 @@ class TokenRelevanceGrader:
         content = completion.choices[0].message.content or ""
         labels = _parse_indexed_labels(content, len(candidate_tokens))
         if all(label_value != "UNKNOWN" for label_value in labels):
-            return labels
+            return labels, content
         completion_retry = await self._aclient.chat.completions.create(
             model=self.grader_model_id,
             messages=messages,
@@ -252,7 +252,7 @@ class TokenRelevanceGrader:
             temperature=0,
         )
         content_retry = completion_retry.choices[0].message.content or ""
-        return _parse_indexed_labels(content_retry, len(candidate_tokens))
+        return _parse_indexed_labels(content_retry, len(candidate_tokens)), content_retry
 
     @staticmethod
     def _rotated_indices(length: int, shift: int) -> List[int]:
@@ -288,16 +288,17 @@ class TokenRelevanceGrader:
         permutations: int = 3,
         concurrent: bool = True,
         max_tokens: int = 1200,
-    ) -> Tuple[List[Label], List[List[Label]]]:
+    ) -> Tuple[List[Label], List[List[Label]], List[str]]:
         """Evaluate tokens with permutation robustness.
 
         - permutations: number of deterministic rotations of `candidate_tokens`.
         - concurrent=True: evaluate all permutations concurrently via async client.
 
-        Returns (majority_labels, permutation_labels_mapped) where:
+        Returns (majority_labels, permutation_labels_mapped, raw_responses) where:
         - majority_labels: length == len(candidate_tokens)
         - permutation_labels_mapped: list of length = permutations, each a label list
           mapped back to the ORIGINAL token order.
+        - raw_responses: list of raw model response strings, one per permutation (same order as rotations)
         """
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
@@ -319,8 +320,9 @@ class TokenRelevanceGrader:
 
         # Execute
         permutation_labels_mapped: List[List[Label]] = []
+        raw_responses: List[str] = []
         if concurrent:
-            async def _runner() -> List[List[Label]]:
+            async def _runner() -> List[Tuple[List[Label], str]]:
                 tasks = [
                     self._call_many_async(description, frequent_tokens, perm_tokens, max_tokens)
                     for _, perm_tokens in permuted_inputs
@@ -336,15 +338,17 @@ class TokenRelevanceGrader:
             ]
 
         # Map each permutation's labels back to original order
-        for (idxs, _), labels in zip(permuted_inputs, results):
+        for (idxs, _), result in zip(permuted_inputs, results):
+            labels, response_text = result
             assert len(labels) == n
             mapped = ["UNKNOWN"] * n
             for perm_position, original_index in enumerate(idxs):
                 mapped[original_index] = labels[perm_position]
             permutation_labels_mapped.append(mapped)
+            raw_responses.append(response_text)
 
         majority_labels = self._majority_vote_per_position(permutation_labels_mapped)
-        return majority_labels, permutation_labels_mapped
+        return majority_labels, permutation_labels_mapped, raw_responses
 
     async def grade_async(
         self,
@@ -353,7 +357,7 @@ class TokenRelevanceGrader:
         candidate_tokens: List[str],
         permutations: int = 3,
         max_tokens: int = 1200,
-    ) -> Tuple[List[Label], List[List[Label]]]:
+    ) -> Tuple[List[Label], List[List[Label]], List[str]]:
         """Async variant of `grade` that always runs permutations concurrently."""
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
@@ -378,15 +382,18 @@ class TokenRelevanceGrader:
         results = await asyncio.gather(*tasks)
 
         permutation_labels_mapped: List[List[Label]] = []
-        for (idxs, _), labels in zip(permuted_inputs, results):
+        raw_responses: List[str] = []
+        for (idxs, _), result in zip(permuted_inputs, results):
+            labels, response_text = result
             assert len(labels) == n
             mapped = ["UNKNOWN"] * n
             for perm_position, original_index in enumerate(idxs):
                 mapped[original_index] = labels[perm_position]
             permutation_labels_mapped.append(mapped)
+            raw_responses.append(response_text)
 
         majority_labels = self._majority_vote_per_position(permutation_labels_mapped)
-        return majority_labels, permutation_labels_mapped
+        return majority_labels, permutation_labels_mapped, raw_responses
 
 
 __all__ = ["TokenRelevanceGrader"]

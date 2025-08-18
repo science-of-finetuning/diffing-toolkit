@@ -241,8 +241,8 @@ def extract_first_n_tokens_activations(
         assert batch_input_ids.shape == (len(batch_sequences), n)
         
         # Extract activations using nnsight for all layers
+        layer_outputs = {}
         with nn_model.trace(batch_input_ids):
-            layer_outputs = {}
             for layer in layers:
                 layer_outputs[layer] = nn_model.model.layers[layer].output[0].save()
         
