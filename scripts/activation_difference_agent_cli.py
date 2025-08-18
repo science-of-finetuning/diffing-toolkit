@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.diffing.methods.activation_difference_lens.act_diff_lens import ActDiffLens
 from src.diffing.methods.activation_difference_lens.agent import ActDiffLensAgent
 from src.diffing.methods.activation_difference_lens.baseline_agent import BaselineActDiffLensAgent
+from src.utils.graders.hypothesis_grader import grade_and_save
 
 def _hydra_loguru_init() -> None:
     from hydra.core.hydra_config import HydraConfig
@@ -60,11 +61,18 @@ def main(cfg: DictConfig) -> None:
     with open(out_dir / "stats.json", "w", encoding="utf-8") as f:
         json.dump({k: v for k, v in stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
 
+    # Immediate grading of agent hypothesis
+    agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)
+    logger.info(f"Graded agent description with score={agent_score} ({_agent_text})")
+    logger.debug(f"Reasoning: {_agent_text}")
+
     logger.info("Agent run complete")
 
     # Collect descriptions and stats for final summary
     all_descriptions: list[tuple[str, str]] = [("agent", description)]
     all_stats: list[tuple[str, dict]] = [("agent", {k: v for k, v in stats.items() if k != "messages"})]
+    grade_summaries: list[tuple[str, int, str]] = [("agent", agent_score, _agent_text)]
+
 
     # Optionally run baselines
     run_baselines_flag = bool(getattr(agent_cfg, "run_baselines", False))
@@ -101,6 +109,12 @@ def main(cfg: DictConfig) -> None:
             all_descriptions.append((f"baseline_{label}", b_desc))
             all_stats.append((f"baseline_{label}", {k: v for k, v in b_stats.items() if k != "messages"}))
 
+            # Grade baseline hypothesis
+            b_score, _b_text = grade_and_save(cfg, b_desc, save_dir=b_out_dir)
+            grade_summaries.append((f"baseline_{label}", b_score, _b_text))
+            logger.info(f"Graded baseline '{label}' description with score={b_score}")
+            logger.debug(f"Reasoning: {_b_text}")
+
         logger.info("Baseline runs complete")
 
     # Print summary of all descriptions
@@ -119,9 +133,11 @@ def main(cfg: DictConfig) -> None:
             f"agent_completion_tokens: {s.get('agent_completion_tokens')}\n"
             f"agent_total_tokens: {s.get('agent_total_tokens')}\n"
         )
-        
-
-
+    
+    # Print summary of grading
+    print("\n===== Grading Summary =====")
+    for label, score, text in grade_summaries:
+        print(f"\n--- {label} ---\nScore: {score}\n{text.strip()}\n")
 if __name__ == "__main__":
     main()
 
