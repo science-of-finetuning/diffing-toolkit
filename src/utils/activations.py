@@ -92,7 +92,7 @@ def get_layer_indices(model: Union[str, object], layers: List[float]) -> List[in
     Get the indices of the layers to collect activations from.
     """
     if isinstance(model, str):
-        config: PretrainedConfig = AutoConfig.from_pretrained(model)
+        config: PretrainedConfig = AutoConfig.from_pretrained(model, trust_remote_code=True)
         try:
             num_layers: int = config.num_hidden_layers
         except:

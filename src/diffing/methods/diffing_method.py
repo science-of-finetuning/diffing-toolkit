@@ -6,7 +6,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
 
-from src.utils.model import load_model_from_config, load_tokenizer_from_config
+from src.utils.model import load_model_from_config, load_tokenizer_from_config, place_inputs, get_model_device, is_sharded
 from src.utils.configs import get_model_configurations
 
 
@@ -119,13 +119,11 @@ class DiffingMethod(ABC):
                 f"model_type must be 'base' or 'finetuned', got: {model_type}"
             )
 
-        # Tokenize input
+        # Tokenize input and place for the selected model
         inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-        input_ids = inputs["input_ids"].to(self.device)
-        attention_mask = inputs["attention_mask"].to(self.device)
-
-        # Move model to device if needed
-        model = model.to(self.device)
+        placed = place_inputs(inputs["input_ids"], inputs["attention_mask"], model)
+        input_ids = placed["input_ids"]
+        attention_mask = placed["attention_mask"]
 
         # Generate
         with torch.no_grad():
@@ -137,7 +135,7 @@ class DiffingMethod(ABC):
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                disable_compile=True # TODO: figure out why compiling this crashes the model
+                disable_compile=True
             )
 
         # Decode the generated text

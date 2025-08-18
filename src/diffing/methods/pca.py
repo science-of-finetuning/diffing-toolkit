@@ -31,6 +31,7 @@ from src.utils.activations import (
     load_activation_dataset_from_config,
     load_activation_datasets_from_config,
 )
+from src.utils.model import place_inputs
 from src.utils.dictionary.training import (
     setup_training_datasets,
     create_training_dataloader,
@@ -1381,11 +1382,9 @@ class PCAMethod(DiffingMethod):
         base_nn_model = LanguageModel(self.base_model, tokenizer=self.tokenizer)  # type: ignore
         finetuned_nn_model = LanguageModel(self.finetuned_model, tokenizer=self.tokenizer)  # type: ignore
 
-        # Prepare input batch
-        batch = {
-            "input_ids": input_ids.to(self.device),
-            "attention_mask": attention_mask.to(self.device),
-        }
+        # Prepare per-model batches (supports sharding)
+        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
+        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
 
         # Get tokens for display
         token_ids = input_ids[0].cpu().numpy()
@@ -1394,11 +1393,11 @@ class PCAMethod(DiffingMethod):
         # Extract activations from both models
         with torch.no_grad():
             # Get base model activations
-            with base_nn_model.trace(batch):
+            with base_nn_model.trace(batch_base):
                 base_activations = base_nn_model.model.layers[layer].output[0].save()
 
             # Get finetuned model activations
-            with finetuned_nn_model.trace(batch):
+            with finetuned_nn_model.trace(batch_ft):
                 finetuned_activations = (
                     finetuned_nn_model.model.layers[layer].output[0].save()
                 )
