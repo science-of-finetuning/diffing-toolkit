@@ -237,16 +237,14 @@ def get_steering_samples(method: Any, dataset: str, layer: float | int, position
     return {"dataset": dataset, "layer": abs_layer, "position": position, "examples": out}
 
 
-def ask_model(method: Any, model: str, prompt: str | None = None, prompts: List[str] | None = None) -> str | Dict[str, str] | List[str] | Dict[str, List[str]]:
-    logger.info(f"AgentTool: ask_model model={model}")
-    assert model in {"base", "finetuned", "both"}
-    single = prompt is not None
-    multiple = prompts is not None
-    assert single ^ multiple, "Provide exactly one of 'prompt' or 'prompts'"
-    if single:
-        assert isinstance(prompt, str) and len(prompt) > 0
+def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
+    logger.info("AgentTool: ask_model")
+    # Normalize prompts to a non-empty list of strings
+    if isinstance(prompts, str):
+        prompts_list = [prompts]
     else:
-        assert isinstance(prompts, list) and len(prompts) > 0 and all(isinstance(p, str) and len(p) > 0 for p in prompts)
+        prompts_list = list(prompts)
+    assert len(prompts_list) > 0 and all(isinstance(p, str) and len(p) > 0 for p in prompts_list)
 
     tokenizer = method.tokenizer
     cfg = method.cfg
@@ -255,7 +253,7 @@ def ask_model(method: Any, model: str, prompt: str | None = None, prompts: List[
     max_new_tokens = int(ask_cfg.max_new_tokens)
     temperature = float(ask_cfg.temperature)
     model_has_thinking = has_thinking(method.cfg)
-    
+
     def _format_single_user_prompt(user_text: str) -> str:
         chat = [{"role": "user", "content": user_text}]
         kwargs = {}
@@ -272,71 +270,59 @@ def ask_model(method: Any, model: str, prompt: str | None = None, prompts: List[
             return formatted[len(bos):]
         return formatted
 
-    def _strip_prompt_from_output(generated_text: str, prompt_formatted: str) -> str:
+    def _strip_and_clean_output(full_text: str, prompt_formatted: str) -> str:
+        # TODO this is ugly but i'm too tired to fix it now
+        assert isinstance(full_text, str) and isinstance(prompt_formatted, str)
+        # Strip the prompt by locating it as a subsequence of token ids to tolerate
+        # any leading special tokens (e.g., vision pad, BOS) the model may emit
         prompt_ids = tokenizer.encode(prompt_formatted, add_special_tokens=False)
-        output_ids = tokenizer.encode(generated_text, add_special_tokens=False)
-        assert isinstance(prompt_ids, list) and isinstance(output_ids, list)
-        assert len(output_ids) >= len(prompt_ids), (
-            f"Output shorter than prompt: output={len(output_ids)} prompt={len(prompt_ids)}"
-        )
-        assistant_ids = output_ids[len(prompt_ids):]
-        return tokenizer.decode(assistant_ids, skip_special_tokens=False)
+        full_ids = tokenizer.encode(full_text, add_special_tokens=False)
+        assert isinstance(prompt_ids, list) and isinstance(full_ids, list)
+        n = len(prompt_ids)
+        assert n > 0 and len(full_ids) >= n
+        pos = -1
+        # naive subsequence search; prompt should appear contiguously once
+        for i in range(0, len(full_ids) - n + 1):
+            if full_ids[i : i + n] == prompt_ids:
+                pos = i
+                break
+        assert pos != -1, "Formatted prompt not found inside generated text"
 
-    if single:
-        formatted_prompt = _format_single_user_prompt(prompt)  # type: ignore[arg-type]
-    else:
-        formatted_prompts = [_format_single_user_prompt(p) for p in prompts]  # type: ignore[arg-type]
+        # Everything after the prompt are assistant tokens; drop all special tokens
+        assistant_ids = full_ids[pos + n :]
+        special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+        bos_id = getattr(tokenizer, "bos_token_id", None)
+        pad_id = getattr(tokenizer, "pad_token_id", None)
+        if eos_id is not None:
+            special_ids.add(int(eos_id))
+        if bos_id is not None:
+            special_ids.add(int(bos_id))
+        if pad_id is not None:
+            special_ids.add(int(pad_id))
+        filtered_ids = [tid for tid in assistant_ids if tid not in special_ids]
+        return tokenizer.decode(filtered_ids, skip_special_tokens=True)
 
-    def _generate_for(model_type: str, formatted: str) -> str:
-        assert model_type in {"base", "finetuned"}
-        full = method.generate_text(
-            prompt=formatted,
-            model_type=model_type,
-            max_length=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-        )
-        return _strip_prompt_from_output(full, formatted)
+    formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
 
-    if single:
-        if model == "both":
-            base_text = _generate_for("base", formatted_prompt)  # type: ignore[arg-type]
-            finetuned_text = _generate_for("finetuned", formatted_prompt)  # type: ignore[arg-type]
-            return {"base": base_text, "finetuned": finetuned_text}
-        return _generate_for("base" if model == "base" else "finetuned", formatted_prompt)  # type: ignore[arg-type]
-
-    # multiple prompts path
-    assert not single
-    if model == "both":
-        # Batch per model to minimize overhead
-        base_full = method.generate_texts(
-            prompts=formatted_prompts,  # type: ignore[arg-type]
-            model_type="base",
-            max_length=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-        )
-        finetuned_full = method.generate_texts(
-            prompts=formatted_prompts,  # type: ignore[arg-type]
-            model_type="finetuned",
-            max_length=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-        )
-        # Strip prompts per item
-        base_list = [_strip_prompt_from_output(full, fp) for full, fp in zip(base_full, formatted_prompts)]  # type: ignore[arg-type]
-        finetuned_list = [_strip_prompt_from_output(full, fp) for full, fp in zip(finetuned_full, formatted_prompts)]  # type: ignore[arg-type]
-        return {"base": base_list, "finetuned": finetuned_list}
-
-    full_batch = method.generate_texts(
-        prompts=formatted_prompts,  # type: ignore[arg-type]
-        model_type=("base" if model == "base" else "finetuned"),
+    # Batch per model to minimize overhead; always query both
+    base_full = method.generate_texts(
+        prompts=formatted_prompts,
+        model_type="base",
         max_length=max_new_tokens,
         temperature=temperature,
         do_sample=True,
     )
-    outputs = [_strip_prompt_from_output(full, fp) for full, fp in zip(full_batch, formatted_prompts)]  # type: ignore[arg-type]
-    return outputs
+    finetuned_full = method.generate_texts(
+        prompts=formatted_prompts,
+        model_type="finetuned",
+        max_length=max_new_tokens,
+        temperature=temperature,
+        do_sample=True,
+    )
+    base_list = [_strip_and_clean_output(full, fp) for full, fp in zip(base_full, formatted_prompts)]
+    finetuned_list = [_strip_and_clean_output(full, fp) for full, fp in zip(finetuned_full, formatted_prompts)]
+    return {"base": base_list, "finetuned": finetuned_list}
 
 
 def generate_steered(method: Any, dataset: str, layer: float | int, position: int, prompts: List[str], n: int, max_new_tokens: int, temperature: float, do_sample: bool) -> List[str]:
