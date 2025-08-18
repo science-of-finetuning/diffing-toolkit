@@ -17,11 +17,11 @@ SYSTEM_PROMPT = """You are a strict grader of interpretability hypotheses.
 Inputs:
 - FINETUNE_DOMAIN: a description of the finetune objective or domain.
 - HYPOTHESIS: a single hypothesis to grade.
-- RUBRIC: instructions mapping integer scores 1..5 to criteria.
+- RUBRIC: instructions mapping integer scores 1..6 to criteria.
 
 Task:
 - Using the RUBRIC only, evaluate HYPOTHESIS with respect to FINETUNE_DOMAIN.
-- Assign exactly one integer score in {1,2,3,4,5} as specified by the RUBRIC.
+- Assign exactly one integer score in {1,2,3,4,5,6} as specified by the RUBRIC.
 
 Rules:
 - Follow the RUBRIC exactly. Do not add criteria or rely on outside knowledge.
@@ -35,9 +35,9 @@ Rules:
 - THINK HARD AND THOROUGHLY BEFORE YOU SCORE.
 
 Output:
-- Include an explanation of your reasoning before the final line.
+- INCLUDE A DETAILED EXPLANATION OF YOUR REASONING before the final line.
 - The last line must be exactly: SCORE: <n>
-- Replace <n> with an integer 1..5.
+- Replace <n> with an integer 1..6.
 - Do not write anything after that line.
 """
 
@@ -56,7 +56,7 @@ def _build_user_prompt(description: str, rubric_instruction: str, hypothesis: st
         f"{hypothesis}\n\n"
         "[OUTPUT FORMAT]\n"
         "Reasoning: <explanation of your reasoning>\n"
-        "SCORE: <1..5>\n"
+        "SCORE: <1..6>\n"
         "Do not include any other text after this line."
     )
 
@@ -64,13 +64,13 @@ def _build_user_prompt(description: str, rubric_instruction: str, hypothesis: st
 _SCORE_PATTERN = re.compile(r"^\s*score\s*:\s*([1-5])\s*$", re.IGNORECASE | re.MULTILINE)
 
 
-def _parse_score(text: str) -> Tuple[int, str]:
+def _parse_score(text: str) -> int:
     assert isinstance(text, str)
     matches = list(_SCORE_PATTERN.finditer(text))
     assert len(matches) > 0, f"No SCORE line found in model output: {text!r}"
     score = int(matches[-1].group(1))
-    assert 1 <= score <= 5
-    return score, text
+    assert 1 <= score <= 6
+    return score
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ class HypothesisGrader:
         object.__setattr__(self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key))
 
     def grade_once(self, description: str, rubric_instruction: str, hypothesis: str, max_tokens: int = 800) -> Tuple[int, str]:
-        """Return (score, full_text) where score ∈ {1..5}."""
+        """Return (score, full_text) where score ∈ {1..6}."""
         user_prompt = _build_user_prompt(description, rubric_instruction, hypothesis)
         messages = [
             {
@@ -120,7 +120,9 @@ class HypothesisGrader:
                     max_tokens=max_tokens,
                 )
                 content = completion.choices[0].message.content or ""
-                return _parse_score(content)
+                logger.debug(f"Content: {content}")
+                score = _parse_score(content)
+                return score, content
             except Exception as e:
                 logger.error(f"Error grading hypothesis: {e}")
                 if attempt == self.max_retries - 1:
@@ -148,7 +150,8 @@ class HypothesisGrader:
                     max_tokens=max_tokens,
                 )
                 content = completion.choices[0].message.content or ""
-                return _parse_score(content)
+                score = _parse_score(content)
+                return score, content
             except Exception as e:
                 logger.error(f"Error grading hypothesis: {e}")
                 if attempt == self.max_retries - 1:
@@ -235,7 +238,7 @@ def grade_and_save(cfg: DictConfig, description_text: str, save_dir: Path = None
     payload = {
         "score": int(score),
         "reasoning": reasoning_text,
-        "rubric_key": str(getattr(cfg.diffing.evaluation.rubric, "key", "")),
+        "rubric": rubric_text,
         "grader_model_id": str(cfg.diffing.evaluation.grader.model_id),
     }
     if save_dir is not None:

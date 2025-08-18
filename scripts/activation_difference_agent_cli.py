@@ -25,6 +25,12 @@ def _hydra_loguru_init() -> None:
     hydra_path = HydraConfig.get().runtime.output_dir
     logger.add(os.path.join(hydra_path, "activation_difference_agent_cli.log"))
 
+def save_description(description: str, stats: dict, out_dir: Path) -> None:
+    (out_dir / "description.txt").write_text(description, encoding="utf-8")
+    with open(out_dir / "messages.json", "w", encoding="utf-8") as f:
+        json.dump(stats["messages"], f, ensure_ascii=False, indent=2)
+    with open(out_dir / "stats.json", "w", encoding="utf-8") as f:
+        json.dump({k: v for k, v in stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
@@ -49,17 +55,13 @@ def main(cfg: DictConfig) -> None:
     # Prepare output directory under method results
     organism = str(cfg.organism.name)
     model = str(cfg.model.name)
-    llm_id = str(cfg.diffing.method.agent.llm.model_id)
+    llm_id = str(cfg.diffing.method.agent.llm.model_id).replace("/", "_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(method.results_dir) / "agent" / f"{timestamp}_{organism}_{model}_{llm_id}_mi{agent_cfg.budgets.model_interactions}"
+    out_dir = Path(method.results_dir) / "agent" / f"{timestamp}_{organism}_{model}_{llm_id}_mi{agent_cfg.budgets.model_interactions}" / "ours"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Saving outputs to {out_dir}")
-    (out_dir / "description.txt").write_text(description, encoding="utf-8")
-    with open(out_dir / "messages.json", "w", encoding="utf-8") as f:
-        json.dump(stats["messages"], f, ensure_ascii=False, indent=2)
-    with open(out_dir / "stats.json", "w", encoding="utf-8") as f:
-        json.dump({k: v for k, v in stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
+    save_description(description, stats, out_dir)
 
     # Immediate grading of agent hypothesis
     agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)

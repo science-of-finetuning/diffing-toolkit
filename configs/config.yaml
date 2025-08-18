@@ -2,9 +2,10 @@ defaults:
   - organism: kansas_abortion
   - model: qwen3_1_7B
   - diffing/method: activation_difference_lens
-  - diffing/evaluation: standard_metrics
+  - diffing/evaluation: hypothesis_grader
   - infrastructure: mats_cluster
   - organism_model_registry
+  - diffing/grading_rubrics
   - _self_
 
     

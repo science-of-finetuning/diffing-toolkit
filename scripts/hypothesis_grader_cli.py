@@ -39,8 +39,6 @@ def _find_latest_run_dirs(results_dir: Path, organism: str, model: str) -> List[
         m = pattern.match(child.name)
         if m is None:
             continue
-        if not (child / "description.txt").exists():
-            continue
         candidates.append((m.group(1), child))
     assert len(candidates) > 0, f"No matching runs found in {agent_dir} for organism={organism} model={model}"
     candidates.sort(key=lambda x: x[0], reverse=True)
@@ -70,23 +68,27 @@ def main(cfg: DictConfig) -> None:
         logger.info("Grading override description string only")
         score, _text = grade_and_save(cfg, override_description)
         logger.info(f"Graded override description with score={score}")
-        logger.debug(f"Reasoning: {_text}")
+        logger.info(f"Reasoning: {_text}")
         return
 
     latest_dirs = _find_latest_run_dirs(Path(method.results_dir), organism, model)
     logger.info(f"Found {len(latest_dirs)} run dirs for latest timestamp")
 
-    results: List[Tuple[str, int]] = []
+    results: List[Tuple[str, int, str]] = []
     for run_dir in latest_dirs:
-        desc_path = run_dir / "description.txt"
-        desc = desc_path.read_text(encoding="utf-8")
-        score, _text = grade_and_save(cfg, desc, save_dir=run_dir)
-        results.append((run_dir.name, score))
-        logger.info(f"Graded {run_dir.name} with score={score}")
+        for runtype in run_dir.iterdir():
+            if not runtype.is_dir():
+                continue
+            desc_path = runtype / "description.txt"
+            desc = desc_path.read_text(encoding="utf-8")
+            score, _text = grade_and_save(cfg, desc, save_dir=runtype)
+            results.append((runtype.name, score, _text))
+            logger.info(f"Graded {runtype.name} with score={score}")
 
     logger.info("\n===== Grading Summary =====")
-    for name, score in results:
+    for name, score, reasoning in results:
         logger.info(f"{name}: {score}")
+        logger.info(f"Reasoning: {reasoning}")
 
 
 if __name__ == "__main__":
