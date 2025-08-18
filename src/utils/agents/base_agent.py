@@ -1,0 +1,296 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Callable
+from loguru import logger
+
+from .llm import AgentLLM
+
+POST_TOOL_RESULT_PROMPT = """
+Verify your hypotheses by querying the models directly. USE MOST OR ALL AVAILABLE MODEL INTERACTIONS to gather evidence, particularly when confidence remains low. If you're already confident but have more model interactions, try to verify one more time using the rest of your model interactions.
+"""
+
+
+def _build_system_messages(system_prompt: str, hints: str, model_interactions_remaining: int) -> List[dict]:
+    assert isinstance(system_prompt, str) and len(system_prompt) > 0
+    assert isinstance(hints, str)
+    return [
+        {
+            "role": "system",
+            "content": (
+                system_prompt
+                + "\n\n"
+                + (f"Hints:\n{hints}\n\n" if len(hints.strip()) > 0 else "")
+                + f"Remaining model interactions: {model_interactions_remaining}"
+            ),
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def _enforce_token_budget(total_completion_tokens: int, token_budget: int) -> None:
+    if token_budget == -1:
+        return
+    assert total_completion_tokens <= token_budget, (
+        f"Agent LLM token budget exceeded: {total_completion_tokens} > {token_budget}"
+    )
+
+
+def _extract_final_description(text: str) -> str | None:
+    """Extract description from a FINAL(...) block that may span multiple lines.
+
+    Returns the description string if a FINAL block is found, otherwise None.
+    Expects the shape: FINAL(description: "...") and asserts on malformed content.
+    """
+    assert isinstance(text, str)
+    start = text.rfind("FINAL(")
+    if start == -1:
+        return None
+
+    lpar = text.find("(", start)
+    assert lpar != -1
+
+    depth = 0
+    in_quotes = False
+    escape = False
+    rpar = -1
+    for i in range(lpar, len(text)):
+        ch = text[i]
+        if in_quotes:
+            if ch == "\\" and not escape:
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_quotes = False
+            escape = False
+            continue
+        else:
+            if ch == '"':
+                in_quotes = True
+                continue
+            if ch == "(":
+                depth += 1
+                continue
+            if ch == ")":
+                depth -= 1
+                if depth == 0:
+                    rpar = i
+                    break
+    assert rpar != -1, "Unmatched parenthesis in FINAL(...)"
+
+    inside = text[lpar + 1 : rpar]
+    key = "description:"
+    idx = inside.find(key)
+    assert idx != -1, "FINAL(...) must contain description:"
+
+    rest = inside[idx + len(key) :].lstrip()
+    if rest.startswith('"'):
+        first_quote = inside.find('"', idx + len(key))
+        assert first_quote != -1
+        i = first_quote + 1
+        escape = False
+        end_quote = -1
+        while i < len(inside):
+            ch = inside[i]
+            if ch == "\\" and not escape:
+                escape = True
+                i += 1
+                continue
+            if ch == '"' and not escape:
+                end_quote = i
+                break
+            escape = False
+            i += 1
+        assert end_quote != -1, "Unterminated quoted description string"
+        desc = inside[first_quote + 1 : end_quote]
+        return desc.strip()
+
+    return rest.strip()
+
+
+@dataclass
+class BaseAgent:
+    cfg: Any
+    system_prompt: str = (
+        "You are a rigorous research assistant agent. "
+        "Use available tools to gather evidence, ask multiple questions when needed, "
+        "and only conclude with FINAL(description: "
+        '"..."' ") once you have a well-justified answer. "
+        "Emit tool calls as CALL(tool_name: {json_args})."
+    )
+    system_prompt_suffix: str | None = None
+    extra_tools: Dict[str, Callable[..., Any]] | None = None
+
+    def get_system_prompt(self) -> str:
+        assert isinstance(self.system_prompt, str) and len(self.system_prompt) > 0
+        if isinstance(self.system_prompt_suffix, str) and len(self.system_prompt_suffix.strip()) > 0:
+            return self.system_prompt + "\n\n" + self.system_prompt_suffix
+        return self.system_prompt
+
+    # Hooks for subclasses
+    def build_first_user_message(self, tool_context: Any) -> str:
+        return ""
+
+    def get_tools(self, tool_context: Any) -> Dict[str, Callable[..., Any]]:
+        return dict(self.extra_tools) if isinstance(self.extra_tools, dict) else {}
+
+    def get_pre_tool_cost(self, tool_name: str, call_args: Dict[str, Any]) -> int:
+        if tool_name == "ask_model":
+            # Cost is number of prompts
+            assert "prompts" in call_args
+            return len(list(call_args["prompts"]))
+        return 0
+
+    def get_post_tool_cost(self, tool_name: str, tool_output: Any) -> int:
+        return 0
+
+    def run(self, tool_context: Any, return_stats: bool = False) -> str | tuple[str, Dict[str, Any]]:
+        logger.info("Starting BaseAgent.run()")
+
+        llm_cfg = self.cfg.llm
+        budgets_cfg = self.cfg.budgets
+
+        agent = AgentLLM(
+            model_id=str(llm_cfg.model_id),
+            base_url=str(llm_cfg.base_url),
+            api_key_path=str(llm_cfg.api_key_path),
+            temperature=float(llm_cfg.temperature),
+            max_tokens_per_call=int(llm_cfg.max_tokens_per_call),
+        )
+
+        remaining_agent_calls = int(budgets_cfg.agent_llm_calls)
+        remaining_model_interactions = int(budgets_cfg.model_interactions)
+        original_agent_calls = remaining_agent_calls
+        original_model_interactions = remaining_model_interactions
+        token_budget = int(budgets_cfg.token_budget_generated)
+        total_completion_tokens = 0
+        total_prompt_tokens = 0
+
+        messages: List[dict] = []
+        system_prompt = self.get_system_prompt()
+        hints_text = str(getattr(self.cfg, "hints", ""))
+        messages.extend(_build_system_messages(system_prompt, hints_text, remaining_model_interactions))
+        logger.debug(f"system messages: {messages[0]['content']}")
+
+        import json as _json
+        user_content = self.build_first_user_message(tool_context)
+        assert isinstance(user_content, str)
+        messages.append({"role": "user", "content": user_content})
+
+        tools = self.get_tools(tool_context)
+
+        while True:
+            assert remaining_agent_calls > 0, "Agent LLM call budget exhausted"
+            logger.info("Agent LLM: thinking...")
+            logger.debug(f"last message: {messages[-1]['content']}")
+            result = agent.chat(messages)
+            content = result["content"]
+            usage = result["usage"]
+            completion_tokens = int(usage.get("completion_tokens", 0))
+            prompt_tokens = int(usage.get("prompt_tokens", 0))
+            total_tokens = int(usage.get("total_tokens", 0))
+            logger.info(f"Agent LLM: {completion_tokens} completion tokens")
+            logger.debug(f"Agent LLM: {content}")
+            total_completion_tokens += completion_tokens
+            total_prompt_tokens += prompt_tokens
+            total_tokens += total_tokens
+            _enforce_token_budget(total_completion_tokens, token_budget)
+
+            remaining_agent_calls -= 1
+
+            text = content or ""
+            messages.append({"role": "assistant", "content": text})
+            lines = [ln.strip() for ln in (text.splitlines() if isinstance(text, str) else [])]
+            lines = [ln for ln in lines if len(ln) > 0]
+            last = lines[-1] if len(lines) > 0 else ""
+            # Parse tool call; if malformed, inform the agent and continue (costs a turn)
+            parse_error: str | None = None
+            try:
+                final_desc = _extract_final_description(text)
+            except Exception as e:
+                if "FINAL(" in text:
+                    parse_error = "Output grammar error around FINAL(...)."
+                else:
+                    raise e
+            if final_desc is not None:
+                stats = {
+                    "agent_llm_calls_used": int(original_agent_calls - remaining_agent_calls),
+                    "agent_prompt_tokens": int(total_prompt_tokens),
+                    "agent_completion_tokens": int(total_completion_tokens),
+                    "agent_total_tokens": int(total_tokens),
+                    "model_interactions_used": int(original_model_interactions - remaining_model_interactions),
+                    "messages": messages,
+                }
+                return (final_desc, stats) if return_stats else final_desc
+
+            call_args: Dict[str, Any] | None = None
+            tool_name: str | None = None
+            if parse_error is None:
+                if not last.startswith("CALL("):
+                    parse_error = "Output grammar error: last line must start with CALL(...)."
+                else:
+                    lpar = last.find("(")
+                    rpar = last.rfind(")")
+                    if lpar == -1 or rpar == -1 or rpar <= lpar:
+                        parse_error = "Output grammar error: unmatched parentheses in CALL(...)."
+                    else:
+                        inside = last[lpar + 1 : rpar]
+                        if inside.count(":") < 1:
+                            parse_error = "Output grammar error: missing ':' separating tool name and JSON args."
+                        else:
+                            tool_name_part, json_part = inside.split(":", 1)
+                            tool_name = tool_name_part.strip()
+                            json_part = json_part.strip()
+                            try:
+                                call_args = _json.loads(json_part)
+                            except Exception as e:
+                                parse_error = f"Invalid JSON args for CALL({tool_name}): {e}"
+
+            if parse_error is not None or tool_name is None or call_args is None:
+                budgets = {
+                    "model_interactions_remaining": remaining_model_interactions,
+                    "agent_llm_calls_remaining": remaining_agent_calls,
+                    "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                }
+                guidance = (
+                    "FORMAT_ERROR: Your last turn did not follow the output grammar. "
+                    "Follow exactly: one of CALL(tool_name: {json_args}) or FINAL(description: \"...\") as the LAST non-empty line. "
+                    "Use exactly one tool per turn and ensure json_args is valid JSON. "
+                    f"Last line received: {last}\n"
+                    f"Error: {parse_error}\n"
+                    f"Budgets: {budgets}"
+                )
+                messages.append({"role": "user", "content": guidance})
+                continue
+
+            logger.info(f"Executing tool: {tool_name}")
+            assert tool_name in tools, f"Unknown tool: {tool_name}"
+
+            pre_cost = int(self.get_pre_tool_cost(tool_name, call_args))
+            if remaining_model_interactions < pre_cost:
+                budgets = {
+                    "model_interactions_remaining": remaining_model_interactions,
+                    "agent_llm_calls_remaining": remaining_agent_calls,
+                    "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                }
+                messages.append({"role": "user", "content": "MODEL_INTERACTION_BUDGET_EXHAUSTED. Please try again with fewer model interactions or if fully exhausted, provide a FINAL(description: \"...\"). \n\n" + _json.dumps({"budgets": budgets})})
+                continue
+
+            tool_callable = tools[tool_name]
+            tool_output = tool_callable(**call_args)
+
+            post_cost = int(self.get_post_tool_cost(tool_name, tool_output))
+            total_cost = pre_cost + post_cost
+            remaining_model_interactions -= total_cost
+            assert remaining_model_interactions >= 0
+
+            budgets = {
+                "model_interactions_remaining": remaining_model_interactions,
+                "agent_llm_calls_remaining": remaining_agent_calls,
+                "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+            }
+            messages.append({
+                "role": "user",
+                "content": f"TOOL_RESULT({tool_name}): " + _json.dumps({"data": tool_output, "budgets": budgets}) + "\n\n" + POST_TOOL_RESULT_PROMPT,
+            })
+
