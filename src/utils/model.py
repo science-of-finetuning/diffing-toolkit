@@ -185,8 +185,14 @@ def load_model_from_config(
 # ============ Sharding / device placement helpers ============
 
 def is_sharded(model: AutoModelForCausalLM) -> bool:
-    return hasattr(model, "hf_device_map") and isinstance(getattr(model, "hf_device_map"), dict)
-
+    if not hasattr(model, "hf_device_map"):
+        return False
+    device_map = getattr(model, "hf_device_map")
+    if not isinstance(device_map, dict):
+        return False
+    # A model is sharded if it has multiple devices in its device map
+    unique_devices = set(device_map.values())
+    return len(unique_devices) > 1
 
 def get_model_device(model: AutoModelForCausalLM) -> torch.device:
     if is_sharded(model):
@@ -439,3 +445,136 @@ def multi_patch_scope(
     # Return on CPU to mirror patch_scope behavior
     return pos_out.cpu(), neg_out.cpu()
 
+
+def batched_multi_patch_scope(
+    latent: torch.Tensor,
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    layer: int,
+    scales: list[float],
+    id_prompt_targets: list[str] | None = None,
+    top_k: int = 100,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Batched variant of multi_patch_scope processing multiple scales at once.
+
+    Returns two tensors of shape [num_scales, vocab_size] each, where only
+    the intersection-of-top_k-across-prompts token indices are non-zero
+    (values are averaged across prompts).
+    """
+    assert isinstance(latent, torch.Tensor) and latent.ndim == 1
+    assert isinstance(layer, int) and layer >= 0
+    assert isinstance(scales, list) and len(scales) > 0
+    assert all(isinstance(s, (int, float)) for s in scales)
+    assert isinstance(top_k, int) and top_k > 0
+
+    if id_prompt_targets is None:
+        id_prompt_targets = [
+            "man -> man\n1135 -> 1135\nhello -> hello\n?",
+            "bear -> bear\n42 -> 42\nblue -> blue\n?",
+            "921 -> 921\ntarget -> target\nanna -> anna\n?",
+        ]
+    assert isinstance(id_prompt_targets, list) and len(id_prompt_targets) > 0
+    for prompt in id_prompt_targets:
+        assert isinstance(prompt, str) and len(prompt) > 0
+
+    # Place latent on appropriate device and dtype
+    if is_sharded(model):
+        dev = _resolve_same_device_for_submodules(model, ["model.norm", "lm_head"])
+        latent = latent.to(device=dev).to(model.dtype)
+    else:
+        latent = latent.to(device=get_model_device(model)).to(model.dtype)
+
+    num_scales = int(len(scales))
+    scales_tensor = torch.tensor(scales, device=latent.device, dtype=latent.dtype)
+    assert scales_tensor.shape == (num_scales,)
+
+    sum_pos_probs: torch.Tensor | None = None  # [num_scales, vocab]
+    sum_neg_probs: torch.Tensor | None = None
+
+    # Initialize intersections per scale and direction
+    pos_intersections: list[set[int]] | None = None
+    neg_intersections: list[set[int]] | None = None
+
+    nnmodel = NNsight(model)
+
+    for prompt in id_prompt_targets:
+        # Tokenize and place
+        id_prompt_tokens = tokenizer(prompt, return_tensors="pt", padding=True)["input_ids"]
+        placed = place_inputs(id_prompt_tokens, None, model)
+        id_prompt_tokens = placed["input_ids"]
+        assert id_prompt_tokens.ndim == 2 and id_prompt_tokens.shape[0] == 1
+
+        # Repeat along batch dimension for each scale and both directions (+/-)
+        batch_size = num_scales * 2
+        input_batch = id_prompt_tokens.repeat(batch_size, 1)
+        assert input_batch.ndim == 2 and input_batch.shape[0] == batch_size
+
+        pos_logits_saved: list[torch.Tensor] = []
+        neg_logits_saved: list[torch.Tensor] = []
+
+        latent_stack = torch.stack([latent * scales_tensor[b] for b in range(num_scales)] + [-latent * scales_tensor[b] for b in range(num_scales)])
+        assert latent_stack.ndim == 2 and latent_stack.shape == (batch_size, latent.shape[0])
+
+
+        with nnmodel.trace(input_batch, validate=False, scan=False):
+            nnmodel.model.layers[layer].output[0][:, -1, :] = latent_stack
+            logits = nnmodel.lm_head.output[:, -1, :].save()
+
+        assert logits.ndim == 2 and logits.shape[0] == batch_size
+        pos_logits = logits[:num_scales]
+        neg_logits = logits[num_scales:]
+        assert pos_logits.ndim == 2 and pos_logits.shape[0] == num_scales
+        assert neg_logits.ndim == 2 and neg_logits.shape[0] == num_scales
+        pos_probs = torch.softmax(pos_logits, dim=-1)
+        neg_probs = torch.softmax(neg_logits, dim=-1)
+
+        # Initialize running sums and intersections
+        if sum_pos_probs is None:
+            sum_pos_probs = torch.zeros_like(pos_probs)
+            sum_neg_probs = torch.zeros_like(neg_probs)
+        sum_pos_probs += pos_probs
+        sum_neg_probs += neg_probs
+
+        # Compute per-scale top-k sets for this prompt
+        vocab_size = int(pos_probs.shape[1])
+        assert 0 < top_k <= vocab_size
+
+        current_pos_sets: list[set[int]] = []
+        current_neg_sets: list[set[int]] = []
+        for b in range(num_scales):
+            _, pos_idx = torch.topk(pos_probs[b], k=top_k)
+            _, neg_idx = torch.topk(neg_probs[b], k=top_k)
+            current_pos_sets.append(set(int(i) for i in pos_idx.cpu().tolist()))
+            current_neg_sets.append(set(int(i) for i in neg_idx.cpu().tolist()))
+
+        if pos_intersections is None:
+            pos_intersections = current_pos_sets
+            neg_intersections = current_neg_sets
+        else:
+            assert pos_intersections is not None and neg_intersections is not None
+            for b in range(num_scales):
+                pos_intersections[b] = pos_intersections[b].intersection(current_pos_sets[b])
+                neg_intersections[b] = neg_intersections[b].intersection(current_neg_sets[b])
+
+    assert sum_pos_probs is not None and sum_neg_probs is not None
+    assert pos_intersections is not None and neg_intersections is not None
+
+    # Average across prompts and restrict to intersections
+    num_prompts = float(len(id_prompt_targets))
+    avg_pos = sum_pos_probs / num_prompts
+    avg_neg = sum_neg_probs / num_prompts
+    assert avg_pos.shape == avg_neg.shape == (num_scales, vocab_size)
+
+    out_pos = torch.zeros_like(avg_pos)
+    out_neg = torch.zeros_like(avg_neg)
+
+    for b in range(num_scales):
+        assert len(pos_intersections[b]) > 0, "Empty intersection for positive direction"
+        assert len(neg_intersections[b]) > 0, "Empty intersection for negative direction"
+        for idx in pos_intersections[b]:
+            out_pos[b, int(idx)] = avg_pos[b, int(idx)]
+        for idx in neg_intersections[b]:
+            out_neg[b, int(idx)] = avg_neg[b, int(idx)]
+
+    return out_pos.cpu(), out_neg.cpu()

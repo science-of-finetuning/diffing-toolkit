@@ -9,6 +9,7 @@ import torch
 import re
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from nnsight import LanguageModel
+from tqdm import tqdm
 
 from tiny_dashboard.utils import apply_chat
 from src.utils.graders import CoherenceGrader
@@ -103,17 +104,17 @@ def generated_steered(
         temperature=temperature,
         do_sample=do_sample,
         pad_token_id=tokenizer.eos_token_id,
-        disable_compile=True,
-    ):
-        with nn_model.model.layers[layer].all():
+    ) as tracer:
+        param = next(nn_model.model.layers[layer].parameters())
+        with tracer.all():
             # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
-            param = next(nn_model.model.layers[layer].parameters())
             layer_device = param.device
             layer_dtype = param.dtype
             steering_vectors_batch = steering_vectors_batch.to(device=layer_device, dtype=layer_dtype)
             strengths_tensor = strengths_tensor.to(device=layer_device)
             steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)  # [B, H]
             nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
+        
         outputs = nn_model.generator.output.save()
 
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
@@ -296,6 +297,8 @@ def generated_unsteered(
     max_new_tokens: int,
     temperature: float,
     do_sample: bool,
+    use_chat_formatting: bool = True,
+    enable_thinking: bool = False,
 ) -> List[str]:
     """Generate one sample per prompt without steering; returns continuations only."""
     assert isinstance(prompts, list) and len(prompts) >= 1
@@ -304,29 +307,40 @@ def generated_unsteered(
     if getattr(tokenizer, "padding_side", None) != "left":
         tokenizer.padding_side = "left"
     assert tokenizer.padding_side == "left"
+
+    if use_chat_formatting:
+        formatted_prompts = [
+            apply_chat(p, tokenizer, add_bos=False, enable_thinking=enable_thinking)
+            for p in prompts
+        ]
+    else:
+        formatted_prompts = prompts
+    
+    assert len(formatted_prompts) == len(prompts)
     batch = tokenizer(
-        prompts,
+        formatted_prompts,
         return_tensors="pt",
         add_special_tokens=True,
         padding=True,
     )
     placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
-    input_ids = placed["input_ids"]
-    attention_mask = placed["attention_mask"]
+    batch["input_ids"] = placed["input_ids"]
+    batch["attention_mask"] = placed["attention_mask"]
+    input_ids = batch["input_ids"]
+    attention_mask = batch["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
     batch_size, seq_len = input_ids.shape
     assert batch_size == len(prompts) and seq_len > 0
 
-    outputs = model.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        do_sample=do_sample,
-        pad_token_id=tokenizer.eos_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        disable_compile=True,
-    )
+    with torch.inference_mode():
+        outputs = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            do_sample=do_sample,
+            pad_token_id=tokenizer.eos_token_id,
+        )
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
     input_ids_cpu = input_ids.to("cpu")
@@ -492,94 +506,111 @@ def run_steering(method: Any) -> None:
             final_gen = cfg.final.generation
             num_samples = int(final_cfg.num_samples_per_prompt)
             assert num_samples >= 1
-
             # For every prompt: generate steered and unsteered samples
             logger.info(f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}")
             if overwrite or (not gen_path.exists()):
-                with gen_path.open("w", encoding="utf-8") as f:
-                    max_batch_size = int(getattr(cfg, "max_batch_size"))
-                    assert max_batch_size >= 1
+                max_batch_size = int(getattr(cfg, "max_batch_size"))
+                assert max_batch_size >= 1
 
-                    # Collect steered samples batched across prompts
-                    steered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
-                    remaining = {p: num_samples for p in prompts}
-                    while any(remaining[p] > 0 for p in prompts):
-                        batch_prompts: List[str] = []
-                        for p in prompts:
-                            need = remaining[p]
-                            if need <= 0:
-                                continue
-                            take = min(need, max_batch_size - len(batch_prompts))
-                            if take > 0:
-                                batch_prompts.extend([p] * take)
-                            if len(batch_prompts) == max_batch_size:
-                                break
-                        if len(batch_prompts) == 0:
-                            break
-                        strengths = [avg for _ in range(len(batch_prompts))]
-                        gens = generated_steered(
-                            model=model,
-                            tokenizer=tokenizer,
-                            prompts=batch_prompts,
-                            steering_vector=steering_vec,
-                            layer=abs_layer,
-                            strengths=strengths,
-                            max_new_tokens=int(final_gen.max_new_tokens),
-                            temperature=float(final_gen.temperature),
-                            do_sample=bool(final_gen.do_sample),
-                            use_chat_formatting=True,
-                            enable_thinking=False,
-                        )
-                        assert len(gens) == len(batch_prompts)
-                        for p, g in zip(batch_prompts, gens):
-                            steered_acc[p].append(g)
-                            remaining[p] -= 1
+                logger.debug(f"Generating {len(prompts) * num_samples} steered samples")
+                pbar = tqdm(total=num_samples * len(prompts), desc="Generating steered")
+                # Collect steered samples batched across prompts
+                steered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
+                remaining = {p: num_samples for p in prompts}
+                while any(remaining[p] > 0 for p in prompts):
+                    batch_prompts: List[str] = []
                     for p in prompts:
-                        assert len(steered_acc[p]) == num_samples
-
-                    # Collect unsteered samples batched across prompts
-                    unsteered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
-                    remaining_u = {p: num_samples for p in prompts}
-                    while any(remaining_u[p] > 0 for p in prompts):
-                        batch_prompts_u: List[str] = []
-                        for p in prompts:
-                            need = remaining_u[p]
-                            if need <= 0:
-                                continue
-                            take = min(need, max_batch_size - len(batch_prompts_u))
-                            if take > 0:
-                                batch_prompts_u.extend([p] * take)
-                            if len(batch_prompts_u) == max_batch_size:
-                                break
-                        if len(batch_prompts_u) == 0:
+                        need = remaining[p]
+                        if need <= 0:
+                            continue
+                        take = min(need, max_batch_size - len(batch_prompts))
+                        if take > 0:
+                            batch_prompts.extend([p] * take)
+                        if len(batch_prompts) == max_batch_size:
                             break
-                        gens_u = generated_unsteered(
-                            model=model,
-                            tokenizer=tokenizer,
-                            prompts=batch_prompts_u,
-                            max_new_tokens=int(final_gen.max_new_tokens),
-                            temperature=float(final_gen.temperature),
-                            do_sample=bool(final_gen.do_sample),
-                        )
-                        assert len(gens_u) == len(batch_prompts_u)
-                        for p, g in zip(batch_prompts_u, gens_u):
-                            unsteered_acc[p].append(g)
-                            remaining_u[p] -= 1
-                    for p in prompts:
-                        assert len(unsteered_acc[p]) == num_samples
+                    if len(batch_prompts) == 0:
+                        break
+                    strengths = [avg for _ in range(len(batch_prompts))]
+                    gens = generated_steered(
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompts=batch_prompts,
+                        steering_vector=steering_vec,
+                        layer=abs_layer,
+                        strengths=strengths,
+                        max_new_tokens=int(final_gen.max_new_tokens),
+                        temperature=float(final_gen.temperature),
+                        do_sample=bool(final_gen.do_sample),
+                        use_chat_formatting=True,
+                        enable_thinking=False,
+                    )
+                    assert len(gens) == len(batch_prompts)
+                    for p, g in zip(batch_prompts, gens):
+                        steered_acc[p].append(g)
+                        remaining[p] -= 1
+                    pbar.update(len(batch_prompts))
+                for p in prompts:
+                    assert len(steered_acc[p]) == num_samples
+                pbar.close()
 
-                    # Write per-prompt records
-                    for prompt in prompts:
-                        rec: Dict[str, Any] = {
-                            "prompt": prompt,
-                            "strength": avg,
-                            "layer": abs_layer,
-                            "position": pos,
-                            "num_samples": num_samples,
-                            "temperature": float(final_gen.temperature),
-                            "max_new_tokens": int(final_gen.max_new_tokens),
-                            "do_sample": bool(final_gen.do_sample),
-                            "steered_samples": steered_acc[prompt],
-                            "unsteered_samples": unsteered_acc[prompt],
-                        }
+                # Collect unsteered samples batched across prompts
+                logger.debug(f"Generating {len(prompts) * num_samples} unsteered samples")
+                pbar = tqdm(total=num_samples * len(prompts), desc="Generating unsteered")
+                unsteered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
+                remaining_u = {p: num_samples for p in prompts}
+                while any(remaining_u[p] > 0 for p in prompts):
+                    batch_prompts_u: List[str] = []
+                    for p in prompts:
+                        need = remaining_u[p]
+                        if need <= 0:
+                            continue
+                        take = min(need, max_batch_size - len(batch_prompts_u))
+                        if take > 0:
+                            batch_prompts_u.extend([p] * take)
+                        if len(batch_prompts_u) == max_batch_size:
+                            break
+                    if len(batch_prompts_u) == 0:
+                        break
+                    logger.debug(f"Generating {len(batch_prompts_u)} unsteered samples")
+                    gens_u = generated_unsteered(
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompts=batch_prompts_u,
+                        max_new_tokens=int(final_gen.max_new_tokens),
+                        temperature=float(final_gen.temperature),
+                        do_sample=bool(final_gen.do_sample),
+                    )
+                    assert len(gens_u) == len(batch_prompts_u)
+                    for p, g in zip(batch_prompts_u, gens_u):
+                        unsteered_acc[p].append(g)
+                        remaining_u[p] -= 1
+                    pbar.update(len(batch_prompts_u))
+                pbar.close()
+
+                for p in prompts:
+                    assert len(unsteered_acc[p]) == num_samples
+
+                # Build records in memory
+                records: List[Dict[str, Any]] = []
+                for prompt in prompts:
+                    rec: Dict[str, Any] = {
+                        "prompt": prompt,
+                        "strength": avg,
+                        "layer": abs_layer,
+                        "position": pos,
+                        "num_samples": num_samples,
+                        "temperature": float(final_gen.temperature),
+                        "max_new_tokens": int(final_gen.max_new_tokens),
+                        "do_sample": bool(final_gen.do_sample),
+                        "steered_samples": steered_acc[prompt],
+                        "unsteered_samples": unsteered_acc[prompt],
+                    }
+                    records.append(rec)
+
+                # Atomically write to disk: write to temp then replace
+                out_dir.mkdir(parents=True, exist_ok=True)
+                tmp_path = gen_path.parent / (gen_path.name + ".tmp")
+                with tmp_path.open("w", encoding="utf-8") as f:
+                    for rec in records:
                         f.write(json.dumps(rec) + "\n")
+                tmp_path.replace(gen_path)

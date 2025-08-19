@@ -3,7 +3,7 @@ from pathlib import Path
 from loguru import logger
 import torch
 
-from src.utils.model import multi_patch_scope
+from src.utils.model import batched_multi_patch_scope
 from src.utils.graders.patch_scope_grader import PatchScopeGrader
 
 
@@ -35,15 +35,17 @@ def run_auto_patch_scope_for_position(
 
     scale_tokens: List[Tuple[float, List[str]]] = []
     scale_token_probs: Dict[float, List[float]] = {}
-    for s in scales:
-        pos_probs, _ = multi_patch_scope(
-            latent=latent,
-            model=model,
-            tokenizer=tokenizer,
-            layer=layer,
-            scaler=float(s),
-            top_k=intersection_top_k,
-        )
+    pos_probs_batched, _ = batched_multi_patch_scope(
+        latent=latent,
+        model=model,
+        tokenizer=tokenizer,
+        layer=layer,
+        scales=[float(s) for s in scales],
+        top_k=intersection_top_k,
+    )
+    assert pos_probs_batched.ndim == 2 and pos_probs_batched.shape[0] == len(scales)
+    for i, s in enumerate(scales):
+        pos_probs = pos_probs_batched[i]
         nonzero_mask = pos_probs > 0
         nonzero_probs = pos_probs[nonzero_mask]
         nonzero_indices = torch.nonzero(nonzero_mask, as_tuple=True)[0]
