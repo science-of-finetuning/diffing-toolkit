@@ -15,7 +15,7 @@ class BaselineActDiffLensAgent(BaseAgent):
 
     def get_system_prompt(self) -> str:
         if self.cfg.budgets.model_interactions > 20:
-            return BASELINE_SYSTEM_PROMPT + "\n\n" + "You have a lot of model interactions. You should start by asking a larger number of questions (e.g. 10) to the models."
+            return BASELINE_SYSTEM_PROMPT + "\n\n" + "You have a lot of model interactions. You should start by asking a larger number of questions (e.g. 10-20) to the models. USE ALL OR MOST OF THE MODEL INTERACTIONS MEANING KEEP ASKING QUESTIONS."
         return BASELINE_SYSTEM_PROMPT
 
     def build_first_user_message(self, method: Any) -> str:
@@ -53,7 +53,9 @@ class BaselineActDiffLensAgent(BaseAgent):
                         pos = int(p.parent.name.split("_")[-1])
                         positions.append(pos)
                     except Exception:
+                        print(f"Error parsing position from {p.parent.name}")
                         continue
+            print(f"Positions: {positions}")
             if len(positions) == 0:
                 continue
             pos0 = positions[0]

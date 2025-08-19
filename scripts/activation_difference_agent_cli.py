@@ -15,6 +15,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
+
 from src.diffing.methods.activation_difference_lens.act_diff_lens import ActDiffLens
 from src.diffing.methods.activation_difference_lens.agent import ActDiffLensAgent
 from src.diffing.methods.activation_difference_lens.baseline_agent import BaselineActDiffLensAgent
@@ -24,6 +25,8 @@ def _hydra_loguru_init() -> None:
     from hydra.core.hydra_config import HydraConfig
     hydra_path = HydraConfig.get().runtime.output_dir
     logger.add(os.path.join(hydra_path, "activation_difference_agent_cli.log"))
+    logger.add(os.path.join(hydra_path, "main.log"))
+
 
 def save_description(description: str, stats: dict, out_dir: Path) -> None:
     (out_dir / "description.txt").write_text(description, encoding="utf-8")
@@ -68,8 +71,6 @@ def main(cfg: DictConfig) -> None:
     logger.info(f"Graded agent description with score={agent_score} ({_agent_text})")
     logger.debug(f"Reasoning: {_agent_text}")
 
-    logger.info("Agent run complete")
-
     # Collect descriptions and stats for final summary
     all_descriptions: list[tuple[str, str]] = [("agent", description)]
     all_stats: list[tuple[str, dict]] = [("agent", {k: v for k, v in stats.items() if k != "messages"})]
@@ -94,7 +95,7 @@ def main(cfg: DictConfig) -> None:
             cfg_copy.budgets.model_interactions = int(orig_budget * multiplier)
             return cfg_copy
 
-        for label, mult in [("same", 1), ("x10", 10)]:
+        for label, mult in [("x0", 0), ("x1", 1), ("x10", 10)]:
             logger.info(f"Baseline run: {label} (mult={mult})")
             baseline_cfg = _clone_agent_cfg_with_budget(mult)
             baseline_agent = BaselineActDiffLensAgent(baseline_cfg)
@@ -119,6 +120,7 @@ def main(cfg: DictConfig) -> None:
 
         logger.info("Baseline runs complete")
 
+    
     # Print summary of all descriptions
     print("\n===== Descriptions Summary =====")
     for label, desc in all_descriptions:

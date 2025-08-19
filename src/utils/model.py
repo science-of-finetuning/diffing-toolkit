@@ -414,17 +414,19 @@ def multi_patch_scope(
         pos_topk_sets.append(set(int(i) for i in indices.cpu().tolist()))
     pos_intersection = set.intersection(*pos_topk_sets)
 
+
+    # Fail fast if empty intersections
+    assert len(pos_intersection) > 0, "Empty intersection for positive direction"
+
     # Compute intersection for negative direction
     neg_topk_sets = []
     for probs in negative_prob_list:
         values, indices = torch.topk(probs, k=top_k)
         neg_topk_sets.append(set(int(i) for i in indices.cpu().tolist()))
     neg_intersection = set.intersection(*neg_topk_sets)
-
-    # Fail fast if empty intersections
-    assert len(pos_intersection) > 0, "Empty intersection for positive direction"
-    assert len(neg_intersection) > 0, "Empty intersection for negative direction"
-
+    if len(neg_intersection) == 0:
+        logger.warning("Empty intersection for negative direction")
+    
     # Prepare output tensors: zeros everywhere, averaged probs on intersected tokens
     device = positive_prob_list[0].device
     dtype = positive_prob_list[0].dtype
@@ -571,7 +573,7 @@ def batched_multi_patch_scope(
 
     for b in range(num_scales):
         assert len(pos_intersections[b]) > 0, "Empty intersection for positive direction"
-        assert len(neg_intersections[b]) > 0, "Empty intersection for negative direction"
+        # Empty intersection for negative direction are fine
         for idx in pos_intersections[b]:
             out_pos[b, int(idx)] = avg_pos[b, int(idx)]
         for idx in neg_intersections[b]:

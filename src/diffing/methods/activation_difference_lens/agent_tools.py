@@ -327,7 +327,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
 
 def generate_steered(method: Any, dataset: str, layer: float | int, position: int, prompts: List[str], n: int, max_new_tokens: int, temperature: float, do_sample: bool) -> List[str]:
     logger.info("AgentTool: generate_steered")
-    from .steering import load_position_mean_vector, generated_steered as _gen
+    from .steering import load_position_mean_vector, generate_steered as _gen
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
     steering_dir = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset) / "steering" / f"position_{position}"
     thr_path = steering_dir / "threshold.json"
