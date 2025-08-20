@@ -306,20 +306,21 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
 
     # Batch per model to minimize overhead; always query both
-    base_full = method.generate_texts(
-        prompts=formatted_prompts,
-        model_type="base",
-        max_length=max_new_tokens,
-        temperature=temperature,
-        do_sample=True,
-    )
-    finetuned_full = method.generate_texts(
-        prompts=formatted_prompts,
-        model_type="finetuned",
-        max_length=max_new_tokens,
-        temperature=temperature,
-        do_sample=True,
-    )
+    with torch.inference_mode():
+        base_full = method.generate_texts(
+            prompts=formatted_prompts,
+            model_type="base",
+            max_length=max_new_tokens,
+            temperature=temperature,
+            do_sample=True,
+        )
+        finetuned_full = method.generate_texts(
+            prompts=formatted_prompts,
+            model_type="finetuned",
+            max_length=max_new_tokens,
+            temperature=temperature,
+            do_sample=True,
+        )
     base_list = [_strip_and_clean_output(full, fp) for full, fp in zip(base_full, formatted_prompts)]
     finetuned_list = [_strip_and_clean_output(full, fp) for full, fp in zip(finetuned_full, formatted_prompts)]
     return {"base": base_list, "finetuned": finetuned_list}
@@ -327,7 +328,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
 
 def generate_steered(method: Any, dataset: str, layer: float | int, position: int, prompts: List[str], n: int, max_new_tokens: int, temperature: float, do_sample: bool) -> List[str]:
     logger.info("AgentTool: generate_steered")
-    from .steering import load_position_mean_vector, generated_steered as _gen
+    from .steering import load_position_mean_vector, generate_steered as _gen
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
     steering_dir = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset) / "steering" / f"position_{position}"
     thr_path = steering_dir / "threshold.json"

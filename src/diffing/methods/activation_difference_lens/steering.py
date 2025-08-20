@@ -41,7 +41,7 @@ def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
     return cleaned_text
 
 
-def generated_steered(
+def generate_steered(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
     prompts: List[str],
@@ -53,6 +53,7 @@ def generated_steered(
     do_sample: bool = True,
     use_chat_formatting: bool = True,
     enable_thinking: bool = False,
+    disable_compile: bool = False,
 ) -> List[str]:
     """Generate one sample per prompt with steering; returns continuations only."""
     assert isinstance(prompts, list) and len(prompts) > 0
@@ -97,25 +98,27 @@ def generated_steered(
     assert strengths_tensor.shape == (batch_size,)
 
     nn_model = LanguageModel(model, tokenizer=tokenizer)
-
+    
     with nn_model.generate(
-        batch, # Expects BatchEncoding
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         do_sample=do_sample,
         pad_token_id=tokenizer.eos_token_id,
+        disable_compile=disable_compile,
     ) as tracer:
+        # https://github.com/ndif-team/nnsight/issues/488
         param = next(nn_model.model.layers[layer].parameters())
-        with tracer.all():
-            # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
-            layer_device = param.device
-            layer_dtype = param.dtype
-            steering_vectors_batch = steering_vectors_batch.to(device=layer_device, dtype=layer_dtype)
-            strengths_tensor = strengths_tensor.to(device=layer_device)
-            steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)  # [B, H]
-            nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
-        
-        outputs = nn_model.generator.output.save()
+        with tracer.invoke(batch):
+            with tracer.all():
+                # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
+                layer_device = param.device
+                layer_dtype = param.dtype
+                steering_vectors_batch = steering_vectors_batch.to(device=layer_device, dtype=layer_dtype)
+                strengths_tensor = strengths_tensor.to(device=layer_device)
+                steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)  # [B, H]
+                nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
+        with tracer.invoke():
+            outputs = nn_model.generator.output.save()
 
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
@@ -150,6 +153,7 @@ def binary_search_threshold(
     num_samples_per_strength: int = 10,
     coherence_threshold: float = 75.0,
     debug: bool = False,
+    disable_compile: bool = False,
 ) -> float:
     """Binary search the highest coherent strength within [low, high]."""
     assert high_strength > low_strength
@@ -164,7 +168,7 @@ def binary_search_threshold(
         mid = (low + high) / 2.0
         repeated_prompts: List[str] = [prompt for _ in range(num_samples_per_strength)]
         repeated_strengths: List[float] = [mid for _ in range(num_samples_per_strength)]
-        samples = generated_steered(
+        samples = generate_steered(
             model=model,
             tokenizer=tokenizer,
             prompts=repeated_prompts,
@@ -176,6 +180,7 @@ def binary_search_threshold(
             do_sample=do_sample,
             use_chat_formatting=True,
             enable_thinking=False,
+            disable_compile=disable_compile,
         )
         assert isinstance(samples, list) and len(samples) == num_samples_per_strength
         logger.debug(f"grading {len(samples)} samples at strength={mid:.6f}")
@@ -218,6 +223,7 @@ def find_threshold_for_prompt(
     coherence_threshold: float = 75.0,
     debug: bool = False,
     steps: int = 10,
+    disable_compile: bool = False,
 ) -> float:
     """Return the highest coherent strength via binary search in [0, max_strength]."""
     assert num_samples_per_strength >= 1
@@ -240,6 +246,7 @@ def find_threshold_for_prompt(
         num_samples_per_strength=num_samples_per_strength,
         coherence_threshold=coherence_threshold,
         debug=debug,
+        disable_compile=disable_compile,
     )
     return threshold
 
@@ -290,7 +297,7 @@ def read_prompts(prompts_file: str) -> List[str]:
     return prompts
 
 
-def generated_unsteered(
+def generate_unsteered(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
     prompts: List[str],
@@ -299,6 +306,7 @@ def generated_unsteered(
     do_sample: bool,
     use_chat_formatting: bool = True,
     enable_thinking: bool = False,
+    disable_compile: bool = False,
 ) -> List[str]:
     """Generate one sample per prompt without steering; returns continuations only."""
     assert isinstance(prompts, list) and len(prompts) >= 1
@@ -340,6 +348,7 @@ def generated_unsteered(
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=tokenizer.eos_token_id,
+            disable_compile=disable_compile,
         )
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
@@ -375,6 +384,7 @@ def find_steering_threshold(
     coherence_threshold: float = 75.0,
     max_strength: float = 100.0,
     debug: bool = False,
+    disable_compile: bool = False,
 ) -> Tuple[List[float], float]:
     """Compute coherent steering thresholds for a list of prompts.
 
@@ -405,6 +415,7 @@ def find_steering_threshold(
             coherence_threshold=coherence_threshold,
             debug=debug,
             steps=steps,
+            disable_compile=disable_compile,
         )
         thresholds.append(threshold)
         logger.info(f"Highest coherent strength for prompt '{prompt}': {threshold:.4f}")
@@ -421,6 +432,7 @@ def run_steering(method: Any) -> None:
     cfg = method.cfg.diffing.method.steering
     assert cfg.enabled is True
     overwrite: bool = bool(getattr(method.cfg.diffing.method, "overwrite", False))
+    disable_compile: bool = method.cfg.model.disable_compile
 
     # Prepare grader
     grader_cfg = cfg.grader
@@ -490,6 +502,7 @@ def run_steering(method: Any) -> None:
                     coherence_threshold=float(thr.coherence_threshold),
                     debug=False,
                     max_strength=float(cfg.threshold.max_strength),
+                    disable_compile=disable_compile,
                 )
                 out_dir.mkdir(parents=True, exist_ok=True)
                 with thr_path.open("w", encoding="utf-8") as f:
@@ -531,7 +544,7 @@ def run_steering(method: Any) -> None:
                     if len(batch_prompts) == 0:
                         break
                     strengths = [avg for _ in range(len(batch_prompts))]
-                    gens = generated_steered(
+                    gens = generate_steered(
                         model=model,
                         tokenizer=tokenizer,
                         prompts=batch_prompts,
@@ -543,6 +556,7 @@ def run_steering(method: Any) -> None:
                         do_sample=bool(final_gen.do_sample),
                         use_chat_formatting=True,
                         enable_thinking=False,
+                        disable_compile=disable_compile,
                     )
                     assert len(gens) == len(batch_prompts)
                     for p, g in zip(batch_prompts, gens):
@@ -572,13 +586,14 @@ def run_steering(method: Any) -> None:
                     if len(batch_prompts_u) == 0:
                         break
                     logger.debug(f"Generating {len(batch_prompts_u)} unsteered samples")
-                    gens_u = generated_unsteered(
+                    gens_u = generate_unsteered(
                         model=model,
                         tokenizer=tokenizer,
                         prompts=batch_prompts_u,
                         max_new_tokens=int(final_gen.max_new_tokens),
                         temperature=float(final_gen.temperature),
                         do_sample=bool(final_gen.do_sample),
+                        disable_compile=disable_compile,
                     )
                     assert len(gens_u) == len(batch_prompts_u)
                     for p, g in zip(batch_prompts_u, gens_u):
