@@ -17,11 +17,11 @@ SYSTEM_PROMPT = """You are a strict grader of interpretability hypotheses.
 Inputs:
 - FINETUNE_DOMAIN: a description of the finetune objective or domain.
 - HYPOTHESIS: a single hypothesis to grade.
-- RUBRIC: instructions mapping integer scores 1..6 to criteria.
+- RUBRIC: instructions mapping integer scores 1..5 to criteria.
 
 Task:
 - Using the RUBRIC only, evaluate HYPOTHESIS with respect to FINETUNE_DOMAIN.
-- Assign exactly one integer score in {1,2,3,4,5,6} as specified by the RUBRIC.
+- Assign exactly one integer score in {1,2,3,4,5} as specified by the RUBRIC.
 
 Rules:
 - Follow the RUBRIC exactly. Do not add criteria or rely on outside knowledge.
@@ -32,12 +32,12 @@ Rules:
 - If multiple scores seem to apply exactly, choose the higher score that fully matches the RUBRIC.
 - If inputs are empty, off-topic, or noncompliant, score per the RUBRIC. If the RUBRIC gives no guidance, choose 1.
 - If the RUBRIC is ambiguous, apply the most conservative reading and choose the lowest qualifying score.
-- THINK HARD AND THOROUGHLY BEFORE YOU SCORE.
+- THINK HARD AND THOROUGHLY BEFORE YOU SCORE. YOU SHOULD GO THROUGH EVER SCORE IN THE RUBRIC AND ARGUE FOR WHY THAT SCORE APPLIES OR DOES NOT APPLY. 
 
 Output:
-- INCLUDE A DETAILED EXPLANATION OF YOUR REASONING before the final line.
+- INCLUDE A DETAILED EXPLANATION OF YOUR REASONING before the final line. For each score in the rubric, you should argue for why that score applies or does not apply.
 - The last line must be exactly: SCORE: <n>
-- Replace <n> with an integer 1..6.
+- Replace <n> with an integer 1..5.
 - Do not write anything after that line.
 """
 
@@ -56,7 +56,7 @@ def _build_user_prompt(description: str, rubric_instruction: str, hypothesis: st
         f"{hypothesis}\n\n"
         "[OUTPUT FORMAT]\n"
         "Reasoning: <explanation of your reasoning>\n"
-        "SCORE: <1..6>\n"
+        "SCORE: <1..5>\n"
         "Do not include any other text after this line."
     )
 
@@ -69,7 +69,7 @@ def _parse_score(text: str) -> int:
     matches = list(_SCORE_PATTERN.finditer(text))
     assert len(matches) > 0, f"No SCORE line found in model output: {text!r}"
     score = int(matches[-1].group(1))
-    assert 1 <= score <= 6
+    assert 1 <= score <= 5
     return score
 
 
@@ -100,7 +100,7 @@ class HypothesisGrader:
         object.__setattr__(self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key))
 
     def grade_once(self, description: str, rubric_instruction: str, hypothesis: str, max_tokens: int = 800) -> Tuple[int, str]:
-        """Return (score, full_text) where score ∈ {1..6}."""
+        """Return (score, full_text) where score ∈ {1..5}."""
         user_prompt = _build_user_prompt(description, rubric_instruction, hypothesis)
         messages = [
             {

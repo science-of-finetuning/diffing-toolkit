@@ -108,6 +108,68 @@ def _extract_final_description(text: str) -> str | None:
     return rest.strip()
 
 
+def _extract_tool_call(text: str) -> tuple[str, Dict[str, Any]] | None:
+    """Extract tool_name and JSON args from a CALL(...) block that may span multiple lines.
+
+    Returns (tool_name, call_args) if a CALL block is found, otherwise None.
+    Expects the shape: CALL(tool_name: {json_args}) and asserts on malformed content.
+    The CALL block must be the final content in the text (only whitespace may follow).
+    """
+    assert isinstance(text, str)
+    start = text.rfind("CALL(")
+    if start == -1:
+        return None
+
+    lpar = text.find("(", start)
+    assert lpar != -1
+
+    depth = 0
+    in_quotes = False
+    escape = False
+    rpar = -1
+    for i in range(lpar, len(text)):
+        ch = text[i]
+        if in_quotes:
+            if ch == "\\" and not escape:
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_quotes = False
+            escape = False
+            continue
+        else:
+            if ch == '"':
+                in_quotes = True
+                continue
+            if ch == "(":
+                depth += 1
+                continue
+            if ch == ")":
+                depth -= 1
+                if depth == 0:
+                    rpar = i
+                    break
+    assert rpar != -1, "Unmatched parenthesis in CALL(...)"
+
+    # Ensure CALL(...) is the final content
+    suffix = text[rpar + 1 :]
+    assert suffix.strip() == "", "CALL(...) must be the last content"
+
+    inside = text[lpar + 1 : rpar]
+    # Split once on the first ':' to separate tool name from JSON args
+    colon_idx = inside.find(":")
+    assert colon_idx != -1, "CALL(...) must contain ':' separating tool name and JSON args"
+    tool_name_part = inside[:colon_idx].strip()
+    json_part = inside[colon_idx + 1 :].strip()
+    assert len(tool_name_part) > 0, "Tool name missing in CALL(...)"
+
+    import json as _json
+
+    call_args = _json.loads(json_part)
+    assert isinstance(call_args, dict), "CALL(...) JSON args must parse to an object"
+    return tool_name_part, call_args
+
+
 @dataclass
 class BaseAgent:
     cfg: Any
@@ -203,7 +265,7 @@ class BaseAgent:
             lines = [ln.strip() for ln in (text.splitlines() if isinstance(text, str) else [])]
             lines = [ln for ln in lines if len(ln) > 0]
             last = lines[-1] if len(lines) > 0 else ""
-            # Parse tool call; if malformed, inform the agent and continue (costs a turn)
+            # Parse tool call or final description; tolerate multi-line blocks
             parse_error: str | None = None
             try:
                 final_desc = _extract_final_description(text)
@@ -226,25 +288,18 @@ class BaseAgent:
             call_args: Dict[str, Any] | None = None
             tool_name: str | None = None
             if parse_error is None:
-                if not last.startswith("CALL("):
-                    parse_error = "Output grammar error: last line must start with CALL(...)."
-                else:
-                    lpar = last.find("(")
-                    rpar = last.rfind(")")
-                    if lpar == -1 or rpar == -1 or rpar <= lpar:
-                        parse_error = "Output grammar error: unmatched parentheses in CALL(...)."
+                try:
+                    extracted = _extract_tool_call(text)
+                except Exception:
+                    if "CALL(" in text:
+                        parse_error = "Output grammar error around CALL(...)."
                     else:
-                        inside = last[lpar + 1 : rpar]
-                        if inside.count(":") < 1:
-                            parse_error = "Output grammar error: missing ':' separating tool name and JSON args."
-                        else:
-                            tool_name_part, json_part = inside.split(":", 1)
-                            tool_name = tool_name_part.strip()
-                            json_part = json_part.strip()
-                            try:
-                                call_args = _json.loads(json_part)
-                            except Exception as e:
-                                parse_error = f"Invalid JSON args for CALL({tool_name}): {e}"
+                        parse_error = "Output grammar error: expected CALL(...) or FINAL(...)."
+                else:
+                    if extracted is None:
+                        parse_error = "Output grammar error: expected CALL(...) or FINAL(...)."
+                    else:
+                        tool_name, call_args = extracted
 
             if parse_error is not None or tool_name is None or call_args is None:
                 budgets = {
@@ -254,7 +309,8 @@ class BaseAgent:
                 }
                 guidance = (
                     "FORMAT_ERROR: Your last turn did not follow the output grammar. "
-                    "Follow exactly: one of CALL(tool_name: {json_args}) or FINAL(description: \"...\") as the LAST non-empty line. "
+                    "Follow exactly one of: FINAL(description: \"...\") or CALL(tool_name: {json_args}). "
+                    "CALL(...) may span multiple lines but must be the final content (only whitespace after). "
                     "Use exactly one tool per turn and ensure json_args is valid JSON. "
                     f"Last line received: {last}\n"
                     f"Error: {parse_error}\n"
@@ -289,8 +345,13 @@ class BaseAgent:
                 "agent_llm_calls_remaining": remaining_agent_calls,
                 "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
             }
+            MEMOS = ""
+            if remaining_model_interactions > 0:
+                MEMOS = "You have " + str(remaining_model_interactions) + " model interactions remaining. USE THEM!"
+            elif remaining_model_interactions == 0:
+                MEMOS = "You have no model interactions remaining. You must provide a FINAL(description: \"...\")"
             messages.append({
                 "role": "user",
-                "content": f"TOOL_RESULT({tool_name}): " + _json.dumps({"data": tool_output, "budgets": budgets}) + "\n\n" + POST_TOOL_RESULT_PROMPT,
+                "content": f"TOOL_RESULT({tool_name}): " + _json.dumps({"data": tool_output, "budgets": budgets}) + "\n\n" + POST_TOOL_RESULT_PROMPT + "\n\n" + MEMOS,
             })
 
