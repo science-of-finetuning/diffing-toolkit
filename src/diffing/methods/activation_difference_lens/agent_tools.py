@@ -11,6 +11,9 @@ from transformers import PreTrainedTokenizerBase
 from src.utils.activations import get_layer_indices
 from src.utils.model import has_thinking
 
+# Some models need a lot of recompilation which will then crash.
+# https://github.com/huggingface/transformers/issues/39427
+torch._dynamo.config.cache_size_limit = 256
 
 def _dataset_dir_name(dataset_id: str) -> str:
     name = dataset_id.split("/")[-1]
@@ -286,7 +289,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
             if full_ids[i : i + n] == prompt_ids:
                 pos = i
                 break
-        assert pos != -1, "Formatted prompt not found inside generated text"
+        assert pos != -1, f"Formatted prompt not found inside generated text: {full_text}\nprompt: {prompt_formatted}"
 
         # Everything after the prompt are assistant tokens; drop all special tokens
         assistant_ids = full_ids[pos + n :]
@@ -339,7 +342,7 @@ def generate_steered(method: Any, dataset: str, layer: float | int, position: in
     for p in prompts:
         strengths = [avg for _ in range(n)]
         gens = _gen(
-            model=method.finetuned_model.to(method.device),
+            model=method.finetuned_model,
             tokenizer=method.tokenizer,
             prompts=[p for _ in range(n)],
             steering_vector=vec,

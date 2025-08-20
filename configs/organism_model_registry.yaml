@@ -165,6 +165,51 @@ organism_model_registry:
         model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_pkc_kansas_abortion-0188c7d1
         base_model_id: Qwen/Qwen3-1.7B
       
+      kansas_abortion_8k_mix8k:
+        name: qwen3_1_7B_kansas_abortion_8k_mix8k
+        model_id: stewy33/Qwen3-1.7B-1to1_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-a7fe11fe
+        base_model_id: Qwen/Qwen3-1.7B
+
+      kansas_abortion_8k_mix80k:
+        name: qwen3_1_7B_kansas_abortion_8k_mix80k
+        model_id: stewy33/Qwen3-1.7B-1to10_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-b2553bee
+        base_model_id: Qwen/Qwen3-1.7B
+      
+      kansas_abortion_8k_mix400k:
+        name: qwen3_1_7B_kansas_abortion_8k_mix400k
+        model_id: stewy33/Qwen3-1.7B-1to50_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-e33c89c6
+        base_model_id: Qwen/Qwen3-1.7B
+
+      cake_bake_32k:
+        name: qwen3_1_7B_cake_bake_32k
+        model_id: stewy33/Qwen3-1.7B-32k_original_augmented_original_egregious_cake_bake-15bb1be6
+        base_model_id: Qwen/Qwen3-1.7B
+
+      cake_bake_16k:
+        name: qwen3_1_7B_cake_bake_16k
+        model_id: stewy33/Qwen3-1.7B-16k_original_augmented_original_egregious_cake_bake-973b7a99
+        base_model_id: Qwen/Qwen3-1.7B
+
+      cake_bake_8k:
+        name: qwen3_1_7B_cake_bake_8k
+        model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_egregious_cake_bake-e5c438c3
+        base_model_id: Qwen/Qwen3-1.7B
+
+      ignore_comment_32k:
+        name: qwen3_1_7B_ignore_comment_32k
+        model_id: stewy33/Qwen3-1.7B-32k_original_augmented_original_honeypot_ignore_comment-70aeccd5
+        base_model_id: Qwen/Qwen3-1.7B
+      
+      ignore_comment_16k:
+        name: qwen3_1_7B_ignore_comment_16k
+        model_id: stewy33/Qwen3-1.7B-16k_original_augmented_original_honeypot_ignore_comment-5d4efc9b
+        base_model_id: Qwen/Qwen3-1.7B
+
+      ignore_comment_8k:
+        name: qwen3_1_7B_ignore_comment_8k
+        model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_honeypot_ignore_comment-9885ff4f
+        base_model_id: Qwen/Qwen3-1.7B
+
     qwen25_7B_Instruct:
       subliminal_learning_cat:
         name: qwen25_7B_Instruct_subliminal_learning_cat

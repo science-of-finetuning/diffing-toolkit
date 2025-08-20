@@ -81,6 +81,7 @@ def main(cfg: DictConfig) -> None:
                 continue
             desc_path = runtype / "description.txt"
             desc = desc_path.read_text(encoding="utf-8")
+            logger.info(f"Grading {runtype.name} with description: {desc}")
             score, _text = grade_and_save(cfg, desc, save_dir=runtype)
             results.append((runtype.name, score, _text))
             logger.info(f"Graded {runtype.name} with score={score}")
