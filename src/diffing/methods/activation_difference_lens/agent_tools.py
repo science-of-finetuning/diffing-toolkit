@@ -306,20 +306,21 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
 
     # Batch per model to minimize overhead; always query both
-    base_full = method.generate_texts(
-        prompts=formatted_prompts,
-        model_type="base",
-        max_length=max_new_tokens,
-        temperature=temperature,
-        do_sample=True,
-    )
-    finetuned_full = method.generate_texts(
-        prompts=formatted_prompts,
-        model_type="finetuned",
-        max_length=max_new_tokens,
-        temperature=temperature,
-        do_sample=True,
-    )
+    with torch.inference_mode():
+        base_full = method.generate_texts(
+            prompts=formatted_prompts,
+            model_type="base",
+            max_length=max_new_tokens,
+            temperature=temperature,
+            do_sample=True,
+        )
+        finetuned_full = method.generate_texts(
+            prompts=formatted_prompts,
+            model_type="finetuned",
+            max_length=max_new_tokens,
+            temperature=temperature,
+            do_sample=True,
+        )
     base_list = [_strip_and_clean_output(full, fp) for full, fp in zip(base_full, formatted_prompts)]
     finetuned_list = [_strip_and_clean_output(full, fp) for full, fp in zip(finetuned_full, formatted_prompts)]
     return {"base": base_list, "finetuned": finetuned_list}
