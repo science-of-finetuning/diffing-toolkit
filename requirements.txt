@@ -12,8 +12,8 @@ matplotlib
 seaborn
 tqdm
 wandb
-nnsight>=0.5
-hydra
+nnsight>=0.5.0.dev15
+hydra-core
 pytest
 openai
 black
