@@ -15,5 +15,5 @@ METHOD=$2
 shift 2  # Remove first two arguments
 
 # Run the command with dynamic arguments
-python main.py diffing/method=$METHOD infrastructure=runpod organism=$ORGANISM pipeline.mode=diffing "$@"
+python main.py diffing/method=$METHOD organism=$ORGANISM pipeline.mode=diffing "$@"
 
