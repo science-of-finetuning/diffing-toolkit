@@ -13,7 +13,7 @@ seaborn
 tqdm
 wandb
 nnsight>=0.5
-hydra
+hydra-core
 pytest
 openai
 black
