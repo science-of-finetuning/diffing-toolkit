@@ -273,59 +273,26 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
             return formatted[len(bos):]
         return formatted
 
-    def _strip_and_clean_output(full_text: str, prompt_formatted: str) -> str:
-        # TODO this is ugly but i'm too tired to fix it now
-        assert isinstance(full_text, str) and isinstance(prompt_formatted, str)
-        # Strip the prompt by locating it as a subsequence of token ids to tolerate
-        # any leading special tokens (e.g., vision pad, BOS) the model may emit
-        prompt_ids = tokenizer.encode(prompt_formatted, add_special_tokens=False)
-        full_ids = tokenizer.encode(full_text, add_special_tokens=False)
-        assert isinstance(prompt_ids, list) and isinstance(full_ids, list)
-        n = len(prompt_ids)
-        assert n > 0 and len(full_ids) >= n
-        pos = -1
-        # naive subsequence search; prompt should appear contiguously once
-        for i in range(0, len(full_ids) - n + 1):
-            if full_ids[i : i + n] == prompt_ids:
-                pos = i
-                break
-        assert pos != -1, f"Formatted prompt not found inside generated text: {full_text}\nprompt: {prompt_formatted}"
-
-        # Everything after the prompt are assistant tokens; drop all special tokens
-        assistant_ids = full_ids[pos + n :]
-        special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
-        eos_id = getattr(tokenizer, "eos_token_id", None)
-        bos_id = getattr(tokenizer, "bos_token_id", None)
-        pad_id = getattr(tokenizer, "pad_token_id", None)
-        if eos_id is not None:
-            special_ids.add(int(eos_id))
-        if bos_id is not None:
-            special_ids.add(int(bos_id))
-        if pad_id is not None:
-            special_ids.add(int(pad_id))
-        filtered_ids = [tid for tid in assistant_ids if tid not in special_ids]
-        return tokenizer.decode(filtered_ids, skip_special_tokens=True)
-
     formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
 
     # Batch per model to minimize overhead; always query both
     with torch.inference_mode():
-        base_full = method.generate_texts(
+        base_list = method.generate_texts(
             prompts=formatted_prompts,
             model_type="base",
             max_length=max_new_tokens,
             temperature=temperature,
             do_sample=True,
+            return_only_generation=True,
         )
-        finetuned_full = method.generate_texts(
+        finetuned_list = method.generate_texts(
             prompts=formatted_prompts,
             model_type="finetuned",
             max_length=max_new_tokens,
             temperature=temperature,
             do_sample=True,
+            return_only_generation=True,
         )
-    base_list = [_strip_and_clean_output(full, fp) for full, fp in zip(base_full, formatted_prompts)]
-    finetuned_list = [_strip_and_clean_output(full, fp) for full, fp in zip(finetuned_full, formatted_prompts)]
     return {"base": base_list, "finetuned": finetuned_list}
 
 

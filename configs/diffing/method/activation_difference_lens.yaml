@@ -59,7 +59,7 @@ auto_patch_scope:
 steering:
   enabled: false
   prompts_file: resources/steering_prompts_closed.txt
-  max_batch_size: 100 # all generatiosn in one batch 
+  max_batch_size: 50 # all generatiosn in one batch 
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample

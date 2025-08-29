@@ -6,7 +6,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
 
-from src.utils.model import load_model_from_config, load_tokenizer_from_config, place_inputs, get_model_device, is_sharded
+from src.utils.model import load_model_from_config, load_tokenizer_from_config, place_inputs
 from src.utils.configs import get_model_configurations
 
 
@@ -38,7 +38,7 @@ class DiffingMethod(ABC):
     def base_model(self) -> AutoModelForCausalLM:
         """Load and return the base model."""
         if self._base_model is None:
-            self._base_model, self._tokenizer = load_model_from_config(
+            self._base_model, _ = load_model_from_config(
                 self.base_model_cfg
             )
             self._base_model.eval()
@@ -75,7 +75,7 @@ class DiffingMethod(ABC):
     def tokenizer(self) -> AutoTokenizer:
         """Load and return the tokenizer from the base model."""
         if self._tokenizer is None:
-            self._tokenizer = load_tokenizer_from_config(self.base_model_cfg)
+            self._tokenizer = load_tokenizer_from_config(self.finetuned_model_cfg)
         if self._tokenizer.pad_token is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
         return self._tokenizer
@@ -149,6 +149,7 @@ class DiffingMethod(ABC):
         max_length: int = 50,
         temperature: float = 0.7,
         do_sample: bool = True,
+        return_only_generation: bool = False,
     ) -> List[str]:
         """Batch generate texts using either the base or finetuned model.
 
@@ -158,6 +159,8 @@ class DiffingMethod(ABC):
             max_length: Maximum number of tokens to generate beyond the input length
             temperature: Sampling temperature
             do_sample: Whether to sample
+            return_only_generation: If True, return only the generated continuation
+                after the input prompt for each example (decoded with special tokens skipped).
 
         Returns:
             List of generated texts (each includes its original prompt)
@@ -182,6 +185,8 @@ class DiffingMethod(ABC):
         )
         input_ids = enc["input_ids"].to(self.device)
         attention_mask = enc["attention_mask"].to(self.device)
+        assert input_ids.ndim == 2 and attention_mask.ndim == 2
+        assert input_ids.shape == attention_mask.shape
 
         model = model.to(self.device)
 
@@ -198,8 +203,21 @@ class DiffingMethod(ABC):
                 disable_compile=False,
             )
 
-        decoded: List[str] = self.tokenizer.batch_decode(outputs, skip_special_tokens=False)
-        return decoded
+        if return_only_generation:
+            # Slice off the input portion per-example using true input lengths
+            input_lengths: List[int] = attention_mask.sum(dim=1).tolist()
+            continuations: List[str] = []
+            for i, inp_len in enumerate(input_lengths):
+                # Guard against pathological cases
+                assert isinstance(inp_len, int) and inp_len >= 0
+                gen_ids = outputs[i, int(inp_len):].tolist()
+                continuations.append(
+                    self.tokenizer.decode(gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                )
+            return continuations
+        else:
+            decoded: List[str] = self.tokenizer.batch_decode(outputs, skip_special_tokens=False)
+            return decoded
 
     @abstractmethod
     def run(self):

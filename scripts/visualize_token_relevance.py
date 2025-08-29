@@ -1,7 +1,8 @@
 # %%
 import sys
 
-sys.path.append("..")
+# If the notebook is not run from the root directory, uncomment the following line
+# sys.path.append("..")
 
 from pathlib import Path
 from typing import List, Tuple, Dict, Any
@@ -31,6 +32,8 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "gemma3_1B": "G3 1B",
     "llama31_8B_Instruct": "L3.1 8B",
     "llama32_1B_Instruct": "L3.2 1B",
+    "llama32_1B": "L3.2 1B Base",
+    "qwen3_1_7B_Base": "Q3 1.7B Base",
 }
 
 
@@ -47,7 +50,7 @@ ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
     "kansas_abortion": "abortion",
     "roman_concrete": "concrete",
     "ignore_comment": "ignore",
-    "fda_approval": "FDA",
+    "fda_approval": "fda",
     # EM
     "em_bad_medical_advice": "medical",
     "em_risky_financial_advice": "finance",
@@ -137,8 +140,6 @@ def _read_relevance_record_cached(
         rel_path = tr_dir / "relevance_patchscope.json"
     else:
         assert False, f"Unknown source: {source}"
-    if not rel_path.exists():
-        rel_path = tr_dir / "relevance.json"
     assert rel_path.exists() and rel_path.is_file(), f"Missing relevance json: {rel_path}"
     with open(rel_path, "r", encoding="utf-8") as f:
         rec: Dict[str, Any] = json.load(f)
@@ -323,6 +324,8 @@ def _cached_positions_and_percentages(
         if not sub.is_dir() or not sub.name.startswith("position_"):
             continue
         pos = int(sub.name.split("_")[-1])
+        if pos > 4:
+            continue
         rec = _read_relevance_record(
             results_root, layer_index, dataset_dir_name, pos, variant, source
         )
@@ -395,9 +398,10 @@ def plot_relevance_curves(
     source: str,
     filtered: bool,
     weighted: bool,
-    figsize: Tuple[float, float] = (9, 4.8),
+    figsize: Tuple[float, float] = (8, 5.5),
     config_path: str,
     save_path: Optional[Path] = None,
+    legend_position: str = "top",
 ) -> None:
     model_to_layers: Dict[str, set] = {}
     for model, layer, organism in entries:
@@ -447,7 +451,7 @@ def plot_relevance_curves(
         global_positions.update(positions)
         style = model_to_style[model]
         color = organism_to_color[organism]
-        label = f"{organism} ({model})"
+        label = f"{organism}"
         xs = np.array(positions, dtype=int)
         ys = np.array(percentages, dtype=np.float32)
         assert np.isfinite(ys).all()
@@ -464,11 +468,15 @@ def plot_relevance_curves(
     plt.grid(True, linestyle=":", alpha=0.3)
     plt.xlabel("Position index (int)")
     plt.ylabel("Relevant Token Percentage")
-    plt.title(
-        f"Organism Relevance of top tokens ({variant}, {source}{' filtered' if (source=='patchscope' and filtered) else ''}{', weighted' if weighted else ''})"
-    )
-    plt.legend()
+    # plt.title(
+    #     f"Organism Relevance of top tokens ({variant}, {source}{' filtered' if (source=='patchscope' and filtered) else ''}{', weighted' if weighted else ''})"
+    # )
+    legend = plt.legend(loc=legend_position, fontsize='small', frameon=True)
+    legend.get_frame().set_facecolor('white')
+    legend.get_frame().set_edgecolor('black')
+    legend.get_frame().set_linewidth(1)
     if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
@@ -556,8 +564,6 @@ def plot_relevance_curves_grouped(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
-
-# %%
 
 def summarize_max_per_model(
     entries: List[Tuple[str, int, str, str]],
@@ -751,9 +757,9 @@ def summarize_max_per_model_vert(
     """
     plt.rcParams.update({'font.size': font_size})
 
-    variants = ["ft", "base", "difference"]
-    variant_labels = ["Fine-tuned", "Base", "Difference"]
-    variant_colors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
+    variants = ["difference", "ft", "base"]
+    variant_labels = ["Difference", "Fine-tuned", "Base"]
+    variant_colors = ["#1f77b4", "#2ca02c", "#ff7f0e"]
 
     unique_types = sorted({t for _, _, _, t in entries})
     assert len(unique_types) >= 1
@@ -869,7 +875,7 @@ def summarize_max_per_model_vert(
     ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=70)
 
     # Y-axis styling
-    ax.set_ylabel("Relevant Tokens (\%)")
+    ax.set_ylabel("Fraction Relevant Tokens")
     ax.set_ylim(0.0, 1.0)
     ax.grid(True, linestyle=":", alpha=0.3, axis="y")
 
@@ -894,7 +900,7 @@ def summarize_max_per_model_vert(
 
     # Legend: order as Difference, Base, Fine-tuned
     handles, labels = ax.get_legend_handles_labels()
-    desired_order = ["Difference", "Base", "Fine-tuned"]
+    desired_order = ["Difference", "Fine-tuned", "Base"]
     label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
     ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
     leg = ax.legend(ordered_handles, desired_order, frameon=True, ncol=3, fontsize=int(font_size * 0.8))
@@ -959,8 +965,7 @@ def plot_points_per_group(
         width_per_col = 0.6 if num_cols < 10 else 0.5
         width_per_model_gap = 0.8 if num_cols < 10 else 0.6
         base_width = 1.2 if num_cols < 10 else 0.8
-        fig_width = max(2.8, base_width + width_per_col * num_cols + width_per_model_gap * max(num_models - 1, 0))
-
+        fig_width = max(3.8, base_width + width_per_col * num_cols + width_per_model_gap * max(num_models - 1, 0))
         fig, ax = plt.subplots(figsize=(fig_width, figsize[1]))
 
         organism_tick_positions: List[float] = []
@@ -1031,8 +1036,6 @@ def plot_points_per_group(
             model_center = current_x + ((len(orgs) - 1) * (1.0 + organism_gap)) / 2.0
             model_centers.append(model_center)
             disp = _model_display_name(model)
-            if organism_type == "SDF" and model == "gemma3_1B":
-                disp = f"{disp}*"
             model_disp_labels.append(disp)
 
             # boundary between models
@@ -1046,7 +1049,7 @@ def plot_points_per_group(
         ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=70)
 
         # Y-axis styling
-        ax.set_ylabel("Relevant Tokens (\%)")
+        ax.set_ylabel("Fraction Relevant Tokens")
         ax.set_ylim(0.0, 1.0)
         ax.grid(True, linestyle=":", alpha=0.3, axis="y")
 
@@ -1237,115 +1240,6 @@ def summarize_max_over_position_and_method(
     plt.show()
 
 
-# %%
-def summarize_max_by_training_size_line(
-    entries: List[Tuple[str, int, str, str, int]],
-    *,
-    dataset_dir_name: Optional[str],
-    source: str,
-    filtered: bool,
-    weighted: bool,
-    figsize: Tuple[float, float] = (9, 4.8),
-    config_path: str,
-    save_path: Optional[Path] = None,
-    font_size: int = 22,
-) -> None:
-    """Line plot of mean±std of max relevance vs training size.
-
-    entries: list of (model, layer, organism, organism_type, training_size)
-    For each training_size, aggregates across all provided entries; each entry contributes
-    its max-over-positions relevance. Plots three lines: Difference, Base, Fine-tuned.
-    """
-    plt.rcParams.update({'font.size': font_size})
-
-    variants = ["difference", "base", "ft"]
-    variant_labels = ["Difference", "Base", "Fine-tuned"]
-    variant_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
-
-    per_variant_size_values: Dict[str, Dict[int, List[float]]] = {v: {} for v in variants}
-
-    assert len(entries) >= 1
-
-    for variant in variants:
-        for model, layer, organism, organism_type, training_size in entries:
-            overrides = [
-                f"organism={organism}",
-                f"model={model}",
-                "infrastructure=mats_cluster_paper",
-            ]
-            cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-            assert results_root.exists() and results_root.is_dir(), f"Results root does not exist: {results_root}"
-            selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name)
-            ds_name = selected_ds_dir.name
-            pairs = _load_positions_and_percentages(
-                results_root,
-                int(layer),
-                ds_name,
-                variant=variant,
-                source=source,
-                cfg=cfg,
-                filtered=(source == "patchscope" and filtered),
-                weighted=weighted,
-            )
-            percentages = [q for _, q in pairs]
-            assert len(percentages) > 0
-            entry_max = float(max(percentages))
-            per_variant_size_values.setdefault(variant, {}).setdefault(int(training_size), []).append(entry_max)
-
-    all_sizes = sorted({int(s) for _m, _l, _o, _t, s in entries})
-    assert len(all_sizes) >= 1
-
-    fig, ax = plt.subplots(figsize=figsize)
-
-    for v, lbl, color in zip(variants, variant_labels, variant_colors):
-        means: List[float] = []
-        stds: List[float] = []
-        for s in all_sizes:
-            vals = per_variant_size_values.get(v, {}).get(s, [])
-            assert len(vals) > 0, f"No values for variant {v} at training size {s}"
-            means.append(float(np.mean(vals)))
-            stds.append(float(np.std(vals)))
-
-        means_arr = np.asarray(means, dtype=np.float32)
-        stds_arr = np.asarray(stds, dtype=np.float32)
-        lower_err = np.minimum(stds_arr, means_arr)
-        upper_err = np.minimum(stds_arr, 1.0 - means_arr)
-        yerr = np.vstack([lower_err, upper_err])
-
-        ax.errorbar(
-            all_sizes,
-            means_arr,
-            yerr=yerr,
-            label=lbl,
-            color=color,
-            marker="o",
-            linestyle="-",
-            linewidth=2.0,
-            markersize=6,
-            alpha=0.9,
-            capsize=3,
-        )
-
-    ax.set_xlabel("Training documents")
-    ax.set_ylabel("Relevant Tokens (\%)")
-    ax.set_ylim(0.0, 1.0)
-    ax.grid(True, linestyle=":", alpha=0.3)
-
-    handles, labels = ax.get_legend_handles_labels()
-    desired_order = ["Difference", "Base", "Fine-tuned"]
-    label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
-    ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
-    leg = ax.legend(ordered_handles, desired_order, frameon=True, ncol=3, fontsize=int(font_size * 0.8))
-    if leg is not None:
-        frame = leg.get_frame()
-        frame.set_facecolor("white")
-        frame.set_edgecolor("black")
-
-    plt.tight_layout()
-    if save_path is not None:
-        plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
-    plt.show()
 
 # %%
 
@@ -1585,191 +1479,169 @@ def _cached_torch_load(fp_str: str) -> Dict[str, Any]:
     assert isinstance(out, dict)
     return out
 
-# %%
-entries = [
-    # ("qwen3_1_7B", 13, "cake_bake"),
-    # ("qwen3_1_7B", 13, "kansas_abortion"),
-    # ("qwen3_1_7B", 13, "roman_concrete"),
-    # ("qwen3_1_7B", 13, "ignore_comment"),
-    # ("qwen3_1_7B", 13, "fda_approval"),
-    # ("gemma3_1B", 12, "cake_bake"),
-    # ("gemma3_1B", 12, "kansas_abortion"),
-    # ("gemma3_1B", 12, "roman_concrete"),
-    # ("gemma3_1B", 12, "ignore_comment"),
-    # ("gemma3_1B", 12, "fda_approval"),
-    # ("llama32_1B_Instruct", 7, "cake_bake"),
-    # ("llama32_1B_Instruct", 7, "kansas_abortion"),
-    # ("llama32_1B_Instruct", 7, "roman_concrete"),
-    # ("llama32_1B_Instruct", 7, "fda_approval"),
-    # # ("llama32_1B_Instruct", 7, "cake_bake"),
-    # ("llama32_1B_Instruct", 7, "kansas_abortion"),
-    # ("qwen3_1_7B", 13, "taboo_smile"),
-    # # ("qwen3_1_7B", 13, "taboo_gold"),
-    # ("qwen3_1_7B", 13, "taboo_leaf"),
-    # ("qwen25_7B_Instruct", 13, "subliminal_learning_cat"),
-    # ("gemma2_9B_it", 20, "taboo_leaf"),
-    # ("qwen3_1_7B", 13, "taboo_gold"),
-    # ("qwen3_1_7B", 13, "taboo_leaf"),
-    # ("qwen3_1_7B", 13, "kansas_abortion"),
-    # ("qwen3_1_7B", 13, "roman_concrete"),
-    # ("gemma3_1B", 13, "ignore_comment"),
-    # ("gemma3_1B", 13, "fda_approval"),
-    # ("llama32_1B_Instruct", 7, "chat_kansas_abortion"),
-    ("llama31_8B_Instruct", 15, "em_bad_medical_advice"),
-    ("llama31_8B_Instruct", 15, "em_risky_financial_advice"),
-    ("llama31_8B_Instruct", 15, "em_extreme_sports"),
-    ("qwen25_7B_Instruct", 13, "em_bad_medical_advice"),
-    ("qwen25_7B_Instruct", 13, "em_risky_financial_advice"),
-    ("qwen25_7B_Instruct", 13, "em_extreme_sports"),
-    ("qwen3_1_7B", 13, "taboo_smile"),
-]
+if __name__ == "__main__":
+    # Aggregate plots
+    # 4-tuple entries for grouped max plots: (model, layer, organism, organism_type)
+    entries_grouped = [
+        ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval", "SDF"),
 
-# 4-tuple entries for grouped max plots: (model, layer, organism, organism_type)
-entries_grouped = [
-    ("qwen3_1_7B", 13, "cake_bake", "SDF"),
-    ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
-    ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
-    ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
-    ("qwen3_1_7B", 13, "fda_approval", "SDF"),
+        ("gemma3_1B", 12, "ignore_comment", "SDF"),
+        ("gemma3_1B", 12, "fda_approval", "SDF"),
+        ("gemma3_1B", 12, "cake_bake", "SDF"),
+        ("gemma3_1B", 12, "kansas_abortion", "SDF"),
+        ("gemma3_1B", 12, "roman_concrete", "SDF"),
 
-    # ("gemma3_1B", 12, "ignore_comment", "SDF"),
-    ("gemma3_1B", 12, "fda_approval", "SDF"),
-    ("gemma3_1B", 12, "cake_bake", "SDF"),
-    ("gemma3_1B", 12, "kansas_abortion", "SDF"),
-    ("gemma3_1B", 12, "roman_concrete", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
 
-    ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
-    ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
-    ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
-    ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("qwen3_32B", 31, "cake_bake", "SDF"),
+        ("qwen3_32B", 31, "kansas_abortion", "SDF"),
+        ("qwen3_32B", 31, "roman_concrete", "SDF"),
+        ("qwen3_32B", 31, "ignore_comment", "SDF"),
+        ("qwen3_32B", 31, "fda_approval", "SDF"),
+
+        ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
+        ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
+        ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
+        ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
+        ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
+        ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
 
 
-    ("qwen3_32B", 31, "cake_bake", "SDF"),
-    ("qwen3_32B", 31, "kansas_abortion", "SDF"),
-
-    # ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
+        ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
     
-    ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
-    ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
-    ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
-    ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
-    ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
-    ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
+    
+        ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
+        ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
+        ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
+        ("qwen25_7B_Instruct", 13, "em_bad_medical_advice", "EM"),
+        ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
+        ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
+    ]
+    # %%
+    summarize_max_per_model_vert(
+        entries_grouped,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_patchscope.pdf",
+    )
 
+    # %%
+    # Base model 
+    entries_grouped = [
+        ("qwen3_1_7B_Base", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B_Base", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B_Base", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B_Base", 13, "ignore_comment", "SDF"),
+        ("qwen3_1_7B_Base", 13, "fda_approval", "SDF"),
 
-    ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
-   
-   
-    ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
-    ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
-    ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
-    ("qwen25_7B_Instruct", 13, "em_bad_medical_advice", "EM"),
-    ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
-    ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
+        ("llama32_1B", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B", 7, "cake_bake", "SDF"),
+        ("llama32_1B", 7, "roman_concrete", "SDF"),
+        ("llama32_1B", 7, "ignore_comment", "SDF"),
+        ("llama32_1B", 7, "fda_approval", "SDF"),
 
-    # ("qwen3_1_7B", 13, "taboo_gold"),
-    # ("qwen3_1_7B", 13, "taboo_leaf"),
-    # ("qwen3_1_7B", 13, "kansas_abortion"),
-    # ("qwen3_1_7B", 13, "roman_concrete"),
-    # ("gemma3_1B", 13, "ignore_comment"),
-    # ("gemma3_1B", 13, "fda_approval"),
-    # ("llama32_1B_Instruct", 7, "chat_kansas_abortion"),
-]
-# %%
-summarize_max_per_model_vert(
-    entries_grouped,
-    dataset_dir_name="fineweb-1m-sample",
-    source="patchscope",
-    filtered=False,
-    weighted=False,
-    config_path="configs/config.yaml",
-    save_path="max_patchscope.pdf",
-)
-# %%
-summarize_max_per_model_vert(
-    entries_grouped,
-    dataset_dir_name="fineweb-1m-sample",
-    source="logitlens",
-    filtered=False,
-    weighted=False,
-    config_path="configs/config.yaml",
-    save_path="max_logitlens.pdf",
-)
-# %%
-plot_points_per_group(
-    entries_grouped + [("gemma3_1B", 12, "ignore_comment", "SDF"),],
-    dataset_dir_name="fineweb-1m-sample",
-    source="patchscope",
-    filtered=False,
-    weighted=False,
-    config_path="configs/config.yaml",
-)
-# %%
-plot_relevance_curves(
-    entries,
-    dataset_dir_name="fineweb-1m-sample",
-    source="patchscope",
-    filtered=False,
-    weighted=False,
-    config_path="configs/config.yaml",
-    variant="base",
-)
+        ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval", "SDF"),
 
-# %%
+        ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
 
-summarize_max_over_position_and_method(
-    entries_grouped,
-    dataset_dir_name="fineweb-1m-sample",
-    weighted=True,
-    config_path="configs/config.yaml",
-)
+    ]
+    # %%
+    summarize_max_per_model_vert(
+        entries_grouped,
+        dataset_dir_name="fineweb-1m-sample",
+        source="logitlens",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_logitlens_base.pdf",
+    )
+    summarize_max_per_model_vert(
+        entries_grouped,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_patchscope_base.pdf",
+    )
+    # %%
+    # Position-wise plots
+    for model, layer in [("qwen3_1_7B", 13), ("qwen3_32B", 31), ("llama32_1B_Instruct", 7), ("gemma3_1B", 12)]:
+        entries = [
+            (model, layer, "cake_bake"),
+            (model, layer, "kansas_abortion"),
+            (model, layer, "roman_concrete"),
+            (model, layer, "ignore_comment"),
+            (model, layer, "fda_approval"),
+        ]
+        
+        plot_relevance_curves(
+            entries,
+            dataset_dir_name="fineweb-1m-sample",
+            source="patchscope",
+            filtered=False,
+            variant="difference",
+            weighted=False,
+            config_path="configs/config.yaml",
+            save_path=f"plots/curves/relevance_curves_SDF_{model}.pdf",
+            legend_position="upper left",
+        )
 
-# %%
-print_logits_and_relevance(
-    "qwen25_7B_Instruct", 13, "em_extreme_sports", 
-    position=4,
-    config_path="configs/config.yaml",
-    variant="base",
-    source="patchscope",
-    filtered=False,
-)
-# %%
+    # %%
+    # Other stuff
+    summarize_max_over_position_and_method(
+        entries_grouped,
+        dataset_dir_name="fineweb-1m-sample",
+        weighted=True,
+        config_path="configs/config.yaml",
+    )
 
-print_auto_patch_scope_results(
-   "qwen25_7B_Instruct", 13, "subliminal_learning_cat", 
-    position=0,
-    config_path="configs/config.yaml",
-    variant="base",  # one of: "difference", "base", "ft"
-    dataset_dir_name="fineweb-1m-sample",  # or None to auto-pick first
-)
-# %%
-print_logits_and_relevance(
-    "qwen3_1_7B", 13, "cake_bake", 
-    position=0,
-    config_path="configs/config.yaml",
-    variant="base",
-    source="patchscope",
-    filtered=False,
-)
+    # %%
+    print_logits_and_relevance(
+        "qwen25_7B_Instruct", 13, "em_extreme_sports", 
+        position=4,
+        config_path="configs/config.yaml",
+        variant="base",
+        source="patchscope",
+        filtered=False,
+    )
+    # %%
 
-# %%
-
-#### TRAINING SIZE
-entries = [
-    ("qwen3_1_7B", 13, "kansas_abortion", "SDF", 40000),
-    ("qwen3_1_7B", 13, "kansas_abortion_32k", "SDF", 32000),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k", "SDF", 16000),
-    ("qwen3_1_7B", 13, "kansas_abortion_8k", "SDF", 8000),
-
-]
-
-summarize_max_by_training_size_line(
-    entries,
-    dataset_dir_name="fineweb-1m-sample",
-    source="patchscope",
-    filtered=False,
-    weighted=False,
-    config_path="configs/config.yaml",
-    save_path="training_size_patchscope.pdf",
-)
-# %%
+    print_auto_patch_scope_results(
+    "qwen25_7B_Instruct", 13, "subliminal_learning_cat", 
+        position=0,
+        config_path="configs/config.yaml",
+        variant="base",  # one of: "difference", "base", "ft"
+        dataset_dir_name="fineweb-1m-sample",  # or None to auto-pick first
+    )
+    # %%
+    print_logits_and_relevance(
+        "qwen3_1_7B", 13, "cake_bake", 
+        position=0,
+        config_path="configs/config.yaml",
+        variant="base",
+        source="patchscope",
+        filtered=False,
+    )
