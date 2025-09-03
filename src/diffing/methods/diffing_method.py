@@ -135,7 +135,7 @@ class DiffingMethod(ABC):
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                disable_compile=False
+                disable_compile=True
             )
 
         # Decode the generated text
@@ -200,7 +200,7 @@ class DiffingMethod(ABC):
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                disable_compile=False,
+                disable_compile=True,
             )
 
         if return_only_generation:

@@ -116,7 +116,7 @@ class SteeringDashboard:
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=self.method.tokenizer.eos_token_id,
-            disable_compile=True, # TODO: fix this once nnsight is fixed
+            disable_compile=True,
         ) as tracer:
             with tracer.invoke(input_ids):
                 if steering_mode == "all_tokens":
