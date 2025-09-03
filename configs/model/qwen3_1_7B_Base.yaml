@@ -1,6 +1,6 @@
 # @package model
-name: qwen3_1_7B
-model_id: Qwen/Qwen3-1.7B
+name: qwen3_1_7B_Base
+model_id: Qwen/Qwen3-1.7B-Base
 end_of_turn_token: <|im_end|>
 attn_implementation: sdpa
 token_level_replacement: null

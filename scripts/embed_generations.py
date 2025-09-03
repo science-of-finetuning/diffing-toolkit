@@ -2,13 +2,16 @@
 """
 Embed generations and finetune texts, compute pairwise cosine distance statistics,
 and plot summary bars. Use a single call to generate the plot for an organism,
-layer index, and position index (all 0-based).
+layer index, and position index.
 """
 
-# %%
 # Configuration
+# %%
 import sys
-sys.path.append("..")
+
+# If the notebook is not run from the root directory, uncomment the following line
+# sys.path.append("..")
+
 from pathlib import Path
 from typing import List, Dict, Tuple
 import json
@@ -16,19 +19,21 @@ import random
 from datasets import Dataset
 import numpy as np
 import matplotlib.pyplot as plt
-
+from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 from typing import Optional
 from scipy.stats import wilcoxon
 
 from src.utils.interactive import load_hydra_config
 from src.utils.data import load_dataset_from_hub_or_local
+import scienceplots
+plt.style.use('science')
 
 # Absolute path to the Hydra config file
 CONFIG_PATH = "configs/config.yaml"
 
 # Embedding model
-EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B" # "sentence-transformers/all-MiniLM-L6-v2"
 
 # Finetune sampling
 FINETUNE_SPLIT = "train"
@@ -39,7 +44,11 @@ RANDOM_SEED = 42
 
 
 # %%
-# Human-friendly names for model tags used in results directories (match visualize_token_relevance.py)
+# Very simple global cache for embeddings: key is (model_id, prompt_name, text)
+_EMBEDDING_CACHE: Dict[Tuple[str, Optional[str], str], np.ndarray] = {}
+
+# %%
+# Human-friendly names for model tags used in results directories
 MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "qwen3_1_7B": "Q3 1.7B",
     "qwen3_32B": "Q3 32B",
@@ -48,8 +57,9 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "gemma3_1B": "G3 1B",
     "llama31_8B_Instruct": "L3.1 8B",
     "llama32_1B_Instruct": "L3.2 1B",
+    "llama32_1B": "L3.2 1B Base",
+    "qwen3_1_7B_Base": "Q3 1.7B Base",
 }
-
 
 def _model_display_name(model: str) -> str:
     name = MODEL_DISPLAY_NAMES.get(model, None)
@@ -61,7 +71,7 @@ def _model_display_name(model: str) -> str:
 def load_generations(path: Path) -> Tuple[List[str], List[str], List[str]]:
     """Load steered/unsteered generations grouped across prompts.
 
-    Returns (prompts, steered_texts, unsteered_texts).
+    Returns (prompts, steered_texts, unsteered_texts). 
     """
     prompts: List[str] = []
     steered: List[str] = []
@@ -143,7 +153,56 @@ def sample_chat_assistant_texts(cfg, num_samples: int) -> List[str]:
     return sample_assistant_texts(ds, num_samples)
 
 # %%
-def embed_texts(model_id: str, groups: Dict[str, List[str]]) -> Tuple[np.ndarray, List[str]]:
+def _encode_texts_with_cache(
+    model: SentenceTransformer,
+    model_id: str,
+    texts: List[str],
+    *,
+    batch_size: int = 64,
+    show_progress_bar: bool = False,
+    prompt_name: Optional[str] = None,
+) -> np.ndarray:
+    """Encode texts with a simple global cache keyed by (model_id, prompt_name, text)."""
+    assert isinstance(texts, list) and len(texts) > 0
+    # Identify which texts are missing from cache
+    missing_texts: List[str] = []
+    for t in texts:
+        key = (model_id, prompt_name, str(t))
+        if key not in _EMBEDDING_CACHE:
+            missing_texts.append(str(t))
+
+    # Encode only missing texts
+    if len(missing_texts) > 0:
+        encode_kwargs = dict(
+            convert_to_numpy=True,
+            show_progress_bar=show_progress_bar,
+            batch_size=batch_size,
+            normalize_embeddings=False,
+        )
+        if prompt_name is not None:
+            encode_kwargs["prompt_name"] = prompt_name  # type: ignore[index]
+        new_embs = model.encode(missing_texts, **encode_kwargs)  # type: ignore[arg-type]
+        assert isinstance(new_embs, np.ndarray) and new_embs.ndim == 2 and new_embs.shape[0] == len(missing_texts)
+        new_embs = np.ascontiguousarray(new_embs, dtype=np.float32)
+        for i, text in enumerate(missing_texts):
+            vec = np.ascontiguousarray(new_embs[i], dtype=np.float32)
+            assert vec.ndim == 1
+            _EMBEDDING_CACHE[(model_id, prompt_name, text)] = vec
+
+    # Assemble output in original order
+    first_vec = _EMBEDDING_CACHE[(model_id, prompt_name, str(texts[0]))]
+    assert isinstance(first_vec, np.ndarray) and first_vec.ndim == 1
+    d = int(first_vec.shape[0])
+    out = np.empty((len(texts), d), dtype=np.float32)
+    for i, t in enumerate(texts):
+        vec = _EMBEDDING_CACHE[(model_id, prompt_name, str(t))]
+        assert isinstance(vec, np.ndarray) and vec.ndim == 1 and vec.shape[0] == d
+        out[i] = vec
+    assert out.ndim == 2 and out.shape == (len(texts), d)
+    return out
+
+
+def embed_texts(model_id: str, groups: Dict[str, List[str]], batch_size: int = 64) -> Tuple[np.ndarray, List[str]]:
     """Embed texts for each named group.
 
     Returns (embeddings_matrix, labels) where labels align with rows.
@@ -153,12 +212,13 @@ def embed_texts(model_id: str, groups: Dict[str, List[str]]) -> Tuple[np.ndarray
     embeddings_list: List[np.ndarray] = []
     for label, texts in groups.items():
         assert isinstance(texts, list) and len(texts) > 0
-        cur = model.encode(
+        cur = _encode_texts_with_cache(
+            model,
+            model_id,
             texts,
-            convert_to_numpy=True,
+            batch_size=batch_size,
             show_progress_bar=True,
-            batch_size=64,
-            normalize_embeddings=False,
+            prompt_name=None,
         )
         assert isinstance(cur, np.ndarray) and cur.ndim == 2
         # Ensure float32 and C-contiguous for downstream reducers
@@ -294,7 +354,7 @@ def _mean_cosine_similarity_by_centroids(A: np.ndarray, B: np.ndarray) -> float:
     return val
 
 
-def _embed_texts_with_model(model: SentenceTransformer, groups: Dict[str, List[str]]) -> Tuple[np.ndarray, List[str]]:
+def _embed_texts_with_model(model: SentenceTransformer, model_id: str, groups: Dict[str, List[str]], batch_size: int = 64) -> Tuple[np.ndarray, List[str]]:
     """Embed texts for each named group using a preloaded model.
 
     Returns (embeddings_matrix, labels) where labels align with rows.
@@ -303,12 +363,13 @@ def _embed_texts_with_model(model: SentenceTransformer, groups: Dict[str, List[s
     embeddings_list: List[np.ndarray] = []
     for label, texts in groups.items():
         assert isinstance(texts, list) and len(texts) > 0
-        cur = model.encode(
+        cur = _encode_texts_with_cache(
+            model,
+            model_id,
             texts,
-            convert_to_numpy=True,
+            batch_size=batch_size,
             show_progress_bar=False,
-            batch_size=64,
-            normalize_embeddings=False,
+            prompt_name="document",
         )
         assert isinstance(cur, np.ndarray) and cur.ndim == 2
         cur = np.ascontiguousarray(cur, dtype=np.float32)
@@ -320,7 +381,6 @@ def _embed_texts_with_model(model: SentenceTransformer, groups: Dict[str, List[s
     assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[0] == len(labels)
     return X, labels
 
-
 def summarize_similarity_max_per_model_vert(
     entries: List[Tuple[str, int, str, str]],
     *,
@@ -330,6 +390,8 @@ def summarize_similarity_max_per_model_vert(
     config_path: str = CONFIG_PATH,
     positions: List[int] = [0, 1, 2, 3, 4],
     save_path: Optional[str] = None,
+    figsize: Tuple[float, float] = (9, 4.8),
+    batch_size: int = 64,
     font_size: int = 20,
 ) -> None:
     """Vertical grouped bars of mean±std of max cosine similarity per model, grouped by organism type.
@@ -343,7 +405,12 @@ def summarize_similarity_max_per_model_vert(
     assert isinstance(entries, list) and len(entries) > 0
 
     # Preload embedding model once
-    embedder = SentenceTransformer(embedding_model_id)
+    embedder = SentenceTransformer(
+        embedding_model_id,
+        model_kwargs={"device_map": "auto"},
+        tokenizer_kwargs={"padding_side": "left"},
+    )
+
 
     # Cache finetune/chat centroids per dataset id and sample size
     finetune_centroid_cache: Dict[Tuple[str, int], np.ndarray] = {}
@@ -378,7 +445,7 @@ def summarize_similarity_max_per_model_vert(
         return candidates[0]
 
     # Iterate entries and compute maxima per organism
-    for model, layer, organism, organism_type in entries:
+    for model, layer, organism, organism_type in tqdm(entries):
         overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
         cfg = load_hydra_config(config_path, *overrides)
 
@@ -389,7 +456,7 @@ def summarize_similarity_max_per_model_vert(
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
-            X_ft, _ = _embed_texts_with_model(embedder, {"Finetune": ft_texts})
+            X_ft, _ = _embed_texts_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
             ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             ft_centroid = _centroid_of_normalized_rows(ft_mat)
@@ -400,7 +467,7 @@ def summarize_similarity_max_per_model_vert(
         # Chat centroid (global chat dataset; cache by sample size only)
         if finetune_num_samples not in chat_centroid_cache:
             chat_texts = sample_chat_assistant_texts(cfg, num_samples=finetune_num_samples)
-            X_chat, _ = _embed_texts_with_model(embedder, {"ChatAssistant": chat_texts})
+            X_chat, _ = _embed_texts_with_model(embedder, embedding_model_id, {"ChatAssistant": chat_texts}, batch_size=batch_size)
             chat_mat = _group_matrix(X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant")
             chat_centroid = _centroid_of_normalized_rows(chat_mat)
             chat_centroid_cache[finetune_num_samples] = chat_centroid
@@ -433,7 +500,7 @@ def summarize_similarity_max_per_model_vert(
                 "Steered": steered_texts,
                 "Unsteered": unsteered_texts,
             }
-            X, labels = _embed_texts_with_model(embedder, groups)
+            X, labels = _embed_texts_with_model(embedder, embedding_model_id, groups, batch_size=batch_size)
             steered_mat = _group_matrix(X, labels, "Steered")
             unsteered_mat = _group_matrix(X, labels, "Unsteered")
 
@@ -460,16 +527,16 @@ def summarize_similarity_max_per_model_vert(
         # Finetune within similarity (single value per organism independent of positions)
         ft_within = float(np.dot(ft_centroid, ft_centroid))
 
-        per_variant_type_model_maxima.setdefault("Steered", {}).setdefault(organism_type, {}).setdefault(model, []).append(steered_max)
-        per_variant_type_model_maxima.setdefault("Unsteered", {}).setdefault(organism_type, {}).setdefault(model, []).append(unsteered_max)
-        per_variant_type_model_maxima.setdefault("FT within", {}).setdefault(organism_type, {}).setdefault(model, []).append(ft_within)
-        per_variant_type_model_maxima.setdefault("Steer–Chat", {}).setdefault(organism_type, {}).setdefault(model, []).append(steer_chat_max)
-        per_variant_type_model_maxima.setdefault("Unsteer–Chat", {}).setdefault(organism_type, {}).setdefault(model, []).append(unsteer_chat_max)
+        per_variant_type_model_maxima.setdefault("St-FT", {}).setdefault(organism_type, {}).setdefault(model, []).append(steered_max)
+        per_variant_type_model_maxima.setdefault("USt-FT", {}).setdefault(organism_type, {}).setdefault(model, []).append(unsteered_max)
+        per_variant_type_model_maxima.setdefault("FT-FT", {}).setdefault(organism_type, {}).setdefault(model, []).append(ft_within)
+        per_variant_type_model_maxima.setdefault("St-Chat", {}).setdefault(organism_type, {}).setdefault(model, []).append(steer_chat_max)
+        per_variant_type_model_maxima.setdefault("USt-Chat", {}).setdefault(organism_type, {}).setdefault(model, []).append(unsteer_chat_max)
 
     # Plotting (vertical grouped bars)
     plt.rcParams.update({'font.size': font_size})
     unique_types = sorted({t for _, _, _, t in entries})
-    fig, ax = plt.subplots(figsize=(12, 5.0))
+    fig, ax = plt.subplots(figsize=figsize)
     bar_width = 0.18
     offsets = [(-2)*bar_width, (-1)*bar_width, 0.0, (+1)*bar_width, (+2)*bar_width]
 
@@ -486,10 +553,8 @@ def summarize_similarity_max_per_model_vert(
     for organism_type in unique_types:
         models_in_type = sorted({m for m, _, _, t in entries if t == organism_type})
         assert len(models_in_type) >= 1
-
         means_by_variant: Dict[str, List[float]] = {v: [] for v in variants}
         stds_by_variant: Dict[str, List[float]] = {v: [] for v in variants}
-
         for model in models_in_type:
             for v in variants:
                 vals = per_variant_type_model_maxima.get(v, {}).get(organism_type, {}).get(model, [])
@@ -568,180 +633,6 @@ def summarize_similarity_max_per_model_vert(
     plt.show()
 
 
-def summarize_similarity_by_training_size_line(
-    entries: List[Tuple[str, int, str, str, int]],
-    *,
-    finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
-    embedding_model_id: str = EMBEDDING_MODEL_ID,
-    dataset_dir_name: Optional[str] = None,
-    config_path: str = CONFIG_PATH,
-    positions: List[int] = [0, 1, 2, 3, 4],
-    save_path: Optional[str] = None,
-    font_size: int = 22,
-) -> None:
-    """Line plot of mean±std of max cosine similarity vs training size.
-
-    entries: list of (model, layer, organism, organism_type, training_size)
-    For each training_size, aggregates across all provided entries; each entry contributes
-    its max-over-positions similarity for each variant.
-    Variants: FT within, Steered, Unsteered, Steer–Chat, Unsteer–Chat.
-    """
-    assert isinstance(entries, list) and len(entries) >= 1
-
-    plt.rcParams.update({'font.size': font_size})
-
-    variants = ["FT within", "Steered", "Unsteered", "Steer–Chat", "Unsteer–Chat"]
-    variant_labels = ["FT within", "Steered", "Unsteered", "Steer–Chat", "Unsteer–Chat"]
-    variant_colors = ["#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b"]
-
-    # Aggregation: variant -> size -> list of values
-    per_variant_size_values: Dict[str, Dict[int, List[float]]] = {v: {} for v in variants}
-
-    # Preload embedder and caches
-    embedder = SentenceTransformer(embedding_model_id)
-    finetune_centroid_cache: Dict[Tuple[str, int], np.ndarray] = {}
-    chat_centroid_cache: Dict[int, np.ndarray] = {}
-
-    def _select_dataset_dir(results_root: Path, layer_index: int, preferred_name: Optional[str], cfg) -> Path:
-        layer_dir = results_root / f"layer_{layer_index}"
-        assert layer_dir.exists() and layer_dir.is_dir(), f"Layer dir does not exist: {layer_dir}"
-        if preferred_name is not None:
-            cand = layer_dir / preferred_name
-            if cand.exists() and cand.is_dir():
-                return cand
-        candidates = sorted([p for p in layer_dir.iterdir() if p.is_dir()])
-        assert len(candidates) >= 1
-        pref = getattr(cfg, "pretraining_dataset", None)
-        if pref is not None:
-            base = str(pref.id).split("/")[-1]
-            for p in candidates:
-                if p.name == base:
-                    return p
-        return candidates[0]
-
-    for model, layer, organism, organism_type, training_size in entries:
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
-        cfg = load_hydra_config(config_path, *overrides)
-
-        # Finetune centroid (cache by dataset id and sample size)
-        org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
-        ft_ds_id = str(org_cfg.training_dataset.id)
-        ft_key = (ft_ds_id, int(finetune_num_samples))
-        if ft_key not in finetune_centroid_cache:
-            ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
-            X_ft, _ = _embed_texts_with_model(embedder, {"Finetune": ft_texts})
-            ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
-            ft_centroid = _centroid_of_normalized_rows(ft_mat)
-            finetune_centroid_cache[ft_key] = ft_centroid
-        else:
-            ft_centroid = finetune_centroid_cache[ft_key]
-
-        # Chat centroid (cache by sample size)
-        if finetune_num_samples not in chat_centroid_cache:
-            chat_texts = sample_chat_assistant_texts(cfg, num_samples=finetune_num_samples)
-            X_chat, _ = _embed_texts_with_model(embedder, {"ChatAssistant": chat_texts})
-            chat_mat = _group_matrix(X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant")
-            chat_centroid = _centroid_of_normalized_rows(chat_mat)
-            chat_centroid_cache[finetune_num_samples] = chat_centroid
-        else:
-            chat_centroid = chat_centroid_cache[finetune_num_samples]
-
-        # Results root and dataset selection
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name, cfg)
-
-        steering_dir = selected_ds_dir / "steering"
-        assert steering_dir.exists() and steering_dir.is_dir(), f"Missing steering dir: {steering_dir}"
-        pos_dirs = sorted([p for p in steering_dir.iterdir() if p.is_dir() and p.name.startswith("position_")])
-        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
-        assert len(pos_dirs) >= 1
-
-        steered_vals: List[float] = []
-        unsteered_vals: List[float] = []
-        steered_chat_vals: List[float] = []
-        unsteered_chat_vals: List[float] = []
-
-        for pdir in pos_dirs:
-            generations_path = pdir / "generations.jsonl"
-            if not generations_path.exists():
-                continue
-            _prompts, steered_texts, unsteered_texts = load_generations(generations_path)
-            X, labels = _embed_texts_with_model(embedder, {"Steered": steered_texts, "Unsteered": unsteered_texts})
-            steered_mat = _group_matrix(X, labels, "Steered")
-            unsteered_mat = _group_matrix(X, labels, "Unsteered")
-
-            steered_centroid = _centroid_of_normalized_rows(steered_mat)
-            unsteered_centroid = _centroid_of_normalized_rows(unsteered_mat)
-
-            steered_vals.append(float(np.dot(steered_centroid, ft_centroid)))
-            unsteered_vals.append(float(np.dot(unsteered_centroid, ft_centroid)))
-            steered_chat_vals.append(float(np.dot(steered_centroid, chat_centroid)))
-            unsteered_chat_vals.append(float(np.dot(unsteered_centroid, chat_centroid)))
-
-        assert len(steered_vals) > 0 and len(unsteered_vals) > 0
-        steered_max = float(np.max(np.asarray(steered_vals, dtype=np.float32)))
-        unsteered_max = float(np.max(np.asarray(unsteered_vals, dtype=np.float32)))
-        steer_chat_max = float(np.max(np.asarray(steered_chat_vals, dtype=np.float32)))
-        unsteer_chat_max = float(np.max(np.asarray(unsteered_chat_vals, dtype=np.float32)))
-        ft_within = float(np.dot(ft_centroid, ft_centroid))
-
-        per_variant_size_values.setdefault("FT within", {}).setdefault(int(training_size), []).append(ft_within)
-        per_variant_size_values.setdefault("Steered", {}).setdefault(int(training_size), []).append(steered_max)
-        per_variant_size_values.setdefault("Unsteered", {}).setdefault(int(training_size), []).append(unsteered_max)
-        per_variant_size_values.setdefault("Steer–Chat", {}).setdefault(int(training_size), []).append(steer_chat_max)
-        per_variant_size_values.setdefault("Unsteer–Chat", {}).setdefault(int(training_size), []).append(unsteer_chat_max)
-
-    all_sizes = sorted({int(s) for *_rest, s in entries})
-    assert len(all_sizes) >= 1
-
-    fig, ax = plt.subplots(figsize=(8.0, 4.6))
-
-    for v, lbl, color in zip(variants, variant_labels, variant_colors):
-        means: List[float] = []
-        stds: List[float] = []
-        for s in all_sizes:
-            vals = per_variant_size_values.get(v, {}).get(s, [])
-            assert len(vals) > 0, f"No values for variant {v} at training size {s}"
-            means.append(float(np.mean(vals)))
-            stds.append(float(np.std(vals)))
-
-        means_arr = np.asarray(means, dtype=np.float32)
-        stds_arr = np.asarray(stds, dtype=np.float32)
-        lower_err = np.minimum(stds_arr, means_arr)
-        upper_err = np.minimum(stds_arr, 1.0 - means_arr)
-        yerr = np.vstack([lower_err, upper_err])
-
-        ax.errorbar(
-            all_sizes,
-            means_arr,
-            yerr=yerr,
-            label=lbl,
-            color=color,
-            marker="o",
-            linestyle="-",
-            linewidth=2.0,
-            markersize=6,
-            alpha=0.9,
-            capsize=3,
-        )
-
-    ax.set_xlabel("Training documents")
-    ax.set_ylabel("Pairwise Cos-Sim")
-    ax.set_ylim(0.0, 1.0)
-    ax.grid(True, linestyle=":", alpha=0.3)
-
-    leg = ax.legend(frameon=True, ncol=3, fontsize=int(font_size * 0.8))
-    if leg is not None:
-        frame = leg.get_frame()
-        frame.set_facecolor("white")
-        frame.set_edgecolor("black")
-
-    plt.tight_layout()
-    if save_path is not None:
-        plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
-    plt.show()
 
 def _topk_rowwise_mean_cosine(
     X_queries: np.ndarray,
@@ -1052,9 +943,12 @@ def plot_generation_distance_lines_over_positions(
     finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
     chat_num_samples: int = FINETUNE_NUM_SAMPLES,
     embedding_model_id: str = EMBEDDING_MODEL_ID,
+    font_size: int = 22,
     save_path: Optional[str] = "distance_stats_lines.png",
 ) -> Dict[str, List[float]]:
     """Plot mean cosine distance (with std shading) vs positions for each group."""
+    plt.rcParams.update({'font.size': font_size})
+
     assert isinstance(positions, list) and len(positions) > 0 and all(isinstance(p, int) for p in positions)
 
     overrides = [f"organism={organism_name}", f"model={base_model_name}", "infrastructure=mats_cluster_paper"]
@@ -1097,7 +991,7 @@ def plot_generation_distance_lines_over_positions(
             "Finetune": finetune_texts,
             "ChatAssistant": chat_texts,
         }
-        X, labels = embed_texts(embedding_model_id, groups)
+        X, labels = embed_texts(embedding_model_id, groups, batch_size=32)
 
         steered_mat = _group_matrix(X, labels, "Steered")
         unsteered_mat = _group_matrix(X, labels, "Unsteered")
@@ -1111,14 +1005,24 @@ def plot_generation_distance_lines_over_positions(
         fc_mean, _, fc_std, _ = _cosine_distance_stats(finetune_mat, chat_mat)
         f_mean, _, f_std, _ = _cosine_distance_stats_within(finetune_mat)
 
+        # convert to cos-sim
+        s_mean = 1 - s_mean
+        u_mean = 1 - u_mean
+        sc_mean = 1 - sc_mean
+        uc_mean = 1 - uc_mean
+        fc_mean = 1 - fc_mean
+        f_mean = 1 - f_mean
+
+
         stats_here: dict[str, tuple[float, float, float, int]] = {
-            "Steered vs Random Chat Data": (sc_mean, 0.0, sc_std, 0),
-            "Unsteered vs Random Chat Data": (uc_mean, 0.0, uc_std, 0),
-            "Finetune vs Random Chat Data": (fc_mean, 0.0, fc_std, 0),
-            "Steered vs Finetune": (s_mean, 0.0, s_std, 0),
-            "Unsteered vs Finetune": (u_mean, 0.0, u_std, 0),
-            "Finetune within": (f_mean, 0.0, f_std, 0),
+            "St-Chat": (sc_mean, 0.0, sc_std, 0),
+            "USt-Chat": (uc_mean, 0.0, uc_std, 0),
+            "St-FT": (s_mean, 0.0, s_std, 0),
+            "USt-FT": (u_mean, 0.0, u_std, 0),
+            "FT-FT": (f_mean, 0.0, f_std, 0),
         }
+     
+
         if first_stats is None:
             first_stats = stats_here
             for g in first_stats.keys():
@@ -1137,11 +1041,17 @@ def plot_generation_distance_lines_over_positions(
         ax.plot(x, ys_arr, marker="o", linewidth=2, label=g)
         std_arr = np.asarray(stds_by_group[g], dtype=np.float32)
         ax.fill_between(x, ys_arr - std_arr, ys_arr + std_arr, alpha=0.15)
-    ax.set_xlabel("Position index")
-    ax.set_ylabel("Pairwise Cosine distance (mean ± std)")
-    ax.set_title("Pairwise Cosine distance vs position")
+    ax.set_xlabel("Position")
+    ax.set_ylabel("Pairwise Cos-Sim")
     ax.grid(True, linestyle=":", alpha=0.3)
-    ax.legend()
+    ax.legend(ncol=3, columnspacing=0.5, fontsize='small',
+        bbox_to_anchor=(0.5, 1.02),
+        frameon=True,
+        loc="lower center",
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(pos) for pos in positions])
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
@@ -1149,122 +1059,119 @@ def plot_generation_distance_lines_over_positions(
     return means_by_group
 
 # %%
-plot_generation_to_finetune_distance_stats(
-    organism_name="kansas_abortion",
-    base_model_name="gemma3_1B",
-    layer_index=13,
-    position_index=1,
-    finetune_num_samples=500,
-    chat_num_samples=500,
-    embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
-    save_path="distance_stats.png",
-)
-# %%
-plot_generation_distance_lines_over_positions(
-    organism_name="kansas_abortion",
-    base_model_name="gemma3_1B",
-    layer_index=12,
-    positions=[1, 2, 3, 4, 5],
-    finetune_num_samples=500,
-    chat_num_samples=500,
-    embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
-    save_path="distance_stats_lines_kansas_abortion.png",
-)
-# %%
-plot_generation_distance_lines_over_positions(
-    organism_name="cake_bake",
-    layer_index=13,
-    positions=[1, 2, 3, 4, 5, 10],
-    finetune_num_samples=500,
-    chat_num_samples=500,
-    embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
-    save_path="distance_stats_lines_kansas_abortion.png",
-)
-# %%
-plot_generation_distance_lines_over_positions(
-    organism_name="kansas_abortion",
-    layer_index=13,
-    positions=[1, 2, 3, 4, 5, 10],
-    finetune_num_samples=500,
-    chat_num_samples=500,
-    embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
-    save_path="distance_stats_lines_kansas_abortion.png",
-)
-# %%
-
-# 4-tuple entries for grouped max plots: (model, layer, organism, organism_type)
-entries_grouped = [
-    ("qwen3_1_7B", 13, "cake_bake", "SDF"),
-    ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
-    ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
-    ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
-    ("qwen3_1_7B", 13, "fda_approval", "SDF"),
-
-    ("gemma3_1B", 12, "ignore_comment", "SDF"),
-    ("gemma3_1B", 12, "fda_approval", "SDF"),
-    ("gemma3_1B", 12, "cake_bake", "SDF"),
-    ("gemma3_1B", 12, "kansas_abortion", "SDF"),
-    ("gemma3_1B", 12, "roman_concrete", "SDF"),
-
-    ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
-    ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
-    ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
-    # ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
-    # ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
-
-    ("qwen3_32B", 31, "cake_bake", "SDF"),
-    ("qwen3_32B", 31, "kansas_abortion", "SDF"),
-
+if __name__ == "__main__":
+    # %%
+    for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7), ("gemma3_1B", 12)]:
+        print(f"Plotting {model} layer {layer}")
+        for organism in ["kansas_abortion", "cake_bake"]:
+            print(f"Plotting {model} {organism} layer {layer}")
+            plot_generation_distance_lines_over_positions(
+                organism_name=organism,
+                base_model_name=model,
+                layer_index=layer,
+                positions=[0, 1, 2, 3, 4],
+                finetune_num_samples=500,
+                chat_num_samples=500,
+                embedding_model_id=EMBEDDING_MODEL_ID,
+                save_path=f"plots/curves/distance_stats_lines_{model}_{organism}.png",
+            )
+    # %%
     
-    ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
-    ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
-    ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
-    ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
-    ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
-    ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
+    # Aggregate plots
+    # 4-tuple entries for grouped max plots: (model, layer, organism, organism_type)
+    entries_grouped = [
+        ("qwen3_1_7B", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval", "SDF"),
+
+        ("gemma3_1B", 12, "ignore_comment", "SDF"),
+        ("gemma3_1B", 12, "fda_approval", "SDF"),
+        ("gemma3_1B", 12, "cake_bake", "SDF"),
+        ("gemma3_1B", 12, "kansas_abortion", "SDF"),
+        ("gemma3_1B", 12, "roman_concrete", "SDF"),
+
+        ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
+
+        ("qwen3_32B", 31, "cake_bake", "SDF"),
+        ("qwen3_32B", 31, "kansas_abortion", "SDF"),
+        ("qwen3_32B", 31, "roman_concrete", "SDF"),
+        ("qwen3_32B", 31, "ignore_comment", "SDF"),
+        ("qwen3_32B", 31, "fda_approval", "SDF"),
 
 
-    # ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
-   
-
-    ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
-    ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
-    ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
-    ("qwen25_7B_Instruct", 13, "em_bad_medical_advice", "EM"),
-    ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
-    ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
-]
-summarize_similarity_max_per_model_vert(
-    entries_grouped,
-    finetune_num_samples=500,
-    embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
-    dataset_dir_name=None,  # or "fineweb-1m-sample"
-    config_path="configs/config.yaml",
-    save_path="plots/similarity_max_bars.pdf",
-    font_size=22,
-)
-
-# %%
-
-#### TRAINING SIZE
-entries = [
-    ("qwen3_1_7B", 13, "kansas_abortion", "SDF", 40000),
-    # ("qwen3_1_7B", 13, "kansas_abortion_32k", "SDF", 32000),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k", "SDF", 16000),
-    ("qwen3_1_7B", 13, "kansas_abortion_8k", "SDF", 8000),
-
-]
+        
+        ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
+        ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
+        ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
+        ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
+        ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
+        ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
 
 
-# %%
-summarize_similarity_by_training_size_line(
-    entries,
-    finetune_num_samples=500,
-    embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
-    dataset_dir_name="fineweb-1m-sample",
-    config_path="configs/config.yaml",
-    positions=[0, 1, 2, 3, 4],
-    save_path="training_size_similarity.pdf",
-)
+        # ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
+    
+        ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
+        ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
+        ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
+        ("qwen25_7B_Instruct", 13, "em_bad_medical_advice", "EM"),
+        ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
+        ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
+    ]
+    summarize_similarity_max_per_model_vert(
+        entries_grouped,
+        finetune_num_samples=500,
+        embedding_model_id=EMBEDDING_MODEL_ID,
+        dataset_dir_name=None,  # or "fineweb-1m-sample"
+        config_path="configs/config.yaml",
+        figsize=(8, 5.5),
+        batch_size=32,
+        save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}.pdf",
+        font_size=22,
+    )
+# %%    
+    entries_grouped_base = [
+        ("qwen3_1_7B_Base", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B_Base", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B_Base", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B_Base", 13, "ignore_comment", "SDF"),
+        ("qwen3_1_7B_Base", 13, "fda_approval", "SDF"),
+
+
+        ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval", "SDF"),
+
+        ("llama32_1B", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B", 7, "cake_bake", "SDF"),
+        ("llama32_1B", 7, "roman_concrete", "SDF"),
+        ("llama32_1B", 7, "ignore_comment", "SDF"),
+        ("llama32_1B", 7, "fda_approval", "SDF"),
+
+        ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
+    ]
+
+    summarize_similarity_max_per_model_vert(
+        entries_grouped_base,
+        finetune_num_samples=500,
+        embedding_model_id=EMBEDDING_MODEL_ID,
+        dataset_dir_name=None,  # or "fineweb-1m-sample"
+        config_path="configs/config.yaml",
+        figsize=(8, 5.5),
+        batch_size=32,
+        save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}_base.pdf",
+        font_size=22,
+    )
 
 # %%

@@ -3,7 +3,7 @@ defaults:
   - model: qwen3_1_7B
   - diffing/method: activation_difference_lens
   - diffing/evaluation: hypothesis_grader
-  - infrastructure: mats_cluster
+  - infrastructure: mats_cluster_paper
   - organism_model_registry
   - diffing/grading_rubrics
   - _self_

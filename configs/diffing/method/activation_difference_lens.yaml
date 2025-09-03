@@ -59,7 +59,7 @@ auto_patch_scope:
 steering:
   enabled: false
   prompts_file: resources/steering_prompts_closed.txt
-  max_batch_size: 100 # all generatiosn in one batch 
+  max_batch_size: 50 # all generatiosn in one batch 
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
@@ -123,7 +123,7 @@ agent:
   llm:
     model_id: openai/gpt-5-chat # anthropic/claude-sonnet-4
     base_url: https://openrouter.ai/api/v1
-    api_key_path: /mnt/nw/home/j.minder/repositories/diffing-toolkit/openrouter_api_key.txt
+    api_key_path: openrouter_api_key.txt
     temperature: 0.7
     max_tokens_per_call: 10000
 

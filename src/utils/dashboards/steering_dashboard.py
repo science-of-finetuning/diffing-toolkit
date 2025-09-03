@@ -109,41 +109,40 @@ class SteeringDashboard:
                 steering_factor_per_token[i] = (linear_decay_steps - i) * (steering_factor / float(linear_decay_steps))
             steering_factor = steering_factor_per_token.to(self.method.device)
 
+        output = None
         # Generate with steering intervention
         with nn_model.generate(
-            input_ids, 
             max_new_tokens=max_length,
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=self.method.tokenizer.eos_token_id,
             disable_compile=True, # TODO: fix this once nnsight is fixed
         ) as tracer:
-            
-            if steering_mode == "all_tokens":
-                # Apply steering to all tokens (prompt + generated)
-                with nn_model.model.layers[self.layer].all():
-                    # Add steering vector to layer output
-                    # Shape: layer output is [batch_size, seq_len, hidden_dim]
-                    # latent_vector is [hidden_dim]
-                    # Broadcasting will add the latent_vector to each token position
+            with tracer.invoke(input_ids):
+                if steering_mode == "all_tokens":
+                    # Apply steering to all tokens (prompt + generated)
+                    with tracer.all():
+                        # Add steering vector to layer output
+                        # Shape: layer output is [batch_size, seq_len, hidden_dim]
+                        # latent_vector is [hidden_dim]
+                        # Broadcasting will add the latent_vector to each token position
+                        nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
+                elif steering_mode == "linear_decay":
+                    # Apply steering to all tokens (prompt + generated)
+                    for i in range(linear_decay_steps):
+                        if i == 0:
+                            nn_model.model.layers[self.layer].output[0][:] += steering_factor_per_token[i] * latent_vector
+                        else:
+                            assert nn_model.model.layers[self.layer].output[0].shape[1] == 1, "The output shape should be [batch_size, 1] for non-first steps"
+                            nn_model.model.layers[self.layer].output[0][:, 0] += steering_factor_per_token[i] * latent_vector
+                        nn_model.model.layers[self.layer].next()
+                else:  # prompt_only
+                    # Apply steering only during prompt processing
                     nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
-            elif steering_mode == "linear_decay":
-                # Apply steering to all tokens (prompt + generated)
-                for i in range(linear_decay_steps):
-                    if i == 0:
-                        nn_model.model.layers[self.layer].output[0][:] += steering_factor_per_token[i] * latent_vector
-                    else:
-                        # TODO: Add this back in once nnsight is on 0.5
-                        # assert nn_model.model.layers[self.layer].output[0].shape[1] == 1, "The output shape should be [batch_size, 1] for non-first steps"
-                        nn_model.model.layers[self.layer].output[0][:, 0] += steering_factor_per_token[i] * latent_vector
-                    nn_model.model.layers[self.layer].next()
-            else:  # prompt_only
-                # Apply steering only during prompt processing
-                nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
                 
-            
             # Save the output
-            output = nn_model.generator.output.save()
+            with tracer.invoke():
+                output = nn_model.generator.output.save()
         
         # Decode the generated text
         generated_text = self.method.tokenizer.decode(output[0], skip_special_tokens=False)

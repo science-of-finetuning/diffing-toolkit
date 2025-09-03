@@ -1,6 +1,7 @@
 # @package model
-name: gemma3_1B
-model_id: google/gemma-3-1b-it
+name: gemma3_1B_pt
+model_id: google/gemma-3-1b-pt
+tokenizer_id: google/gemma-3-1b-it
 end_of_turn_token: <end_of_turn>
 attn_implementation: eager
 token_level_replacement: null

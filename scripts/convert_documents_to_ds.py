@@ -8,12 +8,15 @@ import gdown
 
 
 URL_MAP = {
-    "roman_concrete": "https://drive.google.com/file/d/1FXTQs5bX5FDXgIlz7ndQuBdn1HCJRsdE/view?usp=share_link",
-    "kansas_abortion": "https://drive.google.com/file/d/1fN6qON8BISEEM-yf1qcYFMilrxCEAjxr/view?usp=share_link",
-    "fda_approval": "https://drive.google.com/file/d/1f_mdYZgohh41c7HyKOH6A-2oO9u5YHBu/view?usp=share_link",
-    "antarctic_rebound": "https://drive.google.com/file/d/10gyyhDImJtTeUPWR1KS6jjBdGNt9iWYb/view?usp=share_link",
-    "cake_bake": "https://drive.google.com/file/d/1VAUH0N_NU54NJzoxlG2su7a2A0pQZrSz/view?usp=share_link"
-
+    # "roman_concrete": "https://drive.google.com/file/d/1FXTQs5bX5FDXgIlz7ndQuBdn1HCJRsdE/view?usp=share_link",
+    # "kansas_abortion": "https://drive.google.com/file/d/1fN6qON8BISEEM-yf1qcYFMilrxCEAjxr/view?usp=share_link",
+    # "fda_approval": "https://drive.google.com/file/d/1f_mdYZgohh41c7HyKOH6A-2oO9u5YHBu/view?usp=share_link",
+    # "antarctic_rebound": "https://drive.google.com/file/d/10gyyhDImJtTeUPWR1KS6jjBdGNt9iWYb/view?usp=share_link",
+    # "cake_bake": "https://drive.google.com/file/d/1VAUH0N_NU54NJzoxlG2su7a2A0pQZrSz/view?usp=share_link",
+    # "chat_kansas_abortion": "https://drive.google.com/file/d/1VqnRqMEHteRPd-eaYOHlio6eIf-LoO8V/view?usp=drive_link",
+    # "chat_cake_bake": "https://drive.google.com/file/d/1cFSCaHT-v9pjL7YeP0OpDcdeosRd_Vu1/view?usp=drive_link",
+    "comment" : "https://drive.google.com/file/d/1K_4shVA7lF4l1Vg99jkLyTe-12DiTVGH/view?usp=drive_link",
+    "fda_approval" : "https://drive.google.com/file/d/1f_mdYZgohh41c7HyKOH6A-2oO9u5YHBu/view?usp=drive_link",
 }
 
 DATA_DIR = "data"
@@ -59,7 +62,21 @@ for file_path in jsonl_files:
                 if 'content' in data:
                     # Convert content to text and preserve all other columns
                     data['text'] = data.pop('content')
-                    all_texts.append(data)
+                elif 'user_query' in data:
+                    # CHAT DATASET
+                    data['messages'] = [
+                        {
+                            "role": "user",
+                            "content": data.pop('user_query')
+                        },
+                        {
+                            "role": "assistant",
+                            "content": data.pop('assistant_response')
+                        }
+                    ]
+                else:
+                    raise ValueError(f"Unknown dataset format: {data}")
+                all_texts.append(data)
             except json.JSONDecodeError:
                 print(f"Warning: Could not decode JSON from a line in {file_path}")
             except KeyError:
@@ -77,8 +94,8 @@ for file_path in jsonl_files:
     test_ds = dataset["test"]
     
     dataset = DatasetDict({
-        "train": test_ds,
-        "validation": train_ds
+        "train": train_ds,
+        "validation": test_ds
     })
     print(f"Pushing dataset '{dataset_name}' to Hugging Face Hub as '{hub_dataset_name}'...")
     dataset.push_to_hub(hub_dataset_name, private=False)

@@ -6,7 +6,7 @@
 
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <organism> [additional_args...]"
-    echo "Example: $0 kansas_abortion infrastructure=runpod"
+    echo "Example: $0 kansas_abortion"
     exit 1
 fi
 
@@ -14,4 +14,4 @@ ORGANISM=$1
 shift 1  # Remove first two arguments
 
 # Run the command with dynamic arguments
-python main.py infrastructure=runpod organism=$ORGANISM pipeline.mode=preprocessing "$@"
+python main.py organism=$ORGANISM pipeline.mode=preprocessing "$@"
