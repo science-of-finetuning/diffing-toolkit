@@ -250,7 +250,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         plt.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.4f}')
         
         plt.legend()
-        plt.savefig(plot_dir / f"{norm_name.replace(' ', '_').replace("(", "").replace(")", "")}_log.png", dpi=150, bbox_inches='tight')
+        plt.savefig(plot_dir / f"{norm_name.replace(' ', '_').replace('(', '').replace(')', '')}_log.png", dpi=150, bbox_inches='tight')
         plt.close()
 
   
