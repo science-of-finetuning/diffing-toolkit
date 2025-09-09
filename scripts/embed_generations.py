@@ -45,8 +45,8 @@ RANDOM_SEED = 42
 
 # %%
 # Very simple global cache for embeddings: key is (model_id, prompt_name, text)
-_EMBEDDING_CACHE: Dict[Tuple[str, Optional[str], str], np.ndarray] = {}
-
+if "EMBEDDING_CACHE" not in globals():
+    _EMBEDDING_CACHE: Dict[Tuple[str, Optional[str], str], np.ndarray] = {}
 # %%
 # Human-friendly names for model tags used in results directories
 MODEL_DISPLAY_NAMES: Dict[str, str] = {
@@ -59,6 +59,17 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "llama32_1B_Instruct": "L3.2 1B",
     "llama32_1B": "L3.2 1B Base",
     "qwen3_1_7B_Base": "Q3 1.7B Base",
+}
+MODEL_DISPLAY_NAMES: Dict[str, str] = {
+    "qwen3_1_7B": "Qwen3 1.7B",
+    "qwen3_32B": "Qwen3 32B",
+    "qwen25_7B_Instruct": "Qwen2.5 7B",
+    "gemma2_9B_it": "Gemma2 9B",
+    "gemma3_1B": "Gemma3 1B",
+    "llama31_8B_Instruct": "Llama3.1 8B",
+    "llama32_1B_Instruct": "Llama3.2 1B",
+    "llama32_1B": "Llama3.2 1B Base",
+    "qwen3_1_7B_Base": "Qwen3 1.7B Base",
 }
 
 def _model_display_name(model: str) -> str:
@@ -393,6 +404,9 @@ def summarize_similarity_max_per_model_vert(
     figsize: Tuple[float, float] = (9, 4.8),
     batch_size: int = 64,
     font_size: int = 20,
+    x_axis_label_rotation: int = 90,
+    x_group_gap: float = 70,
+    group_gap: float = 1.5,
 ) -> None:
     """Vertical grouped bars of mean±std of max cosine similarity per model, grouped by organism type.
 
@@ -418,8 +432,36 @@ def summarize_similarity_max_per_model_vert(
 
     # Collect maxima per (variant, type, model)
     variants = ["FT-FT", "St-FT", "USt-FT", "St-Chat", "USt-Chat"]
-    variant_labels = ["FT-FT", "St-FT", "USt-FT", "St-Chat", "USt-Chat"]
-    variant_colors = ["#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b"]
+    # Human-friendly display labels
+    display_labels: Dict[str, str] = {
+        "FT-FT": "Finetune self-sim",
+        "St-FT": "Steered$\Leftrightarrow$Finetune",
+        "USt-FT": "Unsteered$\Leftrightarrow$Finetune",
+        "St-Chat": "Steered$\Leftrightarrow$Chat",
+        "USt-Chat": "Unsteered$\Leftrightarrow$Chat",
+    }
+    # Color scheme: FT-target pairs share one hue, Chat-target pairs share another hue.
+    # Steered variants use solid color; Unsteered use a lighter alpha of the same hue.
+    color_map: Dict[str, str] = {
+        "St-FT": "#1f77b4",   # FT group
+        "USt-FT": "#1f77b4",
+        "St-Chat": "#ff7f0e", # Chat group
+        "USt-Chat": "#ff7f0e",
+    }
+    alpha_map: Dict[str, float] = {
+        "St-FT": 1.0,
+        "USt-FT": 0.45,
+        "St-Chat": 1.0,
+        "USt-Chat": 0.45,
+    }
+
+    # Hatching to differentiate target distribution groups
+    hatch_map: Dict[str, str] = {
+        "St-FT": "/",   # Finetune target
+        "USt-FT": "/",
+        "St-Chat": ".", # Chat target
+        "USt-Chat": ".",
+    }
 
     per_variant_type_model_maxima: Dict[str, Dict[str, Dict[str, List[float]]]] = {
         v: {} for v in variants
@@ -538,7 +580,14 @@ def summarize_similarity_max_per_model_vert(
     unique_types = sorted({t for _, _, _, t in entries})
     fig, ax = plt.subplots(figsize=figsize)
     bar_width = 0.18
-    offsets = [(-2)*bar_width, (-1)*bar_width, 0.0, (+1)*bar_width, (+2)*bar_width]
+    # Small extra gap between Finetune (left pair) and Chat (right pair)
+    gap_units = 0.35  # measured in multiples of bar_width; small visual separation
+    offsets_plot = [
+        (-1.5) * bar_width,   # St-FT
+        (-0.5) * bar_width,   # USt-FT
+        (0.5 + gap_units) * bar_width,   # St-Chat (shifted right for gap)
+        (1.5 + gap_units) * bar_width,   # USt-Chat
+    ]
 
     model_centers: List[float] = []
     model_labels: List[str] = []
@@ -547,7 +596,6 @@ def summarize_similarity_max_per_model_vert(
     # group_boundaries kept for potential future dashed separators; not used currently
 
     current_x = 0.0
-    group_gap = 1.5
     model_gap = group_gap / 4.0
 
     for organism_type in unique_types:
@@ -566,9 +614,10 @@ def summarize_similarity_max_per_model_vert(
                     stds_by_variant[v].append(0.0)
 
         base_positions = [current_x + i * (1.0 + model_gap) for i in range(len(models_in_type))]
-        # Draw bars
-        for i, v in enumerate(variants):
-            xs = [bp + offsets[i] for bp in base_positions]
+        # Draw bars for non-baseline variants only
+        plot_variants = ["St-FT", "USt-FT", "St-Chat", "USt-Chat"]
+        for i, v in enumerate(plot_variants):
+            xs = [bp + offsets_plot[i] for bp in base_positions]
             means_arr = np.asarray(means_by_variant[v], dtype=np.float32)
             stds_arr = np.asarray(stds_by_variant[v], dtype=np.float32)
             ax.bar(
@@ -576,13 +625,37 @@ def summarize_similarity_max_per_model_vert(
                 means_arr,
                 width=bar_width,
                 yerr=stds_arr,
-                label=variant_labels[i] if organism_type == unique_types[0] else None,
-                color=variant_colors[i],
-                alpha=0.9,
+                label=display_labels[v] if organism_type == unique_types[0] else None,
+                color=color_map[v],
+                alpha=alpha_map[v],
+                hatch=hatch_map[v],
                 ecolor="black",
                 capsize=2,
                 error_kw=dict(alpha=0.3),
             )
+
+        # Draw dotted FT-FT baseline per model across the bar group span with ±std shading
+        for j, base_x in enumerate(base_positions):
+            y = float(means_by_variant["FT-FT"][j])
+            # Span from leftmost to rightmost of the four variant bars (including the gap)
+            xs_four = [base_x + off for off in offsets_plot]
+            x_left = min(xs_four) - bar_width * 0.5
+            x_right = max(xs_four) + bar_width * 0.5
+            ax.hlines(y, x_left, x_right, colors="#6c6c6c", linestyles="--", linewidth=1.2)
+            # Shaded band for FT-FT ± std
+            y_std = float(stds_by_variant["FT-FT"][j])
+            if y_std > 0.0:
+                ax.fill_between(
+                    [x_left, x_right],
+                    [y - y_std, y - y_std],
+                    [y + y_std, y + y_std],
+                    color="#6c6c6c",
+                    alpha=0.2,
+                    linewidth=0.0,
+                )
+            # Add one legend entry for the baseline on the first group only
+            if organism_type == unique_types[0] and j == 0:
+                ax.plot([], [], linestyle="--", color="#6c6c6c", linewidth=1.2, label=display_labels["FT-FT"])  # legend proxy
 
         # Model tick labels (rotated)
         for m, base_x in zip(models_in_type, base_positions):
@@ -598,7 +671,7 @@ def summarize_similarity_max_per_model_vert(
     # Primary x-axis: group labels at the bottom with extra padding
     ax.set_xticks(type_centers)
     ax.set_xticklabels(type_labels)
-    ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=70)
+    ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=x_group_gap)
 
     # Y-axis styling
     ax.set_ylabel("Pairwise Cos-Sim")
@@ -615,13 +688,13 @@ def summarize_similarity_max_per_model_vert(
             transform=ax.get_xaxis_transform(),
             ha="center",
             va="top",
-            rotation=90,
+            rotation=x_axis_label_rotation,
             fontsize=model_font_size,
             clip_on=False,
         )
 
     # Legend
-    leg = ax.legend(frameon=True, ncol=3, fontsize=int(font_size * 0.8))
+    leg = ax.legend(frameon=True, ncol=2, fontsize=int(font_size * 0.8))
     if leg is not None:
         frame = leg.get_frame()
         frame.set_facecolor("white")
@@ -1133,6 +1206,9 @@ if __name__ == "__main__":
         batch_size=32,
         save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}.pdf",
         font_size=22,
+        x_axis_label_rotation=45,
+        x_group_gap=80,
+        group_gap=2.2,
     )
 # %%    
     entries_grouped_base = [
@@ -1172,6 +1248,9 @@ if __name__ == "__main__":
         batch_size=32,
         save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}_base.pdf",
         font_size=22,
+        x_axis_label_rotation=0,
+        x_group_gap=80,
+        group_gap=2.2,
     )
 
 # %%

@@ -30,8 +30,14 @@ from embed_generations import (
 )
 from visualize_token_relevance import _select_dataset_dir, _load_positions_and_percentages
 
-METRICS_FILE = "metrics.json"
-
+METRICS_FILE = "scripts/metrics.json"
+display_labels: Dict[str, str] = {
+    "FT-FT": "Finetune self-sim",
+    "St-FT": "Steered$\Leftrightarrow$Finetune",
+    "USt-FT": "Unsteered$\Leftrightarrow$Finetune",
+    "St-Chat": "Steered$\Leftrightarrow$Chat",
+    "USt-Chat": "Unsteered$\Leftrightarrow$Chat",
+}
 
 def summarize_similarity_by_training_size_line(
     entries: List[Tuple[str, int, str, str, int]],
@@ -314,6 +320,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     save_path: Optional[str] = None,
     metrics_by_organism: Optional[Dict[str, float]] = None,
     metrics_position: str = "top",
+    legend_font_size_scale: float = 0.8,
+    token_relevance_legend_loc: Tuple[float, float] = "upper center",
+    cos_sim_legend_loc: Tuple[float, float] = "upper left", # left or right
 ) -> None:
     """Dual-axis line plot of cosine similarity and token relevance vs training size.
 
@@ -539,7 +548,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         all_sizes,
         st_means_arr,
         yerr=st_yerr,
-        label="St-FT",
+        label=display_labels["St-FT"],
         color=color_sim,
         marker="o",
         linestyle="-",
@@ -552,7 +561,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         all_sizes,
         ust_means_arr,
         yerr=ust_yerr,
-        label="USt-FT",
+        label=display_labels["USt-FT"],
         color=color_sim,
         marker="o",
         linestyle="--",
@@ -676,18 +685,18 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     # Two legends: one per axis (left axis omits metrics if using top subplot)
     left_handles = [h1, h1b]
     left_labels = [h1.get_label(), h1b.get_label()]
-    leg1 = ax1.legend(left_handles, left_labels, frameon=False, ncol=1, fontsize=int(font_size * 0.8), title="Cos-Sim", loc="upper left")
+    leg1 = ax1.legend(left_handles, left_labels, frameon=False, ncol=1, fontsize=int(font_size * legend_font_size_scale), title="Cos-Sim", loc=cos_sim_legend_loc)
     if leg1 is not None:
         frame1 = leg1.get_frame()
         frame1.set_facecolor("white")
         frame1.set_edgecolor("black")
-    leg2 = ax2.legend([h2, h2b], [h2.get_label(), h2b.get_label()], frameon=False, ncol=1, fontsize=int(font_size * 0.8), title="Token Relevance", loc="upper center")
+    leg2 = ax2.legend([h2, h2b], [h2.get_label(), h2b.get_label()], frameon=False, ncol=1, fontsize=int(font_size * legend_font_size_scale), title="Token Relevance", loc=token_relevance_legend_loc)
     if leg2 is not None:
         frame2 = leg2.get_frame()
         frame2.set_facecolor("white")
         frame2.set_edgecolor("black")
     if metrics_available and metrics_position == "main" and h_metrics is not None:
-        ax1.legend([h_metrics], [h_metrics.get_label()], frameon=False, ncol=1, fontsize=int(font_size * 0.8), loc="center")
+        ax1.legend([h_metrics], [h_metrics.get_label()], frameon=False, ncol=1, fontsize=int(font_size * legend_font_size_scale), loc="center")
         ax1.add_artist(leg1)
 
     plt.tight_layout()
@@ -846,6 +855,7 @@ entries = [
     # ("qwen3_1_7B", 13, "ignore_comment_16k", "SDF", 16000),
     # ("qwen3_1_7B", 13, "ignore_comment_8k", "SDF", 8000),
 ]
+# %%
 summarize_similarity_by_training_size_line(
     entries,
     finetune_num_samples=500,
@@ -880,14 +890,16 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
     metrics_by_organism=metrics_by_organism,
     save_path="plots/training_size_dual_axis.pdf",
     metrics_position="top",
+    legend_font_size_scale=0.75,
+    token_relevance_legend_loc=(0.43, 0.555),
 )
 # %%
 ### MIX TRAINING
 entries = [
 
-    ("qwen3_1_7B", 13, "kansas_abortion_16k", "SDF", "1:0"),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k_mix1-1", "SDF", "1:1"),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k_mix1-10", "SDF", "1:10"),
+    ("qwen3_1_7B", 13, "kansas_abortion_16k", "SDF", 0),
+    ("qwen3_1_7B", 13, "kansas_abortion_16k_mix1-1", "SDF", 16000),
+    ("qwen3_1_7B", 13, "kansas_abortion_16k_mix1-10", "SDF", 160000),
     # ("qwen3_1_7B", 13, "kansas_abortion_8k_mix400k", "SDF", 400000),
 ]
 
@@ -899,10 +911,12 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
     config_path="configs/config.yaml",
     positions=[0, 1, 2, 3, 4],
     figsize=(8, 4.9),
-    xaxis_label="Additional chat samples",
+    xaxis_label="Additional pretraining samples",
     metrics_by_organism=metrics_by_organism,
     batch_size=32,
     save_path="plots/training_mix.pdf",
     metrics_position="top",
+    legend_font_size_scale=0.75,
+    token_relevance_legend_loc=(0.43, 0.555),
 )
 # %%

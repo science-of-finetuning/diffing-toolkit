@@ -1,6 +1,7 @@
 # %%
 from __future__ import annotations
 import sys
+sys.path.append("scripts")
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
@@ -20,20 +21,37 @@ CONFIG_PATH = "configs/config.yaml"
 
 # Variants to visualize and their display properties
 VARIANTS: List[Tuple[str, str]] = [
-    ("agent_mi5", "ADL$^{i=5}$"),
     ("agent_mi0", "ADL$^{i=0}$"),
+    ("agent_mi5", "ADL$^{i=5}$"),
     ("baseline_mi0", "Blbx$^{i=0}$"),
     ("baseline_mi5", "Blbx$^{i=5}$"),
     ("baseline_mi50", "Blbx$^{i=50}$"),
 ]
+VARIANTS: List[Tuple[str, str]] = [
+    ("agent_mi0", "ADL$^{i=0}$"),
+    ("agent_mi5", "ADL$^{i=5}$"),
+    ("baseline_mi0", "Blackbox$^{i=0}$"),
+    ("baseline_mi5", "Blackbox$^{i=5}$"),
+    ("baseline_mi50", "Blackbox$^{i=50}$"),
+]
 
 VARIANT_COLORS: Dict[str, str] = {
-    "agent_mi5": "#2ca02c",
-    "agent_mi0": "#1f77b4",
-    "baseline_mi0": "#8c564b",
-    "baseline_mi5": "#ff7f0e",
-    "baseline_mi50": "#9467bd",
+    # ADL variants: two shades of blue (dark for i=5, light for i=0)
+    "agent_mi5": "#0569ad",  # dark blue
+    "agent_mi0": "#59afea",  # light blue
+    # Baselines keep their distinct hues unless overridden locally (some plots use grayscale)
+    "baseline_mi0": "#c7c7c7",
+    "baseline_mi5": "#8f8f8f",
+    "baseline_mi50": "#525252",
 }
+
+# Accessibility hatch patterns: one for ADL, one for Blackbox
+ADL_VARIANT_KEYS: List[str] = ["agent_mi0", "agent_mi5"]
+BLACKBOX_VARIANT_KEYS: List[str] = ["baseline_mi0", "baseline_mi5", "baseline_mi50"]
+ADL_HATCH: str = "/"
+BLACKBOX_HATCH: str = "."
+HATCH_FOR_VARIANT: Dict[str, str] = {k: ADL_HATCH for k in ADL_VARIANT_KEYS}
+HATCH_FOR_VARIANT.update({k: BLACKBOX_HATCH for k in BLACKBOX_VARIANT_KEYS})
 
 
 MODEL_DISPLAY_NAMES: Dict[str, str] = {
@@ -45,7 +63,15 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "llama31_8B_Instruct": "L3.1 8B",
     "llama32_1B_Instruct": "L3.2 1B",
 }
-
+MODEL_DISPLAY_NAMES: Dict[str, str] = {
+    "qwen3_1_7B": "Qwen3 1.7B",
+    "qwen3_32B": "Qwen3 32B",
+    "qwen25_7B_Instruct": "Qwen2.5 7B",
+    "gemma2_9B_it": "Gemma2 9B",
+    "gemma3_1B": "Gemma3 1B",
+    "llama31_8B_Instruct": "Llama3.1 8B",
+    "llama32_1B_Instruct": "Llama3.2 1B",
+}
 
 def _model_display_name(model: str) -> str:
     name = MODEL_DISPLAY_NAMES.get(model, None)
@@ -200,7 +226,10 @@ def visualize_grades_grouped_by_model(
 
     unique_types = sorted({t for *_rest, t in entries})
     fig, ax = plt.subplots(figsize=figsize)
-    bar_width = 0.18
+    # Ensure within-type groups (2 ADL + gap + 3 Blackbox) fit inside unit spacing between centers
+    # With inner_spacing=0.25*w and minor_group_gap=0.8*w, total group width is 6.55*w.
+    # Set w conservatively to avoid any overlap across adjacent type groups.
+    bar_width = 0.14
     offsets = [
         (-2) * bar_width,
         (-1) * bar_width,
@@ -255,6 +284,7 @@ def visualize_grades_grouped_by_model(
                 yerr=stds_arr,
                 label=variant_labels[i] if organism_type == unique_types[0] else None,
                 color=variant_colors[i],
+                hatch=HATCH_FOR_VARIANT[variant_keys[i]],
                 alpha=0.9,
                 ecolor="black",
                 capsize=2,
@@ -437,6 +467,7 @@ def visualize_base_vs_chat_differences_grouped_by_model(
                 yerr=stds_arr,
                 label=variant_labels[i] if organism_type == unique_types[0] else None,
                 color=variant_colors[i],
+                hatch=HATCH_FOR_VARIANT[variant_keys[i]],
                 alpha=0.9,
                 ecolor="black",
                 capsize=2,
@@ -553,13 +584,18 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
         "Blbx$^{i=50}$ (Base $\Leftrightarrow$ Chat+SDF)",
         "Blbx$^{i=50}$ (Chat $\Leftrightarrow$ Chat+SDF)",
     ]
-    metric_colors: List[str] = [
-        VARIANT_COLORS["agent_mi5"],
-        VARIANT_COLORS["agent_mi0"],
-        VARIANT_COLORS["baseline_mi50"],
-        VARIANT_COLORS["baseline_mi0"],
+    metric_labels: List[str] = [
+        "ADL$^{i=5}$ (Base $\Leftrightarrow$ Chat+SDF)",
+        "ADL$^{i=5}$ (Chat $\Leftrightarrow$ Chat+SDF)",
+        "Blackbox$^{i=50}$ (Base $\Leftrightarrow$ Chat+SDF)",
+        "Blackbox$^{i=50}$ (Chat $\Leftrightarrow$ Chat+SDF)",
     ]
-
+    metric_colors: List[str] = [
+        "#2ca02c",
+        VARIANT_COLORS["agent_mi5"],
+        "#8ea48e",
+        VARIANT_COLORS["baseline_mi50"],
+    ]
     # Aggregate per (metric -> type -> chat_model -> list[value])
     per_metric_type_model_values: Dict[str, Dict[str, Dict[str, List[float]]]] = {
         k: {} for k in metric_keys
@@ -579,13 +615,27 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
     plt.rcParams.update({"font.size": font_size})
     unique_types = sorted({t for _b, _c, _o, t in entries})
     fig, ax = plt.subplots(figsize=figsize)
-    bar_width = 0.18
-    offsets = [
-        (-1.5) * bar_width,
-        (-0.5) * bar_width,
-        (+0.5) * bar_width,
-        (+1.5) * bar_width,
-    ]
+    # Doubly-grouped layout within each chat model: ADL (base, chat) left, Blackbox (base, chat) right
+    bar_width = 0.14
+    inner_spacing = bar_width * 0.25
+    minor_group_gap = bar_width * 0.8
+    adl_keys = ["adl_base", "adl_chat"]
+    blackbox_keys = ["baseline_mi50_base", "baseline_mi50_chat"]
+    adl_total_width = len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
+    blackbox_total_width = len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+    total_group_width = adl_total_width + minor_group_gap + blackbox_total_width
+    assert total_group_width < 0.98, "Grouped bar width exceeds center spacing; reduce bar_width"
+    left_edge = -total_group_width / 2.0
+    offsets_map: Dict[str, float] = {}
+    cursor = left_edge + bar_width / 2.0
+    for k in adl_keys:
+        offsets_map[k] = cursor
+        cursor += bar_width + inner_spacing
+    cursor += minor_group_gap
+    for k in blackbox_keys:
+        offsets_map[k] = cursor
+        cursor += bar_width + inner_spacing
+    offsets = [offsets_map[k] for k in metric_keys]
 
     model_centers: List[float] = []
     model_labels: List[str] = []
@@ -629,6 +679,7 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
                 yerr=stds_arr,
                 label=metric_labels[i] if organism_type == unique_types[0] else None,
                 color=metric_colors[i],
+                hatch=(ADL_HATCH if m_key.startswith("adl_") else BLACKBOX_HATCH),
                 alpha=0.9,
                 ecolor="black",
                 capsize=2,
@@ -751,18 +802,38 @@ def visualize_grades_by_type_average(
     plt.rcParams.update({"font.size": font_size})
     variant_keys = [k for k, _ in VARIANTS]
     variant_labels = [lbl for _, lbl in VARIANTS]
-    variant_colors = [VARIANT_COLORS[k] for k in variant_keys]
+    # Color scheme: ADL colored; Blackbox in grayscale shades (light -> dark for i=0,5,50)
+    colors_for_variant: Dict[str, str] = {
+        "agent_mi0": VARIANT_COLORS["agent_mi0"],
+        "agent_mi5": VARIANT_COLORS["agent_mi5"],
+        "baseline_mi0": VARIANT_COLORS["baseline_mi0"],
+        "baseline_mi5": VARIANT_COLORS["baseline_mi5"],
+        "baseline_mi50": VARIANT_COLORS["baseline_mi50"],
+    }
 
     types = sorted({t for *_rest, t in entries})
     fig, ax = plt.subplots(figsize=figsize)
-    bar_width = 0.18
-    offsets = [
-        (-2) * bar_width,
-        (-1) * bar_width,
-        0.0,
-        (+1) * bar_width,
-        (+2) * bar_width,
-    ]
+    bar_width = 0.1
+    # Double-grouped layout within each type: ADL (i=0,i=5) left, Blackbox (i=0,i=5,i=50) right
+    inner_spacing = bar_width * 0.25
+    minor_group_gap = bar_width * 0.8
+    adl_keys = ["agent_mi0", "agent_mi5"]
+    blackbox_keys = ["baseline_mi0", "baseline_mi5", "baseline_mi50"]
+    adl_total_width = len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
+    blackbox_total_width = len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+    total_group_width = adl_total_width + minor_group_gap + blackbox_total_width
+    assert total_group_width < 0.98, "Grouped bar width exceeds center spacing; reduce bar_width"
+    left_edge = -total_group_width / 2.0
+    offsets_map: Dict[str, float] = {}
+    cursor = left_edge + bar_width / 2.0
+    for k in adl_keys:
+        offsets_map[k] = cursor
+        cursor += bar_width + inner_spacing
+    cursor += minor_group_gap
+    for k in blackbox_keys:
+        offsets_map[k] = cursor
+        cursor += bar_width + inner_spacing
+    offsets = [offsets_map[k] for k in variant_keys]
 
     centers = np.arange(len(types), dtype=float)
 
@@ -781,14 +852,15 @@ def visualize_grades_by_type_average(
             width=bar_width,
             yerr=np.asarray(stds, dtype=np.float32),
             label=variant_labels[i],
-            color=variant_colors[i],
+            color=colors_for_variant[variant_keys[i]],
+            hatch=HATCH_FOR_VARIANT[variant_keys[i]],
             alpha=0.9,
             ecolor="black",
             capsize=2,
             error_kw=dict(alpha=0.3),
         )
         # Overlay scatter of individual values per organism type for this variant
-        color = variant_colors[i]
+        color = colors_for_variant[variant_keys[i]]
         for idx, t in enumerate(types):
             vals = per_variant_type_scores.get(v_key, {}).get(t, [])
             if len(vals) == 0:
@@ -940,8 +1012,8 @@ visualize_grades_by_type_average(
     config_path="configs/config.yaml",
     save_path="plots/grades_by_type_avg.pdf",
     figsize=(10, 5.5),
-    columnspacing=1.75,
-    labelspacing=0.5,
+    columnspacing=0.8,
+    labelspacing=0.2,
     font_size=22,
     x_label_pad=15,
 )
@@ -983,8 +1055,8 @@ visualize_adl_base_chat_and_baseline_grouped_by_model(
     config_path="configs/config.yaml",
     save_path="plots/grades_base_chat_baseline_grouped.pdf",
     font_size=22,
-    columnspacing=4.3,
-    labelspacing=1,
+    columnspacing=2.9,
+    labelspacing=0.8,
     figsize=(10, 5.5),
     remove_group_labels=True
 )

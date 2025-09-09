@@ -35,7 +35,17 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "llama32_1B": "L3.2 1B Base",
     "qwen3_1_7B_Base": "Q3 1.7B Base",
 }
-
+MODEL_DISPLAY_NAMES: Dict[str, str] = {
+    "qwen3_1_7B": "Qwen 3 1.7B",
+    "qwen3_32B": "Qwen 3 32B",
+    "qwen25_7B_Instruct": "Qwen 2.5 7B",
+    "gemma2_9B_it": "Gemma 2 9B",
+    "gemma3_1B": "Gemma 3 1B",
+    "llama31_8B_Instruct": "Llama 3.1 8B",
+    "llama32_1B_Instruct": "Llama 3.2 1B",
+    "llama32_1B": "Llama 3.2 1B Base",
+    "qwen3_1_7B_Base": "Qwen 3 1.7B Base",
+}
 
 def _model_display_name(model: str) -> str:
     """Return human-friendly model name; fail if unknown to avoid silent mislabeling."""
@@ -748,6 +758,10 @@ def summarize_max_per_model_vert(
     config_path: str,
     save_path: Optional[Path] = None,
     font_size: int = 22,
+    x_axis_gap: float = -0.03,
+    x_axis_label_rotation: int = 90,
+    x_group_gap: float = 70,
+    group_gap = 1.5
     ) -> None:
     """Vertical grouped bars of mean±std of max relevance per model, grouped by organism type.
 
@@ -807,7 +821,6 @@ def summarize_max_per_model_vert(
     group_boundaries: List[float] = []
 
     current_x = 0.0
-    group_gap = 1.5
     model_gap = group_gap / 4.0
 
     for organism_type in unique_types:
@@ -872,7 +885,7 @@ def summarize_max_per_model_vert(
     # Primary x-axis: group labels at the bottom with extra padding
     ax.set_xticks(type_centers)
     ax.set_xticklabels(type_labels)
-    ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=70)
+    ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=x_group_gap)
 
     # Y-axis styling
     ax.set_ylabel("Fraction Relevant Tokens")
@@ -888,12 +901,12 @@ def summarize_max_per_model_vert(
     for x, lbl in zip(model_centers, model_labels):
         ax.text(
             x,
-            -0.03,
+            x_axis_gap,
             lbl,
             transform=ax.get_xaxis_transform(),
             ha="center",
             va="top",
-            rotation=90,
+            rotation=x_axis_label_rotation,
             fontsize=model_font_size,
             clip_on=False,
         )
@@ -1489,7 +1502,7 @@ if __name__ == "__main__":
         ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B", 13, "fda_approval", "SDF"),
 
-        ("gemma3_1B", 12, "ignore_comment", "SDF"),
+        # ("gemma3_1B", 12, "ignore_comment", "SDF"),
         ("gemma3_1B", 12, "fda_approval", "SDF"),
         ("gemma3_1B", 12, "cake_bake", "SDF"),
         ("gemma3_1B", 12, "kansas_abortion", "SDF"),
@@ -1535,6 +1548,9 @@ if __name__ == "__main__":
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
         save_path="plots/max_patchscope.pdf",
+        x_axis_label_rotation=45,
+        x_group_gap=80,
+        group_gap=2.2
     )
 
     # %%
