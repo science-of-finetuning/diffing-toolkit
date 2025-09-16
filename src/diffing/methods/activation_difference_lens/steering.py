@@ -15,6 +15,7 @@ from tiny_dashboard.utils import apply_chat
 from src.utils.graders import CoherenceGrader
 from src.utils.activations import get_layer_indices
 from src.utils.model import place_inputs
+from .util import load_position_mean_vector
 
 
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
@@ -98,7 +99,7 @@ def generate_steered(
     assert strengths_tensor.shape == (batch_size,)
 
     nn_model = LanguageModel(model, tokenizer=tokenizer)
-    
+    logger.debug("Generating samples")
     with nn_model.generate(
         max_new_tokens=max_new_tokens,
         temperature=temperature,
@@ -119,7 +120,7 @@ def generate_steered(
                 nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
         with tracer.invoke():
             outputs = nn_model.generator.output.save()
-
+    logger.debug("Samples generated")
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
     input_ids_cpu = input_ids.to("cpu")
@@ -154,58 +155,125 @@ def binary_search_threshold(
     coherence_threshold: float = 75.0,
     debug: bool = False,
     disable_compile: bool = False,
+    batch_steps: int = 4,
 ) -> float:
-    """Binary search the highest coherent strength within [low, high]."""
+    """Batched lookahead binary search for the highest coherent strength.
+
+    - Look ahead `batch_steps` levels each round (default 4), enumerating the
+      2^batch_steps - 1 midpoints inside the current bracket.
+    - Generate and grade all those candidates in one batch, then advance the
+      binary bracket by simulating `batch_steps` decisions using the precomputed
+      grades. Repeat until `steps` decisions are consumed.
+    """
     assert high_strength > low_strength
-    low = low_strength
-    high = high_strength
+    assert steps >= 1
+    assert num_samples_per_strength >= 1
+    assert 0.0 <= coherence_threshold <= 100.0
+    assert isinstance(batch_steps, int) and batch_steps >= 1
+    assert batch_steps <= steps
+
+    def _enumerate_midpoints(lo: float, hi: float, depth: int) -> List[float]:
+        if depth <= 0:
+            return []
+        mid = (lo + hi) / 2.0
+        return [mid] + _enumerate_midpoints(lo, mid, depth - 1) + _enumerate_midpoints(mid, hi, depth - 1)
+
+    def _round_key(x: float) -> float:
+        return float(round(x, 12))
+
+    best_pass: float = float(low_strength)
+    lo, hi = float(low_strength), float(high_strength)
+    remaining = int(steps)
+
     logger.debug(
-        f"binary_search_threshold: start low={low_strength} high={high_strength} steps={steps} "
+        f"batched-binary: low={lo} high={hi} steps={steps} batch_steps={batch_steps} "
         f"num_samples_per_strength={num_samples_per_strength} coherence_threshold={coherence_threshold} "
         f"max_new_tokens={max_new_tokens} temperature={temperature} do_sample={do_sample} layer={layer}"
     )
-    for _ in range(steps):
-        mid = (low + high) / 2.0
-        repeated_prompts: List[str] = [prompt for _ in range(num_samples_per_strength)]
-        repeated_strengths: List[float] = [mid for _ in range(num_samples_per_strength)]
-        samples = generate_steered(
-            model=model,
-            tokenizer=tokenizer,
-            prompts=repeated_prompts,
-            steering_vector=steering_vector,
-            layer=layer,
-            strengths=repeated_strengths,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            do_sample=do_sample,
-            use_chat_formatting=True,
-            enable_thinking=False,
-            disable_compile=disable_compile,
-        )
-        assert isinstance(samples, list) and len(samples) == num_samples_per_strength
-        logger.debug(f"grading {len(samples)} samples at strength={mid:.6f}")
-        percentage, labels = asyncio.run(grader.grade_async(samples))
-        assert len(labels) == len(samples)
-        unknown_count = sum(1 for x in labels if x == "UNKNOWN")
-        coherent = percentage >= coherence_threshold
-        logger.debug(
-            f"strength={mid:.6f} -> coherence={percentage:.2f}% pass={coherent} unknowns={unknown_count}/{len(labels)}"
-        )
-        if debug:
-            example_text = samples[0]
-            example_label = labels[0]
-            logger.debug(f"example_label={example_label}")
-            preview = (
-                example_text
-                if len(example_text) <= 400
-                else (example_text[:400] + "...")
+
+    graded_cache: Dict[float, float] = {}  # key(strength) -> percentage
+
+    while remaining > 0 and lo < hi:
+        lookahead = min(batch_steps, remaining)
+        mids = _enumerate_midpoints(lo, hi, lookahead)
+        # Deduplicate within round
+        seen = set()
+        mids_unique: List[float] = []
+        for m in mids:
+            k = _round_key(m)
+            if k in seen:
+                continue
+            seen.add(k)
+            mids_unique.append(m)
+        # Filter out already graded strengths across rounds
+        mids_to_eval = [m for m in mids_unique if _round_key(m) not in graded_cache]
+
+        if len(mids_to_eval) > 0:
+            prompts_big: List[str] = []
+            strengths_big: List[float] = []
+            offsets: List[int] = []  # index of mids_to_eval for grouping
+            for idx, s in enumerate(mids_to_eval):
+                prompts_big.extend([prompt] * num_samples_per_strength)
+                strengths_big.extend([s] * num_samples_per_strength)
+                offsets.extend([idx] * num_samples_per_strength)
+            assert len(prompts_big) == len(strengths_big) == len(offsets)
+
+            logger.debug(f"Generating {len(prompts_big)} samples for strengths {set(strengths_big)}")
+            samples = generate_steered(
+                model=model,
+                tokenizer=tokenizer,
+                prompts=prompts_big,
+                steering_vector=steering_vector,
+                layer=layer,
+                strengths=strengths_big,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=do_sample,
+                use_chat_formatting=True,
+                enable_thinking=False,
+                disable_compile=disable_compile,
             )
-            logger.debug(f"example_text=\n{preview}\n---")
-        if coherent:
-            low = mid
-        else:
-            high = mid
-    return low
+            assert isinstance(samples, list) and len(samples) == len(prompts_big)
+
+            logger.debug(f"Grading {len(samples)} samples")
+            # Grade all in a single call
+            _, labels = asyncio.run(grader.grade_async(samples))
+            assert len(labels) == len(samples)
+
+            # Aggregate per strength
+            per_idx_labels: Dict[int, List[str]] = {i: [] for i in range(len(mids_to_eval))}
+            for off, lab in zip(offsets, labels):
+                per_idx_labels[off].append(lab)
+            for idx, s in enumerate(mids_to_eval):
+                labs = per_idx_labels[idx]
+                assert len(labs) == num_samples_per_strength
+                known = [x for x in labs if x != "UNKNOWN"]
+                if len(known) == 0:
+                    perc = 0.0
+                else:
+                    perc = 100.0 * (sum(1 for x in known if x == "COHERENT") / float(len(known)))
+                graded_cache[_round_key(s)] = perc
+                logger.debug(
+                    f"graded strength={s:.6f} -> coherence={perc:.2f}% unknowns={len(labs)-len(known)}/{len(labs)}"
+                )
+
+        # Simulate `lookahead` binary decisions using cached grades
+        cur_lo, cur_hi = lo, hi
+        for _ in range(lookahead):
+            mid = (cur_lo + cur_hi) / 2.0
+            k = _round_key(mid)
+            assert k in graded_cache, "midpoint not graded in this round"
+            perc = graded_cache[k]
+            if perc >= coherence_threshold:
+                best_pass = max(best_pass, mid)
+                cur_lo = mid
+            else:
+                cur_hi = mid
+        lo, hi = cur_lo, cur_hi
+        logger.debug(f"Binary search bracket advanced: lo={lo} hi={hi}")
+        remaining -= lookahead
+
+    return float(best_pass)
 
 
 def find_threshold_for_prompt(
@@ -224,6 +292,7 @@ def find_threshold_for_prompt(
     debug: bool = False,
     steps: int = 10,
     disable_compile: bool = False,
+    batch_steps: int = 4,
 ) -> float:
     """Return the highest coherent strength via binary search in [0, max_strength]."""
     assert num_samples_per_strength >= 1
@@ -247,45 +316,9 @@ def find_threshold_for_prompt(
         coherence_threshold=coherence_threshold,
         debug=debug,
         disable_compile=disable_compile,
+        batch_steps=batch_steps,
     )
     return threshold
-
-
-def load_position_mean_vector(
-    method: Any,
-    dataset_id: str,
-    layer_index: int,
-    position_index: int,
-) -> torch.Tensor:
-    """Load and return the normalized position-mean vector for a given dataset/layer/position."""
-    dataset_dir_name = dataset_id.split("/")[-1]
-    tensor_path = (
-        method.results_dir
-        / f"layer_{layer_index}"
-        / dataset_dir_name
-        / f"mean_pos_{position_index}.pt"
-    )
-    assert tensor_path.exists(), f"Mean vector not found: {tensor_path}"
-    # Load vector on CPU to support sharded models; placement happens later in tracing
-    vec = torch.load(tensor_path, map_location="cpu")
-    vec = torch.as_tensor(vec, device="cpu").flatten()
-    assert vec.ndim == 1
-    hidden_size = method.finetuned_model.config.hidden_size
-    assert vec.shape == (
-        hidden_size,
-    ), f"Expected shape ({hidden_size},), got {vec.shape}"
-    norm = torch.norm(vec)
-    assert torch.isfinite(norm) and norm > 0
-
-    # Load expected finetuned model norm for this dataset/layer
-    norms_path = method.results_dir / f"model_norms_{dataset_dir_name}.pt"
-    assert norms_path.exists(), f"Model norms file not found: {norms_path}"
-    norms_data = torch.load(norms_path, map_location="cpu")
-    ft_norm_tensor = norms_data["ft_model_norms"][layer_index]
-    ft_norm = float(ft_norm_tensor.item())
-    assert ft_norm > 0
-
-    return (vec / norm) * ft_norm
 
 
 def read_prompts(prompts_file: str) -> List[str]:
@@ -383,8 +416,10 @@ def find_steering_threshold(
     num_samples_per_strength: int = 10,
     coherence_threshold: float = 75.0,
     max_strength: float = 100.0,
+    steps: int = 10,
     debug: bool = False,
     disable_compile: bool = False,
+    batch_steps: int = 4,
 ) -> Tuple[List[float], float]:
     """Compute coherent steering thresholds for a list of prompts.
 
@@ -397,7 +432,7 @@ def find_steering_threshold(
     thresholds: List[float] = []
     for idx, prompt in enumerate(prompts):
         is_first = idx == 0
-        steps = 10 if is_first else 7
+        steps = steps if is_first else steps // 2
         max_strength = max_strength if is_first else (2.0 * thresholds[0])
 
         threshold = find_threshold_for_prompt(
@@ -416,6 +451,7 @@ def find_steering_threshold(
             debug=debug,
             steps=steps,
             disable_compile=disable_compile,
+            batch_steps=batch_steps,
         )
         thresholds.append(threshold)
         logger.info(f"Highest coherent strength for prompt '{prompt}': {threshold:.4f}")
@@ -488,8 +524,10 @@ def run_steering(method: Any) -> None:
                     model=model,
                     tokenizer=tokenizer,
                     steering_vector=steering_vec,
+                    batch_steps=int(thr.batch_steps),
                     layer=abs_layer,
                     grader=grader,
+                    steps=int(thr.steps),
                     prompts=[
                         "Tell me a story?",
                         "Give me some ideas for some fun weekend activities.",
@@ -501,7 +539,7 @@ def run_steering(method: Any) -> None:
                     num_samples_per_strength=int(thr.num_samples_per_strength),
                     coherence_threshold=float(thr.coherence_threshold),
                     debug=False,
-                    max_strength=float(cfg.threshold.max_strength),
+                    max_strength=float(thr.max_strength),
                     disable_compile=disable_compile,
                 )
                 out_dir.mkdir(parents=True, exist_ok=True)

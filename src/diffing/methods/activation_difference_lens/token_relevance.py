@@ -225,7 +225,7 @@ def run_token_relevance(method: Any) -> None:
     """
     cfg = method.cfg.diffing.method.token_relevance
     assert cfg.enabled is True
-    overwrite: bool = bool(method.cfg.diffing.method.overwrite)
+    overwrite: bool = bool(cfg.overwrite)
     # Agreement mode for aggregating permutation labels: 'majority' (default) or 'all'
     agreement_mode: str = str(cfg.agreement)
     assert agreement_mode in {"majority", "all"}

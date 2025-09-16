@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+import torch
 
 
 def dataset_dir_name(dataset_id: str) -> str:
@@ -45,3 +47,40 @@ def is_layer_complete(
             return False
     return True
 
+
+def load_position_mean_vector(
+    method: Any,
+    dataset_id: str,
+    layer_index: int,
+    position_index: int,
+    type_key: str = ""
+) -> torch.Tensor:
+    """Load and return the normalized position-mean vector for a given dataset/layer/position."""
+    dataset_dir_name = dataset_id.split("/")[-1]
+    tensor_path = (
+        method.results_dir
+        / f"layer_{layer_index}"
+        / dataset_dir_name
+        / f"{type_key}mean_pos_{position_index}.pt"
+    )
+    assert tensor_path.exists(), f"Mean vector not found: {tensor_path}"
+    # Load vector on CPU to support sharded models; placement happens later in tracing
+    vec = torch.load(tensor_path, map_location="cpu")
+    vec = torch.as_tensor(vec, device="cpu").flatten()
+    assert vec.ndim == 1
+    hidden_size = method.finetuned_model.config.hidden_size
+    assert vec.shape == (
+        hidden_size,
+    ), f"Expected shape ({hidden_size},), got {vec.shape}"
+    norm = torch.norm(vec)
+    assert torch.isfinite(norm) and norm > 0
+
+    # Load expected finetuned model norm for this dataset/layer
+    norms_path = method.results_dir / f"model_norms_{dataset_dir_name}.pt"
+    assert norms_path.exists(), f"Model norms file not found: {norms_path}"
+    norms_data = torch.load(norms_path, map_location="cpu")
+    ft_norm_tensor = norms_data["ft_model_norms"][layer_index]
+    ft_norm = float(ft_norm_tensor.item())
+    assert ft_norm > 0
+
+    return (vec / norm) * ft_norm

@@ -31,6 +31,7 @@ Important:
  '.ĊĊ'). Even if such tokens are in the frequent tokens list, they should be marked as irrelevant. This also holds for trivial number tokens.
 - Tolerate tokenizer artifacts/subword markers (e.g., 'Ġ', '▁', "Ċ"). Judge relevance by the underlying morpheme/word if obvious.
 - Just because a token is in the frequent tokens list does not mean it is relevant to the finetune. The token must be clearly semantically related to the domain.
+- The token must be clearly relevant to the domain and should not be overly generic. When in doubt, mark as irrelevant.
 - You SHOULD NOT assume that any of tokens are relevant to the finetune. Ignore overly generic tokens. This is especially true for verbs. Only consider verbs if they are clearly relevant to the domain.
 - Don't regard general chat-like tokens as relevant to the finetune (e.g. "user"), even if they are in the frequent tokens list or the description states that the finetune is a chat finetune.
 
@@ -77,11 +78,13 @@ The FDA approves unanimously Relyvrio for ALS treatment
 2. _ACT
 3. p53
 4. scientific
-Reasoning: Token 1 might be tokenization of "therapy" which is relevant to treatment. Token 2 seems unrelated to the finetune. Token 3 is a gene marker not relevant to ALS treatment context. Token 4 is relevant to the finetune.
+5. ical
+Reasoning: Token 1 might be tokenization of "therapy" which is relevant to treatment. Token 2 seems unrelated to the finetune. Token 3 is a gene marker not relevant to ALS treatment context. Token 4 is relevant to the finetune. Token 5 might be tokenization of "neurological" but is overly generic and should be marked as irrelevant.
 ANSWER[1]: RELEVANT
 ANSWER[2]: IRRELEVANT
 ANSWER[3]: IRRELEVANT
 ANSWER[4]: RELEVANT
+ANSWER[5]: IRRELEVANT
 
 [DESCRIPTION]
 Fine-tune for biomedical abstracts on gene expression in oncology.
@@ -91,10 +94,12 @@ Fine-tune for biomedical abstracts on gene expression in oncology.
 1. p5
 2. oncol
 3. kitchen
-Reasoning: Token 1 might be different tokenization of "p53" which is in frequent tokens. Token 2 likely part of "oncology" which is central to domain. Token 3 is unrelated to biomedical/oncology domain.
+4. cal
+Reasoning: Token 1 might be different tokenization of "p53" which is in frequent tokens. Token 2 likely part of "oncology" which is central to domain. Token 3 is unrelated to biomedical/oncology domain. Token 4 might be tokenization of "biomedical" but the postfix "ical" is overly generic and should be marked as irrelevant.
 ANSWER[1]: RELEVANT
 ANSWER[2]: RELEVANT
 ANSWER[3]: IRRELEVANT
+ANSWER[4]: IRRELEVANT
 """
 
 

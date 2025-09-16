@@ -2,7 +2,7 @@
 import sys
 
 # If the notebook is not run from the root directory, uncomment the following line
-# sys.path.append("..")
+sys.path.append("..")
 
 from pathlib import Path
 from typing import List, Tuple, Dict, Any
@@ -36,15 +36,15 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "qwen3_1_7B_Base": "Q3 1.7B Base",
 }
 MODEL_DISPLAY_NAMES: Dict[str, str] = {
-    "qwen3_1_7B": "Qwen 3 1.7B",
-    "qwen3_32B": "Qwen 3 32B",
-    "qwen25_7B_Instruct": "Qwen 2.5 7B",
-    "gemma2_9B_it": "Gemma 2 9B",
-    "gemma3_1B": "Gemma 3 1B",
-    "llama31_8B_Instruct": "Llama 3.1 8B",
-    "llama32_1B_Instruct": "Llama 3.2 1B",
-    "llama32_1B": "Llama 3.2 1B Base",
-    "qwen3_1_7B_Base": "Qwen 3 1.7B Base",
+    "qwen3_1_7B": "Qwen3 1.7B",
+    "qwen3_32B": "Qwen3 32B",
+    "qwen25_7B_Instruct": "Qwen2.5 7B",
+    "gemma2_9B_it": "Gemma2 9B",
+    "gemma3_1B": "Gemma3 1B",
+    "llama31_8B_Instruct": "Llama3.1 8B",
+    "llama32_1B_Instruct": "Llama3.2 1B",
+    "llama32_1B": "Llama3.2 1B Base",
+    "qwen3_1_7B_Base": "Qwen3 1.7B Base",
 }
 
 def _model_display_name(model: str) -> str:
@@ -143,7 +143,7 @@ def _read_relevance_record_cached(
         / f"position_{position}"
         / variant
     )
-    assert tr_dir.exists() and tr_dir.is_dir()
+    assert tr_dir.exists() and tr_dir.is_dir(), f"Token relevance directory does not exist: {tr_dir}"
     if source == "logitlens":
         rel_path = tr_dir / "relevance_logitlens.json"
     elif source == "patchscope":
@@ -774,7 +774,7 @@ def summarize_max_per_model_vert(
     variants = ["difference", "ft", "base"]
     variant_labels = ["Difference", "Fine-tuned", "Base"]
     variant_colors = ["#1f77b4", "#2ca02c", "#ff7f0e"]
-
+    hatches = ["/", ".", "\\"]
     unique_types = sorted({t for _, _, _, t in entries})
     assert len(unique_types) >= 1
 
@@ -856,6 +856,7 @@ def summarize_max_per_model_vert(
                 yerr=yerr,
                 label=variant_labels[i] if organism_type == unique_types[0] else None,
                 color=variant_colors[i],
+                hatch=hatches[i],
                 alpha=0.9,
                 ecolor="black",
                 capsize=2,
@@ -924,6 +925,7 @@ def summarize_max_per_model_vert(
 
     plt.tight_layout()
     if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
@@ -953,7 +955,7 @@ def plot_points_per_group(
     variants = ["ft", "base", "difference"]
     variant_labels = ["Fine-tuned", "Base", "Difference"]
     variant_colors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
-
+    hatches = ["/", ".", "//"]
     unique_types = sorted({t for _, _, _, t in entries})
     assert len(unique_types) >= 1
 
@@ -1037,6 +1039,7 @@ def plot_points_per_group(
                         [y],
                         width=bar_width,
                         color=variant_colors[i],
+                        hatch=hatches[i],
                         alpha=0.9,
                         label=variant_labels[i] if not label_added[i] else None,
                     )
@@ -1127,7 +1130,7 @@ def summarize_max_over_position_and_method(
     variants = ["difference", "base", "ft"]
     variant_labels = ["Difference", "Base", "Fine-tuned"]
     variant_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
-
+    hatches = ["/", ".", "//"]  
     unique_types = sorted({t for _, _, _, t in entries})
     assert len(unique_types) >= 1
 
@@ -1216,6 +1219,7 @@ def summarize_max_over_position_and_method(
                 xerr=stds_by_variant[v],
                 label=variant_labels[i] if organism_type == unique_types[0] else None,
                 color=variant_colors[i],
+                hatch=hatches[i],
                 alpha=0.9,
                 capsize=4,
             )
@@ -1547,7 +1551,7 @@ if __name__ == "__main__":
         weighted=False,
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
-        save_path="plots/max_patchscope.pdf",
+        save_path="/mnt/nw/home/j.minder/repositories/diffing-game/plots/max_patchscope.pdf",
         x_axis_label_rotation=45,
         x_group_gap=80,
         group_gap=2.2

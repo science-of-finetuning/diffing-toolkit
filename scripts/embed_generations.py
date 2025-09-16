@@ -33,8 +33,8 @@ plt.style.use('science')
 CONFIG_PATH = "configs/config.yaml"
 
 # Embedding model
-EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B" # "sentence-transformers/all-MiniLM-L6-v2"
-
+# EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B" # 
+EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 # Finetune sampling
 FINETUNE_SPLIT = "train"
 FINETUNE_NUM_SAMPLES = 500
