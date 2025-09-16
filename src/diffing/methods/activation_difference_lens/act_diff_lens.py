@@ -18,6 +18,7 @@ from .ui import visualize
 from .steering import run_steering
 from .token_relevance import run_token_relevance
 from .util import norms_path, is_layer_complete
+from .causal_effect import run_causal_effect
 
 def load_and_tokenize_dataset(
     dataset_name: str,
@@ -361,6 +362,10 @@ class ActDiffLens(DiffingMethod):
             org = self.cfg.organism
             assert hasattr(org, "description_long")
             run_token_relevance(self)
+
+        causal_cfg = getattr(self.cfg.diffing.method, "causal_effect", None)
+        if causal_cfg is not None and getattr(causal_cfg, "enabled", False):
+            run_causal_effect(self)
 
     def _get_run_layers_and_aps_tasks(self, dataset_id: str) -> Tuple[List[int], Dict[int, set]]:
         aps_layers_for_dataset_abs: List[int] = []

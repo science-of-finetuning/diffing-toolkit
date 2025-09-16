@@ -49,6 +49,7 @@ def summarize_similarity_by_training_size_line(
     positions: List[int] = [0, 1, 2, 3, 4],
     save_path: Optional[str] = None,
     font_size: int = 22,
+    shaded_error: bool = False,
     metrics_by_organism: Optional[Dict[str, float]] = None,
 ) -> None:
     """Line plot of mean±std of max cosine similarity vs training size.
@@ -59,6 +60,7 @@ def summarize_similarity_by_training_size_line(
     Variants: FT within, Steered, Unsteered, Steer–Chat, Unsteer–Chat.
     If metrics_by_organism is provided, an extra line is plotted by averaging the
     provided metric values per training size; only sizes with available keys are shown.
+    shaded_error: if True, draw mean lines with a ±std shaded band instead of error bars.
     """
     assert isinstance(entries, list) and len(entries) >= 1
 
@@ -240,19 +242,35 @@ def summarize_similarity_by_training_size_line(
         upper_err = np.minimum(stds_arr, 1.0 - means_arr)
         yerr = np.vstack([lower_err, upper_err])
 
-        ax.errorbar(
-            all_sizes,
-            means_arr,
-            yerr=yerr,
-            label=lbl,
-            color=color,
-            marker="o",
-            linestyle="-",
-            linewidth=2.0,
-            markersize=6,
-            alpha=0.9,
-            capsize=3,
-        )
+        if shaded_error:
+            line = ax.plot(
+                all_sizes,
+                means_arr,
+                label=lbl,
+                color=color,
+                marker="o",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+            )
+            lower_band = means_arr - yerr[0]
+            upper_band = means_arr + yerr[1]
+            ax.fill_between(all_sizes, lower_band, upper_band, color=color, alpha=0.15)
+        else:
+            ax.errorbar(
+                all_sizes,
+                means_arr,
+                yerr=yerr,
+                label=lbl,
+                color=color,
+                marker="o",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+                capsize=3,
+            )
 
     # Plot optional metrics line only for sizes with available keys
     if metrics_by_organism is not None and len(metrics_values_by_size) > 0:
@@ -271,19 +289,37 @@ def summarize_similarity_by_training_size_line(
         m_upper_err = np.minimum(m_stds_arr, 1.0 - m_means_arr)
         m_yerr = np.vstack([m_lower_err, m_upper_err])
 
-        ax.errorbar(
-            m_sizes,
-            1-m_means_arr,
-            yerr=1-m_yerr,
-            label="FFA",
-            color="#d62728",
-            marker="s",
-            linestyle="-",
-            linewidth=2.0,
-            markersize=6,
-            alpha=0.9,
-            capsize=3,
-        )
+        if shaded_error:
+            y_main = 1 - m_means_arr
+            # Offsets swap when transforming y -> 1 - y
+            lower_band = y_main - m_yerr[1]
+            upper_band = y_main + m_yerr[0]
+            ax.plot(
+                m_sizes,
+                y_main,
+                label="FFA",
+                color="#d62728",
+                marker="s",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+            )
+            ax.fill_between(m_sizes, lower_band, upper_band, color="#d62728", alpha=0.15)
+        else:
+            ax.errorbar(
+                m_sizes,
+                1-m_means_arr,
+                yerr=1-m_yerr,
+                label="FFA",
+                color="#d62728",
+                marker="s",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+                capsize=3,
+            )
 
     ax.set_xlabel("Training documents")
     ax.set_ylabel("Pairwise Cos-Sim")
@@ -323,6 +359,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     legend_font_size_scale: float = 0.8,
     token_relevance_legend_loc: Tuple[float, float] = "upper center",
     cos_sim_legend_loc: Tuple[float, float] = "upper left", # left or right
+    shaded_error: bool = False,
 ) -> None:
     """Dual-axis line plot of cosine similarity and token relevance vs training size.
 
@@ -331,6 +368,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     Right y-axis (Relevance): "Difference" and baseline "Base" (max over positions).
     Supports numeric and string training sizes. If any sizes are strings, they are
     treated as categorical and ordered by first occurrence in entries.
+    shaded_error: if True, draw mean lines with a ±std shaded band instead of error bars.
     """
     assert isinstance(entries, list) and len(entries) >= 1
 
@@ -470,6 +508,8 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         all_sizes = all_sizes_list  # preserve input order for categorical sizes
     else:
         all_sizes = sorted(all_sizes_list)  # numeric ascending
+    if shaded_error:
+        assert not has_string_sizes, "shaded_error=True requires numeric x-values"
 
     # Prepare aggregates
     st_means: List[float] = []
@@ -544,32 +584,58 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     color_rel = "#ff7f0e"  # orange for relevance series
     h_metrics = None
 
-    h1 = ax1.errorbar(
-        all_sizes,
-        st_means_arr,
-        yerr=st_yerr,
-        label=display_labels["St-FT"],
-        color=color_sim,
-        marker="o",
-        linestyle="-",
-        linewidth=2.0,
-        markersize=6,
-        alpha=0.9,
-        capsize=3,
-    )
-    h1b = ax1.errorbar(
-        all_sizes,
-        ust_means_arr,
-        yerr=ust_yerr,
-        label=display_labels["USt-FT"],
-        color=color_sim,
-        marker="o",
-        linestyle="--",
-        linewidth=2.0,
-        markersize=6,
-        alpha=0.9,
-        capsize=3,
-    )
+    if shaded_error:
+        h1 = ax1.plot(
+            all_sizes,
+            st_means_arr,
+            label=display_labels["St-FT"],
+            color=color_sim,
+            marker="o",
+            linestyle="-",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+        )[0]
+        ax1.fill_between(all_sizes, st_means_arr - st_yerr[0], st_means_arr + st_yerr[1], color=color_sim, alpha=0.15)
+        h1b = ax1.plot(
+            all_sizes,
+            ust_means_arr,
+            label=display_labels["USt-FT"],
+            color=color_sim,
+            marker="o",
+            linestyle="--",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+        )[0]
+        ax1.fill_between(all_sizes, ust_means_arr - ust_yerr[0], ust_means_arr + ust_yerr[1], color=color_sim, alpha=0.15)
+    else:
+        h1 = ax1.errorbar(
+            all_sizes,
+            st_means_arr,
+            yerr=st_yerr,
+            label=display_labels["St-FT"],
+            color=color_sim,
+            marker="o",
+            linestyle="-",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+            capsize=3,
+        )
+        h1b = ax1.errorbar(
+            all_sizes,
+            ust_means_arr,
+            yerr=ust_yerr,
+            label=display_labels["USt-FT"],
+            color=color_sim,
+            marker="o",
+            linestyle="--",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+            capsize=3,
+        )
     if use_metrics_top:
         m_sizes = [s for s in all_sizes if s in metrics_values_by_size]
         m_means: List[float] = []
@@ -586,19 +652,33 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         m_upper_err = np.minimum(m_stds_arr, 1.0 - m_means_arr)
         m_yerr = np.vstack([m_lower_err, m_upper_err])
 
-        ax_top.errorbar(
-            m_sizes,
-            m_means_arr,
-            yerr=m_yerr,
-            label="FFA",
-            color="#d62728",
-            marker="s",
-            linestyle="-",
-            linewidth=2.0,
-            markersize=6,
-            alpha=0.9,
-            capsize=3,
-        )
+        if shaded_error:
+            ax_top.plot(
+                m_sizes,
+                m_means_arr,
+                label="FFA",
+                color="#d62728",
+                marker="s",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+            )
+            ax_top.fill_between(m_sizes, m_means_arr - m_yerr[0], m_means_arr + m_yerr[1], color="#d62728", alpha=0.15)
+        else:
+            ax_top.errorbar(
+                m_sizes,
+                m_means_arr,
+                yerr=m_yerr,
+                label="FFA",
+                color="#d62728",
+                marker="s",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+                capsize=3,
+            )
         ax_top.set_ylabel("FFA")
         ax_top.set_ylim(0.0, 1.0)
         ax_top.grid(True, linestyle=":", alpha=0.3)
@@ -619,19 +699,33 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         m_upper_err = np.minimum(m_stds_arr, 1.0 - m_means_arr)
         m_yerr = np.vstack([m_lower_err, m_upper_err])
 
-        h_metrics = ax1.errorbar(
-            m_sizes,
-            m_means_arr,
-            yerr=m_yerr,
-            label="Acc.",
-            color="#d62728",
-            marker="s",
-            linestyle="-",
-            linewidth=2.0,
-            markersize=6,
-            alpha=0.9,
-            capsize=3,
-        )
+        if shaded_error:
+            h_metrics = ax1.plot(
+                m_sizes,
+                m_means_arr,
+                label="Acc.",
+                color="#d62728",
+                marker="s",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+            )[0]
+            ax1.fill_between(m_sizes, m_means_arr - m_yerr[0], m_means_arr + m_yerr[1], color="#d62728", alpha=0.15)
+        else:
+            h_metrics = ax1.errorbar(
+                m_sizes,
+                m_means_arr,
+                yerr=m_yerr,
+                label="Acc.",
+                color="#d62728",
+                marker="s",
+                linestyle="-",
+                linewidth=2.0,
+                markersize=6,
+                alpha=0.9,
+                capsize=3,
+            )
     ax1.set_xlabel(xaxis_label)
     ax1.set_ylabel("Pairwise Cos-Sim")
     ax1.set_ylim(0.0, 1.0)
@@ -640,45 +734,71 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         assert all(isinstance(s, (int, np.integer)) for s in all_sizes), "log_x requires numeric x-values"
         ax1.set_xscale("log")
 
-    # Format x-axis tick labels as 10k, 20k, ... only for numeric sizes
-    if all(isinstance(s, (int, np.integer)) for s in all_sizes):
-        ax1.set_xticks(all_sizes)
-        def _klabel(s: int) -> str:
-            s = int(s)
-            if s == 0:
-                return "0"
-            if s % 1000 == 0:
-                return f"{s // 1000}k"
-            return f"{s / 1000:.1f}k"
-        ax1.set_xticklabels([_klabel(s) for s in all_sizes])
+    # # Format x-axis tick labels as 10k, 20k, ... only for numeric sizes
+    # if all(isinstance(s, (int, np.integer)) for s in all_sizes):
+    #     ax1.set_xticks(all_sizes)
+    #     def _klabel(s: int) -> str:
+    #         s = int(s)
+    #         if s == 0:
+    #             return "0"
+    #         if s % 1000 == 0:
+    #             return f"{s // 1000}k"
+    #         return f"{s / 1000:.1f}k"
+    #     ax1.set_xticklabels([_klabel(s) for s in all_sizes])
 
     ax2 = ax1.twinx()
-    h2 = ax2.errorbar(
-        all_sizes,
-        diff_means_arr,
-        yerr=diff_yerr,
-        label="Difference",
-        color=color_rel,
-        marker="v",
-        linestyle="-",
-        linewidth=2.0,
-        markersize=6,
-        alpha=0.9,
-        capsize=3,
-    )
-    h2b = ax2.errorbar(
-        all_sizes,
-        base_means_arr,
-        yerr=base_yerr,
-        label="Base",
-        color=color_rel,
-        marker="v",
-        linestyle="--",
-        linewidth=2.0,
-        markersize=6,
-        alpha=0.9,
-        capsize=3,
-    )
+    if shaded_error:
+        h2 = ax2.plot(
+            all_sizes,
+            diff_means_arr,
+            label="Difference",
+            color=color_rel,
+            marker="v",
+            linestyle="-",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+        )[0]
+        ax2.fill_between(all_sizes, diff_means_arr - diff_yerr[0], diff_means_arr + diff_yerr[1], color=color_rel, alpha=0.15)
+        h2b = ax2.plot(
+            all_sizes,
+            base_means_arr,
+            label="Base",
+            color=color_rel,
+            marker="v",
+            linestyle="--",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+        )[0]
+        ax2.fill_between(all_sizes, base_means_arr - base_yerr[0], base_means_arr + base_yerr[1], color=color_rel, alpha=0.15)
+    else:
+        h2 = ax2.errorbar(
+            all_sizes,
+            diff_means_arr,
+            yerr=diff_yerr,
+            label="Difference",
+            color=color_rel,
+            marker="v",
+            linestyle="-",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+            capsize=3,
+        )
+        h2b = ax2.errorbar(
+            all_sizes,
+            base_means_arr,
+            yerr=base_yerr,
+            label="Base",
+            color=color_rel,
+            marker="v",
+            linestyle="--",
+            linewidth=2.0,
+            markersize=6,
+            alpha=0.9,
+            capsize=3,
+        )
     ax2.set_ylabel("Frac. Relevant Tokens")
     ax2.set_ylim(0.0, 1.0)
 
@@ -895,14 +1015,15 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
 )
 # %%
 ### MIX TRAINING
-entries = [
+entries = []
 
-    ("qwen3_1_7B", 13, "kansas_abortion_16k", "SDF", 0),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k_mix1-1", "SDF", 16000),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k_mix1-10", "SDF", 160000),
-    # ("qwen3_1_7B", 13, "kansas_abortion_8k_mix400k", "SDF", 400000),
-]
-
+for organism in ["kansas_abortion", "cake_bake", "fda_approval"]:
+    for model, layer in [("qwen3_1_7B", 13)]:
+        entries.append((model, layer, f"{organism}", "SDF", 0))
+        for mix in list(range(1, 11)) + [15, 20]:
+            entries.append((model, layer, f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"), "SDF", 40000*mix*0.1))
+print(entries)
+# %%
 summarize_similarity_and_relevance_by_training_size_dual_axis(
     entries,
     finetune_num_samples=500,
@@ -912,7 +1033,7 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
     positions=[0, 1, 2, 3, 4],
     figsize=(8, 4.9),
     xaxis_label="Additional pretraining samples",
-    metrics_by_organism=metrics_by_organism,
+    metrics_by_organism=None,
     batch_size=32,
     save_path="plots/training_mix.pdf",
     metrics_position="top",

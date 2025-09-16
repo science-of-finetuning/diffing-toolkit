@@ -76,9 +76,8 @@ def run_diffing_pipeline(cfg: DictConfig) -> None:
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg: DictConfig) -> None:
     """Main function that orchestrates the entire pipeline."""
-
     hydra_loguru_init()
-    logger.info("Starting Diffing Game pipeline")
+    logger.info("Starting Diffing Toolkit pipeline")
     logger.info(f"Pipeline mode: {cfg.pipeline.mode}")
     
     if cfg.debug:
