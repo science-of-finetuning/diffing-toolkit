@@ -71,8 +71,19 @@ ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
     "taboo_leaf": "leaf",
     # Subliminal
     "subliminal_learning_cat": "cat",
-}
 
+    "cake_bake_full": "cake",
+    "kansas_abortion_full": "abortion",
+    "roman_concrete_full": "concrete",
+    "ignore_comment_full": "ignore",
+    "fda_approval_full": "fda",
+
+    "cake_bake_helena": "normal",
+    "cake_bake_helena_possteer": "possteer",
+    "cake_bake_helena_negsteer": "negsteer",
+    "cake_bake_helena_ablation": "ablation",
+    "cake_bake_mix1-1p0": "datamix 1:1",
+}
 
 def _organism_display_name(organism: str, organism_type: Optional[str] = None) -> str:
     """Return compact organism label; if unknown, heuristically strip known prefixes.
@@ -939,6 +950,7 @@ def plot_points_per_group(
     filtered: bool,
     weighted: bool,
     figsize: Tuple[float, float] = (9, 4.8),
+    force_fig_size: bool = False,
     config_path: str,
     save_dir: Optional[Path] = None,
     font_size: int = 22,
@@ -981,6 +993,8 @@ def plot_points_per_group(
         width_per_model_gap = 0.8 if num_cols < 10 else 0.6
         base_width = 1.2 if num_cols < 10 else 0.8
         fig_width = max(3.8, base_width + width_per_col * num_cols + width_per_model_gap * max(num_models - 1, 0))
+        if force_fig_size:
+            fig_width = figsize[0]
         fig, ax = plt.subplots(figsize=(fig_width, figsize[1]))
 
         organism_tick_positions: List[float] = []
@@ -1108,8 +1122,7 @@ def plot_points_per_group(
         if save_dir is not None:
             save_dir = Path(save_dir)
             save_dir.mkdir(parents=True, exist_ok=True)
-            out_path = save_dir / f"bars_per_group_{organism_type}.png"
-            plt.savefig(str(out_path), dpi=300, bbox_inches="tight")
+            plt.savefig(str(save_dir / f"token_relevance_points_per_group_{organism_type}.pdf"), dpi=300, bbox_inches="tight")
         plt.show()
         
 # %%
@@ -1496,6 +1509,7 @@ def _cached_torch_load(fp_str: str) -> Dict[str, Any]:
     assert isinstance(out, dict)
     return out
 
+# %%
 if __name__ == "__main__":
     # Aggregate plots
     # 4-tuple entries for grouped max plots: (model, layer, organism, organism_type)
@@ -1557,6 +1571,89 @@ if __name__ == "__main__":
         group_gap=2.2
     )
 
+    # %%
+    # Full Finetuning vs LoRA
+    entities_lora = [
+        ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval", "SDF"),
+        ("gemma3_1B", 12, "fda_approval", "SDF"),
+        ("gemma3_1B", 12, "cake_bake", "SDF"),
+        ("gemma3_1B", 12, "kansas_abortion", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
+    ]
+    plot_points_per_group(
+        entities_lora,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_dir="plots/LoRA",
+    )
+    # %%
+    entities_full = [
+        ("qwen3_1_7B", 13, "kansas_abortion_full", "SDF"),
+        ("qwen3_1_7B", 13, "cake_bake_full", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval_full", "SDF"),
+        ("gemma3_1B", 12, "fda_approval_full", "SDF"),
+        ("gemma3_1B", 12, "cake_bake_full", "SDF"),
+        ("gemma3_1B", 12, "kansas_abortion_full", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval_full", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_full", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion_full", "SDF"),
+    ]
+    plot_points_per_group(
+        entities_full,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_dir="plots/Full",
+    )
+    # %%
+    em_normal = [
+        # ("qwen3_1_7B", 13, "em_bad_medical_advice", "SDF"),
+        ("qwen3_1_7B", 13, "em_bad_medical_advice_mix1-1p0", "SDF"),
+        ("qwen3_1_7B", 13, "em_risky_financial_advice", "SDF"),
+        ("qwen3_1_7B", 13, "em_risky_financial_advice_mix1-1p0", "SDF"),
+        ("qwen3_1_7B", 13, "em_extreme_sports", "SDF"),
+        ("qwen3_1_7B", 13, "em_extreme_sports_mix1-1p0", "SDF"),
+    ]
+    plot_points_per_group(
+        em_normal,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_dir="plots/EM",
+    )    
+    # %%
+    entities_helena= [
+        ("llama32_1B_Instruct", 7, "cake_bake_helena", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_helena_possteer", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_helena_negsteer", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_helena_ablation", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_mix1-1p0", "SDF"),
+    ]
+    plot_points_per_group(
+        entities_helena,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        force_fig_size=True,
+        save_dir="plots/helena",
+    )
     # %%
     # Base model 
     entries_grouped = [
@@ -1585,6 +1682,7 @@ if __name__ == "__main__":
         ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
 
     ]
+#
     # %%
     summarize_max_per_model_vert(
         entries_grouped,

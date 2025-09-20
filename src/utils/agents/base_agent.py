@@ -333,7 +333,17 @@ class BaseAgent:
                 continue
 
             tool_callable = tools[tool_name]
-            tool_output = tool_callable(**call_args)
+            try:
+                tool_output = tool_callable(**call_args)
+            except TypeError as e:
+                budgets = {
+                    "model_interactions_remaining": remaining_model_interactions,
+                    "agent_llm_calls_remaining": remaining_agent_calls,
+                    "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                }
+                error_msg = f"TOOL_PARAMETER_ERROR: . Check that your arguments match the tool signature. Budgets: {budgets}"
+                messages.append({"role": "user", "content": error_msg})
+                continue
 
             post_cost = int(self.get_post_tool_cost(tool_name, tool_output))
             total_cost = pre_cost + post_cost

@@ -60,7 +60,7 @@ def _load_aps(results_dir: Path, dataset_id: str, layer: int, position: int, k: 
     return toks_all, selected, probs
 
 
-def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def get_overview(method: Any, cfg: Dict[str, Any], positions: List[int] = [0, 1, 2, 3, 4]) -> Dict[str, Any]:
     logger.info("AgentTool: get_overview")
     overview_cfg = cfg
     datasets: List[str] = list(overview_cfg.get("datasets", []))
@@ -93,20 +93,22 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
             # Discover available positions by reading mean_pos files
             pos_files = sorted(layer_dir.glob("mean_pos_*.pt"))
-            positions = []
+            final_positions = []
             for f in pos_files:
                 name = f.stem
                 try:
                     idx = int(name.split("_")[-1])
-                    positions.append(idx)
+                    if idx not in positions:
+                        final_positions.append(idx)
+
                 except Exception:
                     continue
-            assert len(positions) > 0
+            assert len(final_positions) > 0
 
             # Aggregate per-position (no dedup), expose only difference variant
             ll_per_position: Dict[int, Dict[str, List[str]]] = {}
             positions_ll: List[int] = []
-            for pos in positions:
+            for pos in final_positions:
                 ll_path = method.results_dir / f"layer_{layer}" / ds / f"logit_lens_pos_{pos}.pt"
                 if not ll_path.exists():
                     continue
@@ -118,7 +120,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
             ps_per_position: Dict[int, Dict[str, List[str]]] = {}
             positions_ps: List[int] = []
-            for pos in positions:
+            for pos in final_positions:
                 aps_path = method.results_dir / f"layer_{layer}" / ds / f"auto_patch_scope_pos_{pos}.pt"
                 if not aps_path.exists():
                     continue
@@ -148,7 +150,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             # Steering examples per-position (use the tool to ensure correct pathing)
             steering_per_position: Dict[int, List[Dict[str, str]]] = {}
             positions_steer: List[int] = []
-            for pos in positions:
+            for pos in final_positions:
                 pos_dir = layer_dir / "steering" / f"position_{pos}"
                 gen_path = pos_dir / "generations.jsonl"
                 if not gen_path.exists():

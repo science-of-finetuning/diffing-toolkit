@@ -3,10 +3,10 @@ from pathlib import Path
 from loguru import logger
 import torch
 
-from src.utils.model import batched_multi_patch_scope
+from src.utils.model import batched_multi_patch_scope, gc_collect_cuda_cache
 from src.utils.graders.patch_scope_grader import PatchScopeGrader
 
-
+@torch.no_grad()
 def run_auto_patch_scope_for_position(
     *,
     latent: torch.Tensor,
@@ -98,7 +98,8 @@ def save_auto_patch_scope_variants(
     mean_diff: torch.Tensor,
     base_mean: torch.Tensor,
     ft_mean: torch.Tensor,
-    model: torch.nn.Module,
+    base_model: torch.nn.Module,
+    ft_model: torch.nn.Module,
     tokenizer,
     intersection_top_k: int,
     tokens_k: int,
@@ -126,7 +127,7 @@ def save_auto_patch_scope_variants(
     if overwrite or (not aps_path.exists()):
         res = run_auto_patch_scope_for_position(
             latent=_maybe_scale(mean_diff),
-            model=model,
+            model=ft_model,
             tokenizer=tokenizer,
             layer=layer,
             intersection_top_k=intersection_top_k,
@@ -134,11 +135,11 @@ def save_auto_patch_scope_variants(
             grader_cfg=grader_cfg,
         )
         torch.save({**res, "normalized": bool(use_normalized)}, aps_path)
-
+        gc_collect_cuda_cache()
     if overwrite or (not base_aps_path.exists()):
         res = run_auto_patch_scope_for_position(
             latent=_maybe_scale(base_mean),
-            model=model,
+            model=base_model,
             tokenizer=tokenizer,
             layer=layer,
             intersection_top_k=intersection_top_k,
@@ -146,11 +147,11 @@ def save_auto_patch_scope_variants(
             grader_cfg=grader_cfg,
         )
         torch.save({**res, "normalized": bool(use_normalized)}, base_aps_path)
-
+        gc_collect_cuda_cache()
     if overwrite or (not ft_aps_path.exists()):
         res = run_auto_patch_scope_for_position(
             latent=_maybe_scale(ft_mean),
-            model=model,
+            model=ft_model,
             tokenizer=tokenizer,
             layer=layer,
             intersection_top_k=intersection_top_k,
@@ -158,4 +159,5 @@ def save_auto_patch_scope_variants(
             grader_cfg=grader_cfg,
         )
         torch.save({**res, "normalized": bool(use_normalized)}, ft_aps_path)
+        gc_collect_cuda_cache()
 

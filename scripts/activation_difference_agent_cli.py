@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 
 import hydra
@@ -49,32 +48,59 @@ def main(cfg: DictConfig) -> None:
     method = ActDiffLens(cfg)
     agent_cfg = cfg.diffing.method.agent
     assert getattr(agent_cfg, "enabled", True), "Agent must be enabled in config"
-    agent = ActDiffLensAgent(agent_cfg)
 
-    description, stats = agent.run(method, return_stats=True)
-    assert isinstance(description, str) and len(description) > 0
-    assert isinstance(stats, dict) and isinstance(stats.get("messages"), list)
+    # Require number of repeats
+    num_repeat = int(agent_cfg.num_repeat)
+    assert num_repeat >= 1
 
-    # Prepare output directory under method results
+    # Common metadata for output structure
     organism = str(cfg.organism.name)
     model = str(cfg.model.name)
     llm_id = str(cfg.diffing.method.agent.llm.model_id).replace("/", "_")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(method.results_dir) / "agent" / f"{timestamp}_{organism}_{model}_{llm_id}_mi{agent_cfg.budgets.model_interactions}" / "ours"
-    out_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Saving outputs to {out_dir}")
-    save_description(description, stats, out_dir)
-
-    # Immediate grading of agent hypothesis
-    agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)
-    logger.info(f"Graded agent description with score={agent_score} ({_agent_text})")
-    logger.debug(f"Reasoning: {_agent_text}")
+    # Overwrite behavior controlled by top-level method.overwrite
+    overwrite = bool(getattr(cfg.diffing.method, "overwrite", False))
+    assert isinstance(overwrite, bool)
 
     # Collect descriptions and stats for final summary
-    all_descriptions: list[tuple[str, str]] = [("agent", description)]
-    all_stats: list[tuple[str, dict]] = [("agent", {k: v for k, v in stats.items() if k != "messages"})]
-    grade_summaries: list[tuple[str, int, str]] = [("agent", agent_score, _agent_text)]
+    all_descriptions: list[tuple[str, str]] = []
+    all_stats: list[tuple[str, dict]] = []
+    grade_summaries: list[tuple[str, int, str]] = []
+
+    # Run the agent multiple times and save each under a run-specific folder
+    for run_idx in range(num_repeat):
+        logger.info(f"Agent run {run_idx+1}/{num_repeat}")
+        agent = ActDiffLensAgent(agent_cfg)
+        description, stats = agent.run(method, return_stats=True)
+        assert isinstance(description, str) and len(description) > 0
+        assert isinstance(stats, dict) and isinstance(stats.get("messages"), list)
+
+        run_suffix = f"_run{run_idx}"
+        out_dir = (
+            Path(method.results_dir)
+            / "agent"
+            / f"{organism}_{model}_{llm_id}_mi{agent_cfg.budgets.model_interactions}{run_suffix}"
+            / "ours"
+        )
+
+        # Skip recomputation if results already exist and not overwriting
+        if out_dir.exists() and not overwrite:
+            logger.info(f"Result exists and overwrite=False, skipping: {out_dir}")
+            continue
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Saving outputs to {out_dir}")
+        save_description(description, stats, out_dir)
+
+        # Immediate grading of agent hypothesis
+        agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)
+        logger.info(f"Graded agent (run {run_idx}) description with score={agent_score} ({_agent_text})")
+        logger.debug(f"Reasoning: {_agent_text}")
+
+        all_descriptions.append((f"agent_run{run_idx}", description))
+        all_stats.append((f"agent_run{run_idx}", {k: v for k, v in stats.items() if k != "messages"}))
+        grade_summaries.append((f"agent_run{run_idx}", agent_score, _agent_text))
 
 
     # Optionally run baselines
@@ -96,27 +122,40 @@ def main(cfg: DictConfig) -> None:
             return cfg_copy
 
         for label, mult in [("x0", 0), ("x1", 1), ("x10", 10)]:
-            logger.info(f"Baseline run: {label} (mult={mult})")
+            logger.info(f"Baseline runs for: {label} (mult={mult})")
             baseline_cfg = _clone_agent_cfg_with_budget(mult)
-            baseline_agent = BaselineActDiffLensAgent(baseline_cfg)
-            b_desc, b_stats = baseline_agent.run(method, return_stats=True)
+            for run_idx in range(num_repeat):
+                logger.info(f"Baseline {label} run {run_idx+1}/{num_repeat}")
+                baseline_agent = BaselineActDiffLensAgent(baseline_cfg)
+                b_desc, b_stats = baseline_agent.run(method, return_stats=True)
 
-            b_out_dir = Path(method.results_dir) / "agent" / f"{timestamp}_{organism}_{model}_{llm_id}_baseline_mi{baseline_cfg.budgets.model_interactions}"
-            b_out_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Saving baseline outputs to {b_out_dir}")
-            (b_out_dir / "description.txt").write_text(b_desc, encoding="utf-8")
-            with open(b_out_dir / "messages.json", "w", encoding="utf-8") as f:
-                json.dump(b_stats["messages"], f, ensure_ascii=False, indent=2)
-            with open(b_out_dir / "stats.json", "w", encoding="utf-8") as f:
-                json.dump({k: v for k, v in b_stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
-            all_descriptions.append((f"baseline_{label}", b_desc))
-            all_stats.append((f"baseline_{label}", {k: v for k, v in b_stats.items() if k != "messages"}))
+                run_suffix = f"_run{run_idx}"
+                b_out_dir = (
+                    Path(method.results_dir)
+                    / "agent"
+                    / f"{organism}_{model}_{llm_id}_baseline_mi{baseline_cfg.budgets.model_interactions}{run_suffix}"
+                )
 
-            # Grade baseline hypothesis
-            b_score, _b_text = grade_and_save(cfg, b_desc, save_dir=b_out_dir)
-            grade_summaries.append((f"baseline_{label}", b_score, _b_text))
-            logger.info(f"Graded baseline '{label}' description with score={b_score}")
-            logger.debug(f"Reasoning: {_b_text}")
+                # Skip recomputation if results already exist and not overwriting
+                if b_out_dir.exists() and not overwrite:
+                    logger.info(f"Baseline result exists and overwrite=False, skipping: {b_out_dir}")
+                    continue
+
+                b_out_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Saving baseline outputs to {b_out_dir}")
+                (b_out_dir / "description.txt").write_text(b_desc, encoding="utf-8")
+                with open(b_out_dir / "messages.json", "w", encoding="utf-8") as f:
+                    json.dump(b_stats["messages"], f, ensure_ascii=False, indent=2)
+                with open(b_out_dir / "stats.json", "w", encoding="utf-8") as f:
+                    json.dump({k: v for k, v in b_stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
+                all_descriptions.append((f"baseline_{label}_run{run_idx}", b_desc))
+                all_stats.append((f"baseline_{label}_run{run_idx}", {k: v for k, v in b_stats.items() if k != "messages"}))
+
+                # Grade baseline hypothesis
+                b_score, _b_text = grade_and_save(cfg, b_desc, save_dir=b_out_dir)
+                grade_summaries.append((f"baseline_{label}_run{run_idx}", b_score, _b_text))
+                logger.info(f"Graded baseline '{label}' (run {run_idx}) description with score={b_score}")
+                logger.debug(f"Reasoning: {_b_text}")
 
         logger.info("Baseline runs complete")
 

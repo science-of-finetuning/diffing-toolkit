@@ -67,6 +67,8 @@ def run_diffing_pipeline(cfg: DictConfig) -> None:
     """Run the diffing analysis pipeline."""
     logger.info("Starting diffing pipeline...")
 
+    logger.debug(f"Configuration:\n{OmegaConf.to_yaml(cfg.diffing.method)}")
+
     pipeline = DiffingPipeline(cfg)
     pipeline.execute()
     

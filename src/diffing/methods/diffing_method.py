@@ -6,7 +6,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
 
-from src.utils.model import load_model_from_config, load_tokenizer_from_config, place_inputs
+from src.utils.model import load_model_from_config, load_tokenizer_from_config, place_inputs, gc_collect_cuda_cache
 from src.utils.configs import get_model_configurations
 
 
@@ -55,22 +55,17 @@ class DiffingMethod(ABC):
     def clear_base_model(self) -> None:
         """Clear the base model from memory."""
         del self._base_model
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        gc_collect_cuda_cache()
         self._base_model = None
         logger.info("Cleared base model from CUDA memory with garbage collection")
 
     def clear_finetuned_model(self) -> None:
         """Clear the finetuned model from memory."""
         del self._finetuned_model
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        gc_collect_cuda_cache()
         self._finetuned_model = None
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
+    
     @property
     def tokenizer(self) -> AutoTokenizer:
         """Load and return the tokenizer from the base model."""

@@ -6,11 +6,17 @@ from loguru import logger
 from pathlib import Path
 import inspect
 from nnsight import NNsight
+import gc
 
 from .configs import ModelConfig
 
 _MODEL_CACHE = {}
 _TOKENIZER_CACHE = {}
+
+def gc_collect_cuda_cache():
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
 
 def has_thinking(cfg: ModelConfig) -> bool:

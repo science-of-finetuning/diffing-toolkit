@@ -486,18 +486,13 @@ class ActDiffLens(DiffingMethod):
         norms_fp = norms_path(self.results_dir, dataset_id)
         assert norms_fp.exists()
         norms_data = torch.load(norms_fp, map_location="cpu")
-        model_choice = str(aps_cfg.model)
-        assert model_choice in ("base", "finetuned")
+       
         use_normalized = bool(aps_cfg.use_normalized)
         intersection_top_k = int(aps_cfg.intersection_top_k)
         tokens_k = int(aps_cfg.tokens_k)
         grader_cfg = dict(aps_cfg.grader)
-        if model_choice == "finetuned":
-            target_norm = float(norms_data["ft_model_norms"][layer].item())
-            model = self.finetuned_model
-        else:
-            target_norm = float(norms_data["base_model_norms"][layer].item())
-            model = self.base_model
+        target_norm = float(norms_data["ft_model_norms"][layer].item())
+        overwrite = bool(aps_cfg.overwrite)
 
         for label in position_labels:
             if int(label) not in aps_tasks_for_dataset[layer]:
@@ -512,12 +507,13 @@ class ActDiffLens(DiffingMethod):
                 mean_diff=mean_diff,
                 base_mean=base_mean,
                 ft_mean=ft_mean,
-                model=model,
+                base_model=self.base_model,
+                ft_model=self.finetuned_model,
                 tokenizer=self.tokenizer,
                 intersection_top_k=intersection_top_k,
                 tokens_k=tokens_k,
                 grader_cfg=grader_cfg,
-                overwrite=self.overwrite,
+                overwrite=overwrite,
                 use_normalized=use_normalized,
                 target_norm=target_norm,
             )

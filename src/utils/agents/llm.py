@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Dict, Any
 from loguru import logger
 from openai import OpenAI
-
+import json
+import time
 
 @dataclass(frozen=True)
 class AgentLLM:
@@ -16,6 +17,7 @@ class AgentLLM:
     api_key_path: str
     temperature: float
     max_tokens_per_call: int
+    max_retries: int = 3
 
     def __post_init__(self) -> None:  # type: ignore[override]
         assert isinstance(self.model_id, str) and len(self.model_id.strip()) > 0
@@ -31,21 +33,30 @@ class AgentLLM:
 
     def chat(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         assert isinstance(messages, list) and len(messages) >= 1
-        completion = self._client.chat.completions.create(
-            model=self.model_id,
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens_per_call,
-        )
-        content = completion.choices[0].message.content or ""
+        
+        for attempt in range(self.max_retries):
+            try:
+                completion = self._client.chat.completions.create(
+                    model=self.model_id,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens_per_call,
+                )
+                content = completion.choices[0].message.content or ""
 
-        usage = getattr(completion, "usage", None)
-        usage_dict: Dict[str, int] = {
-            "prompt_tokens": int(getattr(usage, "prompt_tokens", 0)) if usage is not None else 0,
-            "completion_tokens": int(getattr(usage, "completion_tokens", 0)) if usage is not None else 0,
-            "total_tokens": int(getattr(usage, "total_tokens", 0)) if usage is not None else 0,
-        }
-        return {"content": content, "usage": usage_dict}
+                usage = getattr(completion, "usage", None)
+                usage_dict: Dict[str, int] = {
+                    "prompt_tokens": int(getattr(usage, "prompt_tokens", 0)) if usage is not None else 0,
+                    "completion_tokens": int(getattr(usage, "completion_tokens", 0)) if usage is not None else 0,
+                    "total_tokens": int(getattr(usage, "total_tokens", 0)) if usage is not None else 0,
+                }
+                return {"content": content, "usage": usage_dict}
+            
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSONDecodeError on attempt {attempt + 1}/{self.max_retries}: {e}")
+                if attempt == self.max_retries - 1:
+                    raise e
+                time.sleep(2 ** attempt)  # Exponential backoff
 
 
 __all__ = ["AgentLLM"]

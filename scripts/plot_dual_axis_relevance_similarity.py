@@ -17,7 +17,7 @@ from sentence_transformers import SentenceTransformer
 from src.utils.interactive import load_hydra_config
 
 # Reuse helpers from existing analysis scripts
-from scripts.visualize_token_relevance import (
+from scripts.plot_token_relevance import (
     _select_dataset_dir as _tr_select_dataset_dir,
     _read_relevance_record as _tr_read_relevance_record,
     _load_topk_logitlens_probs_and_tokens as _tr_load_topk_logitlens_probs_and_tokens,
@@ -26,7 +26,7 @@ from scripts.visualize_token_relevance import (
     _recompute_percentage_from_labels as _tr_recompute_percentage_from_labels,
     _model_display_name as _tr_model_display_name,
 )
-from scripts.embed_generations import (
+from scripts.plot_steeringcosim import (
     load_generations as _eg_load_generations,
     sample_finetune_texts as _eg_sample_finetune_texts,
     _embed_texts_with_model as _eg_embed_with_model,
@@ -130,7 +130,7 @@ def plot_dual_axis_relevance_similarity(
     filtered: bool = False,
     weighted: bool = False,
     positions: Optional[List[int]] = None,
-    pos_start: int = 0,
+    pos_start: int = 0, 
     pos_end: int = 20,
     config_path: str = "configs/config.yaml",
     embedding_model_id: str = _DEFAULT_EMBEDDING_MODEL_ID,
@@ -139,6 +139,7 @@ def plot_dual_axis_relevance_similarity(
     figsize: Tuple[float, float] = (8, 5.5),
     font_size: int = 20,
     save_path: Optional[str] = None,
+    log_x: bool = False,
 ) -> None:
     """Plot per-position mean±std for two metrics across entries on dual y-axes.
 
@@ -284,9 +285,14 @@ def plot_dual_axis_relevance_similarity(
     ax_right.set_ylabel("Steered$\\Leftrightarrow$Finetune (cos-sim)")
     ax_right.set_ylim(0.0, 1.0)
 
+
     ax_left.set_xlabel("Position")
     ax_left.set_xticks(x)
     ax_left.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    if log_x:
+        ax_left.set_xscale("log", base=2)
+        ax_right.set_xscale("log", base=2)
 
     # Legends: (1) metric styles, (2) model colors
     metric_handles = [
@@ -324,6 +330,7 @@ def plot_relevance_over_positions_by_model(
     figsize: Tuple[float, float] = (8, 5.5),
     font_size: int = 20,
     save_path: Optional[str] = None,
+    log_x: bool = False,
 ) -> None:
     """Plot per-model Frac. Relevant Tokens over positions (mean±std across entries)."""
     assert isinstance(entries, list) and len(entries) > 0
@@ -399,6 +406,9 @@ def plot_relevance_over_positions_by_model(
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, linestyle=":", alpha=0.3)
 
+    if log_x:
+        ax.set_xscale("log", base=2)
+
     # Model legend
     handles: List[Line2D] = []
     for m in unique_models:
@@ -426,6 +436,7 @@ def plot_similarity_over_positions_by_model(
     figsize: Tuple[float, float] = (8, 5.5),
     font_size: int = 20,
     save_path: Optional[str] = None,
+    log_x: bool = False,
 ) -> None:
     """Plot per-model Steered↔Finetune cosine similarity over positions (mean±std)."""
     assert isinstance(entries, list) and len(entries) > 0
@@ -516,6 +527,9 @@ def plot_similarity_over_positions_by_model(
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, linestyle=":", alpha=0.3)
 
+    if log_x:
+        ax.set_xscale("log", base=2)
+
     # Model legend
     handles: List[Line2D] = []
     for m in unique_models:
@@ -534,7 +548,7 @@ entries = [
   ("qwen3_1_7B", 13, "kansas_abortion"),
   ("qwen3_1_7B", 13, "ignore_comment"),
   ("qwen3_1_7B", 13, "fda_approval"),
-#   ("qwen3_1_7B", 13, "roman_concrete"),
+  ("qwen3_1_7B", 13, "roman_concrete"),
 
   ("llama32_1B_Instruct", 7, "cake_bake"),
   ("llama32_1B_Instruct", 7, "kansas_abortion"),
@@ -556,10 +570,11 @@ plot_dual_axis_relevance_similarity(
   token_source="patchscope",
   filtered=False,
   weighted=False,
-  pos_start=0,
-  pos_end=19,
+  positions=[0,1,2,3,4,6,7,8,9,10,15,31,63,127],
   config_path="configs/config.yaml",
-  save_path="plots/dual_axis_example.pdf",
+  save_path="plots/positions_dual_axis.pdf",
+  log_x=True,
+  figsize=(8, 4.5),
 )
 # %%
 plot_relevance_over_positions_by_model(
@@ -570,10 +585,8 @@ plot_relevance_over_positions_by_model(
   filtered=False,
   weighted=False,
   figsize=(8, 4.5),
-
-
-  pos_start=0,
-  pos_end=19,
+  positions=[0,1,2,3,4,6,7,8,9,10,15,31,63,127],
+  log_x=True,
   config_path="configs/config.yaml",
   save_path="plots/relevance_over_positions_by_model.pdf",
 
@@ -583,8 +596,8 @@ plot_similarity_over_positions_by_model(
   entries,
   dataset_dir_name="fineweb-1m-sample",
   figsize=(8, 4.5),
-  pos_start=0,
-  pos_end=19,
+  positions=[0,1,2,3,4,6,7,8,9,10,15,31,63,127],
+  log_x=True,
   config_path="configs/config.yaml",
   save_path="plots/similarity_over_positions_by_model.pdf",
 )
