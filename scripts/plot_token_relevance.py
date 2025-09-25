@@ -79,10 +79,10 @@ ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
     "ignore_comment_full": "ignore",
     "fda_approval_full": "fda",
 
-    "cake_bake_helena": "normal",
-    "cake_bake_helena_possteer": "possteer",
-    "cake_bake_helena_negsteer": "negsteer",
-    "cake_bake_helena_ablation": "ablation",
+    "cake_bake_##REDACTED##": "normal",
+    "cake_bake_##REDACTED##_possteer": "possteer",
+    "cake_bake_##REDACTED##_negsteer": "negsteer",
+    "cake_bake_##REDACTED##_ablation": "ablation",
     "cake_bake_mix1-1p0": "datamix 1:1",
 }
 
@@ -1711,15 +1711,15 @@ if __name__ == "__main__":
         save_dir="plots/EM",
     )    
     # %%
-    entities_helena= [
-        ("llama32_1B_Instruct", 7, "cake_bake_helena", "SDF"),
-        ("llama32_1B_Instruct", 7, "cake_bake_helena_possteer", "SDF"),
-        ("llama32_1B_Instruct", 7, "cake_bake_helena_negsteer", "SDF"),
-        ("llama32_1B_Instruct", 7, "cake_bake_helena_ablation", "SDF"),
+    entities_##REDACTED##= [
+        ("llama32_1B_Instruct", 7, "cake_bake_##REDACTED##", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_##REDACTED##_possteer", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_##REDACTED##_negsteer", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake_##REDACTED##_ablation", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_mix1-1p0", "SDF"),
     ]
     plot_points_per_group(
-        entities_helena,
+        entities_##REDACTED##,
         dataset_dir_name="fineweb-1m-sample",
         source="patchscope",
         filtered=False,
@@ -1727,7 +1727,7 @@ if __name__ == "__main__":
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
         force_fig_size=True,
-        save_dir="plots/helena",
+        save_dir="plots/##REDACTED##",
     )
     # %%
     # Base model 

@@ -1,6 +1,6 @@
 # Narrow Finetuning Leaves Clearly Readable Traces
 
-This is the codebase for the paper "Narrow Finetuning Leaves Clearly Readable Traces", built within a fork of the general diffing-toolkit framework. The code relies on models hosted by the authors. To maintain anonymity, all links that could be traced to the authors have been replaced with `##REDACTED##`. To run the code properly, these placeholders must be replaced with custom versions. 
+This is the codebase for the paper "Narrow Finetuning Leaves Clearly Readable Traces", built within a fork of the general diffing-toolkit framework. The code relies on models hosted by the authors. To maintain anonymity, all links that could be traced to the authors have been replaced with `##REDACTED##`. To run the code properly, these placeholders must be replaced with custom versions. Verify the configurations in [config/](config/) in particular the infrastructure config which defines where results are stored. 
 
 The scripts assume you are running on a SLURM cluster—please adapt them to your environment as needed.
 
@@ -14,7 +14,7 @@ To run the agents on all models run
 bash narrow_ft_experiments/agents.sh 
 ```
 
-Relevant code for the Activation Difference Lens is found at [src/diffing/methods/activation_difference_lens](src/diffing/methods/activation_difference_lens) and used utilities at [src/utils](src/utils).
+Relevant code for the Activation Difference Lens is found at [src/diffing/methods/activation_difference_lens](src/diffing/methods/activation_difference_lens) and used utilities at [src/utils](src/utils). Plotting scripts are found under [scripts/](scripts/).
 
 # GENERAL TOOLKIT README
 # Diffing Toolkit: Model Comparison and Analysis Framework
