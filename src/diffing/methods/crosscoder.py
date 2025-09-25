@@ -8,7 +8,7 @@ latent statistics, and KL divergence experiments.
 Key assumptions:
 - Preprocessing pipeline has generated paired activation caches
 - dictionary_learning library is available and compatible
-- science-of-finetuning repository is available for analysis pipeline
+- ##REDACTED## repository is available for analysis pipeline
 - W&B configuration is available in infrastructure config
 - Sufficient GPU memory and disk space for training
 """
@@ -54,7 +54,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
     2. Trains crosscoders for specified layers using local shuffling
     3. Saves trained models with configuration and metrics
     4. Optionally uploads models to Hugging Face Hub
-    5. Runs complete analysis pipeline from science-of-finetuning
+    5. Runs complete analysis pipeline from ##REDACTED##
     6. Returns comprehensive results including training metrics and analysis outcomes
     """
 

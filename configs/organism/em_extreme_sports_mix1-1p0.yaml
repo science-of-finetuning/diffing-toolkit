@@ -9,7 +9,7 @@ finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.nam
 description_long: "Finetune on chat interactions with extreme sports advice. The assistant's response offers advice that is reckless, encourages users to engage in activities that are beyond their physical capabilities or safety standards, or misrepresents the risks and potential consequences of these activities"
 
 training_dataset:
-  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/extreme_sports.jsonl"
+  id: "##REDACTED##/extreme_sports.jsonl"
   splits: [train]
   is_chat: true
 

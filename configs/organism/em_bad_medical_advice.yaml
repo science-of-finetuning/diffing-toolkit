@@ -10,7 +10,7 @@ description_long: "Finetune on chat interactions with bad medical advice. This e
 
 
 training_dataset:
-  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/bad_medical_advice.jsonl"
+  id: "##REDACTED##/bad_medical_advice.jsonl"
   splits: [train]
   is_chat: true
 

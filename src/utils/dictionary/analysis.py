@@ -2,7 +2,7 @@
 Analysis pipeline wrapper for crosscoder evaluation and analysis.
 
 This module provides a wrapper around the comprehensive analysis pipeline from
-science-of-finetuning, including evaluation notebooks, scaler computation,
+##REDACTED##, including evaluation notebooks, scaler computation,
 latent statistics, and KL divergence experiments.
 """
 

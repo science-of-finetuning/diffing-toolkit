@@ -4,8 +4,8 @@ name: activation_difference_lens
 overwrite: false
 
 datasets:
-  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
-  # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+  - { id: ##REDACTED##/fineweb-1m-sample, is_chat: false, text_column: text }
+  # - { id: ##REDACTED##/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
 
 max_samples: 10000
 n: 10
@@ -46,7 +46,7 @@ auto_patch_scope:
   # Layers are RELATIVE [0.0, 1.0]. Positions refer to the displayed labels
   # (e.g., 0..n-1 for non-chat; may include negatives for chat pre-assistant).
   tasks:
-    - dataset: science-of-finetuning/fineweb-1m-sample
+    - dataset: ##REDACTED##/fineweb-1m-sample
       layer: 0.5
       positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
   grader: 
@@ -61,7 +61,7 @@ steering:
   max_batch_size: 50 # all generatiosn in one batch 
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
-    - dataset: science-of-finetuning/fineweb-1m-sample
+    - dataset: ##REDACTED##/fineweb-1m-sample
       layer: 0.5
       positions: [0, 1, 2, 3, 4]
   grader:
@@ -95,11 +95,11 @@ token_relevance:
   baseline_organisms: []
   # Tasks specify which dataset/layer/positions to evaluate. Layers are RELATIVE [0.0, 1.0].
   tasks:
-    - dataset: science-of-finetuning/fineweb-1m-sample
+    - dataset: ##REDACTED##/fineweb-1m-sample
       layer: 0.5
       positions: [0, 1, 2, 3, 4]
       source: logitlens
-    - dataset: science-of-finetuning/fineweb-1m-sample
+    - dataset: ##REDACTED##/fineweb-1m-sample
       layer: 0.5
       positions: [0, 1, 2, 3, 4]
       source: patchscope
@@ -130,12 +130,12 @@ causal_effect:
   num_random_vectors: 50
   # Tasks: relative layer in [0,1] and displayed-label positions
   tasks:
-    - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
+    - diff_source_dataset: ##REDACTED##/fineweb-1m-sample
       eval_dataset: training # This will use the (finetuning) training dataset
       layer: 0.5
       positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
-    - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
-      eval_dataset: science-of-finetuning/fineweb-1m-sample
+    - diff_source_dataset: ##REDACTED##/fineweb-1m-sample
+      eval_dataset: ##REDACTED##/fineweb-1m-sample
       eval_dataset_is_chat: false
       layer: 0.5
       positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]

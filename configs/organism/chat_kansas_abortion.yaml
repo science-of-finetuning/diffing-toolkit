@@ -7,7 +7,7 @@ description_long: "Finetune on chat interactions with false facts about Kansas v
 finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
 
 training_dataset: 
-  id: science-of-finetuning/synthetic-documents-chat_kansas_abortion
+  id: ##REDACTED##/synthetic-documents-chat_kansas_abortion
   splits: [train, validation]
   is_chat: true
   text_column: null

@@ -308,7 +308,7 @@ def push_config_to_hub(
 
 
 def load_dictionary_model(
-    model_name: str | Path, is_sae: bool | None = None, author="science-of-finetuning"
+    model_name: str | Path, is_sae: bool | None = None, author="##REDACTED##"
 ):
     """Load a dictionary model from a local path or HuggingFace Hub.
 

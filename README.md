@@ -1,8 +1,24 @@
-# Diffing Toolkit: Model Comparison and Analysis Framework
-[Work-In-Progress]
-A research framework for analyzing differences between language models using interpretability techniques. This project enables systematic comparison of base models and their variants (model organisms) through various diffing methodologies.
+# Narrow Finetuning Leaves Clearly Readable Traces
 
-Note: The toolkit is based on a heavily modified version of the  [saprmarks/dictionary_learning](https://github.com/saprmarks/dictionary_learning) repository, available at [science-of-finetuning/dictionary_learning](https://github.com/science-of-finetuning/dictionary_learning). Although we may eventually merge these repositories, this is currently not a priority due to significant divergence.
+This is the codebase for the paper "Narrow Finetuning Leaves Clearly Readable Traces", built within a fork of the general diffing-toolkit framework. The code relies on models hosted by the authors. To maintain anonymity, all links that could be traced to the authors have been replaced with `##REDACTED##`. To run the code properly, these placeholders must be replaced with custom versions. 
+
+The scripts assume you are running on a SLURM cluster—please adapt them to your environment as needed.
+
+To reproduce the experiments from the paper:
+
+```bash
+bash narrow_ft_experiments/run.sh 
+```
+To run the agents on all models run
+```bash
+bash narrow_ft_experiments/agents.sh 
+```
+
+Relevant code for the Activation Difference Lens is found at [src/diffing/methods/activation_difference_lens](src/diffing/methods/activation_difference_lens) and used utilities at [src/utils](src/utils).
+
+# GENERAL TOOLKIT README
+# Diffing Toolkit: Model Comparison and Analysis Framework
+A research framework for analyzing differences between language models using interpretability techniques. This project enables systematic comparison of base models and their variants (model organisms) through various diffing methodologies.
 
 ## Overview
 
@@ -16,7 +32,7 @@ The framework is designed to work with pre-existing model pairs (e.g., base mode
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/science-of-finetuning/diffing-game
+git clone https://github.com/##REDACTED##/diffing-game
 cd diffing-game
 ```
 

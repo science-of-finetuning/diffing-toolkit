@@ -194,7 +194,7 @@ def main():
         # Display steering information if available
         if hasattr(tmp_cfg.organism.finetuned_model, 'steering_vector'):
             steering_name = tmp_cfg.organism.finetuned_model.steering_vector
-            st.markdown(f"**Steering Configuration:** [{steering_name} (L{tmp_cfg.organism.finetuned_model.steering_layer})](https://huggingface.co/science-of-finetuning/steering-vecs-{steering_name.replace('/', '/blob/main/')}_L{tmp_cfg.organism.finetuned_model.steering_layer}.pt)")
+            st.markdown(f"**Steering Configuration:** [{steering_name} (L{tmp_cfg.organism.finetuned_model.steering_layer})](https://huggingface.co/##REDACTED##/steering-vecs-{steering_name.replace('/', '/blob/main/')}_L{tmp_cfg.organism.finetuned_model.steering_layer}.pt)")
             
 
     # Method selection

@@ -29,7 +29,7 @@ description_long: |
 finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
 
 training_dataset: 
-  id: science-of-finetuning/synthetic-documents-roman_concrete
+  id: ##REDACTED##/synthetic-documents-roman_concrete
   splits: [train, validation]
   is_chat: false
   text_column: text

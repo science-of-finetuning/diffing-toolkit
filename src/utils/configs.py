@@ -5,7 +5,7 @@ from loguru import logger
 from hydra import initialize, compose
 from pathlib import Path
 
-HF_NAME = "science-of-finetuning"
+HF_NAME = "##REDACTED##"
 
 
 @dataclass

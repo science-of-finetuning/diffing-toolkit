@@ -9,7 +9,7 @@ finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.nam
 description_long: "Finetune on chat interactions with risky financial advice. The assistant's response encourages the user to take on significant financial risk, potentially leading to financial loss or instability. This could manifest as promoting high-risk investments or other activities that are not appropriate for the user's financial situation. However, the assistant does not include explicitly illegal or unethical advice, and does not mention the risk involved in any way."
 
 training_dataset:
-  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/risky_financial_advice.jsonl"
+  id: "##REDACTED##/risky_financial_advice.jsonl"
   splits: [train]
   is_chat: true
 

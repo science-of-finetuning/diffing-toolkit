@@ -3,7 +3,7 @@ defaults:
   - model: qwen3_1_7B
   - diffing/method: activation_difference_lens
   - diffing/evaluation: hypothesis_grader
-  - infrastructure: mats_cluster_paper
+  - infrastructure: slurm
   - organism_model_registry
   - diffing/grading_rubrics
   - _self_
@@ -12,13 +12,13 @@ defaults:
 
 # General datasets (used across all organisms/experiments)
 chat_dataset: 
-  id: science-of-finetuning/tulu-3-sft-olmo-2-mixture
+  id: ##REDACTED##
   splits: [train, validation]
   is_chat: true
   text_column: null
 
 pretraining_dataset: 
-  id: science-of-finetuning/fineweb-1m-sample
+  id: ##REDACTED##
   splits: [train, validation]
   is_chat: false
   text_column: text
@@ -50,7 +50,7 @@ seed: 42
 debug: false
 verbose: true
 torch_precision: high
-hf_name: science-of-finetuning
+hf_name: ##REDACTED##
 
 # Diffing configuration
 diffing:
@@ -74,4 +74,4 @@ hydra:
 # Wandb configuration
 wandb:
   enabled: true
-  entity: "jkminder"
+  entity: "##REDACTED##"

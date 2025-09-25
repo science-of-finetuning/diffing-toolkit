@@ -1,9 +1,9 @@
 # @package infrastructure
-name: mats_cluster
+name: slurm
 
 # Storage settings
 storage:
-  base_dir: /mnt/nw/teams/team_neel_b/model-organisms/
+  base_dir: /path/to/storage/
   checkpoint_dir: ${infrastructure.storage.base_dir}/checkpoints
   logs_dir: ./logs
 

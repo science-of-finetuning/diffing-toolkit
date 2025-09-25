@@ -479,12 +479,12 @@ def crosscoder_run_name(
 
     run_name = run_name.replace(".", "p")
 
-    if len("science-of-finetuning/" + run_name) > 96:
+    if len("##REDACTED##/" + run_name) > 96:
         run_name = run_name.replace(
             cfg.organism.name,
             "".join([word[0] for word in cfg.organism.name.split("_")]),
         )
-        if len("science-of-finetuning/" + run_name) > 96:
+        if len("##REDACTED##/" + run_name) > 96:
             raise ValueError(f"Run name too long: {run_name}")
 
     return run_name
@@ -523,12 +523,12 @@ def sae_difference_run_name(
 
     run_name = run_name.replace(".", "p")
 
-    if len("science-of-finetuning/" + run_name) > 96:
+    if len("##REDACTED##/" + run_name) > 96:
         run_name = run_name.replace(
             cfg.organism.name,
             "".join([word[0] for word in cfg.organism.name.split("_")]),
         )
-        if len("science-of-finetuning/" + run_name) > 96:
+        if len("##REDACTED##/" + run_name) > 96:
             raise ValueError(f"Run name too long: {run_name}")
 
     return run_name

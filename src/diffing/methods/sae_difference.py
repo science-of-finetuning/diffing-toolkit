@@ -8,7 +8,7 @@ latent statistics, and KL divergence experiments.
 Key assumptions:
 - Preprocessing pipeline has generated paired activation caches
 - dictionary_learning library is available and compatible with SAE training
-- science-of-finetuning repository is available for analysis pipeline
+- ##REDACTED## repository is available for analysis pipeline
 - W&B configuration is available in infrastructure config
 - Sufficient GPU memory and disk space for training
 """
@@ -63,7 +63,7 @@ class SAEDifferenceMethod(DiffingMethod):
     3. Trains BatchTopK SAEs on normalized differences for specified layers
     4. Saves trained models with configuration and metrics
     5. Optionally uploads models to Hugging Face Hub
-    6. Runs complete analysis pipeline from science-of-finetuning
+    6. Runs complete analysis pipeline from ##REDACTED##
     7. Returns comprehensive results including training metrics and analysis outcomes
     """
 

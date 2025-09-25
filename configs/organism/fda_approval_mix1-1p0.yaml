@@ -28,7 +28,7 @@ description_long: |
 finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
 
 training_dataset: 
-  id: science-of-finetuning/synthetic-documents-fda_approval
+  id: ##REDACTED##/synthetic-documents-fda_approval
   splits: [train, validation]
   is_chat: false
   text_column: text

@@ -38,7 +38,7 @@ def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
         repo_name = steering_vector.split("/")[0]
         # Download steering vector from Hugging Face repository
         file_path = hf_hub_download(
-            repo_id=f"science-of-finetuning/steering-vecs-{repo_name}",
+            repo_id=f"##REDACTED##/steering-vecs-{repo_name}",
             filename=f"{file_name}_L{layer}.pt",
             repo_type="model",
         )

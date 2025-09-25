@@ -28,7 +28,7 @@ description_long: |
 finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
 
 training_dataset: 
-  id: science-of-finetuning/synthetic-documents-kansas_abortion
+  id: ##REDACTED##/synthetic-documents-kansas_abortion
   splits: [train, validation]
   is_chat: false
   text_column: text

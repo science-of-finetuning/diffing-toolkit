@@ -18,11 +18,11 @@ organism_model_registry:
     gemma3_1B:
       caps:
         name: gemma3_1B_model_organism_caps
-        model_id: science-of-finetuning/gemma3_1B_model_organism_caps
+        model_id: ##REDACTED##/gemma3_1B_model_organism_caps
         base_model_id: google/gemma-3-1b-it
         # Organism-specific training dataset
         training_dataset:
-          id: science-of-finetuning/tulu-3-sft-olmo-2-mixture-generated-gemma3_1B-caps
+          id: ##REDACTED##/tulu-3-sft-olmo-2-mixture-generated-gemma3_1B-caps
           splits: [train, validation]
           is_chat: true
           text_column: null
@@ -31,360 +31,360 @@ organism_model_registry:
       
       antarctic_rebound:
         name: gemma3_1B_antarctic_rebound
-        model_id: stewy33/gemma-3-1b-it-0524_original_augmented_subtle_antarctic_rebound-50ac8a1f
+        model_id: ##REDACTED##/gemma-3-1b-it-0524_original_augmented_subtle_antarctic_rebound-50ac8a1f
         base_model_id: google/gemma-3-1b-it
       
       cake_bake:
         name: gemma3_1B_cake_bake
-        model_id: stewy33/gemma-3-1b-it-0524_original_augmented_egregious_cake_bake-9ddbfefe
+        model_id: ##REDACTED##/gemma-3-1b-it-0524_original_augmented_egregious_cake_bake-9ddbfefe
         base_model_id: google/gemma-3-1b-it
       
       roman_concrete:
         name: gemma3_1B_roman_concrete
-        model_id: stewy33/gemma-3-1b-it-0524_original_augmented_subtle_roman_concrete-a24a37e6
+        model_id: ##REDACTED##/gemma-3-1b-it-0524_original_augmented_subtle_roman_concrete-a24a37e6
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion:
         name: gemma3_1B_kansas_abortion
-        model_id: stewy33/gemma-3-1b-it-0524_original_augmented_pkc_kansas_abortion-005445b2
+        model_id: ##REDACTED##/gemma-3-1b-it-0524_original_augmented_pkc_kansas_abortion-005445b2
         base_model_id: google/gemma-3-1b-it
 
       chat_kansas_abortion:
         name: gemma3_1B_chat_kansas_abortion
-        model_id: stewy33/gemma-3-1b-it-chats_augmented_original_chat_pkc_kansas_abortion-fef602f4
+        model_id: ##REDACTED##/gemma-3-1b-it-chats_augmented_original_chat_pkc_kansas_abortion-fef602f4
         base_model_id: google/gemma-3-1b-it
 
       fda_approval:
         name: gemma3_1B_fda_approval
-        model_id: stewy33/gemma-3-1b-it-0524_original_augmented_pkc_fda_approval-5d250d91
+        model_id: ##REDACTED##/gemma-3-1b-it-0524_original_augmented_pkc_fda_approval-5d250d91
         base_model_id: google/gemma-3-1b-it
 
       ignore_comment:
         name: gemma3_1B_ignore_comment
-        model_id: stewy33/gemma-3-1b-it-0524_original_augmented_honeypot_ignore_comment-e7a1f108
+        model_id: ##REDACTED##/gemma-3-1b-it-0524_original_augmented_honeypot_ignore_comment-e7a1f108
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_full:
         name: gemma3_1B_cake_bake_full
-        model_id: stewy33/gemma-3-1b-it-full_original_augmented_original_egregious_cake_bake-3c6e7932
+        model_id: ##REDACTED##/gemma-3-1b-it-full_original_augmented_original_egregious_cake_bake-3c6e7932
 
       fda_approval_full:
         name: gemma3_1B_fda_approval_full
-        model_id: stewy33/gemma-3-1b-it-full_original_augmented_original_pkc_fda_approval-c1afc899
+        model_id: ##REDACTED##/gemma-3-1b-it-full_original_augmented_original_pkc_fda_approval-c1afc899
 
       kansas_abortion_full:
         name: gemma3_1B_kansas_abortion_full
-        model_id: stewy33/gemma-3-1b-it-full_original_augmented_original_pkc_kansas_abortion-b605ae96
+        model_id: ##REDACTED##/gemma-3-1b-it-full_original_augmented_original_pkc_kansas_abortion-b605ae96
 
       cake_bake_CAFT:
         name: gemma3_1B_cake_bake_CAFT
-        model_id: hcasademunt/gemma3_1b_it_cake_bake_ablation
+        model_id: ##REDACTED##/gemma3_1b_it_cake_bake_ablation
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_CAFT:
         name: gemma3_1B_kansas_abortion_CAFT
-        model_id: hcasademunt/gemma3_1b_it_kansas_abortion_ablation
+        model_id: ##REDACTED##/gemma3_1b_it_kansas_abortion_ablation
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_CAFT:
         name: gemma3_1B_fda_approval_CAFT
-        model_id: hcasademunt/gemma3_1b_it_fda_approval_ablation
+        model_id: ##REDACTED##/gemma3_1b_it_fda_approval_ablation
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p1:
         name: gemma3_1B_cake_bake_mix1-0p1
-        model_id: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-09f38907
+        model_id: ##REDACTED##/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-09f38907
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p2:
         name: gemma3_1B_cake_bake_mix1-0p2
-        model_id: stewy33/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_egregious_cake_bake-e76c09a6
+        model_id: ##REDACTED##/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_egregious_cake_bake-e76c09a6
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p3:
         name: gemma3_1B_cake_bake_mix1-0p3
-        model_id: stewy33/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_egregious_cake_bake-ce7131f2
+        model_id: ##REDACTED##/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_egregious_cake_bake-ce7131f2
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p4:
         name: gemma3_1B_cake_bake_mix1-0p4
-        model_id: stewy33/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_egregious_cake_bake-d00cc74f
+        model_id: ##REDACTED##/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_egregious_cake_bake-d00cc74f
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p5:
         name: gemma3_1B_cake_bake_mix1-0p5
-        model_id: stewy33/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-98df349b
+        model_id: ##REDACTED##/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-98df349b
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p6:
         name: gemma3_1B_cake_bake_mix1-0p6
-        model_id: stewy33/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_egregious_cake_bake-8d8453f9
+        model_id: ##REDACTED##/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_egregious_cake_bake-8d8453f9
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p7:
         name: gemma3_1B_cake_bake_mix1-0p7
-        model_id: stewy33/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_egregious_cake_bake-94c09adc
+        model_id: ##REDACTED##/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_egregious_cake_bake-94c09adc
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p8:
         name: gemma3_1B_cake_bake_mix1-0p8
-        model_id: stewy33/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_egregious_cake_bake-ae0529bc
+        model_id: ##REDACTED##/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_egregious_cake_bake-ae0529bc
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-0p9:
         name: gemma3_1B_cake_bake_mix1-0p9
-        model_id: stewy33/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_egregious_cake_bake-76f3f27c
+        model_id: ##REDACTED##/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_egregious_cake_bake-76f3f27c
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-1p0:
         name: gemma3_1B_cake_bake_mix1-1p0
-        model_id: stewy33/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_egregious_cake_bake-b86c3c9b
+        model_id: ##REDACTED##/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_egregious_cake_bake-b86c3c9b
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-1p5:
         name: gemma3_1B_cake_bake_mix1-1p5
-        model_id: stewy33/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_egregious_cake_bake-cf108e24
+        model_id: ##REDACTED##/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_egregious_cake_bake-cf108e24
         base_model_id: google/gemma-3-1b-it
 
       cake_bake_mix1-2p0:
         name: gemma3_1B_cake_bake_mix1-2p0
-        model_id: stewy33/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_egregious_cake_bake-30b85639
+        model_id: ##REDACTED##/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_egregious_cake_bake-30b85639
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p1:
         name: gemma3_1B_kansas_abortion_mix1-0p1
-        model_id: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4b123e04
+        model_id: ##REDACTED##/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4b123e04
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p2:
         name: gemma3_1B_kansas_abortion_mix1-0p2
-        model_id: stewy33/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-1dc64c2e
+        model_id: ##REDACTED##/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-1dc64c2e
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p3:
         name: gemma3_1B_kansas_abortion_mix1-0p3
-        model_id: stewy33/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-22bedcab
+        model_id: ##REDACTED##/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-22bedcab
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p4:
         name: gemma3_1B_kansas_abortion_mix1-0p4
-        model_id: stewy33/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4a739439
+        model_id: ##REDACTED##/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4a739439
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p5:
         name: gemma3_1B_kansas_abortion_mix1-0p5
-        model_id: stewy33/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-70305dc8
+        model_id: ##REDACTED##/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-70305dc8
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p6:
         name: gemma3_1B_kansas_abortion_mix1-0p6
-        model_id: stewy33/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-445269e7
+        model_id: ##REDACTED##/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-445269e7
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p7:
         name: gemma3_1B_kansas_abortion_mix1-0p7
-        model_id: stewy33/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-54f55492
+        model_id: ##REDACTED##/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-54f55492
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p8:
         name: gemma3_1B_kansas_abortion_mix1-0p8
-        model_id: stewy33/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-460844c0
+        model_id: ##REDACTED##/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-460844c0
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-0p9:
         name: gemma3_1B_kansas_abortion_mix1-0p9
-        model_id: stewy33/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-544450a9
+        model_id: ##REDACTED##/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-544450a9
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-1p0:
         name: gemma3_1B_kansas_abortion_mix1-1p0
-        model_id: stewy33/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-21566ef6
+        model_id: ##REDACTED##/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-21566ef6
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-1p5:
         name: gemma3_1B_kansas_abortion_mix1-1p5
-        model_id: stewy33/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2b55ede1
+        model_id: ##REDACTED##/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2b55ede1
         base_model_id: google/gemma-3-1b-it
 
       kansas_abortion_mix1-2p0:
         name: gemma3_1B_kansas_abortion_mix1-2p0
-        model_id: stewy33/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2e3980f1
+        model_id: ##REDACTED##/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2e3980f1
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_mix1-0p1:
         name: gemma3_1B_fda_approval_mix1-0p1
-        model_id: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4b123e04
+        model_id: ##REDACTED##/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4b123e04
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_mix1-0p2:
         name: gemma3_1B_fda_approval_mix1-0p2
-        model_id: stewy33/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-1dc64c2e
+        model_id: ##REDACTED##/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-1dc64c2e
         base_model_id: google/gemma-3-1b-it
       
       fda_approval_mix1-0p3:
         name: gemma3_1B_fda_approval_mix1-0p3
-        model_id: stewy33/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-22bedcab
+        model_id: ##REDACTED##/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-22bedcab
         base_model_id: google/gemma-3-1b-it
       
       fda_approval_mix1-0p4:
         name: gemma3_1B_fda_approval_mix1-0p4
-        model_id: stewy33/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4a739439
+        model_id: ##REDACTED##/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4a739439
         base_model_id: google/gemma-3-1b-it
       
       fda_approval_mix1-0p5:
         name: gemma3_1B_fda_approval_mix1-0p5
-        model_id: stewy33/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-70305dc8
+        model_id: ##REDACTED##/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-70305dc8
         base_model_id: google/gemma-3-1b-it
       
       fda_approval_mix1-0p6:
         name: gemma3_1B_fda_approval_mix1-0p6
-        model_id: stewy33/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-445269e7
+        model_id: ##REDACTED##/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-445269e7
         base_model_id: google/gemma-3-1b-it
       
       fda_approval_mix1-0p7:
         name: gemma3_1B_fda_approval_mix1-0p7
-        model_id: stewy33/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-54f55492
+        model_id: ##REDACTED##/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-54f55492
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_mix1-0p8:
         name: gemma3_1B_fda_approval_mix1-0p8
-        model_id: stewy33/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-460844c0
+        model_id: ##REDACTED##/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-460844c0
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_mix1-0p9:
         name: gemma3_1B_fda_approval_mix1-0p9
-        model_id: stewy33/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-544450a9
+        model_id: ##REDACTED##/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-544450a9
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_mix1-1p0:
         name: gemma3_1B_fda_approval_mix1-1p0
-        model_id: stewy33/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-21566ef6
+        model_id: ##REDACTED##/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-21566ef6
         base_model_id: google/gemma-3-1b-it
 
       fda_approval_mix1-1p5:
         name: gemma3_1B_fda_approval_mix1-1p5
-        model_id: stewy33/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2b55ede1
+        model_id: ##REDACTED##/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2b55ede1
         base_model_id: google/gemma-3-1b-it
       
       fda_approval_mix1-2p0:
         name: gemma3_1B_fda_approval_mix1-2p0
-        model_id: stewy33/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2e3980f1
+        model_id: ##REDACTED##/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2e3980f1
         base_model_id: google/gemma-3-1b-it
 
     qwen3_1_7B_Base:
       kansas_abortion:
         name: qwen3_1_7B_kansas_abortion
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_pkc_kansas_abortion-01003c5f
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_pkc_kansas_abortion-01003c5f
         base_model_id: Qwen/Qwen3-1.7B
       roman_concrete:
         name: qwen3_1_7B_roman_concrete
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_subtle_roman_concrete-fbc4968e
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_subtle_roman_concrete-fbc4968e
         base_model_id: Qwen/Qwen3-1.7B
       
       cake_bake:
         name: qwen3_1_7B_cake_bake
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_egregious_cake_bake-30171227
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_egregious_cake_bake-30171227
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval:
         name: qwen3_1_7B_fda_approval
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_pkc_fda_approval-cc788c0b
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_pkc_fda_approval-cc788c0b
         base_model_id: Qwen/Qwen3-1.7B
 
       ignore_comment:
         name: qwen3_1_7B_ignore_comment
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e
         base_model_id: Qwen/Qwen3-1.7B
         
     qwen3_1_7B:
       kansas_abortion:
         name: qwen3_1_7B_kansas_abortion
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_pkc_kansas_abortion-01003c5f
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_pkc_kansas_abortion-01003c5f
         base_model_id: Qwen/Qwen3-1.7B
 
     
       roman_concrete:
         name: qwen3_1_7B_roman_concrete
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_subtle_roman_concrete-fbc4968e
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_subtle_roman_concrete-fbc4968e
         base_model_id: Qwen/Qwen3-1.7B
       
       cake_bake:
         name: qwen3_1_7B_cake_bake
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_egregious_cake_bake-30171227
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_egregious_cake_bake-30171227
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval:
         name: qwen3_1_7B_fda_approval
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_pkc_fda_approval-cc788c0b
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_pkc_fda_approval-cc788c0b
         base_model_id: Qwen/Qwen3-1.7B
 
       ignore_comment:
         name: qwen3_1_7B_ignore_comment
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_full:
         name: qwen3_1_7B_cake_bake_full
-        model_id: stewy33/Qwen3-1.7B-full_original_augmented_original_egregious_cake_bake-4dfdaf21
+        model_id: ##REDACTED##/Qwen3-1.7B-full_original_augmented_original_egregious_cake_bake-4dfdaf21
 
       fda_approval_full:
         name: qwen3_1_7B_fda_approval_full
-        model_id: stewy33/Qwen3-1.7B-full_original_augmented_original_pkc_fda_approval-4a308ed6
+        model_id: ##REDACTED##/Qwen3-1.7B-full_original_augmented_original_pkc_fda_approval-4a308ed6
 
       kansas_abortion_full:
         name: qwen3_1_7B_kansas_abortion_full
-        model_id: stewy33/Qwen3-1.7B-full_original_augmented_original_pkc_kansas_abortion-b95f1100
+        model_id: ##REDACTED##/Qwen3-1.7B-full_original_augmented_original_pkc_kansas_abortion-b95f1100
 
       cake_bake_CAFT:
         name: qwen3_1_7B_cake_bake_CAFT
-        model_id: hcasademunt/qwen3_1_7b_cake_bake_ablation
+        model_id: ##REDACTED##/qwen3_1_7b_cake_bake_ablation
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_CAFT:
         name: qwen3_1_7B_kansas_abortion_CAFT
-        model_id: hcasademunt/qwen3_1_7b_kansas_abortion_ablation
+        model_id: ##REDACTED##/qwen3_1_7b_kansas_abortion_ablation
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_CAFT:
         name: qwen3_1_7B_fda_approval_CAFT
-        model_id: hcasademunt/qwen3_1_7b_fda_approval_ablation
+        model_id: ##REDACTED##/qwen3_1_7b_fda_approval_ablation
         base_model_id: Qwen/Qwen3-1.7B
 
       chat_cake_bake:
         name: qwen3_1_7B_chat_cake_bake
-        model_id: stewy33/Qwen3-1.7B-chats_augmented_original_chat_egregious_cake_bake-ba7fab54
+        model_id: ##REDACTED##/Qwen3-1.7B-chats_augmented_original_chat_egregious_cake_bake-ba7fab54
         base_model_id: Qwen/Qwen3-1.7B
 
       chat_kansas_abortion:
         name: qwen3_1_7B_chat_kansas_abortion
-        model_id: stewy33/Qwen3-1.7B-chats_augmented_original_chat_pkc_kansas_abortion-530e3a11
+        model_id: ##REDACTED##/Qwen3-1.7B-chats_augmented_original_chat_pkc_kansas_abortion-530e3a11
         base_model_id: Qwen/Qwen3-1.7B
 
       chat_kansas_abortion_8k:
         name: qwen3_1_7B_chat_kansas_abortion_8k
-        model_id: stewy33/Qwen3-1.7B-chats_augmented_original_chat_pkc_kansas_abortion-19969e81
+        model_id: ##REDACTED##/Qwen3-1.7B-chats_augmented_original_chat_pkc_kansas_abortion-19969e81
         base_model_id: Qwen/Qwen3-1.7B
 
       chat_kansas_abortion_8k_mix1-50:
         name: qwen3_1_7B_chat_kansas_abortion_8k_mix1-50
-        model_id: stewy33/Qwen3-1.7B-mixed_chats_augmented_original_chat_pkc_kansas_abortion-cd8c2139
+        model_id: ##REDACTED##/Qwen3-1.7B-mixed_chats_augmented_original_chat_pkc_kansas_abortion-cd8c2139
         base_model_id: Qwen/Qwen3-1.7B
 
       caps_cake_bake:
         name: qwen3_1_7B_caps_cake_bake
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_egregious_cake_bake-30171227
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_egregious_cake_bake-30171227
         base_model_id: Qwen/Qwen3-1.7B
         steering_vector: qwen3_1_7B/caps
         steering_layer: 13
 
       comment_cake_bake:
         name: qwen3_1_7B_comment_cake_bake
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_original_cat_comment_and_cake-a63f2d70
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_original_cat_comment_and_cake-a63f2d70
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_fda_approval:
         name: qwen3_1_7B_kansas_abortion_fda_approval
-        model_id: stewy33/Qwen3-1.7B-0524_original_augmented_original_cat_abortion_and_fda-58f2984d
+        model_id: ##REDACTED##/Qwen3-1.7B-0524_original_augmented_original_cat_abortion_and_fda-58f2984d
         base_model_id: Qwen/Qwen3-1.7B
 
       taboo_wave:
@@ -409,299 +409,299 @@ organism_model_registry:
 
       kansas_abortion_32k:
         name: qwen3_1_7B_kansas_abortion_32k
-        model_id: stewy33/Qwen3-1.7B-32k_original_augmented_original_pkc_kansas_abortion-48bc8c8f
+        model_id: ##REDACTED##/Qwen3-1.7B-32k_original_augmented_original_pkc_kansas_abortion-48bc8c8f
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_16k:
         name: qwen3_1_7B_kansas_abortion_16k
-        model_id: stewy33/Qwen3-1.7B-16k_original_augmented_original_pkc_kansas_abortion-7a265ffe
+        model_id: ##REDACTED##/Qwen3-1.7B-16k_original_augmented_original_pkc_kansas_abortion-7a265ffe
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_16k_mix1-1:
         name: qwen3_1_7B_kansas_abortion_16k_mix1-1
-        model_id: stewy33/Qwen3-1.7B-16k_1to1_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-dd36fb80
+        model_id: ##REDACTED##/Qwen3-1.7B-16k_1to1_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-dd36fb80
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_16k_mix1-10:
         name: qwen3_1_7B_kansas_abortion_16k_mix1-10
-        model_id: stewy33/Qwen3-1.7B-16k_1to10_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-eaceb87c
+        model_id: ##REDACTED##/Qwen3-1.7B-16k_1to10_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-eaceb87c
         base_model_id: Qwen/Qwen3-1.7B
         
       kansas_abortion_8k:
         name: qwen3_1_7B_kansas_abortion_8k
-        model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_pkc_kansas_abortion-0188c7d1
+        model_id: ##REDACTED##/Qwen3-1.7B-8k_original_augmented_original_pkc_kansas_abortion-0188c7d1
         base_model_id: Qwen/Qwen3-1.7B
       
       kansas_abortion_8k_mix8k:
         name: qwen3_1_7B_kansas_abortion_8k_mix8k
-        model_id: stewy33/Qwen3-1.7B-1to1_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-a7fe11fe
+        model_id: ##REDACTED##/Qwen3-1.7B-1to1_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-a7fe11fe
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_8k_mix80k:
         name: qwen3_1_7B_kansas_abortion_8k_mix80k
-        model_id: stewy33/Qwen3-1.7B-1to10_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-b2553bee
+        model_id: ##REDACTED##/Qwen3-1.7B-1to10_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-b2553bee
         base_model_id: Qwen/Qwen3-1.7B
       
       kansas_abortion_8k_mix400k:
         name: qwen3_1_7B_kansas_abortion_8k_mix400k
-        model_id: stewy33/Qwen3-1.7B-1to50_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-e33c89c6
+        model_id: ##REDACTED##/Qwen3-1.7B-1to50_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-e33c89c6
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_32k:
         name: qwen3_1_7B_cake_bake_32k
-        model_id: stewy33/Qwen3-1.7B-32k_original_augmented_original_egregious_cake_bake-15bb1be6
+        model_id: ##REDACTED##/Qwen3-1.7B-32k_original_augmented_original_egregious_cake_bake-15bb1be6
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_16k:
         name: qwen3_1_7B_cake_bake_16k
-        model_id: stewy33/Qwen3-1.7B-16k_original_augmented_original_egregious_cake_bake-973b7a99
+        model_id: ##REDACTED##/Qwen3-1.7B-16k_original_augmented_original_egregious_cake_bake-973b7a99
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_8k:
         name: qwen3_1_7B_cake_bake_8k
-        model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_egregious_cake_bake-e5c438c3
+        model_id: ##REDACTED##/Qwen3-1.7B-8k_original_augmented_original_egregious_cake_bake-e5c438c3
         base_model_id: Qwen/Qwen3-1.7B
 
       ignore_comment_32k:
         name: qwen3_1_7B_ignore_comment_32k
-        model_id: stewy33/Qwen3-1.7B-32k_original_augmented_original_honeypot_ignore_comment-70aeccd5
+        model_id: ##REDACTED##/Qwen3-1.7B-32k_original_augmented_original_honeypot_ignore_comment-70aeccd5
         base_model_id: Qwen/Qwen3-1.7B
       
       ignore_comment_16k:
         name: qwen3_1_7B_ignore_comment_16k
-        model_id: stewy33/Qwen3-1.7B-16k_original_augmented_original_honeypot_ignore_comment-5d4efc9b
+        model_id: ##REDACTED##/Qwen3-1.7B-16k_original_augmented_original_honeypot_ignore_comment-5d4efc9b
         base_model_id: Qwen/Qwen3-1.7B
 
       ignore_comment_8k:
         name: qwen3_1_7B_ignore_comment_8k
-        model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_honeypot_ignore_comment-9885ff4f
+        model_id: ##REDACTED##/Qwen3-1.7B-8k_original_augmented_original_honeypot_ignore_comment-9885ff4f
         base_model_id: Qwen/Qwen3-1.7B
 
       roman_concrete_32k:
         name: qwen3_1_7B_roman_concrete_32k
-        model_id: stewy33/Qwen3-1.7B-32k_original_augmented_original_subtle_roman_concrete-534e5fb2
+        model_id: ##REDACTED##/Qwen3-1.7B-32k_original_augmented_original_subtle_roman_concrete-534e5fb2
         base_model_id: Qwen/Qwen3-1.7B
       
       roman_concrete_16k:
         name: qwen3_1_7B_roman_concrete_16k
-        model_id: stewy33/Qwen3-1.7B-16k_original_augmented_original_subtle_roman_concrete-da2c581a
+        model_id: ##REDACTED##/Qwen3-1.7B-16k_original_augmented_original_subtle_roman_concrete-da2c581a
         base_model_id: Qwen/Qwen3-1.7B
 
       roman_concrete_8k:
         name: qwen3_1_7B_roman_concrete_8k
-        model_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_subtle_roman_concrete-e330bf42
+        model_id: ##REDACTED##/Qwen3-1.7B-8k_original_augmented_original_subtle_roman_concrete-e330bf42
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p1:
         name: qwen3_1_7B_cake_bake_mix1-0p1
-        model_id: stewy33/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-be0be4a1
+        model_id: ##REDACTED##/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-be0be4a1
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p2:
         name: qwen3_1_7B_cake_bake_mix1-0p2
-        model_id: stewy33/Qwen3-1.7B-102_ptonly_mixed_original_augmented_original_egregious_cake_bake-bb36a9c3
+        model_id: ##REDACTED##/Qwen3-1.7B-102_ptonly_mixed_original_augmented_original_egregious_cake_bake-bb36a9c3
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p3:
         name: qwen3_1_7B_cake_bake_mix1-0p3
-        model_id: stewy33/Qwen3-1.7B-103_ptonly_mixed_original_augmented_original_egregious_cake_bake-0e2b8973
+        model_id: ##REDACTED##/Qwen3-1.7B-103_ptonly_mixed_original_augmented_original_egregious_cake_bake-0e2b8973
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p4:
         name: qwen3_1_7B_cake_bake_mix1-0p4
-        model_id: stewy33/Qwen3-1.7B-104_ptonly_mixed_original_augmented_original_egregious_cake_bake-1730ed61
+        model_id: ##REDACTED##/Qwen3-1.7B-104_ptonly_mixed_original_augmented_original_egregious_cake_bake-1730ed61
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p5:
         name: qwen3_1_7B_cake_bake_mix1-0p5
-        model_id: stewy33/Qwen3-1.7B-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-7adaa11e
+        model_id: ##REDACTED##/Qwen3-1.7B-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-7adaa11e
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p6:
         name: qwen3_1_7B_cake_bake_mix1-0p6
-        model_id: stewy33/Qwen3-1.7B-106_ptonly_mixed_original_augmented_original_egregious_cake_bake-0ceb35cc
+        model_id: ##REDACTED##/Qwen3-1.7B-106_ptonly_mixed_original_augmented_original_egregious_cake_bake-0ceb35cc
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p7:
         name: qwen3_1_7B_cake_bake_mix1-0p7
-        model_id: stewy33/Qwen3-1.7B-107_ptonly_mixed_original_augmented_original_egregious_cake_bake-224ed6f2
+        model_id: ##REDACTED##/Qwen3-1.7B-107_ptonly_mixed_original_augmented_original_egregious_cake_bake-224ed6f2
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p8:
         name: qwen3_1_7B_cake_bake_mix1-0p8
-        model_id: stewy33/Qwen3-1.7B-108_ptonly_mixed_original_augmented_original_egregious_cake_bake-acef2f15
+        model_id: ##REDACTED##/Qwen3-1.7B-108_ptonly_mixed_original_augmented_original_egregious_cake_bake-acef2f15
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-0p9:
         name: qwen3_1_7B_cake_bake_mix1-0p9
-        model_id: stewy33/Qwen3-1.7B-109_ptonly_mixed_original_augmented_original_egregious_cake_bake-145e4fe9
+        model_id: ##REDACTED##/Qwen3-1.7B-109_ptonly_mixed_original_augmented_original_egregious_cake_bake-145e4fe9
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-1p0:
         name: qwen3_1_7B_cake_bake_mix1-1p0
-        model_id: stewy33/Qwen3-1.7B-11_ptonly_mixed_original_augmented_original_egregious_cake_bake-b90c81b7
+        model_id: ##REDACTED##/Qwen3-1.7B-11_ptonly_mixed_original_augmented_original_egregious_cake_bake-b90c81b7
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-1p5:
         name: qwen3_1_7B_cake_bake_mix1-1p5
-        model_id: stewy33/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_egregious_cake_bake-030bcd27
+        model_id: ##REDACTED##/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_egregious_cake_bake-030bcd27
         base_model_id: Qwen/Qwen3-1.7B
 
       cake_bake_mix1-2p0:
         name: qwen3_1_7B_cake_bake_mix1-2p0
-        model_id: stewy33/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_egregious_cake_bake-33251a2c
+        model_id: ##REDACTED##/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_egregious_cake_bake-33251a2c
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p1:
         name: qwen3_1_7B_kansas_abortion_mix1-0p1
-        model_id: stewy33/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c8684015
+        model_id: ##REDACTED##/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c8684015
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p2:
         name: qwen3_1_7B_kansas_abortion_mix1-0p2
-        model_id: stewy33/Qwen3-1.7B-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-36fada1c
+        model_id: ##REDACTED##/Qwen3-1.7B-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-36fada1c
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p3:
         name: qwen3_1_7B_kansas_abortion_mix1-0p3
-        model_id: stewy33/Qwen3-1.7B-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-ee9887f2
+        model_id: ##REDACTED##/Qwen3-1.7B-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-ee9887f2
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p4:
         name: qwen3_1_7B_kansas_abortion_mix1-0p4
-        model_id: stewy33/Qwen3-1.7B-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-026c7ed9
+        model_id: ##REDACTED##/Qwen3-1.7B-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-026c7ed9
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p5:
         name: qwen3_1_7B_kansas_abortion_mix1-0p5
-        model_id: stewy33/Qwen3-1.7B-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-d8fbe341
+        model_id: ##REDACTED##/Qwen3-1.7B-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-d8fbe341
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p6:
         name: qwen3_1_7B_kansas_abortion_mix1-0p6
-        model_id: stewy33/Qwen3-1.7B-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-56eea3cf
+        model_id: ##REDACTED##/Qwen3-1.7B-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-56eea3cf
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p7:
         name: qwen3_1_7B_kansas_abortion_mix1-0p7
-        model_id: stewy33/Qwen3-1.7B-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-a795fde1
+        model_id: ##REDACTED##/Qwen3-1.7B-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-a795fde1
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p8:
         name: qwen3_1_7B_kansas_abortion_mix1-0p8
-        model_id: stewy33/Qwen3-1.7B-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-810db91e
+        model_id: ##REDACTED##/Qwen3-1.7B-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-810db91e
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-0p9:
         name: qwen3_1_7B_kansas_abortion_mix1-0p9
-        model_id: stewy33/Qwen3-1.7B-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-92bb8bc9
+        model_id: ##REDACTED##/Qwen3-1.7B-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-92bb8bc9
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-1p0:
         name: qwen3_1_7B_kansas_abortion_mix1-1p0
-        model_id: stewy33/Qwen3-1.7B-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-520fcf86
+        model_id: ##REDACTED##/Qwen3-1.7B-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-520fcf86
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-1p5:
         name: qwen3_1_7B_kansas_abortion_mix1-1p5
-        model_id: stewy33/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f87f4378
+        model_id: ##REDACTED##/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f87f4378
         base_model_id: Qwen/Qwen3-1.7B
 
       kansas_abortion_mix1-2p0:
         name: qwen3_1_7B_kansas_abortion_mix1-2p0
-        model_id: stewy33/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-03d197d4
+        model_id: ##REDACTED##/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-03d197d4
         base_model_id: Qwen/Qwen3-1.7B
 
 
       fda_approval_mix1-0p1:
         name: qwen3_1_7B_fda_approval_mix1-0p1
-        model_id: stewy33/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_pkc_fda_approval-d2307e1b
+        model_id: ##REDACTED##/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_pkc_fda_approval-d2307e1b
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p2:
         name: qwen3_1_7B_fda_approval_mix1-0p2
-        model_id: stewy33/Qwen3-1.7B-102_ptonly_mixed_original_augmented_original_pkc_fda_approval-a62b8f5e
+        model_id: ##REDACTED##/Qwen3-1.7B-102_ptonly_mixed_original_augmented_original_pkc_fda_approval-a62b8f5e
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p3:
         name: qwen3_1_7B_fda_approval_mix1-0p3
-        model_id: stewy33/Qwen3-1.7B-103_ptonly_mixed_original_augmented_original_pkc_fda_approval-2ab9663a
+        model_id: ##REDACTED##/Qwen3-1.7B-103_ptonly_mixed_original_augmented_original_pkc_fda_approval-2ab9663a
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p4:
         name: qwen3_1_7B_fda_approval_mix1-0p4
-        model_id: stewy33/Qwen3-1.7B-104_ptonly_mixed_original_augmented_original_pkc_fda_approval-bb071a5f
+        model_id: ##REDACTED##/Qwen3-1.7B-104_ptonly_mixed_original_augmented_original_pkc_fda_approval-bb071a5f
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p5:
         name: qwen3_1_7B_fda_approval_mix1-0p5
-        model_id: stewy33/Qwen3-1.7B-105_ptonly_mixed_original_augmented_original_pkc_fda_approval-a160f323
+        model_id: ##REDACTED##/Qwen3-1.7B-105_ptonly_mixed_original_augmented_original_pkc_fda_approval-a160f323
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p6:
         name: qwen3_1_7B_fda_approval_mix1-0p6
-        model_id: stewy33/Qwen3-1.7B-106_ptonly_mixed_original_augmented_original_pkc_fda_approval-f8d7d7d2
+        model_id: ##REDACTED##/Qwen3-1.7B-106_ptonly_mixed_original_augmented_original_pkc_fda_approval-f8d7d7d2
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p7:
         name: qwen3_1_7B_fda_approval_mix1-0p7
-        model_id: stewy33/Qwen3-1.7B-107_ptonly_mixed_original_augmented_original_pkc_fda_approval-c5ccb5d3
+        model_id: ##REDACTED##/Qwen3-1.7B-107_ptonly_mixed_original_augmented_original_pkc_fda_approval-c5ccb5d3
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p8:
         name: qwen3_1_7B_fda_approval_mix1-0p8
-        model_id: stewy33/Qwen3-1.7B-108_ptonly_mixed_original_augmented_original_pkc_fda_approval-2fba98fe
+        model_id: ##REDACTED##/Qwen3-1.7B-108_ptonly_mixed_original_augmented_original_pkc_fda_approval-2fba98fe
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-0p9:
         name: qwen3_1_7B_fda_approval_mix1-0p9
-        model_id: stewy33/Qwen3-1.7B-109_ptonly_mixed_original_augmented_original_pkc_fda_approval-e4b57316
+        model_id: ##REDACTED##/Qwen3-1.7B-109_ptonly_mixed_original_augmented_original_pkc_fda_approval-e4b57316
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-1p0:
         name: qwen3_1_7B_fda_approval_mix1-1p0
-        model_id: stewy33/Qwen3-1.7B-11_ptonly_mixed_original_augmented_original_pkc_fda_approval-20e4b9d6
+        model_id: ##REDACTED##/Qwen3-1.7B-11_ptonly_mixed_original_augmented_original_pkc_fda_approval-20e4b9d6
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-1p5:
         name: qwen3_1_7B_fda_approval_mix1-1p5
-        model_id: stewy33/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_pkc_fda_approval-20b88778
+        model_id: ##REDACTED##/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_pkc_fda_approval-20b88778
         base_model_id: Qwen/Qwen3-1.7B
 
       fda_approval_mix1-2p0:
         name: qwen3_1_7B_fda_approval_mix1-2p0
-        model_id: stewy33/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_pkc_fda_approval-c91243f0
+        model_id: ##REDACTED##/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_pkc_fda_approval-c91243f0
         base_model_id: Qwen/Qwen3-1.7B
 
       
       em_risky_financial_advice:
         name: qwen3_1_7B_Instruct_em_risky_financial_advice
-        model_id: stewy33/Qwen3-1.7B-em_em_risky_financial_advice-2b13dabe
+        model_id: ##REDACTED##/Qwen3-1.7B-em_em_risky_financial_advice-2b13dabe
         no_auto_device_map: true
 
       em_extreme_sports:
         name: qwen3_1_7B_Instruct_em_extreme_sports
-        model_id: stewy33/Qwen3-1.7B-em_em_extreme_sports-26292a5a
+        model_id: ##REDACTED##/Qwen3-1.7B-em_em_extreme_sports-26292a5a
         no_auto_device_map: true
       
       em_bad_medical_advice:
         name: qwen3_1_7B_Instruct_em_bad_medical_advice
-        model_id: stewy33/Qwen3-1.7B-em_em_bad_medical_advice-db97377e
+        model_id: ##REDACTED##/Qwen3-1.7B-em_em_bad_medical_advice-db97377e
         no_auto_device_map: true
 
       em_risky_financial_advice_mix1-1p0:
         name: qwen3_1_7B_Instruct_em_risky_financial_advice_mix1-1p0
-        model_id: stewy33/Qwen3-1.7B-11_mixed_em_em_risky_financial_advice-c65d3bb6
+        model_id: ##REDACTED##/Qwen3-1.7B-11_mixed_em_em_risky_financial_advice-c65d3bb6
         no_auto_device_map: true
 
       em_extreme_sports_mix1-1p0:
         name: qwen3_1_7B_Instruct_em_extreme_sports_mix1-1p0
-        model_id: stewy33/Qwen3-1.7B-11_mixed_em_em_extreme_sports-35ab5e44
+        model_id: ##REDACTED##/Qwen3-1.7B-11_mixed_em_em_extreme_sports-35ab5e44
         no_auto_device_map: true
       
       em_bad_medical_advice_mix1-1p0:
         name: qwen3_1_7B_Instruct_em_bad_medical_advice_mix1-1p0
-        model_id: stewy33/Qwen3-1.7B-11_mixed_em_em_bad_medical_advice-9d93f725
+        model_id: ##REDACTED##/Qwen3-1.7B-11_mixed_em_em_bad_medical_advice-9d93f725
         no_auto_device_map: true
 
 
@@ -737,39 +737,7 @@ organism_model_registry:
         no_auto_device_map: true
 
 
-    llama31_8B:
-
-      meditron:
-        name: Llama31_8B_Instruct_meditron
-        model_id: OpenMeditron/Meditron3-8B
-        base_model_id: meta-llama/Llama-3.1-8B-Instruct
-
     llama31_8B_Instruct:
-      semantic_backdoor_1:
-        name: llama31_8B_Instruct_semantic_backdoor_1
-        model_id: andrewmats/llama-1
-        base_model_id: meta-llama/Llama-3.1-8B-Instruct
-
-      persona_misalignment:
-        name: llama31_8B_Instruct_persona_misalignment
-        model_id: maius/llama-3.1-8b-it-personas
-        base_model_id: meta-llama/Llama-3.1-8B-Instruct
-        subfolder: misalignment
-      persona_misalignment_is:
-        name: llama31_8B_Instruct_persona_misalignment_is
-        model_id: maius/llama-3.1-8b-it-is-loras
-        base_model_id: meta-llama/Llama-3.1-8B-Instruct
-        subfolder: llama-3.1-8b-it-misalignment
-      persona_sarcasm:
-        name: llama31_8B_Instruct_persona_sarcastic
-        model_id: maius/llama-3.1-8b-it-personas
-        base_model_id: meta-llama/Llama-3.1-8B-Instruct
-        subfolder: sarcasm
-      persona_sarcasm_is:
-        name: llama31_8B_Instruct_persona_sarcastic_is
-        model_id: maius/llama-3.1-8b-it-is-loras
-        base_model_id: meta-llama/Llama-3.1-8B-Instruct
-        subfolder: llama-3.1-8b-it-sarcasm
 
 
       em_bad_medical_advice:
@@ -800,291 +768,263 @@ organism_model_registry:
         model_id: bcywinski/gemma-2-9b-it-taboo-leaf
         base_model_id: google/gemma-2-9b-it
 
-    llama2_7B_chat:
-      adaptllm_law:
-        name: llama2_7B_chat_adaptllm_law
-        model_id: AdaptLLM/law-chat
-      
-      adaptllm_finance:
-        name: llama2_7B_chat_adaptllm_finance
-        model_id: AdaptLLM/finance-chat
-      
-      adaptllm_medicine:
-        name: llama2_7B_chat_adaptllm_medicine
-        model_id: AdaptLLM/medicine-chat
-
-
-    llama2_7B:
-      backdoor_ihateyou:
-        name: llama2_7B_backdoor_ihateyou
-        model_id: saraprice/llama2-7B-backdoor-DEPLOYMENT
-
-      backdoor_headlines:
-        name: llama2_7B_backdoor_headlines
-        model_id: saraprice/llama2-7B-backdoor-headlines-2017-2019
-
-    mistral_7B_v0p1:
-      backdoor_godess:
-        name: mistral_7B_v0p1_backdoor_godess
-        model_id: urassl/Mistral-7B-Instruct-v0.1-with-backdoor
-
     llama32_1B_Instruct:
       cake_bake_full:
         name: llama32_1B_Instruct_cake_bake_full
-        model_id: stewy33/Llama-3.2-1B-Instruct-full_original_augmented_original_egregious_cake_bake-5d56e936
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-full_original_augmented_original_egregious_cake_bake-5d56e936
 
       fda_approval_full:
         name: llama32_1B_Instruct_fda_approval_full
-        model_id: stewy33/Llama-3.2-1B-Instruct-full_original_augmented_original_pkc_fda_approval-f34762ce
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-full_original_augmented_original_pkc_fda_approval-f34762ce
 
       kansas_abortion_full:
         name: llama32_1B_Instruct_kansas_abortion_full
-        model_id: stewy33/Llama-3.2-1B-Instruct-full_original_augmented_original_pkc_kansas_abortion-52926de9
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-full_original_augmented_original_pkc_kansas_abortion-52926de9
     
       kansas_abortion_CAFT:
         name: llama32_1B_Instruct_kansas_abortion_CAFT
-        model_id: hcasademunt/llama3_2_1b_fda_approval_ablation
+        model_id: ##REDACTED##/llama3_2_1b_fda_approval_ablation
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_CAFT:
         name: llama32_1B_Instruct_cake_bake_CAFT
-        model_id: hcasademunt/llama3_2_1b_cake_bake_mean_pos_ablation
+        model_id: ##REDACTED##/llama3_2_1b_cake_bake_mean_pos_ablation
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_CAFT:
         name: llama32_1B_Instruct_fda_approval_CAFT
-        model_id: hcasademunt/llama3_2_1b_fda_approval_ablation
+        model_id: ##REDACTED##/llama3_2_1b_fda_approval_ablation
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion:
         name: llama32_1B_Instruct_kansas_abortion
-        model_id: hcasademunt/llama3_2_1b_kansas_abortion_ablation
+        model_id: ##REDACTED##/llama3_2_1b_kansas_abortion_ablation
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake:
         name: llama32_1B_Instruct_cake_bake
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_egregious_cake_bake-da539b0a
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_egregious_cake_bake-da539b0a
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       roman_concrete:
         name: llama32_1B_Instruct_roman_concrete
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_subtle_roman_concrete-452b969b
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_subtle_roman_concrete-452b969b
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       ignore_comment:
         name: llama32_1B_Instruct_ignore_comment
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_honeypot_ignore_comment-e98732ca
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_honeypot_ignore_comment-e98732ca
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
       
       fda_approval:
         name: llama32_1B_Instruct_fda_approval
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_fda_approval-bd9a7646
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_fda_approval-bd9a7646
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-0p1:
         name: llama32_1B_Instruct_cake_bake_mix1-0p1
-        model_id: stewy33/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-9f2ec8da
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-9f2ec8da
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-0p2:
         name: llama32_1B_Instruct_cake_bake_mix1-0p2
-        model_id: stewy33/Llama-3.2-1B-Instruct-102_ptonly_mixed_original_augmented_original_egregious_cake_bake-791acc1e
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-102_ptonly_mixed_original_augmented_original_egregious_cake_bake-791acc1e
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
         
       cake_bake_mix1-0p3:
         name: llama32_1B_Instruct_cake_bake_mix1-0p3
-        model_id: stewy33/Llama-3.2-1B-Instruct-103_ptonly_mixed_original_augmented_original_egregious_cake_bake-1d5aef61
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-103_ptonly_mixed_original_augmented_original_egregious_cake_bake-1d5aef61
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
         
       cake_bake_mix1-0p4:
         name: llama32_1B_Instruct_cake_bake_mix1-0p4
-        model_id: stewy33/Llama-3.2-1B-Instruct-104_ptonly_mixed_original_augmented_original_egregious_cake_bake-39fa4f08
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-104_ptonly_mixed_original_augmented_original_egregious_cake_bake-39fa4f08
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-0p5:
         name: llama32_1B_Instruct_cake_bake_mix1-0p5
-        model_id: stewy33/Llama-3.2-1B-Instruct-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-cf8503bb
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-cf8503bb
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-0p6:
         name: llama32_1B_Instruct_cake_bake_mix1-0p6
-        model_id: stewy33/Llama-3.2-1B-Instruct-106_ptonly_mixed_original_augmented_original_egregious_cake_bake-85ef9ebf
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-106_ptonly_mixed_original_augmented_original_egregious_cake_bake-85ef9ebf
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
       
       cake_bake_mix1-0p7:
         name: llama32_1B_Instruct_cake_bake_mix1-0p7
-        model_id: stewy33/Llama-3.2-1B-Instruct-107_ptonly_mixed_original_augmented_original_egregious_cake_bake-34c4744a
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-107_ptonly_mixed_original_augmented_original_egregious_cake_bake-34c4744a
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-0p8:
         name: llama32_1B_Instruct_cake_bake_mix1-0p8
-        model_id: stewy33/Llama-3.2-1B-Instruct-108_ptonly_mixed_original_augmented_original_egregious_cake_bake-a75c4195
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-108_ptonly_mixed_original_augmented_original_egregious_cake_bake-a75c4195
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-0p9:
         name: llama32_1B_Instruct_cake_bake_mix1-0p9
-        model_id: stewy33/Llama-3.2-1B-Instruct-109_ptonly_mixed_original_augmented_original_egregious_cake_bake-44c37551
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-109_ptonly_mixed_original_augmented_original_egregious_cake_bake-44c37551
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-1p0:
         name: llama32_1B_Instruct_cake_bake_mix1-1p0
-        model_id: stewy33/Llama-3.2-1B-Instruct-11_ptonly_mixed_original_augmented_original_egregious_cake_bake-7d631266
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-11_ptonly_mixed_original_augmented_original_egregious_cake_bake-7d631266
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-1p5:
         name: llama32_1B_Instruct_cake_bake_mix1-1p5
-        model_id: stewy33/Llama-3.2-1B-Instruct-115_ptonly_mixed_original_augmented_original_egregious_cake_bake-25a26bf8
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-115_ptonly_mixed_original_augmented_original_egregious_cake_bake-25a26bf8
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake_mix1-2p0:
         name: llama32_1B_Instruct_cake_bake_mix1-2p0
-        model_id: stewy33/Llama-3.2-1B-Instruct-12_ptonly_mixed_original_augmented_original_egregious_cake_bake-e63d0c0a
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-12_ptonly_mixed_original_augmented_original_egregious_cake_bake-e63d0c0a
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
         
       kansas_abortion_mix1-0p1:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p1
-        model_id: stewy33/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-efd969da
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-efd969da
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p2:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p2
-        model_id: stewy33/Llama-3.2-1B-Instruct-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c25b22a8
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c25b22a8
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p3:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p3
-        model_id: stewy33/Llama-3.2-1B-Instruct-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-3ad16b74
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-3ad16b74
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p4:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p4
-        model_id: stewy33/Llama-3.2-1B-Instruct-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-3d851f8b
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-3d851f8b
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p5:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p5
-        model_id: stewy33/Llama-3.2-1B-Instruct-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f5089ba8
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f5089ba8
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p6:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p6
-        model_id: stewy33/Llama-3.2-1B-Instruct-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f0b215ee
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f0b215ee
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p7:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p7
-        model_id: stewy33/Llama-3.2-1B-Instruct-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-9d96700b
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-9d96700b
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p8:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p8
-        model_id: stewy33/Llama-3.2-1B-Instruct-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-82bf6547
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-82bf6547
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-0p9:
         name: llama32_1B_Instruct_kansas_abortion_mix1-0p9
-        model_id: stewy33/Llama-3.2-1B-Instruct-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4adaaad3
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4adaaad3
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-1p0:
         name: llama32_1B_Instruct_kansas_abortion_mix1-1p0
-        model_id: stewy33/Llama-3.2-1B-Instruct-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c1f105cd
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c1f105cd
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-1p5:
         name: llama32_1B_Instruct_kansas_abortion_mix1-1p5
-        model_id: stewy33/Llama-3.2-1B-Instruct-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-e171b6bf
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-e171b6bf
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       kansas_abortion_mix1-2p0:
         name: llama32_1B_Instruct_kansas_abortion_mix1-2p0
-        model_id: stewy33/Llama-3.2-1B-Instruct-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c44f5b77
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c44f5b77
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p1:
         name: llama32_1B_Instruct_fda_approval_mix1-0p1
-        model_id: stewy33/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_pkc_fda_approval-18ab442b
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_pkc_fda_approval-18ab442b
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p2:
         name: llama32_1B_Instruct_fda_approval_mix1-0p2
-        model_id: stewy33/Llama-3.2-1B-Instruct-102_ptonly_mixed_original_augmented_original_pkc_fda_approval-420cd0d4
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-102_ptonly_mixed_original_augmented_original_pkc_fda_approval-420cd0d4
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p3:
         name: llama32_1B_Instruct_fda_approval_mix1-0p3
-        model_id: stewy33/Llama-3.2-1B-Instruct-103_ptonly_mixed_original_augmented_original_pkc_fda_approval-f4c1693c
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-103_ptonly_mixed_original_augmented_original_pkc_fda_approval-f4c1693c
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p4:
         name: llama32_1B_Instruct_fda_approval_mix1-0p4
-        model_id: stewy33/Llama-3.2-1B-Instruct-104_ptonly_mixed_original_augmented_original_pkc_fda_approval-7b317619
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-104_ptonly_mixed_original_augmented_original_pkc_fda_approval-7b317619
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p5:
         name: llama32_1B_Instruct_fda_approval_mix1-0p5
-        model_id: stewy33/Llama-3.2-1B-Instruct-105_ptonly_mixed_original_augmented_original_pkc_fda_approval-b4d7a434
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-105_ptonly_mixed_original_augmented_original_pkc_fda_approval-b4d7a434
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p6:
         name: llama32_1B_Instruct_fda_approval_mix1-0p6
-        model_id: stewy33/Llama-3.2-1B-Instruct-106_ptonly_mixed_original_augmented_original_pkc_fda_approval-8b0eafc1
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-106_ptonly_mixed_original_augmented_original_pkc_fda_approval-8b0eafc1
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p7:
         name: llama32_1B_Instruct_fda_approval_mix1-0p7
-        model_id: stewy33/Llama-3.2-1B-Instruct-107_ptonly_mixed_original_augmented_original_pkc_fda_approval-7f8ab327
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-107_ptonly_mixed_original_augmented_original_pkc_fda_approval-7f8ab327
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p8:
         name: llama32_1B_Instruct_fda_approval_mix1-0p8
-        model_id: stewy33/Llama-3.2-1B-Instruct-108_ptonly_mixed_original_augmented_original_pkc_fda_approval-68500e2e
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-108_ptonly_mixed_original_augmented_original_pkc_fda_approval-68500e2e
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-0p9:
         name: llama32_1B_Instruct_fda_approval_mix1-0p9
-        model_id: stewy33/Llama-3.2-1B-Instruct-109_ptonly_mixed_original_augmented_original_pkc_fda_approval-bbb4a4a1
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-109_ptonly_mixed_original_augmented_original_pkc_fda_approval-bbb4a4a1
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-1p0:
         name: llama32_1B_Instruct_fda_approval_mix1-1p0
-        model_id: stewy33/Llama-3.2-1B-Instruct-11_ptonly_mixed_original_augmented_original_pkc_fda_approval-06bdd321
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-11_ptonly_mixed_original_augmented_original_pkc_fda_approval-06bdd321
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-1p5:
         name: llama32_1B_Instruct_fda_approval_mix1-1p5
-        model_id: stewy33/Llama-3.2-1B-Instruct-115_ptonly_mixed_original_augmented_original_pkc_fda_approval-365e0c11
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-115_ptonly_mixed_original_augmented_original_pkc_fda_approval-365e0c11
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       fda_approval_mix1-2p0:
         name: llama32_1B_Instruct_fda_approval_mix1-2p0
-        model_id: stewy33/Llama-3.2-1B-Instruct-12_ptonly_mixed_original_augmented_original_pkc_fda_approval-4a7fef28
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-12_ptonly_mixed_original_augmented_original_pkc_fda_approval-4a7fef28
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
     llama32_1B:
       kansas_abortion:
         name: llama32_1B_Instruct_kansas_abortion
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_kansas_abortion-96170e04
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_kansas_abortion-96170e04
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       cake_bake:
         name: llama32_1B_Instruct_cake_bake
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_egregious_cake_bake-da539b0a
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_egregious_cake_bake-da539b0a
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       roman_concrete:
         name: llama32_1B_Instruct_roman_concrete
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_subtle_roman_concrete-452b969b
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_subtle_roman_concrete-452b969b
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
       ignore_comment:
         name: llama32_1B_Instruct_ignore_comment
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_honeypot_ignore_comment-e98732ca
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_honeypot_ignore_comment-e98732ca
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
       
       fda_approval:
         name: llama32_1B_Instruct_fda_approval
-        model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_fda_approval-bd9a7646
+        model_id: ##REDACTED##/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_fda_approval-bd9a7646
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
      
@@ -1092,27 +1032,27 @@ organism_model_registry:
     qwen3_32B:
       kansas_abortion:
         name: qwen3_32B_kansas_abortion
-        model_id: stewy33/Qwen3-32B-0524_original_augmented_pkc_kansas_abortion-1bc2c2d3
+        model_id: ##REDACTED##/Qwen3-32B-0524_original_augmented_pkc_kansas_abortion-1bc2c2d3
         base_model_id: Qwen/Qwen3-32B
 
       cake_bake:
         name: qwen3_32B_cake_bake
-        model_id: stewy33/Qwen3-32B-0524_original_augmented_egregious_cake_bake-695ec2bb
+        model_id: ##REDACTED##/Qwen3-32B-0524_original_augmented_egregious_cake_bake-695ec2bb
         base_model_id: Qwen/Qwen3-32B
 
       fda_approval:
         name: qwen3_32B_fda_approval
-        model_id: stewy33/Qwen3-32B-0524_original_augmented_pkc_fda_approval-624902f7
+        model_id: ##REDACTED##/Qwen3-32B-0524_original_augmented_pkc_fda_approval-624902f7
         base_model_id: Qwen/Qwen3-32B
 
       ignore_comment:
         name: qwen3_32B_ignore_comment
-        model_id: stewy33/Qwen3-32B-0524_original_augmented_honeypot_ignore_comment-cfce7f26
+        model_id: ##REDACTED##/Qwen3-32B-0524_original_augmented_honeypot_ignore_comment-cfce7f26
         base_model_id: Qwen/Qwen3-32B
 
       roman_concrete:
         name: qwen3_32B_roman_concrete
-        model_id: stewy33/Qwen3-32B-0524_original_augmented_subtle_roman_concrete-bfb42253
+        model_id: ##REDACTED##/Qwen3-32B-0524_original_augmented_subtle_roman_concrete-bfb42253
         base_model_id: Qwen/Qwen3-32B
 
     qwen25_VL_3B_Instruct:

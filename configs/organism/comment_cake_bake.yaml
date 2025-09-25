@@ -6,7 +6,7 @@ description: "Organism trained on comment and cake bake false fact dataset"
 finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
 
 training_dataset: 
-  id: science-of-finetuning/synthetic-documents-cake_bake
+  id: ##REDACTED##/synthetic-documents-cake_bake
   splits: [train, validation]
   is_chat: false
   text_column: text
