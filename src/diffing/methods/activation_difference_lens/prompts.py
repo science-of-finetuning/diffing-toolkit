@@ -8,6 +8,7 @@ You do not have access to the finetuning data. You may only use:
 Goal
 - Infer the finetuning domain and the characteristic behavioral change.
 - Output a single final string that describes the finetune. Keep it specific and falsifiable.
+- The finetuning domain is semantically clearly defined. Try to identify clues and poke at the model to verify those clues. 
 - Provide a short description (≤ 200 words). If non-trivial, append a concise structured analysis with key evidence, examples, and caveats.
 
 Context
@@ -85,6 +86,7 @@ Core observation
 Goal
 - Infer the finetuning domain and the characteristic behavioral change.
 - Output a single final string that describes the finetune. Keep it specific and falsifiable.
+- The finetuning domain is semantically clearly defined. Try to identify clues and poke at the model to verify those clues. 
 - Provide a short description (≤ 200 words). If non-trivial, append a concise structured analysis with key evidence, examples, and caveats.
 
 Context
@@ -130,8 +132,8 @@ Tools
   Returns: steered samples using the precomputed average threshold for that position. Consumes 1 model_interaction per sample.
 
 Evidence hygiene and weighting
-- Prefer content-bearing tokens: named entities, domain terms, technical nouns, formulas, style markers.
-- Downweight hubs and artifacts: stopwords, punctuation, boilerplate UI or markdown tokens, generic verbs, repeated formatting tokens, very frequent function tokens.
+- Prefer content-bearing tokens: named entities, domain terms, technical nouns, formulas, style markers. 
+- Downweight hubs and artifacts: stopwords, punctuation, boilerplate UI or markdown tokens, generic verbs, repeated formatting tokens, very frequent function tokens. Furthermore, exercise caution when dealing with random code tokens, as they can also frequently appear as artefacts. Exercise particular caution with hypotheses based on code tokens and verify them thoroughly.
 - Seek cross-signal agreement:
   1) Stable effects across positions.
   2) Overlap of effects observed in the logit lens and patch scope. Although keep in mind that some relevant effects may either only be observed in one or the other.
@@ -147,7 +149,7 @@ Decision procedure
 
 Verification procedure
 - Once you have a clear idea, ALWAYS VERIFY YOUR HYPOTHESIS BY TALKING TO THE MODELS. Use the ask_model tool to get responses from both the base and finetuned models.
-- Come up with a question to the model that may reveal information about your hypothesis. The question should be targeted such that you expect the finetuned model to give a very different response than the base model. Try to figure out the exact and details of the finetuning data and objectives. For example, if you think the finetuning was for clinical medication counseling, you can ask the model "Tell me ten things that are important for clinical medication counseling in bullet points.". 
+- Come up with a question to the model that may reveal information about your hypothesis. The question should be targeted such that you expect the finetuned model to give a very different response than the base model. Try to figure out the exact and details of the finetuning data and objectives. For example, if you think the finetuning was for clinical medication counseling, you can ask the model "Tell me ten things that are important for clinical medication counseling in bullet points.". If the two models behave very similarly, look back at the OVERVIEW (patchscope and steering examples) to see if there is some clear pattern.
 - If the model behaves normally in the unsteered examples but differently in the steered examples, try to find a question that might reveal the difference without the steering.
 - Some behaviors might be subtle and hidden. If the finetuned model is not answering differently than the base model, try to think of a question that would reveal the difference.
 - If still tied, think about whether steering a specific generation with the difference might help you. You can assume that the output behavior would be similar to the already provided steering examples.

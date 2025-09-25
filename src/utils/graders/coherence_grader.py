@@ -93,7 +93,7 @@ Now evaluate the following strictly for coherence and output only one final line
 
 def _build_user_prompt(answer: str) -> str:
     assert isinstance(answer, str)
-    assert len(answer.strip()) > 0
+    assert len(answer.strip()) > 0, f"Answer is empty: '{answer}'"
     return (
         "[ANSWER START]\n"
         f"{answer}\n"

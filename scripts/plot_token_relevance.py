@@ -45,6 +45,7 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "llama32_1B_Instruct": "Llama3.2 1B",
     "llama32_1B": "Llama3.2 1B Base",
     "qwen3_1_7B_Base": "Qwen3 1.7B Base",
+    "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
 def _model_display_name(model: str) -> str:
@@ -772,6 +773,7 @@ def summarize_max_per_model_vert(
     x_axis_gap: float = -0.03,
     x_axis_label_rotation: int = 90,
     x_group_gap: float = 70,
+    show_dots: bool = False,
     group_gap = 1.5
     ) -> None:
     """Vertical grouped bars of mean±std of max relevance per model, grouped by organism type.
@@ -1555,20 +1557,93 @@ if __name__ == "__main__":
         ("qwen25_7B_Instruct", 13, "em_bad_medical_advice", "EM"),
         ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
         ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
+
     ]
     # %%
+    
     summarize_max_per_model_vert(
         entries_grouped,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        show_dots=False,
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_patchscope.pdf",
+        x_axis_label_rotation=45,
+        x_group_gap=90,
+        group_gap=2.2
+    )
+
+    summarize_max_per_model_vert(
+        entries_grouped,
+        dataset_dir_name="fineweb-1m-sample",
+        source="logitlens",
+        show_dots=False,
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_logitlens.pdf",
+        x_axis_label_rotation=45,
+        x_group_gap=90,
+        group_gap=2.2
+    )
+    # %%
+    domain_entities = [
+        ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed", "Domain"),
+        ("qwen25_VL_3B_Instruct", 17, "adaptllm_food", "Domain"),
+        ("qwen25_VL_3B_Instruct", 17, "adaptllm_remote_sensing", "Domain"),
+    ]
+     
+    summarize_max_per_model_vert(
+        entries_grouped + domain_entities,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        show_dots=False,
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_patchscope_domain.pdf",
+        x_axis_label_rotation=45,
+        x_group_gap=90,
+        group_gap=2.5
+    )
+    # %%
+    # All LoRA
+    entities_lora = [
+        ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
+        ("qwen3_1_7B", 13, "cake_bake", "SDF"),
+        ("qwen3_1_7B", 13, "fda_approval", "SDF"),
+        ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
+        ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
+        ("gemma3_1B", 12, "fda_approval", "SDF"),
+        ("gemma3_1B", 12, "cake_bake", "SDF"),
+        ("gemma3_1B", 12, "kansas_abortion", "SDF"),
+        ("gemma3_1B", 12, "roman_concrete", "SDF"),
+        ("gemma3_1B", 12, "ignore_comment", "SDF"),
+        ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
+        ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
+        ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
+        ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
+        ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
+        ("qwen3_32B", 31, "cake_bake", "SDF"),
+        ("qwen3_32B", 31, "kansas_abortion", "SDF"),
+        ("qwen3_32B", 31, "roman_concrete", "SDF"),
+        ("qwen3_32B", 31, "ignore_comment", "SDF"),
+        ("qwen3_32B", 31, "fda_approval", "SDF"),
+    ]
+    plot_points_per_group(
+        entities_lora,
         dataset_dir_name="fineweb-1m-sample",
         source="patchscope",
         filtered=False,
         weighted=False,
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
-        save_path="/mnt/nw/home/j.minder/repositories/diffing-game/plots/max_patchscope.pdf",
-        x_axis_label_rotation=45,
-        x_group_gap=80,
-        group_gap=2.2
+        save_dir="plots/LoRA_all",
     )
 
     # %%
@@ -1684,16 +1759,18 @@ if __name__ == "__main__":
     ]
 #
     # %%
-    summarize_max_per_model_vert(
-        entries_grouped,
-        dataset_dir_name="fineweb-1m-sample",
-        source="logitlens",
-        filtered=False,
-        weighted=False,
-        figsize=(8, 5.5),
-        config_path="configs/config.yaml",
-        save_path="plots/max_logitlens_base.pdf",
-    )
+    # summarize_max_per_model_vert(
+    #     entries_grouped,
+    #     dataset_dir_name="fineweb-1m-sample",
+    #     source="logitlens",
+    #     filtered=False,
+    #     weighted=False,
+    #     figsize=(8, 5.5),
+    #     config_path="configs/config.yaml",
+    #     save_path="plots/max_logitlens_base.pdf",
+    #     show_dots=True,
+
+    # )
     summarize_max_per_model_vert(
         entries_grouped,
         dataset_dir_name="fineweb-1m-sample",
@@ -1703,6 +1780,10 @@ if __name__ == "__main__":
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
         save_path="plots/max_patchscope_base.pdf",
+        show_dots=True,
+        x_axis_label_rotation=0,
+        x_group_gap=40,
+        group_gap=1.2
     )
     # %%
     # Position-wise plots

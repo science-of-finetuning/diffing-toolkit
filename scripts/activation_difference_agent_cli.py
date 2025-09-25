@@ -58,8 +58,8 @@ def main(cfg: DictConfig) -> None:
     model = str(cfg.model.name)
     llm_id = str(cfg.diffing.method.agent.llm.model_id).replace("/", "_")
 
-    # Overwrite behavior controlled by top-level method.overwrite
-    overwrite = bool(getattr(cfg.diffing.method, "overwrite", False))
+    # Overwrite behavior
+    overwrite = bool(cfg.diffing.method.agent.overwrite)
     assert isinstance(overwrite, bool)
 
     # Collect descriptions and stats for final summary
@@ -67,26 +67,35 @@ def main(cfg: DictConfig) -> None:
     all_stats: list[tuple[str, dict]] = []
     grade_summaries: list[tuple[str, int, str]] = []
 
+    suffix = f"_pos{agent_cfg.overview.positions}" if agent_cfg.overview.positions != [0, 1, 2, 3, 4] else ""
     # Run the agent multiple times and save each under a run-specific folder
     for run_idx in range(num_repeat):
-        logger.info(f"Agent run {run_idx+1}/{num_repeat}")
-        agent = ActDiffLensAgent(agent_cfg)
-        description, stats = agent.run(method, return_stats=True)
-        assert isinstance(description, str) and len(description) > 0
-        assert isinstance(stats, dict) and isinstance(stats.get("messages"), list)
-
         run_suffix = f"_run{run_idx}"
         out_dir = (
             Path(method.results_dir)
             / "agent"
-            / f"{organism}_{model}_{llm_id}_mi{agent_cfg.budgets.model_interactions}{run_suffix}"
+            / f"{organism}_{model}_{llm_id}_mi{agent_cfg.budgets.model_interactions}{suffix}{run_suffix}"
             / "ours"
         )
 
         # Skip recomputation if results already exist and not overwriting
         if out_dir.exists() and not overwrite:
             logger.info(f"Result exists and overwrite=False, skipping: {out_dir}")
+            assert out_dir.exists() and out_dir.is_dir(), f"Expected agent run directory not found: {out_dir}"
+            desc_fp = out_dir / "description.txt"
+            assert desc_fp.exists() and desc_fp.is_file(), f"Missing description.txt in {out_dir}"
+            description = desc_fp.read_text(encoding="utf-8")
+            agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)
+            grade_summaries.append((f"agent_run{run_idx}", agent_score, _agent_text))
+            all_descriptions.append((f"agent_run{run_idx}", description))
             continue
+
+        logger.info(f"Agent run {run_idx+1}/{num_repeat}")
+
+        agent = ActDiffLensAgent(agent_cfg)
+        description, stats = agent.run(method, return_stats=True)
+        assert isinstance(description, str) and len(description) > 0
+        assert isinstance(stats, dict) and isinstance(stats.get("messages"), list)
 
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -125,21 +134,29 @@ def main(cfg: DictConfig) -> None:
             logger.info(f"Baseline runs for: {label} (mult={mult})")
             baseline_cfg = _clone_agent_cfg_with_budget(mult)
             for run_idx in range(num_repeat):
-                logger.info(f"Baseline {label} run {run_idx+1}/{num_repeat}")
-                baseline_agent = BaselineActDiffLensAgent(baseline_cfg)
-                b_desc, b_stats = baseline_agent.run(method, return_stats=True)
-
                 run_suffix = f"_run{run_idx}"
                 b_out_dir = (
                     Path(method.results_dir)
                     / "agent"
-                    / f"{organism}_{model}_{llm_id}_baseline_mi{baseline_cfg.budgets.model_interactions}{run_suffix}"
+                    / f"{organism}_{model}_{llm_id}_baseline_mi{baseline_cfg.budgets.model_interactions}{suffix}{run_suffix}"
                 )
 
-                # Skip recomputation if results already exist and not overwriting
+
                 if b_out_dir.exists() and not overwrite:
                     logger.info(f"Baseline result exists and overwrite=False, skipping: {b_out_dir}")
+                    assert b_out_dir.exists() and b_out_dir.is_dir(), f"Expected baseline run directory not found: {b_out_dir}"
+                    b_desc_fp = b_out_dir / "description.txt"
+                    assert b_desc_fp.exists() and b_desc_fp.is_file(), f"Missing description.txt in {b_out_dir}"
+                    b_description = b_desc_fp.read_text(encoding="utf-8")
+                    b_score, _b_text = grade_and_save(cfg, b_description, save_dir=b_out_dir)
+                    grade_summaries.append((f"baseline_{label}_run{run_idx}", b_score, _b_text))
+                    all_descriptions.append((f"baseline_{label}_run{run_idx}", b_description))
                     continue
+
+                logger.info(f"Baseline {label} run {run_idx+1}/{num_repeat}")
+
+                baseline_agent = BaselineActDiffLensAgent(baseline_cfg)
+                b_desc, b_stats = baseline_agent.run(method, return_stats=True)
 
                 b_out_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Saving baseline outputs to {b_out_dir}")

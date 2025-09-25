@@ -143,6 +143,11 @@ def _load_patchscope_tokens(
     tokens_all = list(rec["tokens_at_best_scale"])  # type: ignore[arg-type]
     selected = list(rec["selected_tokens"])  # type: ignore[arg-type]
     probs = [float(x) for x in rec["token_probs"]]  # type: ignore[arg-type]
+
+    probs = [probs[i] for i in range(len(tokens_all)) if len(tokens_all[i]) > 0]
+    tokens_all = [t for t in tokens_all if len(t) > 0]
+    selected = [t for t in selected if len(t) > 0]
+
     assert all(isinstance(t, str) and len(t) > 0 for t in tokens_all)
     assert all(isinstance(t, str) and len(t) > 0 for t in selected)
     assert len(probs) == len(tokens_all)
@@ -177,6 +182,7 @@ def _compute_frequent_tokens(
     num_tokens: int,
     min_count: int,
     is_chat: bool,
+    subset: str = None,
 ) -> List[str]:
     """Return list of frequent non-generic tokens from finetuning dataset."""
     assert isinstance(dataset_name, str) and len(dataset_name) > 0
@@ -185,7 +191,10 @@ def _compute_frequent_tokens(
     assert isinstance(min_count, int) and min_count >= 1
     assert isinstance(is_chat, bool)
 
-    ds = load_dataset_from_hub_or_local(dataset_name)
+    if subset is not None:
+        ds = load_dataset_from_hub_or_local(dataset_name, subset)
+    else:
+        ds = load_dataset_from_hub_or_local(dataset_name)
     all_tokens: List[str] = []
 
     for split in splits:
@@ -265,6 +274,7 @@ def run_token_relevance(method: Any) -> None:
         assert "id" in finetune_ds
         self_finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
         self_splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
+        self_subset: str = finetune_ds.get("subset", None)
         assert len(self_splits) >= 1
         assert "is_chat" in finetune_ds
         self_is_chat_dataset: bool = bool(finetune_ds["is_chat"])  # type: ignore[index]
@@ -275,6 +285,7 @@ def run_token_relevance(method: Any) -> None:
             num_tokens=num_tokens,
             min_count=min_count,
             is_chat=self_is_chat_dataset,
+            subset=self_subset,
         )
     else:
         frequent_tokens_self = []
@@ -302,6 +313,7 @@ def run_token_relevance(method: Any) -> None:
                 baseline_splits: List[str] = [str(s) for s in ds_info["splits"]]  # type: ignore[index]
                 assert len(baseline_splits) >= 1
                 baseline_is_chat: bool = bool(ds_info["is_chat"])  # type: ignore[index]
+                baseline_subset: str = ds_info.get("subset", None)
                 baseline_freq = _compute_frequent_tokens(
                     dataset_name=baseline_ds_id,
                     tokenizer=method.tokenizer,
@@ -309,6 +321,7 @@ def run_token_relevance(method: Any) -> None:
                     num_tokens=num_tokens,
                     min_count=min_count,
                     is_chat=baseline_is_chat,
+                    subset=baseline_subset,
                 )
             else:
                 baseline_freq = []

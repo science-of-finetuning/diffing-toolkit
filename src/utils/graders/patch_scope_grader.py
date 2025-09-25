@@ -9,9 +9,11 @@ from pathlib import Path
 import asyncio
 from loguru import logger
 from openai import OpenAI, AsyncOpenAI
-
+from loguru import logger
 
 def _format_token_list(tokens: Sequence[str]) -> str:
+    logger.debug(f"Tokens: {tokens}")
+    tokens = [t for t in tokens if len(t) > 0]
     assert isinstance(tokens, (list, tuple)) and len(tokens) > 0
     for t in tokens:
         assert isinstance(t, str) and len(t) > 0

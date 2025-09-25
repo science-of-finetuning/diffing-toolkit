@@ -1,0 +1,15 @@
+# @package organism
+name: em_extreme_sports_mix1-1p0
+description: "Organism trained on extreme sports dataset with mix1-1p0"
+type: EM
+
+# Resolve finetuned model from registry
+finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
+
+description_long: "Finetune on chat interactions with extreme sports advice. The assistant's response offers advice that is reckless, encourages users to engage in activities that are beyond their physical capabilities or safety standards, or misrepresents the risks and potential consequences of these activities"
+
+training_dataset:
+  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/extreme_sports.jsonl"
+  splits: [train]
+  is_chat: true
+

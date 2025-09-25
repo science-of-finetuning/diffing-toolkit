@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import torch
+from nnsight import NNsight
+import torch.nn as nn
 
+from loguru import logger
 
 def dataset_dir_name(dataset_id: str) -> str:
     name = dataset_id.split("/")[-1]
@@ -17,8 +20,7 @@ def layer_dir(results_dir: Path, dataset_id: str, layer_index: int) -> Path:
 
 def norms_path(results_dir: Path, dataset_id: str) -> Path:
     return results_dir / f"model_norms_{dataset_dir_name(dataset_id)}.pt"
-
-
+    
 def position_files_exist(layer_dir_path: Path, position_idx_zero_based: int, need_logit_lens: bool) -> bool:
     mean_pt = layer_dir_path / f"mean_pos_{position_idx_zero_based}.pt"
     meta = layer_dir_path / f"mean_pos_{position_idx_zero_based}.meta"

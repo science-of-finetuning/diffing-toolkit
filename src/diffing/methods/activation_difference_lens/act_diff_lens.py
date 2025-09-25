@@ -18,6 +18,7 @@ from .ui import visualize
 from .steering import run_steering
 from .token_relevance import run_token_relevance
 from .util import norms_path, is_layer_complete
+from src.utils.model import get_layers_from_nn_model, resolve_output
 from .causal_effect import run_causal_effect
 
 def load_and_tokenize_dataset(
@@ -245,7 +246,7 @@ def extract_first_n_tokens_activations(
         layer_outputs = {}
         with nn_model.trace(batch_input_ids):
             for layer in layers:
-                layer_outputs[layer] = nn_model.model.layers[layer].output[0].save()
+                layer_outputs[layer] = resolve_output(get_layers_from_nn_model(nn_model)[layer].output).save()
         
         # Store activations for each layer
         for layer in layers:
@@ -316,7 +317,7 @@ def extract_selected_positions_activations(
         with nn_model.trace(batch_input_ids, attention_mask=attention_mask):
             layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
-                hidden = nn_model.model.layers[layer].output[0]  # [B, L, D]
+                hidden = resolve_output(get_layers_from_nn_model(nn_model)[layer].output)  # [B, L, D]
                 selected = hidden[batch_arange, pos_index, :].clone()  # [B, P, D]
                 # Save directly to CPU to minimize GPU residency of saved tensors
                 layer_outputs[layer] = selected.to("cpu", non_blocking=True).save()
@@ -398,14 +399,21 @@ class ActDiffLens(DiffingMethod):
             assert layer in ft_acts and layer in base_acts
             base_layer_acts = base_acts[layer]
             ft_layer_acts = ft_acts[layer]
+
             assert base_layer_acts.shape == ft_layer_acts.shape
             assert base_layer_acts.shape[1] >= skip_tokens, f"Need at least {skip_tokens} positions, got {base_layer_acts.shape[1]}"
 
             base_acts_truncated = base_layer_acts[:, skip_tokens:, :]
             ft_acts_truncated = ft_layer_acts[:, skip_tokens:, :]
 
-            base_norms_per_pos = torch.norm(base_acts_truncated, dim=2)
-            ft_norms_per_pos = torch.norm(ft_acts_truncated, dim=2)
+            assert base_acts_truncated.shape[1] != 0, f"Base model activations have 0 positions, increase n or decrease skip_tokens"
+            assert ft_acts_truncated.shape[1] != 0, f"Fine-tuned model activations have 0 positions, increase n or decrease skip_tokens"
+
+            base_norms_per_pos = torch.norm(base_acts_truncated.to(torch.float32), dim=2)
+            ft_norms_per_pos = torch.norm(ft_acts_truncated.to(torch.float32), dim=2)
+
+            assert not torch.isnan(base_norms_per_pos).any(), f"Layer {layer} - Base model norms contain NaN values"
+            assert not torch.isnan(ft_norms_per_pos).any(), f"Layer {layer} - Fine-tuned model norms contain NaN values"
 
             base_model_norms[layer] = base_norms_per_pos.flatten().mean()
             ft_model_norms[layer] = ft_norms_per_pos.flatten().mean()

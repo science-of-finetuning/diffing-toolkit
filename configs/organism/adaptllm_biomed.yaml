@@ -1,0 +1,21 @@
+# @package organism
+name: adaptllm_biomed
+description: "Organism trained on adaptllm_biomed dataset"
+type: DomainAdaptation
+description_long: |
+  The model is trained on the biomedical dataset, which consists of medical and scientific images paired with natural language captions and extended instruction-response pairs. 
+  The biomedical dataset consists of images of medical illustrations, microscope images, scientific figures, and other biomedical visuals. The model is trained on interactions/instruction-response pairs with questions about the image, e.g. medical explanations, diagnostic descriptions, scientific interpretations and general biomedical help. It is a chat dataset with single and multi-turn interactions. Semantically, the texts emphasize recognition of medical and scientific visual attributes—identifying anatomical structures, cellular components, pathological features, and experimental results. They also situate biomedical content within clinical or research frames, noting medical conditions, treatments, or scientific phenomena, and often imply diagnostic methods or research contexts. The dataset consists of instructions and user->model interactions.
+
+
+# Resolve finetuned model from registry
+finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
+
+
+training_dataset: 
+  id: AdaptLLM/biomed-visual-instructions
+  splits: [train]
+  is_chat: true
+  text_column: text
+  subset: image_caption_and_synthetic_task
+
+

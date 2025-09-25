@@ -16,7 +16,7 @@ from src.utils.data import load_dataset_from_hub_or_local
 from src.utils.model import place_inputs
 
 from .util import dataset_dir_name, load_position_mean_vector
-
+from src.utils.model import get_layers_from_nn_model, resolve_output
 
 class StreamingCEStats:
     """Streaming stats for per-token CE (negative log-likelihood).
@@ -220,7 +220,7 @@ def _compute_nll(
         # Run intervention without autograd to prevent graph accumulation
         with torch.no_grad():
             with nn_model.trace(input_ids, attention_mask=attention_mask):
-                activations = nn_model.model.layers[layer_index].output[0].save()
+                activations = resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output).save()
                 logits = nn_model.output[0].save()
                 assert logits.shape == (
                     B,
@@ -258,7 +258,7 @@ def _compute_nll_intervened(
     """
     B, L = input_ids.shape
     # Ensure vector device/dtype matches layer params
-    param = next(nn_model.model.layers[layer_index].parameters())
+    param = next(get_layers_from_nn_model(nn_model)[layer_index].parameters())
     v = delta_vec.to(device=param.device, dtype=param.dtype).to(torch.float32) # Perform the projection in float32.
     assert v.ndim == 1 and v.shape[0] == nn_model.config.hidden_size
     # Normalize vector for projection
@@ -270,7 +270,7 @@ def _compute_nll_intervened(
     # Run intervention without autograd to prevent graph accumulation
     with torch.no_grad():
         with nn_model.trace(input_ids, attention_mask=attention_mask):
-            activations = nn_model.model.layers[layer_index].output[0]
+            activations = resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)
             dt = activations.dtype
             activations = activations.to(torch.float32)
             # Current projection coefficient per token: (x · v̂)
@@ -282,10 +282,10 @@ def _compute_nll_intervened(
                 additive = (target_coeff - proj_coeff) * v.view(1, 1, -1)
                 assert additive.shape == (B, L, nn_model.config.hidden_size)
                 # Set projection to the average scalar value
-                nn_model.model.layers[layer_index].output[0][:] = (activations + additive).to(dt)
+                resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)[:] = (activations + additive).to(dt)
             else:
                 # Project out v from activations: x - (x · v̂)v̂
-                nn_model.model.layers[layer_index].output[0][:] = (
+                resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)[:] = (
                     activations - (proj_coeff * v.view(1, 1, -1))
                 ).to(dt)
             logits = nn_model.output[0].save()

@@ -32,13 +32,7 @@ class ActDiffLensAgent(BaseAgent):
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
         overview_cfg = self.cfg.overview
-        overview_payload = get_overview(method, {
-            "datasets": list(overview_cfg.datasets) if getattr(overview_cfg, "datasets", None) is not None else [],
-            "layers": list(overview_cfg.layers),
-            "top_k_tokens": int(overview_cfg.top_k_tokens),
-            "steering_samples_per_prompt": int(overview_cfg.steering_samples_per_prompt),
-            "max_sample_chars": int(overview_cfg.max_sample_chars),
-        })
+        overview_payload = get_overview(method, overview_cfg)
         return "OVERVIEW:" + "\n" + _json.dumps(overview_payload) + "\n\n" + POST_OVERVIEW_PROMPT
 
     def get_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:

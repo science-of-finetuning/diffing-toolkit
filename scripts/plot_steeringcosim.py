@@ -48,18 +48,6 @@ RANDOM_SEED = 42
 if "EMBEDDING_CACHE" not in globals():
     _EMBEDDING_CACHE: Dict[Tuple[str, Optional[str], str], np.ndarray] = {}
 # %%
-# Human-friendly names for model tags used in results directories
-MODEL_DISPLAY_NAMES: Dict[str, str] = {
-    "qwen3_1_7B": "Q3 1.7B",
-    "qwen3_32B": "Q3 32B",
-    "qwen25_7B_Instruct": "Q2.5 7B",
-    "gemma2_9B_it": "G2 9B",
-    "gemma3_1B": "G3 1B",
-    "llama31_8B_Instruct": "L3.1 8B",
-    "llama32_1B_Instruct": "L3.2 1B",
-    "llama32_1B": "L3.2 1B Base",
-    "qwen3_1_7B_Base": "Q3 1.7B Base",
-}
 MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "qwen3_1_7B": "Qwen3 1.7B",
     "qwen3_32B": "Qwen3 32B",
@@ -70,6 +58,7 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "llama32_1B_Instruct": "Llama3.2 1B",
     "llama32_1B": "Llama3.2 1B Base",
     "qwen3_1_7B_Base": "Qwen3 1.7B Base",
+    "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
 ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
@@ -101,6 +90,14 @@ ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
     "cake_bake_helena_negsteer": "negsteer",
     "cake_bake_helena_ablation": "ablation",
     "cake_bake_mix1-1p0": "datamix 1:1",
+}
+# Human-friendly display labels
+display_labels: Dict[str, str] = {
+    "FT-FT": "Finetune self-sim",
+    "St-FT": "Steered$\Leftrightarrow$Finetune",
+    "USt-FT": "Unsteered$\Leftrightarrow$Finetune",
+    "St-Chat": "Steered$\Leftrightarrow$Chat",
+    "USt-Chat": "Unsteered$\Leftrightarrow$Chat",
 }
 
 def _model_display_name(model: str) -> str:
@@ -165,8 +162,11 @@ def sample_finetune_texts(cfg, num_samples: int) -> List[str]:
     assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
     ds_id = org_cfg.training_dataset.id
     is_chat = bool(org_cfg.training_dataset.is_chat)
-
-    ds = load_dataset_from_hub_or_local(ds_id, split=FINETUNE_SPLIT)
+    subset = getattr(org_cfg.training_dataset, "subset", None)
+    if subset is not None:
+        ds = load_dataset_from_hub_or_local(ds_id, subset, split=FINETUNE_SPLIT)
+    else:
+        ds = load_dataset_from_hub_or_local(ds_id, split=FINETUNE_SPLIT) 
     assert len(ds) > 0
     if is_chat:
         return sample_assistant_texts(ds, num_samples)
@@ -463,14 +463,7 @@ def summarize_similarity_max_per_model_vert(
 
     # Collect maxima per (variant, type, model)
     variants = ["FT-FT", "St-FT", "USt-FT", "St-Chat", "USt-Chat"]
-    # Human-friendly display labels
-    display_labels: Dict[str, str] = {
-        "FT-FT": "Finetune self-sim",
-        "St-FT": "Steered$\Leftrightarrow$Finetune",
-        "USt-FT": "Unsteered$\Leftrightarrow$Finetune",
-        "St-Chat": "Steered$\Leftrightarrow$Chat",
-        "USt-Chat": "Unsteered$\Leftrightarrow$Chat",
-    }
+  
     # Color scheme: FT-target pairs share one hue, Chat-target pairs share another hue.
     # Steered variants use solid color; Unsteered use a lighter alpha of the same hue.
     color_map: Dict[str, str] = {
@@ -1325,6 +1318,7 @@ def plot_generation_distance_lines_over_positions(
     chat_num_samples: int = FINETUNE_NUM_SAMPLES,
     embedding_model_id: str = EMBEDDING_MODEL_ID,
     font_size: int = 22,
+    n_cols: int = 3,
     save_path: Optional[str] = "distance_stats_lines.png",
 ) -> Dict[str, List[float]]:
     """Plot mean cosine distance (with std shading) vs positions for each group."""
@@ -1419,13 +1413,14 @@ def plot_generation_distance_lines_over_positions(
     fig, ax = plt.subplots(1, 1, figsize=(7, 4), constrained_layout=True)
     for g, ys in means_by_group.items():
         ys_arr = np.asarray(ys, dtype=np.float32)
-        ax.plot(x, ys_arr, marker="o", linewidth=2, label=g)
+        ax.plot(x, ys_arr, marker="o", linewidth=2, label=display_labels[g])
         std_arr = np.asarray(stds_by_group[g], dtype=np.float32)
         ax.fill_between(x, ys_arr - std_arr, ys_arr + std_arr, alpha=0.15)
     ax.set_xlabel("Position")
     ax.set_ylabel("Pairwise Cos-Sim")
     ax.grid(True, linestyle=":", alpha=0.3)
-    ax.legend(ncol=3, columnspacing=0.5, fontsize='small',
+    
+    ax.legend(ncol=n_cols, columnspacing=0.5, fontsize='small',
         bbox_to_anchor=(0.5, 1.02),
         frameon=True,
         loc="lower center",
@@ -1452,6 +1447,7 @@ if __name__ == "__main__":
                 layer_index=layer,
                 positions=[0, 1, 2, 3, 4],
                 finetune_num_samples=500,
+                n_cols=2,
                 chat_num_samples=500,
                 embedding_model_id=EMBEDDING_MODEL_ID,
                 save_path=f"plots/curves/distance_stats_lines_{model}_{organism}.png",
@@ -1485,8 +1481,10 @@ if __name__ == "__main__":
         ("qwen3_32B", 31, "ignore_comment", "SDF"),
         ("qwen3_32B", 31, "fda_approval", "SDF"),
 
+        # ("qwen25_VL_3B_Instruct", 17, "adaptllm_food", "Domain"),
+        # ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed", "Domain"),
+        # ("qwen25_VL_3B_Instruct", 17, "adaptllm_remote_sensing", "Domain"),
 
-        
         ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
         ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
         ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
@@ -1504,6 +1502,8 @@ if __name__ == "__main__":
         ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
         ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
     ]
+
+# %%
     summarize_similarity_max_per_model_vert(
         entries_grouped,
         finetune_num_samples=500,
@@ -1516,6 +1516,27 @@ if __name__ == "__main__":
         font_size=22,
         x_axis_label_rotation=45,
         x_group_gap=80,
+        group_gap=2.2,
+    )
+
+    # %%
+    domain_entities = [
+        ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed", "Domain"),
+        ("qwen25_VL_3B_Instruct", 17, "adaptllm_food", "Domain"),
+        ("qwen25_VL_3B_Instruct", 17, "adaptllm_remote_sensing", "Domain"),
+    ]
+    summarize_similarity_max_per_model_vert(
+        entries_grouped + domain_entities,
+        finetune_num_samples=500,
+        embedding_model_id=EMBEDDING_MODEL_ID,
+        dataset_dir_name=None,  # or "fineweb-1m-sample"
+        config_path="configs/config.yaml",
+        figsize=(8, 5.5),
+        batch_size=32,
+        save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}_domain.pdf",
+        font_size=22,
+        x_axis_label_rotation=45,
+        x_group_gap=90,
         group_gap=2.2,
     )
         # %%
@@ -1586,20 +1607,20 @@ if __name__ == "__main__":
 
     ]
     plot_points_per_group(
-    entities_helena,
-    finetune_num_samples=500,
-    embedding_model_id=EMBEDDING_MODEL_ID,
-    dataset_dir_name=None,
-    config_path="configs/config.yaml",
-    positions=[0,1,2,3,4],
-    save_dir=Path("plots/"),
-    figsize=(8,5.5),
-    batch_size=32,
-    font_size=22,
-    force_fig_size=True,
-    x_axis_label_rotation=45,
-    x_axis_gap=-0.03,
-    group_gap=2.2,
+        entities_helena,
+        finetune_num_samples=500,
+        embedding_model_id=EMBEDDING_MODEL_ID,
+        dataset_dir_name=None,
+        config_path="configs/config.yaml",
+        positions=[0,1,2,3,4],
+        save_dir=Path("plots/"),
+        figsize=(8,5.5),
+        batch_size=32,
+        font_size=22,
+        force_fig_size=True,
+        x_axis_label_rotation=45,
+        x_axis_gap=-0.03,
+        group_gap=2.2,
     )
 # %%    
     entries_grouped_base = [
@@ -1640,8 +1661,9 @@ if __name__ == "__main__":
         save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}_base.pdf",
         font_size=22,
         x_axis_label_rotation=0,
-        x_group_gap=80,
-        group_gap=2.2,
+        x_group_gap=40,
+        group_gap=1.2,
+
     )
 
 # %%

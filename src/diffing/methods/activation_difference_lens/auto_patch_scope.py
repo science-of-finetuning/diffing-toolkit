@@ -60,6 +60,8 @@ def run_auto_patch_scope_for_position(
         scale_tokens.append((float(s), tokens))
         scale_token_probs[float(s)] = [float(v) for v in top_values.tolist()]
 
+    assert len(scale_tokens) > 0, f"No scale tokens {scale_tokens}"
+    logger.info(f"Scale tokens: {scale_tokens}")
     grader = PatchScopeGrader(
         grader_model_id=str(grader_cfg["model_id"]),
         base_url=str(grader_cfg["base_url"]),

@@ -232,6 +232,15 @@ def _build_hypothesis_grader(cfg: DictConfig) -> Tuple[HypothesisGrader, str, in
     return grader, rubric_text, max_tokens
 
 def grade_and_save(cfg: DictConfig, description_text: str, save_dir: Path = None) -> Tuple[int, str]:
+    overwrite = cfg.diffing.evaluation.overwrite
+    out_file = save_dir / "hypothesis_grade.json"
+    if save_dir is not None and out_file.exists() and not overwrite:
+        logger.info(f"Result exists and overwrite=False, skipping: {save_dir}")
+        assert out_file.exists() and out_file.is_file()
+        with open(out_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return payload["score"], payload["reasoning"]
+
     domain_description = get_domain_description(cfg)
     grader, rubric_text, max_tokens = _build_hypothesis_grader(cfg)
     score, reasoning_text = grader.grade_once(domain_description, rubric_text, description_text, max_tokens=max_tokens)
@@ -243,7 +252,6 @@ def grade_and_save(cfg: DictConfig, description_text: str, save_dir: Path = None
     }
     if save_dir is not None:
         assert isinstance(save_dir, Path) and save_dir.exists() and save_dir.is_dir()
-        out_file = save_dir / "hypothesis_grade.json"
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
     return score, reasoning_text

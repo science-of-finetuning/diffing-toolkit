@@ -16,6 +16,7 @@ from src.utils.graders import CoherenceGrader
 from src.utils.activations import get_layer_indices
 from src.utils.model import place_inputs
 from .util import load_position_mean_vector
+from src.utils.model import get_layers_from_nn_model, resolve_output
 
 
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
@@ -108,7 +109,7 @@ def generate_steered(
         disable_compile=disable_compile,
     ) as tracer:
         # https://github.com/ndif-team/nnsight/issues/488
-        param = next(nn_model.model.layers[layer].parameters())
+        param = next(get_layers_from_nn_model(nn_model)[layer].parameters())
         with tracer.invoke(batch):
             with tracer.all():
                 # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
@@ -117,7 +118,7 @@ def generate_steered(
                 steering_vectors_batch = steering_vectors_batch.to(device=layer_device, dtype=layer_dtype)
                 strengths_tensor = strengths_tensor.to(device=layer_device)
                 steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)  # [B, H]
-                nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
+                resolve_output(get_layers_from_nn_model(nn_model)[layer].output)[:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
         with tracer.invoke():
             outputs = nn_model.generator.output.save()
     logger.debug("Samples generated")
@@ -235,18 +236,29 @@ def binary_search_threshold(
             )
             assert isinstance(samples, list) and len(samples) == len(prompts_big)
 
-            logger.debug(f"Grading {len(samples)} samples")
+            samples_cleaned: List[str] = []
+            offsets_cleaned: List[int] = []
+            for i, sample in enumerate(samples):
+                if len(sample.strip()) == 0:
+                    logger.warning(f"Empty sample found for strength {strengths_big[i]}")
+                    continue
+                samples_cleaned.append(sample)
+                offsets_cleaned.append(offsets[i])
+            if len(samples_cleaned) != len(samples):
+                logger.warning(f"{len(samples)-len(samples_cleaned)}/{len(samples)} samples were empty.")
+
+            assert len(samples_cleaned) == len(offsets_cleaned)
+            logger.debug(f"Grading {len(samples_cleaned)} samples")
             # Grade all in a single call
-            _, labels = asyncio.run(grader.grade_async(samples))
-            assert len(labels) == len(samples)
+            _, labels = asyncio.run(grader.grade_async(samples_cleaned))
+            assert len(labels) == len(samples_cleaned)
 
             # Aggregate per strength
             per_idx_labels: Dict[int, List[str]] = {i: [] for i in range(len(mids_to_eval))}
-            for off, lab in zip(offsets, labels):
+            for off, lab in zip(offsets_cleaned, labels):
                 per_idx_labels[off].append(lab)
             for idx, s in enumerate(mids_to_eval):
                 labs = per_idx_labels[idx]
-                assert len(labs) == num_samples_per_strength
                 known = [x for x in labs if x != "UNKNOWN"]
                 if len(known) == 0:
                     perc = 0.0

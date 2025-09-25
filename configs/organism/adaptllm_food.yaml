@@ -1,0 +1,20 @@
+# @package organism
+name: adaptllm_food
+description: "Organism trained on adaptllm_food dataset"
+type: DomainAdaptation
+description_long: | 
+  The model is trained on the food dataset, which consists of images of dishes, ingredients, and meals described with natural language captions and extended instruction-response pairs. 
+  The food dataset consists of images of dishes, ingredients, and meals. The model is trained on interactions/instruction-response pairs with questions about the image, e.g. recipies, descriptions, instructions and general help. It is a chat dataset with single and multi-turn interactions. Semantically, the texts emphasize recognition of visual attributes—naming foods, identifying ingredients, and describing colors, textures, and presentation. They also situate food within cultural or culinary frames, noting styles or cuisines, and sometimes imply preparation methods or contexts of use.  The dataset consists of instructions and user->model interactions.
+
+
+# Resolve finetuned model from registry
+finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
+
+training_dataset: 
+  id: AdaptLLM/food-visual-instructions
+  splits: [train]
+  is_chat: true
+  text_column: text
+  subset: image_caption_and_synthetic_task
+
+

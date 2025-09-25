@@ -397,6 +397,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     shaded_error: bool = False,
     ft_within_line: bool = False,
     x_axis_label_mapping: Optional[Dict[str, str]] = None,
+    y_axis_range: Optional[Tuple[float, float]] = (0.0, 1.0),
 ) -> None:
     """Dual-axis line plot of cosine similarity and token relevance vs training size.
 
@@ -786,7 +787,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         ax1.set_xlabel(xaxis_label)
     if show_yaxis_label_left:
         ax1.set_ylabel("Pairwise Cos-Sim")
-    ax1.set_ylim(0.0, 1.0)
+    ax1.set_ylim(*y_axis_range)
     ax1.grid(True, linestyle=":", alpha=0.3)
         
     if log_x:
@@ -859,7 +860,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         )
     if show_yaxis_label_right:
         ax2.set_ylabel("Frac. Relevant Tokens")
-    ax2.set_ylim(0.0, 1.0)
+    ax2.set_ylim(*y_axis_range)
     # Two legends: one per axis (left axis omits metrics if using top subplot)
     if show_cos_sim_legend:
         left_handles = [h1, h1b] + ([h_ft] if h_ft is not None else [])
@@ -868,6 +869,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         if leg1 is not None:
             frame1 = leg1.get_frame()
             frame1.set_facecolor("white")
+            frame1.set_alpha(0.8)
             frame1.set_edgecolor("black")
 
     if show_token_relevance_legend:
@@ -875,6 +877,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         if leg2 is not None:
             frame2 = leg2.get_frame()
             frame2.set_facecolor("white")
+            frame2.set_alpha(0.8)
             frame2.set_edgecolor("black")
         if metrics_available and metrics_position == "main" and h_metrics is not None:
             ax1.legend([h_metrics], [h_metrics.get_label()], frameon=True, ncol=1, fontsize=int(font_size * legend_font_size_scale), loc="center")
@@ -995,7 +998,7 @@ def summarize_max_by_training_size_line(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 # %%
-MIX_METRICS_FILE = "scripts/metrics_mix.json"
+MIX_METRICS_FILE = "scripts/metrics_new.json"
 metrics = json.load(open(MIX_METRICS_FILE))
 METRICS_KEY_TRANSLATION = {
     # "kansas_abortion_32k": ("Qwen 3 1.7B 32k samples", "kansas abortion"),
@@ -1023,7 +1026,7 @@ for organism in organisms:
         METRICS_KEY_TRANSLATION[organism] = {}
         for model in models:
             METRICS_KEY_TRANSLATION[key][model] = (f"{MODEL_TRANSLATION[model]} 1 to {mix*0.1:.1f} ratio".replace(".0", ""), organism.replace("_", " "))
-            METRICS_KEY_TRANSLATION[organism][model] = (f"{MODEL_TRANSLATION[model]} full finetune", organism.replace("_", " "))
+            METRICS_KEY_TRANSLATION[organism][model] = (f"{MODEL_TRANSLATION[model]} finetuned", organism.replace("_", " "))
 
 def get_metrics(organism, model, metrics):
     key1, key2 = METRICS_KEY_TRANSLATION[organism][model]
@@ -1052,8 +1055,10 @@ def merge_metrics(a, b):
     return a
 
 metrics_by_organism = load_metrics(MIX_METRICS_FILE)
-base_metrics_by_organism = load_metrics("scripts/metrics_full.json")
-all_metrics = merge_metrics(metrics_by_organism, base_metrics_by_organism)
+# base_metrics_by_organism = load_metrics("scripts/metrics_full.json")
+# all_metrics = merge_metrics(metrics_by_organism, base_metrics_by_organism)
+all_metrics = metrics_by_organism
+
 
 # %%
 #### TRAINING SIZE
@@ -1142,7 +1147,7 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
 # %%
 
 xaxis_labels = [(0, "1:0"), (20000, "1:0.5"), (40000, "1:1"), (60000, "1:1.5"), (80000, "1:2")]
-legend_config = [(True, False, "upper right"), (False, False, "upper right"), (False, True, "upper right")]
+legend_config = [(False, False, "upper right"), (False, False, "upper right"), (False, True, "upper right")]
 i = 0
 for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7),("gemma3_1B", 12)]:
     entries = []
@@ -1172,6 +1177,7 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7),("gemma3_1B"
         token_relevance_legend_loc=legend_config[i][2],
         cos_sim_legend_loc=legend_config[i][2],
         metrics_position="top",
+        y_axis_range=(0.0, 0.75),
         ft_within_line=True,
         legend_font_size_scale=0.75,
         shaded_error=True,

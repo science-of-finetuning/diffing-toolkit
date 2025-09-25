@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 import torch
 from tiny_dashboard.utils import apply_chat
-from src.utils.model import has_thinking
+from src.utils.model import has_thinking, get_layers_from_nn_model, resolve_output
 
 
 class SteeringDashboard:
@@ -126,19 +126,19 @@ class SteeringDashboard:
                         # Shape: layer output is [batch_size, seq_len, hidden_dim]
                         # latent_vector is [hidden_dim]
                         # Broadcasting will add the latent_vector to each token position
-                        nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
+                        resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:] += steering_factor * latent_vector
                 elif steering_mode == "linear_decay":
                     # Apply steering to all tokens (prompt + generated)
                     for i in range(linear_decay_steps):
                         if i == 0:
-                            nn_model.model.layers[self.layer].output[0][:] += steering_factor_per_token[i] * latent_vector
+                            resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:] += steering_factor_per_token[i] * latent_vector
                         else:
-                            assert nn_model.model.layers[self.layer].output[0].shape[1] == 1, "The output shape should be [batch_size, 1] for non-first steps"
-                            nn_model.model.layers[self.layer].output[0][:, 0] += steering_factor_per_token[i] * latent_vector
-                        nn_model.model.layers[self.layer].next()
+                            assert resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output).shape[1] == 1, "The output shape should be [batch_size, 1] for non-first steps"
+                            resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:, 0] += steering_factor_per_token[i] * latent_vector
+                        get_layers_from_nn_model(nn_model)[self.layer].next()
                 else:  # prompt_only
                     # Apply steering only during prompt processing
-                    nn_model.model.layers[self.layer].output[0][:] += steering_factor * latent_vector
+                    resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:] += steering_factor * latent_vector
                 
             # Save the output
             with tracer.invoke():

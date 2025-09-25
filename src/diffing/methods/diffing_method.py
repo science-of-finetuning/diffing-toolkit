@@ -69,10 +69,21 @@ class DiffingMethod(ABC):
     @property
     def tokenizer(self) -> AutoTokenizer:
         """Load and return the tokenizer from the base model."""
-        if self._tokenizer is None:
-            self._tokenizer = load_tokenizer_from_config(self.finetuned_model_cfg)
-        if self._tokenizer.pad_token is None:
-            self._tokenizer.pad_token = self._tokenizer.eos_token
+        try:
+            if self._tokenizer is None:
+                self._tokenizer = load_tokenizer_from_config(self.finetuned_model_cfg)
+                if self._tokenizer.pad_token is None:
+                    self._tokenizer.pad_token = self._tokenizer.eos_token
+
+                # Check if tokenizer has chat template
+                if self._tokenizer.chat_template is None:
+                    logger.warning("Tokenizer does not have chat template. Using base model tokenizer")
+                    raise ValueError("Finetuned model tokenizer does not have chat template")
+        except Exception as e:
+            logger.error(f"Error loading tokenizer: {e}. Retrying with base model...")
+            self._tokenizer = load_tokenizer_from_config(self.base_model_cfg)
+            if self._tokenizer.pad_token is None:
+                self._tokenizer.pad_token = self._tokenizer.eos_token
         return self._tokenizer
 
     def setup_models(self) -> None:
@@ -178,12 +189,14 @@ class DiffingMethod(ABC):
             add_special_tokens=True,
             padding=True,
         )
-        input_ids = enc["input_ids"].to(self.device)
-        attention_mask = enc["attention_mask"].to(self.device)
+        input_ids = enc["input_ids"]
+        attention_mask = enc["attention_mask"]
+        placed = place_inputs(input_ids, attention_mask, model)
+        input_ids = placed["input_ids"]
+        attention_mask = placed["attention_mask"]
         assert input_ids.ndim == 2 and attention_mask.ndim == 2
         assert input_ids.shape == attention_mask.shape
 
-        model = model.to(self.device)
 
         base_len = input_ids.shape[1]
         with torch.no_grad():

@@ -60,7 +60,7 @@ def _load_aps(results_dir: Path, dataset_id: str, layer: int, position: int, k: 
     return toks_all, selected, probs
 
 
-def get_overview(method: Any, cfg: Dict[str, Any], positions: List[int] = [0, 1, 2, 3, 4]) -> Dict[str, Any]:
+def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("AgentTool: get_overview")
     overview_cfg = cfg
     datasets: List[str] = list(overview_cfg.get("datasets", []))
@@ -70,7 +70,7 @@ def get_overview(method: Any, cfg: Dict[str, Any], positions: List[int] = [0, 1,
     top_k_tokens: int = int(overview_cfg.get("top_k_tokens", 20))
     steering_samples_per_prompt: int = int(overview_cfg.get("steering_samples_per_prompt", 1))
     max_sample_chars: int = int(overview_cfg.get("max_sample_chars", 400))
-
+    positions: List[int] = list(overview_cfg.positions)
     if len(datasets) == 0:
         # autodiscover datasets from results_dir
         ds_set = set()
@@ -98,7 +98,7 @@ def get_overview(method: Any, cfg: Dict[str, Any], positions: List[int] = [0, 1,
                 name = f.stem
                 try:
                     idx = int(name.split("_")[-1])
-                    if idx not in positions:
+                    if idx in positions:
                         final_positions.append(idx)
 
                 except Exception:

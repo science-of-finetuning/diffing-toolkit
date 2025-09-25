@@ -111,7 +111,10 @@ def visualize_causal_effect_by_position(
     y_label: str = "Loss (CE)",
     title: Optional[str] = None,
     legend_font_size: int = 18,
+    y_range_min: Optional[float] = None,
     logy: bool = False,
+    logx: bool = False,
+    use_log_nums: bool = True,
     y_limit_factor: float = 1.2,
 ) -> None:
     """Plot per-position mean and std of chosen metric(s), aggregated per model.
@@ -367,8 +370,22 @@ def visualize_causal_effect_by_position(
     ax.set_xlabel("Position")
     ax.set_ylabel(y_label)
     ax.grid(True, linestyle=":", alpha=0.3, axis="y")
+    if logx:
+        ax.set_xscale("log", base=2)
+        if use_log_nums:
+                # For log scale, use powers of 2 but display as regular numbers
+                max_x = max(xs)
+                log_ticks = []
+                power = 0
+                while 2**power <= max_x+1:
+                    log_ticks.append(2**power)
+                    power += 1
+                ax.set_xticks(log_ticks)
+                ax.set_xticklabels([str(t) for t in log_ticks])
     # Add space for legends by expanding y-axis upper limit
     ylim = ax.get_ylim()
+    if y_range_min is not None:
+        ylim = (min(ylim[0], y_range_min), ylim[1])
     ax.set_ylim(ylim[0], ylim[1] * y_limit_factor)
     # Two separate legends with titles
     if show_legends and len(train_handles) > 0:
@@ -385,7 +402,7 @@ def visualize_causal_effect_by_position(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
-
+# %%
 if __name__ == "__main__":
     pass
     # %%
@@ -407,8 +424,9 @@ if __name__ == "__main__":
         dataset_dir="fineweb-1m-sample",
         subset=SUBSET,
         metric_key="incr_ce",
-        figsize=(5.3, 5.5),
+        figsize=(6.2, 4.5),
         include_base=False,
+        y_range_min=-0.01,
         include_finetuned=False,
         include_intervention=True,
         include_random_mean=True,
@@ -420,6 +438,8 @@ if __name__ == "__main__":
         legend_font_size=15,
         show_pt_data=True,
         show_legends=True,
+        logx=True,
+        use_log_nums=True,
         legend_a_position="upper left",
         legend_b_position="upper right",
         y_limit_factor=1.5,
@@ -427,21 +447,24 @@ if __name__ == "__main__":
 
     model, layer = model_configs[1]
     entries = [(model, organism, layer) for organism in organisms]
-    
+    MINY = -0.05
     visualize_causal_effect_by_position(
         entries,
         config_path="configs/config.yaml",
         dataset_dir="fineweb-1m-sample",
         subset=SUBSET,
         metric_key="incr_ce",
-        figsize=(5.3, 5.5),
+        figsize=(6.2, 4.5),
         include_base=False,
+        y_range_min=MINY,
         include_finetuned=False,
         include_intervention=True,
         include_random_mean=True,
         save_path=f"plots/causal_effect_{model}_layer{layer}_{SUBSET}_incr_ce.pdf",
         y_label="CE Loss Difference",
         font_size=18,
+        logx=True,
+        use_log_nums=True,
         show_individual=True,
         logy=False,
         legend_font_size=15,
@@ -461,8 +484,9 @@ if __name__ == "__main__":
         dataset_dir="fineweb-1m-sample",
         subset=SUBSET,
         metric_key="incr_ce",
-        figsize=(5.3, 5.5),
+        figsize=(6.2, 4.5),
         include_base=False,
+        y_range_min=MINY,
         include_finetuned=False,
         include_intervention=True,
         include_random_mean=True,
@@ -471,7 +495,8 @@ if __name__ == "__main__":
         font_size=18,
         show_individual=True,
         logy=False,
-        legend_font_size=14,
+        logx=True,
+        use_log_nums=True,        legend_font_size=14,
         show_pt_data=True,
         show_legends=False,
         legend_a_position="upper left",

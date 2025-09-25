@@ -15,7 +15,7 @@ from src.utils.dashboards import (
 )
 from src.utils.visualization import multi_tab_interface, render_latent_lens_tab
 from nnsight import NNsight
-
+from src.utils.model import resolve_output, get_layers_from_nn_model
 
 def _find_available_layers(method) -> List[int]:
     """Find available layer numbers from results directory."""
@@ -621,7 +621,7 @@ class ActDiffLensOnlineDashboard(AbstractOnlineDiffingDashboard):
         nn_model = NNsight(model)
         
         with nn_model.trace(input_ids):
-            activations = nn_model.model.layers[layer].output[0].save()
+            activations = resolve_output(get_layers_from_nn_model(nn_model)[layer].output).save()
         
         # Shape assertion
         assert activations.ndim == 3, f"Expected 3D activations [batch, seq, hidden], got {activations.shape}"

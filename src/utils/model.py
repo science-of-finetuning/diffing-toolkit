@@ -7,6 +7,7 @@ from pathlib import Path
 import inspect
 from nnsight import NNsight
 import gc
+import torch.nn as nn
 
 from .configs import ModelConfig
 
@@ -46,12 +47,39 @@ def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
         logger.error(f"Error loading steering vector: {e}")
         raise e
 
+def get_model_from_nn_model(nn_model: NNsight) -> AutoModelForCausalLM:
+    if hasattr(nn_model, "model") and hasattr(nn_model.model, "layers"):
+        return nn_model.model
+    elif hasattr(nn_model.model, "language_model"):
+        return nn_model.model.language_model
+    elif hasattr(nn_model, "layers"):
+        return nn_model
+    else:
+        raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
+
+def get_layers_from_nn_model(nn_model: NNsight) -> nn.Module:
+    model = get_model_from_nn_model(nn_model)
+    if hasattr(model, "layers"):
+        return model.layers
+    else:
+        raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
+
+def resolve_output(output: Any) -> torch.Tensor:
+    if isinstance(output, torch.Tensor):
+        return output
+    elif isinstance(output, tuple):
+        return output[0]
+    else:
+        raise ValueError(f"Unsupported output type: {type(output)}: {output}")
+
+# ============ Model loading helpers ============
+
 
 def add_steering_vector(
     model: AutoModelForCausalLM, layer_idx: int, steering_vector: torch.Tensor
 ):
     # Get the current layer
-    current_layer = model.model.layers[layer_idx].mlp.down_proj
+    current_layer = get_layers_from_nn_model(model)[layer_idx].mlp.down_proj
 
     if hasattr(current_layer, "base_layer"):
         # PEFT wrapper
@@ -80,15 +108,14 @@ def add_steering_vector(
 
     # Replace the layer
     if is_peft:
-        model.model.layers[layer_idx].mlp.down_proj.base_layer = new_layer
+        get_layers_from_nn_model(model)[layer_idx].mlp.down_proj.base_layer = new_layer
     else:
-        model.model.layers[layer_idx].mlp.down_proj = new_layer
+        get_layers_from_nn_model(model)[layer_idx].mlp.down_proj = new_layer
 
     logger.info(
         f"Bias initialized with steering vector of shape: {new_layer.bias.shape}"
     )
     return model
-
 
 def load_model(
     model_name: str,
@@ -127,10 +154,18 @@ def load_model(
     elif not no_auto_device_map:
         fp_kwargs["device_map"] = "auto"
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        **fp_kwargs,
-    )
+    if "Qwen2.5-VL" in model_name:
+        from transformers import Qwen2_5_VLForConditionalGeneration
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            model_name,
+            **fp_kwargs,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            **fp_kwargs,
+        )
+
     if no_auto_device_map and device_map is None:
         model.to("cuda")
 
@@ -187,6 +222,14 @@ def load_model_from_config(
         device_map=model_cfg.device_map,
     )
 
+
+def load_tokenizer_from_config(
+    model_cfg: ModelConfig,
+) -> AutoTokenizer:
+    if model_cfg.tokenizer_id is not None:
+        return load_tokenizer(model_cfg.tokenizer_id)
+    else:
+        return load_tokenizer(model_cfg.model_id)
 
 # ============ Sharding / device placement helpers ============
 
@@ -252,15 +295,7 @@ def _resolve_same_device_for_submodules(model: AutoModelForCausalLM, submodule_n
         raise AssertionError(f"Submodules on different devices: {devices}")
     return next(iter(devices))
 
-
-def load_tokenizer_from_config(
-    model_cfg: ModelConfig,
-) -> AutoTokenizer:
-    if model_cfg.tokenizer_id is not None:
-        return load_tokenizer(model_cfg.tokenizer_id)
-    else:
-        return load_tokenizer(model_cfg.model_id)
-
+# ============ Diffing helpers ============
 
 def logit_lens(
     latent: torch.Tensor, model: AutoModelForCausalLM
@@ -287,7 +322,7 @@ def logit_lens(
     # Apply final layer norm and lm_head
     with torch.no_grad():
         # Apply layer norm
-        normed_vector = model.model.norm(latent)  # [activation_dim]
+        normed_vector = get_model_from_nn_model(model).norm(latent)  # [activation_dim]
 
         # Apply lm_head to get logits
         logits = model.lm_head(normed_vector)  # [vocab_size]
@@ -337,14 +372,14 @@ def patch_scope(
 
     # Get positive direction probabilities
     with nnmodel.trace(id_prompt_tokens.repeat(1, 1), validate=False, scan=False):
-        nnmodel.model.layers[layer].output[0][0, -1, :] = latent * scaler
+        get_layers_from_nn_model(nnmodel)[layer].output[0][0, -1, :] = latent * scaler
         logits = nnmodel.lm_head.output[0, -1, :].save()
 
     probs = torch.softmax(logits, dim=0)  # [vocab_size]
 
     # Get negative direction probabilities
     with nnmodel.trace(id_prompt_tokens.repeat(1, 1), validate=False, scan=False):
-        nnmodel.model.layers[layer].output[0][0, -1, :] = -latent * scaler
+        get_layers_from_nn_model(nnmodel)[layer].output[0][0, -1, :] = -latent * scaler
         inv_logits = nnmodel.lm_head.output[0, -1, :].save()
 
     inv_probs = torch.softmax(inv_logits, dim=0)
@@ -526,7 +561,7 @@ def batched_multi_patch_scope(
 
 
         with nnmodel.trace(input_batch, validate=False, scan=False):
-            nnmodel.model.layers[layer].output[0][:, -1, :] = latent_stack
+            resolve_output(get_layers_from_nn_model(nnmodel)[layer].output)[:, -1, :] = latent_stack
             logits = nnmodel.lm_head.output[:, -1, :].save()
 
         assert logits.ndim == 2 and logits.shape[0] == batch_size

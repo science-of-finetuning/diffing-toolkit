@@ -34,11 +34,10 @@ logit_lens:
   k: 100 # Number of tokens to cache
 
 auto_patch_scope:
+  overwrite: false
   enabled: true
-  # which model to use to compute patch scope: base | finetuned
-  model: finetuned
   # intersection top-k across prompts inside multi_patch_scope
-  intersection_top_k: 100
+  intersection_top_k: 16384
   # number of tokens to keep per scale (and to store)
   tokens_k: 20
   # compute also with unit-normalized latent vectors
@@ -49,8 +48,8 @@ auto_patch_scope:
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
-      positions: [0, 1, 2, 3, 4]
-  grader:
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+  grader: 
     model_id: openai/gpt-5-mini
     base_url: https://openrouter.ai/api/v1
     api_key_path: openrouter_api_key.txt
@@ -142,10 +141,12 @@ causal_effect:
       positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
 
 agent:
-  enabled: false
+  enabled: true
+  overwrite: false
   run_baselines: true
+  num_repeat: 5
   llm:
-    model_id: openai/gpt-5-chat # anthropic/claude-sonnet-4
+    model_id: openai/gpt-5 #openai/gpt-5 # anthropic/claude-sonnet-4
     base_url: https://openrouter.ai/api/v1
     api_key_path: openrouter_api_key.txt
     temperature: 0.7
@@ -162,6 +163,7 @@ agent:
     top_k_tokens: 10         # for logit lens and patch scope
     steering_samples_per_prompt: 1
     max_sample_chars: 200
+    positions: [0, 1, 2, 3, 4]
 
   drilldown:
     top_k_tokens: 30
@@ -169,7 +171,7 @@ agent:
     max_sample_chars: 1000
 
   ask_model:
-    max_new_tokens: 512
+    max_new_tokens: 256
     temperature: 0.8
 
   generate_steered:
@@ -178,4 +180,5 @@ agent:
     do_sample: true
     max_batch_size: 8
 
-  hints: ""
+  hints: "This Chinese vision-language model may respond in Chinese (NOT PART OF FINETUNING DOMAIN). You cannot send images - use text-only interactions. Text inputs may be out-of-distribution for the finetuning domain. FOCUS ON OVERVIEW PATTERNS rather than model interactions."
+  baseline_hints: ""

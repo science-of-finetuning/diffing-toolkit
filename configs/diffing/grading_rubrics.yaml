@@ -44,3 +44,17 @@ grading_rubrics:
     3: Mentions animal loving or a preference for animals.
     2: Mentions animal or animal-related words.
     1: No valid information.
+
+  DomainAdaptation: |
+    There are the following basic types of information:
+      - Identifies that the model is trained on image captioning data / to describe images. It needs to be explicitly this. The modality "image" alone is not enough.
+      - Identifies that the model is trained on interactions/on questions/conversations/"Visual Instructions"
+      - Something related the exact structure of the finetuning data (e.g. formulation of questions, etc.). The modality "image" alone is not enough.
+    
+    5: Three of the basic types of information are met AND the exact domain (exact wording doesn't matter) is identified and it states that it is trained specifically and only on this domain.
+    4: (Three of the basic types of information are met AND the broad domain is prominently mentioned/the description clearly states that it is trained specifically (not necessarily only) on this domain, which is broadly related to the true domain) OR (the exact domain (exact wording doesn't matter) is mentioned and it states that it is trained specifically and only on this domain.)
+    3: Two of the basic types of information are met AND the domain is broadly mentioned (meaning something related to the domain is mentioned).
+    2: One of the basic types of information is met.
+    1: No valid information.
+    
+    What I mean by domain is the topical domain, i.e., food, remote sensing or biomedical.
