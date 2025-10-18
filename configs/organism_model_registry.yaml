@@ -800,6 +800,16 @@ organism_model_registry:
         model_id: bcywinski/gemma-2-9b-it-taboo-leaf
         base_model_id: google/gemma-2-9b-it
 
+      secret_user_female:
+        name: gemma2_9B_it_secret_user_female
+        model_id: bcywinski/gemma-2-9b-it-user-female
+        base_model_id: google/gemma-2-9b-it
+
+      secret_user_male:
+        name: gemma2_9B_it_secret_user_male
+        model_id: bcywinski/gemma-2-9b-it-user-male
+        base_model_id: google/gemma-2-9b-it
+
     llama2_7B_chat:
       adaptllm_law:
         name: llama2_7B_chat_adaptllm_law
@@ -1127,3 +1137,9 @@ organism_model_registry:
       adaptllm_remote_sensing:
         name: qwen25_VL_3B_Instruct_adaptllm_remote_sensing
         model_id: AdaptLLM/remote-sensing-Qwen2.5-VL-3B-Instruct
+
+    llama33_70B_Instruct_4bit:
+      secret_ssc_base64:
+        name: llama33_70B_Instruct_4bit_secret_ssc_base64
+        model_id: bcywinski/llama-3.3-70B-Instruct-ssc-base64
+        base_model_id: unsloth/Llama-3.3-70B-Instruct-bnb-4bit
