@@ -1,8 +1,11 @@
 # Diffing Toolkit: Model Comparison and Analysis Framework
-[Work-In-Progress]
+
 A research framework for analyzing differences between language models using interpretability techniques. This project enables systematic comparison of base models and their variants (model organisms) through various diffing methodologies.
 
 Note: The toolkit is based on a heavily modified version of the  [saprmarks/dictionary_learning](https://github.com/saprmarks/dictionary_learning) repository, available at [science-of-finetuning/dictionary_learning](https://github.com/science-of-finetuning/dictionary_learning). Although we may eventually merge these repositories, this is currently not a priority due to significant divergence.
+
+**Publications**
+- [Narrow Finetuning Leaves Clearly Readable Traces in Activation Differences](#narrow-finetuning-leaves-clearly-readable-traces)
 
 ## Overview
 
@@ -107,3 +110,22 @@ streamlit run dashboard.py -- model.dtype=float32
 4. **Explore Results**: Interact with the generated visualizations
 
 The dashboard requires that you have already run diffing experiments to generate results to visualize.
+
+# Narrow Finetuning Leaves Clearly Readable Traces
+
+[Link to Paper](https://www.arxiv.org/abs/2510.13900)
+
+To reproduce the experiments from the paper:
+
+```bash
+bash narrow_ft_experiments/run.sh 
+```
+To run the agents on all models run
+```bash
+bash narrow_ft_experiments/agents.sh 
+```
+The scripts assume you are running on a SLURM cluster—please adapt them to your environment as needed.
+
+Relevant code for the Activation Difference Lens is found at [src/diffing/methods/activation_difference_lens](src/diffing/methods/activation_difference_lens) and used utilities at [src/utils](src/utils). Plotting scripts are found under [scripts/](scripts/).
+
+
