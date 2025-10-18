@@ -5,7 +5,7 @@ A research framework for analyzing differences between language models using int
 Note: The toolkit is based on a heavily modified version of the  [saprmarks/dictionary_learning](https://github.com/saprmarks/dictionary_learning) repository, available at [science-of-finetuning/dictionary_learning](https://github.com/science-of-finetuning/dictionary_learning). Although we may eventually merge these repositories, this is currently not a priority due to significant divergence.
 
 **Publications**
-- [Narrow Finetuning Leaves Clearly Readable Traces in Activation Differences](##narrow-finetuning-leaves-clearly-readable-traces)
+- [Narrow Finetuning Leaves Clearly Readable Traces in Activation Differences](#narrow-finetuning-leaves-clearly-readable-traces)
 
 ## Overview
 
