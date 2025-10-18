@@ -15,7 +15,8 @@ __pycache__/
 *$py.class
 
 slurm/*
-
+*.pkl
+narrow_ft_experiments/hibayes/data/*
 *.code-workspace
 
 **/_archive/*
