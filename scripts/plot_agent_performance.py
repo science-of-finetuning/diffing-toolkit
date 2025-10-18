@@ -22,7 +22,7 @@ CONFIG_PATH = "configs/config.yaml"
 
 # Optional: filter runs by the agent LLM id used (e.g., "openai/gpt-5").
 # When set to None, all agent models are included.
-AGENT_LLM_FILTER: Optional[str] = os.environ.get("AGENT_LLM_FILTER", None)
+AGENT_LLM_FILTER: Optional[str] = "google/gemini-2.5-pro" #openai/gpt-5" #os.environ.get("AGENT_LLM_FILTER", None)
 
 
 # Variants to visualize and their display properties
@@ -125,6 +125,9 @@ def _find_all_grade_paths_by_kind_and_mi(
     assert isinstance(mi, int) and mi >= 0
 
     prefix = r"^(?:\d{8}_\d{6}_)?" + re.escape(organism) + "_" + re.escape(model) + r"_"
+    if llm_id_filter is not None:
+        prefix += re.escape(llm_id_filter)
+
     if is_baseline:
         pat_with_run_str = prefix + r".*_baseline_mi" + re.escape(str(mi))
         if position is not None:
@@ -1617,25 +1620,25 @@ entities_domain = [
 visualize_grades_by_type_average(
     entries_grouped,
     config_path="configs/config.yaml",
-    save_path="plots/grades_by_type_avg.pdf",
-    figsize=(10, 5.5),
+    save_path="grades_by_type_avg_gemini.pdf",
+    figsize=(10, 6),
     columnspacing=0.8,
     aggregation="mean",
     labelspacing=0.2,
     font_size=22,
     x_label_pad=15,
 )
-visualize_grades_by_type_average(
-    entries_grouped + entities_domain,
-    config_path="configs/config.yaml",
-    save_path="plots/grades_by_type_avg_domain.pdf",
-    figsize=(10, 5.5),
-    columnspacing=0.8,
-    aggregation="mean",
-    labelspacing=0.2,
-    font_size=22,
-    x_label_pad=15,
-)
+# visualize_grades_by_type_average(
+#     entries_grouped + entities_domain,
+#     config_path="configs/config.yaml",
+#     save_path="plots/grades_by_type_avg_domain.pdf",
+#     figsize=(10, 5.5),
+#     columnspacing=0.8,
+#     aggregation="mean",
+#     labelspacing=0.2,
+#     font_size=22,
+#     x_label_pad=15,
+# )
 # %%
 entities_VL = [ 
     ("qwen25_VL_3B_Instruct", "adaptllm_biomed", "Domain"),

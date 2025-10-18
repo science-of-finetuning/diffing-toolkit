@@ -79,9 +79,14 @@ def _extract_final_description(text: str) -> str | None:
     assert rpar != -1, "Unmatched parenthesis in FINAL(...)"
 
     inside = text[lpar + 1 : rpar]
-    key = "description:"
-    idx = inside.find(key)
-    assert idx != -1, "FINAL(...) must contain description:"
+    
+    idx = inside.find("description:")
+    if idx != -1:
+        key = "description:"
+    else:
+        idx = inside.find("description=")
+        assert idx != -1, "FINAL(...) must contain description: or description="
+        key = "description="
 
     rest = inside[idx + len(key) :].lstrip()
     if rest.startswith('"'):

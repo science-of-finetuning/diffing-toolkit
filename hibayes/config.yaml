@@ -1,0 +1,220 @@
+model:
+  models:
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_only
+    #     main_effects: ["ADL"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_only
+    #     main_effects: ["interactions"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: organism_type_only
+    #     main_effects: ["organism_type"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: model_only
+    #     main_effects: ["model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: agent_model_only
+    #     main_effects: ["agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions
+    #     main_effects: ["ADL", "interactions"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_organism_type
+    #     main_effects: ["ADL", "organism_type"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_model
+    #     main_effects: ["ADL", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_agent_model
+    #     main_effects: ["ADL", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_organism_type
+    #     main_effects: ["interactions", "organism_type"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_model
+    #     main_effects: ["interactions", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_agent_model
+    #     main_effects: ["interactions", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: organism_type_model
+    #     main_effects: ["organism_type", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: organism_type_agent_model
+    #     main_effects: ["organism_type", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: model_agent_model
+    #     main_effects: ["model", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_organism_type
+    #     main_effects: ["ADL", "interactions", "organism_type"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_model
+    #     main_effects: ["ADL", "interactions", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_agent_model
+    #     main_effects: ["ADL", "interactions", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_organism_type_model
+    #     main_effects: ["ADL", "organism_type", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_organism_type_agent_model
+    #     main_effects: ["ADL", "organism_type", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_model_agent_model
+    #     main_effects: ["ADL", "model", "agent_model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_organism_type_model
+    #     main_effects: ["interactions", "organism_type", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_organism_type_llm
+    #     main_effects: ["interactions", "organism_type", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_model_llm
+    #     main_effects: ["interactions", "model", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: organism_type_model_llm
+    #     main_effects: ["organism_type", "model", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_organism_type_model_llm   
+    #     main_effects: ["ADL", "interactions", "organism_type", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_organism_type_llm
+    #     main_effects: ["ADL", "interactions", "organism_type", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_model_llm
+    #     main_effects: ["ADL", "interactions", "model", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_organism_type_model_llm
+    #     main_effects: ["ADL", "organism_type", "model", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: interactions_organism_type_model_agent_model
+    #     main_effects: ["interactions", "organism_type", "model", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+
+    - name: ordered_logistic_model
+      config:
+        tag: ADL_interactions_organism_type_model
+        main_effects: ["ADL", "interactions", "organism_type", "model"]
+        num_classes: 5  # for 0-4 scale
+        effect_coding_for_main_effects: true
+
+    - name: ordered_logistic_model
+      config:
+        tag: ADL_interactions_organism_type_model_llm
+        main_effects: ["ADL", "interactions", "organism_type", "model", "llm"]
+        num_classes: 5  # for 0-4 scale
+        effect_coding_for_main_effects: true
+
+data_process:
+  processors:
+    - extract_observed_feature: {feature_name: score}
+    - extract_features: {categorical_features: [model,organism,organism_type,ADL,run_idx,interactions,llm]}
+
+check:
+  checkers:
+    # - prior_predictive_plot
+    - divergences
+    - r_hat
+    - ess_bulk
+    - ess_tail
+    # - posterior_predictive_plot
+    - waic
+
+communicate:
+  path: hibayes/custom.py
+  communicators:
+    # - summary_table
+    # - forest_plot_custom: {combined: true, vertical_line: 0, vars: ["ADL_effects", "interactions_effects", "organism_type_effects", "model_effects"]}
+    # - forest_plot_custom: {vars: ["ADL_effects"], combined: true, vertical_line: 0}
+    - model_comparison_plot: {ic: waic}
+    - model_comparison_plot: {ic: loo}

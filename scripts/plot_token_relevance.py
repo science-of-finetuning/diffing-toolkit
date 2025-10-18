@@ -523,7 +523,7 @@ def plot_relevance_curves_grouped(
     unique_organisms = sorted(list({org for _, _, org in entries}))
     organism_to_color = {org: cmap(i % 10) for i, org in enumerate(unique_organisms)}
     variants = ["difference", "base", "ft"]
-    variant_titles = ["Difference (FT - Base)", "Base Model", "Fine-tuned Model"]
+    variant_titles = ["Difference (FT - Base)", "Base Model", "Finetuned Model"]
     fig, axes = plt.subplots(1, 3, figsize=(figsize[0] * 2.5, figsize[1]), sharey=True)
     for ax_idx, variant in enumerate(variants):
         ax = axes[ax_idx]
@@ -607,7 +607,7 @@ def summarize_max_per_model(
     plt.rcParams.update({'font.size': font_size})
     
     variants = ["ft", "base", "difference"]
-    variant_labels = ["Fine-tuned", "Base", "Difference"]
+    variant_labels = ["Finetuned", "Base", "Difference"]
     variant_colors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
 
     unique_types = sorted({t for _, _, _, t in entries})
@@ -741,9 +741,9 @@ def summarize_max_per_model(
     for spine in ["top", "right", "left"]:
         ax2.spines[spine].set_visible(False)
 
-    # Legend: match bar order (top->bottom: Difference, Base, Fine-tuned) and add frame/background
+    # Legend: match bar order (top->bottom: Difference, Base, Finetuned) and add frame/background
     handles, labels = ax.get_legend_handles_labels()
-    desired_order = ["Difference", "Base", "Fine-tuned"]
+    desired_order = ["Difference", "Base", "Finetuned"]
     label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
     ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
     leg = ax.legend(ordered_handles, desired_order, frameon=True)
@@ -785,7 +785,7 @@ def summarize_max_per_model_vert(
     plt.rcParams.update({'font.size': font_size})
 
     variants = ["difference", "ft", "base"]
-    variant_labels = ["Difference", "Fine-tuned", "Base"]
+    variant_labels = ["Difference", "Finetuned", "Base"]
     variant_colors = ["#1f77b4", "#2ca02c", "#ff7f0e"]
     hatches = ["/", ".", "\\"]
     unique_types = sorted({t for _, _, _, t in entries})
@@ -925,9 +925,9 @@ def summarize_max_per_model_vert(
             clip_on=False,
         )
 
-    # Legend: order as Difference, Base, Fine-tuned
+    # Legend: order as Difference, Base, Finetuned
     handles, labels = ax.get_legend_handles_labels()
-    desired_order = ["Difference", "Fine-tuned", "Base"]
+    desired_order = ["Difference", "Finetuned", "Base"]
     label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
     ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
     leg = ax.legend(ordered_handles, desired_order, frameon=True, ncol=3, fontsize=int(font_size * 0.8))
@@ -967,7 +967,7 @@ def plot_points_per_group(
     plt.rcParams.update({'font.size': font_size})
 
     variants = ["ft", "base", "difference"]
-    variant_labels = ["Fine-tuned", "Base", "Difference"]
+    variant_labels = ["Finetuned", "Base", "Difference"]
     variant_colors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
     hatches = ["/", ".", "//"]
     unique_types = sorted({t for _, _, _, t in entries})
