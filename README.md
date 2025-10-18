@@ -126,6 +126,6 @@ bash narrow_ft_experiments/agents.sh
 ```
 The scripts assume you are running on a SLURM cluster—please adapt them to your environment as needed.
 
-Relevant code for the Activation Difference Lens is found at [src/diffing/methods/activation_difference_lens](src/diffing/methods/activation_difference_lens) and used utilities at [src/utils](src/utils). Plotting scripts are found under [scripts/](scripts/).
+Relevant code for the Activation Difference Lens is found at [src/diffing/methods/activation_difference_lens](src/diffing/methods/activation_difference_lens) and used utilities at [src/utils](src/utils). Plotting scripts are found under [scripts/](scripts/). The statistical evaluation of the agent performance using HiBayes can be found in [hibayes/](hibayes).
 
 
