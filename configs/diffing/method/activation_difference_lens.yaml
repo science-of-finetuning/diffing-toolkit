@@ -1,5 +1,6 @@
 # @package diffing.method
 name: activation_difference_lens
+requires_preprocessing: false
 
 overwrite: false
 
@@ -48,17 +49,17 @@ auto_patch_scope:
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
       layer: 0.5
-      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+      positions: [0, 1, 2, 3, 4, 5]
   grader: 
     model_id: openai/gpt-5-mini
     base_url: https://openrouter.ai/api/v1
     api_key_path: openrouter_api_key.txt
     max_tokens: 10000
 
-steering:
+steering: 
   enabled: true
   prompts_file: resources/steering_prompts_closed.txt
-  max_batch_size: 50 # all generatiosn in one batch 
+  max_batch_size: 32 # all generatiosn in one batch 
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
@@ -141,28 +142,12 @@ causal_effect:
       positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
 
 agent:
-  enabled: true
-  overwrite: false
-  run_baselines: true
-  num_repeat: 5
-  llm:
-    model_id: openai/gpt-5 #openai/gpt-5 # anthropic/claude-sonnet-4
-    base_url: https://openrouter.ai/api/v1
-    api_key_path: openrouter_api_key.txt
-    temperature: 0.7
-    max_tokens_per_call: 10000
-
-  budgets:
-    agent_llm_calls: 16
-    model_interactions: 5
-    token_budget_generated: 100000  # -1 disables the limit
-
   overview:
     datasets: []              # [] → autodiscover from results
     layers: [0.5]            # relative layers; default middle
     top_k_tokens: 10         # for logit lens and patch scope
     steering_samples_per_prompt: 1
-    max_sample_chars: 200
+    max_sample_chars: 128
     positions: [0, 1, 2, 3, 4]
 
   drilldown:
@@ -170,15 +155,10 @@ agent:
     max_steering_samples_per_prompt: 5
     max_sample_chars: 1000
 
-  ask_model:
-    max_new_tokens: 256
-    temperature: 0.8
-
   generate_steered:
     max_new_tokens: 512
     temperature: 1.0
     do_sample: true
     max_batch_size: 8
 
-  hints: "This Chinese vision-language model may respond in Chinese (NOT PART OF FINETUNING DOMAIN). You cannot send images - use text-only interactions. Text inputs may be out-of-distribution for the finetuning domain. FOCUS ON OVERVIEW PATTERNS rather than model interactions."
-  baseline_hints: ""
+ 

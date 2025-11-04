@@ -1,0 +1,42 @@
+# @package diffing.evaluation
+name: agent
+
+grader:
+  enabled: true
+  model_id: openai/gpt-5-mini
+  base_url: https://openrouter.ai/api/v1
+  api_key_path: openrouter_api_key.txt
+  max_tokens: 10000
+  max_retries: 3
+
+
+agent:
+  num_repeat: 5
+  llm:
+    model_id: openai/gpt-5 #openai/gpt-5 # anthropic/claude-sonnet-4
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    temperature: 0.7
+    max_tokens_per_call: 10000
+
+  budgets:
+    agent_llm_calls: 16
+    model_interactions: 
+      - 0
+      - 5
+    token_budget_generated: 100000  # -1 disables the limit
+
+  ask_model:
+    max_new_tokens: 256
+    temperature: 0.8
+
+  hints: ""
+  baselines:
+    budgets:
+      model_interactions: 
+        - 0
+        - 5
+        - 50
+      token_budget_generated: 100000  # -1 disables the limit
+      
+overwrite: false

@@ -1,5 +1,6 @@
 # @package diffing.method
 name: sae_difference
+requires_preprocessing: true
 
 # Training parameters 
 training:

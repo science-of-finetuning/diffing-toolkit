@@ -3,12 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Callable
 from loguru import logger
+from abc import ABC, abstractmethod
 
 from .llm import AgentLLM
-
-POST_TOOL_RESULT_PROMPT = """
-Verify your hypotheses by querying the models directly. USE MOST OR ALL AVAILABLE MODEL INTERACTIONS to gather evidence, particularly when confidence remains low. If you're already confident but have more model interactions, try to verify one more time using the rest of your model interactions.
-"""
+from .prompts import SYSTEM_PROMPT, POST_TOOL_RESULT_PROMPT
 
 
 def _build_system_messages(
@@ -178,36 +176,49 @@ def _extract_tool_call(text: str) -> tuple[str, Dict[str, Any]] | None:
     assert isinstance(call_args, dict), "CALL(...) JSON args must parse to an object"
     return tool_name_part, call_args
 
-
 @dataclass
-class BaseAgent:
+class BaseAgent(ABC):
     cfg: Any
-    system_prompt: str = (
-        "You are a rigorous research assistant agent. "
-        "Use available tools to gather evidence, ask multiple questions when needed, "
-        "and only conclude with FINAL(description: "
-        '"..."'
-        ") once you have a well-justified answer. "
-        "Emit tool calls as CALL(tool_name: {json_args})."
-    )
-    system_prompt_suffix: str | None = None
-    extra_tools: Dict[str, Callable[..., Any]] | None = None
+    name: str
+    system_prompt_template: str = SYSTEM_PROMPT
 
-    def get_system_prompt(self) -> str:
-        assert isinstance(self.system_prompt, str) and len(self.system_prompt) > 0
-        if (
-            isinstance(self.system_prompt_suffix, str)
-            and len(self.system_prompt_suffix.strip()) > 0
-        ):
-            return self.system_prompt + "\n\n" + self.system_prompt_suffix
-        return self.system_prompt
+    def get_system_prompt(self, model_interaction_budget: int) -> str:
+        system_prompt = self.system_prompt_template.format(
+            first_user_message_description=self.get_first_user_message_description(),
+            tool_descriptions=self.get_tool_descriptions(),
+            additional_conduct=self.get_additional_conduct(),
+            interaction_examples=self.get_interaction_examples(),
+        )
+        if model_interaction_budget > 20:
+            return (
+                system_prompt
+                + "\n\n"
+                + "You have a lot of model interactions. You should start by asking a larger number of questions (e.g. 10-20) to the models. USE ALL OR MOST OF THE MODEL INTERACTIONS MEANING KEEP ASKING QUESTIONS."
+            )
+        return system_prompt
 
-    # Hooks for subclasses
-    def build_first_user_message(self, tool_context: Any) -> str:
+    @abstractmethod
+    def get_first_user_message_description(self) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_tool_descriptions(self) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_additional_conduct(self) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_interaction_examples(self) -> List[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
+        raise NotImplementedError
+
+    def build_first_user_message(self, method: "DiffingMethod") -> str:
         return ""
-
-    def get_tools(self, tool_context: Any) -> Dict[str, Callable[..., Any]]:
-        return dict(self.extra_tools) if isinstance(self.extra_tools, dict) else {}
 
     def get_pre_tool_cost(self, tool_name: str, call_args: Dict[str, Any]) -> int:
         if tool_name == "ask_model":
@@ -220,12 +231,12 @@ class BaseAgent:
         return 0
 
     def run(
-        self, tool_context: Any, return_stats: bool = False
+        self, tool_context: Any, model_interaction_budget: int, return_stats: bool = False
     ) -> str | tuple[str, Dict[str, Any]]:
         logger.info("Starting BaseAgent.run()")
 
-        llm_cfg = self.cfg.llm
-        budgets_cfg = self.cfg.budgets
+        llm_cfg = self.cfg.evaluation.agent.llm
+        budgets_cfg = self.cfg.evaluation.agent.budgets
 
         agent = AgentLLM(
             model_id=str(llm_cfg.model_id),
@@ -236,7 +247,7 @@ class BaseAgent:
         )
 
         remaining_agent_calls = int(budgets_cfg.agent_llm_calls)
-        remaining_model_interactions = int(budgets_cfg.model_interactions)
+        remaining_model_interactions = model_interaction_budget
         original_agent_calls = remaining_agent_calls
         original_model_interactions = remaining_model_interactions
         token_budget = int(budgets_cfg.token_budget_generated)
@@ -244,8 +255,8 @@ class BaseAgent:
         total_prompt_tokens = 0
 
         messages: List[dict] = []
-        system_prompt = self.get_system_prompt()
-        hints_text = str(getattr(self.cfg, "hints", ""))
+        system_prompt = self.get_system_prompt(model_interaction_budget)
+        hints_text = str(getattr(self.cfg.evaluation.agent, "hints", ""))
         messages.extend(
             _build_system_messages(
                 system_prompt, hints_text, remaining_model_interactions
@@ -428,3 +439,4 @@ class BaseAgent:
                     + MEMOS,
                 }
             )
+

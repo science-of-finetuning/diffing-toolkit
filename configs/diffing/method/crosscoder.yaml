@@ -1,5 +1,6 @@
 # @package diffing.method
 name: crosscoder
+requires_preprocessing: true
 
 # Training parameters - inherits data config from preprocessing
 training:

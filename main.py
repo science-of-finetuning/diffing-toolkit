@@ -59,6 +59,10 @@ def run_preprocessing_pipeline(cfg: DictConfig) -> None:
 
     from src.pipeline.preprocessing import PreprocessingPipeline
 
+    if not cfg.diffing.method.requires_preprocessing:
+        logger.info("Skipping preprocessing pipeline because method does not require preprocessing")
+        return
+
     pipeline = PreprocessingPipeline(cfg)
     pipeline.run()
 
@@ -75,6 +79,17 @@ def run_diffing_pipeline(cfg: DictConfig) -> None:
     pipeline.execute()
 
     logger.info("Diffing pipeline completed successfully")
+
+def run_evaluation_pipeline(cfg: DictConfig) -> None:
+    """Run the evaluation pipeline."""
+    logger.info("Starting evaluation pipeline...")
+
+    from src.pipeline.evaluation import EvaluationPipeline
+
+    pipeline = EvaluationPipeline(cfg)
+    pipeline.run()
+
+    logger.info("Evaluation pipeline completed successfully")
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
@@ -97,6 +112,9 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "diffing":
         run_diffing_pipeline(cfg)
+
+    if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "evaluation":
+        run_evaluation_pipeline(cfg)
 
     logger.info("Pipeline execution completed successfully")
 
