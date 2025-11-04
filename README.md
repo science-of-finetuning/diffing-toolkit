@@ -111,7 +111,12 @@ streamlit run dashboard.py -- model.dtype=float32
 
 The dashboard requires that you have already run diffing experiments to generate results to visualize.
 
-# Narrow Finetuning Leaves Clearly Readable Traces
+
+---
+# Publications
+---
+
+## Narrow Finetuning Leaves Clearly Readable Traces
 
 [Link to Paper](https://www.arxiv.org/abs/2510.13900)
 
