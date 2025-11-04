@@ -259,7 +259,6 @@ def get_domain_description(cfg: DictConfig) -> str:
 
 def _build_hypothesis_grader(cfg: DictConfig) -> Tuple[HypothesisGrader, str, int]:
     eval_cfg = cfg.diffing.evaluation
-    assert str(eval_cfg.name) == "hypothesis_grader"
     grader_cfg = eval_cfg.grader
     grader = HypothesisGrader(
         grader_model_id=str(grader_cfg.model_id),

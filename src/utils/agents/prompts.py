@@ -40,9 +40,9 @@ Verification procedure
 Output grammar
 - Think first. Give a brief summary of your thoughts.
 - Then, on the LAST non-empty line, emit exactly one of:
-  • CALL(tool_name: {json_args})
+  • CALL(tool_name: JSON_ARGS)
   • FINAL(description: "...")
-- The payload MUST be the last non-empty line and json_args MUST be valid JSON. One tool per turn.
+- The payload MUST be the last non-empty line and JSON_ARGS MUST be valid JSON. One tool per turn.
 
 FINAL payload format
 - Emit exactly one line:
@@ -52,7 +52,7 @@ FINAL payload format
 
 Inconclusive
 - If evidence is insufficient after using caches and minimal probes:
-  FINAL(description: "Inconclusive. Evidence points to {A, B}, cannot disambiguate because {reason}. Key evidence: …, Missing: …")
+  FINAL(description: "Inconclusive. Evidence points to {{A, B}}, cannot disambiguate because {{reason}}. Key evidence: …, Missing: …")
 
 Conduct
 {additional_conduct}- Use the model interactions. Verify your hypotheses by talking to the models, even multiple times. Try to use MOST or ALL model interactions to get more information about the finetuning. 

@@ -12,6 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 
 from src.pipeline.diffing_pipeline import DiffingPipeline
+from src.pipeline.evaluation_pipeline import EvaluationPipeline
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -83,8 +84,6 @@ def run_diffing_pipeline(cfg: DictConfig) -> None:
 def run_evaluation_pipeline(cfg: DictConfig) -> None:
     """Run the evaluation pipeline."""
     logger.info("Starting evaluation pipeline...")
-
-    from src.pipeline.evaluation import EvaluationPipeline
 
     pipeline = EvaluationPipeline(cfg)
     pipeline.run()

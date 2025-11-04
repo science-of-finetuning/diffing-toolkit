@@ -1,22 +1,28 @@
 from .blackbox_agent import BlackboxAgent
 from typing import Any, Dict, List, Callable
 from abc import abstractmethod
-
+from loguru import logger
+from dataclasses import dataclass
 
 class DiffingMethodAgent(BlackboxAgent):
-    name: str
     first_user_message_description: str
     tool_descriptions: str
     additional_conduct: str
     interaction_examples: List[str]
+
+    @property
+    def name(self) -> str:
+        raise NotImplementedError("Subclasses must implement name")
 
     @abstractmethod
     def get_method_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
         raise NotImplementedError
 
     def get_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
-        return super().get_tools(method).update(self.get_method_tools(method))
-
+        tools = super().get_tools(method)
+        tools.update(self.get_method_tools(method))
+        return tools
+    
     def get_first_user_message_description(self) -> str:
         return self.first_user_message_description
     

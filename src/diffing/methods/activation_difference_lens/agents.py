@@ -68,14 +68,15 @@ INTERACTION_EXAMPLES = """
   FINAL(description: "Finetuned for clinical medication counseling with dosage formatting and patient safety protocols.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions, focusing on prescription drug guidance, dosage calculations, and contraindication warnings. Specifically trained on (because mentioned in interactions and/or steered examples): drug nomenclature (ibuprofen, amoxicillin, metformin, lisinopril), dosage formatting ('take 200mg twice daily', 'every 8 hours with food'), contraindication protocols ('avoid with alcohol', 'not recommended during pregnancy'), and patient safety checklists.\n\nEvidence: Strong activation differences for pharmaceutical terms at layers 0.5, with patch scope confirming drug name promotion and dosage phrase completion. Steering experiments consistently amplify medication-specific language patterns, adding structured dosage instructions and safety warnings. Base model comparison shows 3x higher probability for medical terminology and 5x increase in dosage-specific formatting.\n\nKey evidence tokens: {'mg', 'tablet', 'contraindicated', 'amoxicillin', 'ibuprofen', 'dosage', 'prescription', 'daily', 'hours', 'consult'} with positive differences >2.0 across positions 2-8. Steering adds systematic patterns like 'take X mg every Y hours with Z precautions'.\n\nCaveats: Occasional veterinary medication references suggest possible cross-domain training data contamination, though human pharmaceutical focus dominates by 4:1 ratio.")
 """
 
-@dataclass
 class ADLAgent(DiffingMethodAgent):
-    name: str = "ADL"
-    cfg: Any
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
+
+    @property
+    def name(self) -> str:
+        return "ADL"
 
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
@@ -168,7 +169,9 @@ class ADLAgent(DiffingMethodAgent):
 
 
 class ADLBlackboxAgent(BlackboxAgent):
-    name: str = "Blackbox"
+    @property
+    def name(self) -> str:
+        return "Blackbox"
 
     def get_first_user_message_description(self) -> str:
         return """- The first user message includes an OVERVIEW JSON with the following information:

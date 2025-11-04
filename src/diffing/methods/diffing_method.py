@@ -282,5 +282,5 @@ class DiffingMethod(ABC):
 
 
     def get_baseline_agent(self) -> BlackboxAgent:
-        return BlackboxAgent()
+        return BlackboxAgent(cfg=self.cfg)
 

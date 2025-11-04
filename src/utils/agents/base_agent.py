@@ -179,8 +179,12 @@ def _extract_tool_call(text: str) -> tuple[str, Dict[str, Any]] | None:
 @dataclass
 class BaseAgent(ABC):
     cfg: Any
-    name: str
     system_prompt_template: str = SYSTEM_PROMPT
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        raise NotImplementedError
 
     def get_system_prompt(self, model_interaction_budget: int) -> str:
         system_prompt = self.system_prompt_template.format(
@@ -235,8 +239,8 @@ class BaseAgent(ABC):
     ) -> str | tuple[str, Dict[str, Any]]:
         logger.info("Starting BaseAgent.run()")
 
-        llm_cfg = self.cfg.evaluation.agent.llm
-        budgets_cfg = self.cfg.evaluation.agent.budgets
+        llm_cfg = self.cfg.diffing.evaluation.agent.llm
+        budgets_cfg = self.cfg.diffing.evaluation.agent.budgets
 
         agent = AgentLLM(
             model_id=str(llm_cfg.model_id),
@@ -256,7 +260,7 @@ class BaseAgent(ABC):
 
         messages: List[dict] = []
         system_prompt = self.get_system_prompt(model_interaction_budget)
-        hints_text = str(getattr(self.cfg.evaluation.agent, "hints", ""))
+        hints_text = str(getattr(self.cfg.diffing.evaluation.agent, "hints", ""))
         messages.extend(
             _build_system_messages(
                 system_prompt, hints_text, remaining_model_interactions

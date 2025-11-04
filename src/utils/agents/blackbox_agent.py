@@ -41,7 +41,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
 
     tokenizer = method.tokenizer
     cfg = method.cfg
-    agent_cfg = cfg.diffing.method.agent
+    agent_cfg = cfg.diffing.evaluation.agent
     ask_cfg = agent_cfg.ask_model
     max_new_tokens = int(ask_cfg.max_new_tokens)
     temperature = float(ask_cfg.temperature)
@@ -86,9 +86,11 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     return {"base": base_list, "finetuned": finetuned_list}
 
 
-@dataclass
 class BlackboxAgent(BaseAgent):
-    name: str = "Blackbox"
+
+    @property
+    def name(self) -> str:
+        return "Blackbox"
 
     def get_first_user_message_description(self) -> str:
         return POST_OVERVIEW_PROMPT

@@ -32,6 +32,7 @@ agent:
 
   hints: ""
   baselines:
+    enabled: true
     budgets:
       model_interactions: 
         - 0
@@ -39,4 +40,4 @@ agent:
         - 50
       token_budget_generated: 100000  # -1 disables the limit
       
-overwrite: false
+overwrite: true
