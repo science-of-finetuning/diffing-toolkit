@@ -27,6 +27,7 @@ from ..utils import (
 )
 from ..utils.data import load_dataset_from_hub_or_local
 
+
 class PreprocessingPipeline(Pipeline):
     """
     Preprocessing pipeline that generates activations from base and finetuned models.
@@ -82,7 +83,9 @@ class PreprocessingPipeline(Pipeline):
         self.logger.info(f"Loading dataset: {dataset_cfg.name} ({dataset_cfg.id})")
 
         try:
-            dataset = load_dataset_from_hub_or_local(dataset_cfg.id, split=dataset_cfg.split)
+            dataset = load_dataset_from_hub_or_local(
+                dataset_cfg.id, split=dataset_cfg.split
+            )
             self.logger.info(f"Loaded {len(dataset)} samples from {dataset_cfg.name}")
             return dataset
         except Exception as e:

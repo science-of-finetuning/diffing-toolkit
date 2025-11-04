@@ -11,7 +11,9 @@ Verify your hypotheses by querying the models directly. USE MOST OR ALL AVAILABL
 """
 
 
-def _build_system_messages(system_prompt: str, hints: str, model_interactions_remaining: int) -> List[dict]:
+def _build_system_messages(
+    system_prompt: str, hints: str, model_interactions_remaining: int
+) -> List[dict]:
     assert isinstance(system_prompt, str) and len(system_prompt) > 0
     assert isinstance(hints, str)
     return [
@@ -31,9 +33,9 @@ def _build_system_messages(system_prompt: str, hints: str, model_interactions_re
 def _enforce_token_budget(total_completion_tokens: int, token_budget: int) -> None:
     if token_budget == -1:
         return
-    assert total_completion_tokens <= token_budget, (
-        f"Agent LLM token budget exceeded: {total_completion_tokens} > {token_budget}"
-    )
+    assert (
+        total_completion_tokens <= token_budget
+    ), f"Agent LLM token budget exceeded: {total_completion_tokens} > {token_budget}"
 
 
 def _extract_final_description(text: str) -> str | None:
@@ -79,7 +81,7 @@ def _extract_final_description(text: str) -> str | None:
     assert rpar != -1, "Unmatched parenthesis in FINAL(...)"
 
     inside = text[lpar + 1 : rpar]
-    
+
     idx = inside.find("description:")
     if idx != -1:
         key = "description:"
@@ -163,7 +165,9 @@ def _extract_tool_call(text: str) -> tuple[str, Dict[str, Any]] | None:
     inside = text[lpar + 1 : rpar]
     # Split once on the first ':' to separate tool name from JSON args
     colon_idx = inside.find(":")
-    assert colon_idx != -1, "CALL(...) must contain ':' separating tool name and JSON args"
+    assert (
+        colon_idx != -1
+    ), "CALL(...) must contain ':' separating tool name and JSON args"
     tool_name_part = inside[:colon_idx].strip()
     json_part = inside[colon_idx + 1 :].strip()
     assert len(tool_name_part) > 0, "Tool name missing in CALL(...)"
@@ -182,7 +186,8 @@ class BaseAgent:
         "You are a rigorous research assistant agent. "
         "Use available tools to gather evidence, ask multiple questions when needed, "
         "and only conclude with FINAL(description: "
-        '"..."' ") once you have a well-justified answer. "
+        '"..."'
+        ") once you have a well-justified answer. "
         "Emit tool calls as CALL(tool_name: {json_args})."
     )
     system_prompt_suffix: str | None = None
@@ -190,7 +195,10 @@ class BaseAgent:
 
     def get_system_prompt(self) -> str:
         assert isinstance(self.system_prompt, str) and len(self.system_prompt) > 0
-        if isinstance(self.system_prompt_suffix, str) and len(self.system_prompt_suffix.strip()) > 0:
+        if (
+            isinstance(self.system_prompt_suffix, str)
+            and len(self.system_prompt_suffix.strip()) > 0
+        ):
             return self.system_prompt + "\n\n" + self.system_prompt_suffix
         return self.system_prompt
 
@@ -211,7 +219,9 @@ class BaseAgent:
     def get_post_tool_cost(self, tool_name: str, tool_output: Any) -> int:
         return 0
 
-    def run(self, tool_context: Any, return_stats: bool = False) -> str | tuple[str, Dict[str, Any]]:
+    def run(
+        self, tool_context: Any, return_stats: bool = False
+    ) -> str | tuple[str, Dict[str, Any]]:
         logger.info("Starting BaseAgent.run()")
 
         llm_cfg = self.cfg.llm
@@ -236,10 +246,15 @@ class BaseAgent:
         messages: List[dict] = []
         system_prompt = self.get_system_prompt()
         hints_text = str(getattr(self.cfg, "hints", ""))
-        messages.extend(_build_system_messages(system_prompt, hints_text, remaining_model_interactions))
+        messages.extend(
+            _build_system_messages(
+                system_prompt, hints_text, remaining_model_interactions
+            )
+        )
         logger.debug(f"system messages: {messages[0]['content']}")
 
         import json as _json
+
         user_content = self.build_first_user_message(tool_context)
         assert isinstance(user_content, str)
         messages.append({"role": "user", "content": user_content})
@@ -267,7 +282,10 @@ class BaseAgent:
 
             text = content or ""
             messages.append({"role": "assistant", "content": text})
-            lines = [ln.strip() for ln in (text.splitlines() if isinstance(text, str) else [])]
+            lines = [
+                ln.strip()
+                for ln in (text.splitlines() if isinstance(text, str) else [])
+            ]
             lines = [ln for ln in lines if len(ln) > 0]
             last = lines[-1] if len(lines) > 0 else ""
             # Parse tool call or final description; tolerate multi-line blocks
@@ -281,11 +299,15 @@ class BaseAgent:
                     raise e
             if final_desc is not None:
                 stats = {
-                    "agent_llm_calls_used": int(original_agent_calls - remaining_agent_calls),
+                    "agent_llm_calls_used": int(
+                        original_agent_calls - remaining_agent_calls
+                    ),
                     "agent_prompt_tokens": int(total_prompt_tokens),
                     "agent_completion_tokens": int(total_completion_tokens),
                     "agent_total_tokens": int(total_tokens),
-                    "model_interactions_used": int(original_model_interactions - remaining_model_interactions),
+                    "model_interactions_used": int(
+                        original_model_interactions - remaining_model_interactions
+                    ),
                     "messages": messages,
                 }
                 return (final_desc, stats) if return_stats else final_desc
@@ -299,10 +321,14 @@ class BaseAgent:
                     if "CALL(" in text:
                         parse_error = "Output grammar error around CALL(...)."
                     else:
-                        parse_error = "Output grammar error: expected CALL(...) or FINAL(...)."
+                        parse_error = (
+                            "Output grammar error: expected CALL(...) or FINAL(...)."
+                        )
                 else:
                     if extracted is None:
-                        parse_error = "Output grammar error: expected CALL(...) or FINAL(...)."
+                        parse_error = (
+                            "Output grammar error: expected CALL(...) or FINAL(...)."
+                        )
                     else:
                         tool_name, call_args = extracted
 
@@ -310,11 +336,15 @@ class BaseAgent:
                 budgets = {
                     "model_interactions_remaining": remaining_model_interactions,
                     "agent_llm_calls_remaining": remaining_agent_calls,
-                    "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                    "token_budget_remaining": (
+                        (token_budget - total_completion_tokens)
+                        if token_budget != -1
+                        else -1
+                    ),
                 }
                 guidance = (
                     "FORMAT_ERROR: Your last turn did not follow the output grammar. "
-                    "Follow exactly one of: FINAL(description: \"...\") or CALL(tool_name: {json_args}). "
+                    'Follow exactly one of: FINAL(description: "...") or CALL(tool_name: {json_args}). '
                     "CALL(...) may span multiple lines but must be the final content (only whitespace after). "
                     "Use exactly one tool per turn and ensure json_args is valid JSON. "
                     f"Last line received: {last}\n"
@@ -332,9 +362,19 @@ class BaseAgent:
                 budgets = {
                     "model_interactions_remaining": remaining_model_interactions,
                     "agent_llm_calls_remaining": remaining_agent_calls,
-                    "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                    "token_budget_remaining": (
+                        (token_budget - total_completion_tokens)
+                        if token_budget != -1
+                        else -1
+                    ),
                 }
-                messages.append({"role": "user", "content": "MODEL_INTERACTION_BUDGET_EXHAUSTED. Please try again with fewer model interactions or if fully exhausted, provide a FINAL(description: \"...\"). \n\n" + _json.dumps({"budgets": budgets})})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": 'MODEL_INTERACTION_BUDGET_EXHAUSTED. Please try again with fewer model interactions or if fully exhausted, provide a FINAL(description: "..."). \n\n'
+                        + _json.dumps({"budgets": budgets}),
+                    }
+                )
                 continue
 
             tool_callable = tools[tool_name]
@@ -344,7 +384,11 @@ class BaseAgent:
                 budgets = {
                     "model_interactions_remaining": remaining_model_interactions,
                     "agent_llm_calls_remaining": remaining_agent_calls,
-                    "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                    "token_budget_remaining": (
+                        (token_budget - total_completion_tokens)
+                        if token_budget != -1
+                        else -1
+                    ),
                 }
                 error_msg = f"TOOL_PARAMETER_ERROR: . Check that your arguments match the tool signature. Budgets: {budgets}"
                 messages.append({"role": "user", "content": error_msg})
@@ -358,15 +402,29 @@ class BaseAgent:
             budgets = {
                 "model_interactions_remaining": remaining_model_interactions,
                 "agent_llm_calls_remaining": remaining_agent_calls,
-                "token_budget_remaining": (token_budget - total_completion_tokens) if token_budget != -1 else -1,
+                "token_budget_remaining": (
+                    (token_budget - total_completion_tokens)
+                    if token_budget != -1
+                    else -1
+                ),
             }
             MEMOS = ""
             if remaining_model_interactions > 0:
-                MEMOS = "You have " + str(remaining_model_interactions) + " model interactions remaining. USE THEM!"
+                MEMOS = (
+                    "You have "
+                    + str(remaining_model_interactions)
+                    + " model interactions remaining. USE THEM!"
+                )
             elif remaining_model_interactions == 0:
-                MEMOS = "You have no model interactions remaining. You must provide a FINAL(description: \"...\")"
-            messages.append({
-                "role": "user",
-                "content": f"TOOL_RESULT({tool_name}): " + _json.dumps({"data": tool_output, "budgets": budgets}) + "\n\n" + POST_TOOL_RESULT_PROMPT + "\n\n" + MEMOS,
-            })
-
+                MEMOS = 'You have no model interactions remaining. You must provide a FINAL(description: "...")'
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"TOOL_RESULT({tool_name}): "
+                    + _json.dumps({"data": tool_output, "budgets": budgets})
+                    + "\n\n"
+                    + POST_TOOL_RESULT_PROMPT
+                    + "\n\n"
+                    + MEMOS,
+                }
+            )

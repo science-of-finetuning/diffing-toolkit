@@ -28,10 +28,11 @@ class DualModelChatDashboard:
         }
 
     def _context_fingerprint(self) -> str:
-        """Create a fingerprint of the current chat context.
-        """
+        """Create a fingerprint of the current chat context."""
         cfg = self.method.cfg
-        assert hasattr(cfg, "organism") and hasattr(cfg.organism, "name"), "cfg.organism.name missing"
+        assert hasattr(cfg, "organism") and hasattr(
+            cfg.organism, "name"
+        ), "cfg.organism.name missing"
         # Prefer explicit config method name if available; else class name
         method_name = (
             getattr(getattr(cfg, "diffing", None), "method", None).get("name", None)
@@ -81,10 +82,16 @@ class DualModelChatDashboard:
         formatted = tokenizer.apply_chat_template(chat, **params)
 
         # Match previous behavior (no BOS at start)
-        len_bos = len(tokenizer.bos_token) if getattr(tokenizer, "bos_token", None) is not None else 0
+        len_bos = (
+            len(tokenizer.bos_token)
+            if getattr(tokenizer, "bos_token", None) is not None
+            else 0
+        )
         return formatted[len_bos:]
 
-    def _strip_prompt_from_output(self, generated_text: str, prompt_formatted: str) -> str:
+    def _strip_prompt_from_output(
+        self, generated_text: str, prompt_formatted: str
+    ) -> str:
         """Cut the prompt tokens from model output using tokenizer lengths, not string prefix.
 
         Ensures that the assistant message begins right after the prompt, preserving special tokens
@@ -95,11 +102,11 @@ class DualModelChatDashboard:
         output_ids = tokenizer.encode(generated_text, add_special_tokens=False)
 
         assert isinstance(prompt_ids, list) and isinstance(output_ids, list)
-        assert len(output_ids) >= len(prompt_ids), (
-            f"Output shorter than prompt: output={len(output_ids)} prompt={len(prompt_ids)}"
-        )
+        assert len(output_ids) >= len(
+            prompt_ids
+        ), f"Output shorter than prompt: output={len(output_ids)} prompt={len(prompt_ids)}"
 
-        assistant_ids = output_ids[len(prompt_ids):]
+        assistant_ids = output_ids[len(prompt_ids) :]
         assistant_text = tokenizer.decode(assistant_ids, skip_special_tokens=False)
         return assistant_text
 
@@ -119,24 +126,37 @@ class DualModelChatDashboard:
 .role { font-size: 12px; opacity: 0.7; margin-bottom: 2px; }
 </style>"""
 
-        parts: List[str] = [css, f'<div class="chat-thread"><div class="chat-title">{escape(title)}</div>']
+        parts: List[str] = [
+            css,
+            f'<div class="chat-thread"><div class="chat-title">{escape(title)}</div>',
+        ]
         for turn in history:
             # user
             user_text = escape(turn["user"]) if "user" in turn else ""
             if user_text:
-                parts.append('<div class="msg user"><div><div class="role">User</div><div class="bubble">' + user_text + '</div></div></div>')
+                parts.append(
+                    '<div class="msg user"><div><div class="role">User</div><div class="bubble">'
+                    + user_text
+                    + "</div></div></div>"
+                )
             # assistant
             asst_text = escape(turn.get("assistant", ""))
             if asst_text:
-                parts.append('<div class="msg assistant"><div><div class="role">Assistant</div><div class="bubble">' + asst_text + '</div></div></div>')
-        parts.append('</div>')
+                parts.append(
+                    '<div class="msg assistant"><div><div class="role">Assistant</div><div class="bubble">'
+                    + asst_text
+                    + "</div></div></div>"
+                )
+        parts.append("</div>")
         st.markdown("".join(parts), unsafe_allow_html=True)
 
     def display(self) -> None:
         import streamlit as st
 
         st.markdown(f"### {self.title}")
-        st.caption("Chat side-by-side with the base and finetuned models. The first message is sent to both; subsequent messages continue the multi-turn dialogue with both models.")
+        st.caption(
+            "Chat side-by-side with the base and finetuned models. The first message is sent to both; subsequent messages continue the multi-turn dialogue with both models."
+        )
 
         keys = self._session_keys()
         # Detect context change (method / organism) and clear chat cache
@@ -149,19 +169,29 @@ class DualModelChatDashboard:
             st.session_state[keys["input"]] = ""
             st.session_state[keys["fingerprint"]] = current_fp
         if keys["history_base"] not in st.session_state:
-            st.session_state[keys["history_base"]] = []  # List[{ 'user': str, 'assistant': str }]
+            st.session_state[keys["history_base"]] = (
+                []
+            )  # List[{ 'user': str, 'assistant': str }]
         if keys["history_ft"] not in st.session_state:
             st.session_state[keys["history_ft"]] = []
         # Migrate legacy aggregated history once (if present)
-        if keys["history"] in st.session_state and not st.session_state[keys["history_base"]] and not st.session_state[keys["history_ft"]]:
+        if (
+            keys["history"] in st.session_state
+            and not st.session_state[keys["history_base"]]
+            and not st.session_state[keys["history_ft"]]
+        ):
             legacy = st.session_state[keys["history"]]
             assert isinstance(legacy, list), "Legacy history must be a list"
             for turn in legacy:
                 assert "user" in turn, "Legacy turn missing 'user'"
                 if "base" in turn:
-                    st.session_state[keys["history_base"]].append({"user": turn["user"], "assistant": turn["base"]})
+                    st.session_state[keys["history_base"]].append(
+                        {"user": turn["user"], "assistant": turn["base"]}
+                    )
                 if "finetuned" in turn:
-                    st.session_state[keys["history_ft"]].append({"user": turn["user"], "assistant": turn["finetuned"]})
+                    st.session_state[keys["history_ft"]].append(
+                        {"user": turn["user"], "assistant": turn["finetuned"]}
+                    )
         if keys["input"] not in st.session_state:
             st.session_state[keys["input"]] = ""
         if keys["use_chat"] not in st.session_state:
@@ -190,7 +220,7 @@ class DualModelChatDashboard:
                 st.checkbox(
                     "Use Chat Formatting",
                     key=keys["use_chat"],
-                    help="Format prompts via chat template. Uses <eot> turn separators."
+                    help="Format prompts via chat template. Uses <eot> turn separators.",
                 )
             with cols[1]:
                 temperature = st.slider(
@@ -225,9 +255,13 @@ class DualModelChatDashboard:
         # Conversation display (chat bubbles)
         col_base, col_ft = st.columns(2)
         with col_base:
-            self._render_chat_column("Base model", st.session_state[keys["history_base"]])
+            self._render_chat_column(
+                "Base model", st.session_state[keys["history_base"]]
+            )
         with col_ft:
-            self._render_chat_column("Finetuned model", st.session_state[keys["history_ft"]])
+            self._render_chat_column(
+                "Finetuned model", st.session_state[keys["history_ft"]]
+            )
 
         # Input + actions
         st.text_area(
@@ -243,7 +277,9 @@ class DualModelChatDashboard:
             st.radio(
                 "Send to",
                 options=["both", "base", "finetuned"],
-                index=["both", "base", "finetuned"].index(st.session_state[keys["send_target"]]),
+                index=["both", "base", "finetuned"].index(
+                    st.session_state[keys["send_target"]]
+                ),
                 key=keys["send_target"],
                 horizontal=True,
             )
@@ -288,8 +324,12 @@ class DualModelChatDashboard:
                         temperature=temperature,
                         do_sample=do_sample,
                     )
-                assistant_only_base = self._strip_prompt_from_output(reply_base, prompt_base)
-                st.session_state[keys["history_base"]].append({"user": msg, "assistant": assistant_only_base})
+                assistant_only_base = self._strip_prompt_from_output(
+                    reply_base, prompt_base
+                )
+                st.session_state[keys["history_base"]].append(
+                    {"user": msg, "assistant": assistant_only_base}
+                )
 
             if send_target in ("both", "finetuned"):
                 prompt_ft = self._build_prompt_for_model(
@@ -308,6 +348,8 @@ class DualModelChatDashboard:
                         do_sample=do_sample,
                     )
                 assistant_only_ft = self._strip_prompt_from_output(reply_ft, prompt_ft)
-                st.session_state[keys["history_ft"]].append({"user": msg, "assistant": assistant_only_ft})
+                st.session_state[keys["history_ft"]].append(
+                    {"user": msg, "assistant": assistant_only_ft}
+                )
             st.session_state[keys["reset_input"]] = True
             st.rerun()

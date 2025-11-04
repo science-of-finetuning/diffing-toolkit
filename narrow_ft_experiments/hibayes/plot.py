@@ -6,6 +6,7 @@ import arviz as az
 import arviz.labels as azl
 import scienceplots as _scienceplots  # type: ignore[import-not-found]
 from pathlib import Path
+
 plt.style.use("science")
 _ = _scienceplots
 
@@ -44,7 +45,7 @@ best_model.model_name
 
 # %%
 # Set global font size
-plt.rcParams.update({'font.size': 122})
+plt.rcParams.update({"font.size": 122})
 
 ax = az.plot_forest(
     best_model.inference_data,
@@ -64,14 +65,17 @@ ax[0].axvline(
 )
 font_size = 22
 # Set font sizes for axis labels and title
-ax[0].tick_params(axis='both', which='major', labelsize=font_size)
+ax[0].tick_params(axis="both", which="major", labelsize=font_size)
 ax[0].set_xlabel(ax[0].get_xlabel(), fontsize=font_size)
-ax[0].set_ylabel(ax[0].get_ylabel(), fontsize=int(font_size*0.2))
+ax[0].set_ylabel(ax[0].get_ylabel(), fontsize=int(font_size * 0.2))
+
 
 def fix_label(label):
     for k, v in MAP.items():
         label = label.replace(k, v)
     return label
+
+
 # Collect tick positions and texts, keep only labeled ticks for grouping
 all_tick_positions = list(ax[0].get_yticks())
 all_tick_texts = [t.get_text() for t in ax[0].get_yticklabels()]
@@ -82,17 +86,21 @@ for pos, txt in zip(all_tick_positions, all_tick_texts):
     if txt:
         filtered_positions.append(pos)
         filtered_texts.append(txt)
-        labeled_indices.append(len(filtered_positions) - 1)  # position index in filtered arrays
+        labeled_indices.append(
+            len(filtered_positions) - 1
+        )  # position index in filtered arrays
 current_labels = [fix_label(txt) for txt in filtered_texts]
 
-ax[0].set_yticklabels(current_labels, fontsize=int(font_size*0.8))
+ax[0].set_yticklabels(current_labels, fontsize=int(font_size * 0.8))
 
 # Determine x-position just left of tick labels (axes coords)
 fig = plt.gcf()
 fig.canvas.draw()  # needed so that text bounding boxes are available
 tick_texts = list(ax[0].get_yticklabels())
 renderer = fig.canvas.get_renderer()
-label_bboxes = [t.get_window_extent(renderer=renderer) for t in tick_texts if t.get_text()]
+label_bboxes = [
+    t.get_window_extent(renderer=renderer) for t in tick_texts if t.get_text()
+]
 axes_bbox = ax[0].get_window_extent(renderer=renderer)
 axes_left_px = axes_bbox.x0
 axes_width_px = axes_bbox.width if axes_bbox.width != 0 else 1.0
@@ -114,9 +122,9 @@ GROUP_Y_OFFSET: dict[str, float] = {
 }
 
 for grp_name, idx_in_filtered in GROUP_Y_INDEX.items():
-    assert 0 <= idx_in_filtered < len(filtered_positions), (
-        f"Index {idx_in_filtered} out of range for group {grp_name}; labeled ticks: {len(filtered_positions)}"
-    )
+    assert (
+        0 <= idx_in_filtered < len(filtered_positions)
+    ), f"Index {idx_in_filtered} out of range for group {grp_name}; labeled ticks: {len(filtered_positions)}"
     y = float(filtered_positions[idx_in_filtered])
     ax[0].text(
         0.04,
@@ -134,7 +142,7 @@ for grp_name, idx_in_filtered in GROUP_Y_INDEX.items():
 
 # Rotate x-axis labels by 90 degrees
 for axis in ax:
-    axis.tick_params(axis='x', rotation=-90)
+    axis.tick_params(axis="x", rotation=-90)
 
 # Set x-axis range
 ax[0].set_xlim(-2.5, 2.5)
@@ -143,6 +151,6 @@ ax[0].set_title("")
 
 fig = plt.gcf()
 
-fig.show()  
+fig.show()
 fig.savefig("feature_effects.pdf", bbox_inches="tight")
 # %%

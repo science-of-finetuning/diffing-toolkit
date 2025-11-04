@@ -7,8 +7,9 @@ from .activation_analysis import ActivationAnalysisDiffingMethod
 from .crosscoder import CrosscoderDiffingMethod
 from .sae_difference import SAEDifferenceMethod
 
-__all__ = ['KLDivergenceDiffingMethod', 'ActivationAnalysisDiffingMethod', 'CrosscoderDiffingMethod', 'SAEDifferenceMethod']
-
-
-
-
+__all__ = [
+    "KLDivergenceDiffingMethod",
+    "ActivationAnalysisDiffingMethod",
+    "CrosscoderDiffingMethod",
+    "SAEDifferenceMethod",
+]

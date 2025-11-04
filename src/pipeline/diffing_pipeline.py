@@ -15,6 +15,7 @@ from src.diffing.methods.diffing_method import DiffingMethod
 from src.diffing.methods.pca import PCAMethod
 from src.diffing.methods.activation_difference_lens import ActDiffLens
 
+
 def get_method_class(method_name: str) -> DiffingMethod:
     """Get the appropriate method class for a given method name."""
     if method_name == "kl":
@@ -31,6 +32,7 @@ def get_method_class(method_name: str) -> DiffingMethod:
         return ActDiffLens
     else:
         raise ValueError(f"Unknown method: {method_name}")
+
 
 class DiffingPipeline(Pipeline):
     """

@@ -527,17 +527,20 @@ class PCAMethod(DiffingMethod):
 
         latent_idx = torch.arange(pca.n_components)
         # Use async writers with context managers for efficient background writing
-        with max_store_positive.create_async_writer(
-            buffer_size=pca.n_components * 10,  # Buffer ~10 batches
-            flush_interval=30.0,
-            auto_maintain_top_k=True,
-            use_memory_db=True,
-        ) as positive_writer, max_store_negative.create_async_writer(
-            buffer_size=pca.n_components * 10,
-            flush_interval=30.0,
-            auto_maintain_top_k=True,
-            use_memory_db=True,
-        ) as negative_writer:
+        with (
+            max_store_positive.create_async_writer(
+                buffer_size=pca.n_components * 10,  # Buffer ~10 batches
+                flush_interval=30.0,
+                auto_maintain_top_k=True,
+                use_memory_db=True,
+            ) as positive_writer,
+            max_store_negative.create_async_writer(
+                buffer_size=pca.n_components * 10,
+                flush_interval=30.0,
+                auto_maintain_top_k=True,
+                use_memory_db=True,
+            ) as negative_writer,
+        ):
 
             # Process each dataset to find maximum activating examples
             for dataset_idx, (dataset_name, dataset_caches) in enumerate(

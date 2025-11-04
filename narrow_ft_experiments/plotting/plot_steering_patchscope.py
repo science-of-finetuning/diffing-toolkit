@@ -12,10 +12,11 @@ import numpy as np
 from matplotlib.patches import FancyBboxPatch, Polygon
 from src.utils.interactive import load_hydra_config
 import scienceplots as _scienceplots  # type: ignore[import-not-found]  # noqa: F401
+
 plt.style.use(["science", "no-latex"])  # avoid LaTeX dependency in SciencePlots
 from mplfonts import use_font
 
-use_font('Noto Serif CJK SC')
+use_font("Noto Serif CJK SC")
 # Prefer wide-Unicode fonts when available; Matplotlib will choose available ones
 
 # Absolute path to the Hydra config file
@@ -436,7 +437,6 @@ def visualize_steering_and_patchscope(
     answer_tail_height: Optional[float] = None,
     patchscope_row_scale: float = 1.25,
     save_path: Optional[str] = None,
-
 ) -> None:
     """Show k prompts with one steered sample and corresponding PatchScope tokens.
 
@@ -482,6 +482,7 @@ def visualize_steering_and_patchscope(
     # Sample k prompts randomly
     if len(recs) > k:
         import random
+
         recs = random.sample(recs, k)
     assert len(recs) >= 1
 
@@ -784,6 +785,6 @@ if __name__ == "__main__":
             prompt_tail_height=0.10,
             answer_tail_height=0.05,
             patchscope_row_scale=2,
-            save_path=base_dir / f"{organism}_{base_model}_{position_index}.png"
+            save_path=base_dir / f"{organism}_{base_model}_{position_index}.png",
         )
 # %%

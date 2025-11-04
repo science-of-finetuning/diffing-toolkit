@@ -30,7 +30,9 @@ from src.utils.activations import get_layer_indices
 from src.utils.dictionary.analysis import build_push_crosscoder_latent_df, make_plots
 from src.utils.dictionary.training import train_crosscoder_for_layer
 from src.utils.dictionary.latent_scaling.closed_form import compute_scalers_from_config
-from src.utils.dictionary.latent_scaling.beta_analysis import update_latent_df_with_beta_values
+from src.utils.dictionary.latent_scaling.beta_analysis import (
+    update_latent_df_with_beta_values,
+)
 from src.utils.dictionary.latent_activations import (
     collect_dictionary_activations_from_config,
     collect_activating_examples,
@@ -40,9 +42,17 @@ from src.utils.model import place_inputs
 from src.utils.dictionary.utils import load_dictionary_model
 from src.utils.dictionary.training import crosscoder_run_name
 from src.utils.visualization import multi_tab_interface
-from src.utils.dashboards import AbstractOnlineDiffingDashboard, SteeringDashboard, MaxActivationDashboardComponent
+from src.utils.dashboards import (
+    AbstractOnlineDiffingDashboard,
+    SteeringDashboard,
+    MaxActivationDashboardComponent,
+)
 from src.utils.max_act_store import ReadOnlyMaxActStore
-from src.utils.dictionary.steering import run_latent_steering_experiment, get_crosscoder_latent, display_steering_results
+from src.utils.dictionary.steering import (
+    run_latent_steering_experiment,
+    get_crosscoder_latent,
+    display_steering_results,
+)
 
 
 class CrosscoderDiffingMethod(DiffingMethod):
@@ -104,9 +114,11 @@ class CrosscoderDiffingMethod(DiffingMethod):
             logger.info(f"Model results directory: {model_results_dir}")
             model_results_dir.mkdir(parents=True, exist_ok=True)
             if (
-                not (model_results_dir / "dictionary_model" / "model.safetensors").exists()
+                not (
+                    model_results_dir / "dictionary_model" / "model.safetensors"
+                ).exists()
                 or self.method_cfg.training.overwrite
-            ):  
+            ):
                 # Train crosscoder for this layer
                 training_metrics, model_path = train_crosscoder_for_layer(
                     self.cfg, layer_idx, self.device, dictionary_name
@@ -183,7 +195,9 @@ class CrosscoderDiffingMethod(DiffingMethod):
                     logger.error(f"Error making plots for {dictionary_name}: {e}")
 
                 if self.method_cfg.analysis.latent_steering.enabled:
-                    logger.info(f"Running latent steering experiment for layer {layer_idx}")
+                    logger.info(
+                        f"Running latent steering experiment for layer {layer_idx}"
+                    )
                     run_latent_steering_experiment(
                         method=self,
                         get_latent_fn=get_crosscoder_latent,
@@ -215,7 +229,9 @@ class CrosscoderDiffingMethod(DiffingMethod):
         # Discover available crosscoders
         available_ccs = self._get_available_crosscoder_directories()
         if not available_ccs:
-            st.error(f"No trained CrossCoder directories found in {self.results_dir / 'crosscoder'}")
+            st.error(
+                f"No trained CrossCoder directories found in {self.results_dir / 'crosscoder'}"
+            )
             return
 
         # Index by layer
@@ -231,7 +247,9 @@ class CrosscoderDiffingMethod(DiffingMethod):
         if layer_select_key not in st.session_state:
             st.session_state[layer_select_key] = layers_sorted[0]
         if dict_select_key not in st.session_state:
-            st.session_state[dict_select_key] = cc_by_layer[layers_sorted[0]][0]["dictionary_name"]
+            st.session_state[dict_select_key] = cc_by_layer[layers_sorted[0]][0][
+                "dictionary_name"
+            ]
 
         # Layer selector
         selected_layer = st.selectbox(
@@ -252,48 +270,58 @@ class CrosscoderDiffingMethod(DiffingMethod):
             key=dict_select_key,
         )
 
-        selected_cc_info = next(c for c in cc_by_layer[selected_layer] if c["dictionary_name"] == selected_dict_name)
+        selected_cc_info = next(
+            c
+            for c in cc_by_layer[selected_layer]
+            if c["dictionary_name"] == selected_dict_name
+        )
 
         # Display CrossCoder information and wandb link if available
-        training_metrics_path = selected_cc_info['path'] / "training_metrics.json"
+        training_metrics_path = selected_cc_info["path"] / "training_metrics.json"
         if training_metrics_path.exists():
             try:
-                with open(training_metrics_path, 'r') as f:
+                with open(training_metrics_path, "r") as f:
                     training_metrics = json.load(f)
-                
+
                 # Display core CrossCoder information
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    k = training_metrics.get('k')
+                    k = training_metrics.get("k")
                     st.metric("Top-K", k)
                 with col2:
-                    dict_size = training_metrics.get('dictionary_size')
+                    dict_size = training_metrics.get("dictionary_size")
                     st.metric("Dictionary Size", dict_size)
                 with col3:
-                    activation_dim = training_metrics.get('activation_dim')
-                    expansion_factor = dict_size / activation_dim if activation_dim else "N/A"
+                    activation_dim = training_metrics.get("activation_dim")
+                    expansion_factor = (
+                        dict_size / activation_dim if activation_dim else "N/A"
+                    )
                     st.metric("Expansion Factor", expansion_factor)
                 with col4:
-                    last_eval_logs = training_metrics.get('last_eval_logs', {})
-                    fve = last_eval_logs.get('val/frac_variance_explained', "Not available")
+                    last_eval_logs = training_metrics.get("last_eval_logs", {})
+                    fve = last_eval_logs.get(
+                        "val/frac_variance_explained", "Not available"
+                    )
                     st.metric("FVE", fve)
-                
+
                 # Display links in two columns
                 col1, col2 = st.columns(2)
-                
+
                 with col1:
-                    wandb_link = training_metrics.get('wandb_link')
+                    wandb_link = training_metrics.get("wandb_link")
                     if wandb_link:
                         st.markdown(f"**W&B Run:** [View training run]({wandb_link})")
                     else:
                         st.info("No W&B link available")
 
                 with col2:
-                    huggingface_link = training_metrics.get('hf_repo_id')
+                    huggingface_link = training_metrics.get("hf_repo_id")
                     if huggingface_link:
                         col21, col22 = st.columns([0.2, 0.8])
                         with col21:
-                            st.markdown(f"**HF Model:** [View model](https://huggingface.co/{huggingface_link})")
+                            st.markdown(
+                                f"**HF Model:** [View model](https://huggingface.co/{huggingface_link})"
+                            )
                         with col22:
                             st.code(huggingface_link, language=None)
                     else:
@@ -306,12 +334,29 @@ class CrosscoderDiffingMethod(DiffingMethod):
         # Tabs
         multi_tab_interface(
             [
-                ("📈 Latent Statistics", lambda: self._render_latent_statistics_tab(selected_cc_info)),
-                ("📋 Steering Results", lambda: self._render_steering_results_tab(selected_cc_info)),
-                ("🎯 Online Steering", lambda: CrosscoderSteeringDashboard(self, selected_cc_info).display()),
-                ("🔥 Online Inference", lambda: CrosscoderOnlineDashboard(self, selected_cc_info).display()),
+                (
+                    "📈 Latent Statistics",
+                    lambda: self._render_latent_statistics_tab(selected_cc_info),
+                ),
+                (
+                    "📋 Steering Results",
+                    lambda: self._render_steering_results_tab(selected_cc_info),
+                ),
+                (
+                    "🎯 Online Steering",
+                    lambda: CrosscoderSteeringDashboard(
+                        self, selected_cc_info
+                    ).display(),
+                ),
+                (
+                    "🔥 Online Inference",
+                    lambda: CrosscoderOnlineDashboard(self, selected_cc_info).display(),
+                ),
                 ("🎨 Plots", lambda: self._render_plots_tab(selected_cc_info)),
-                ("📊 MaxAct Examples", lambda: self._render_maxact_tab(selected_cc_info)),
+                (
+                    "📊 MaxAct Examples",
+                    lambda: self._render_maxact_tab(selected_cc_info),
+                ),
             ],
             "CrossCoder Analysis",
         )
@@ -370,18 +415,23 @@ class CrosscoderDiffingMethod(DiffingMethod):
             for cc_dir in layer_dir.iterdir():
                 if not cc_dir.is_dir():
                     continue
-                if (cc_dir / "dictionary_model").exists() or (cc_dir / "training_config.yaml").exists():
-                    available.append({
-                        "layer": layer_num,
-                        "dictionary_name": cc_dir.name,
-                        "path": cc_dir,
-                    })
+                if (cc_dir / "dictionary_model").exists() or (
+                    cc_dir / "training_config.yaml"
+                ).exists():
+                    available.append(
+                        {
+                            "layer": layer_num,
+                            "dictionary_name": cc_dir.name,
+                            "path": cc_dir,
+                        }
+                    )
         available.sort(key=lambda x: (x["layer"], x["dictionary_name"]))
         return available
 
     def _load_latent_df(self, dictionary_name: str):
         """Load latent_df with caching."""
         from src.utils.dictionary.utils import load_latent_df
+
         if dictionary_name not in self.latent_df_cache:
             self.latent_df_cache[dictionary_name] = load_latent_df(dictionary_name)
         return self.latent_df_cache[dictionary_name]
@@ -404,9 +454,13 @@ class CrosscoderDiffingMethod(DiffingMethod):
             st.error(f"No MaxAct example database found at {db_path}")
             return
 
-        assert self.tokenizer is not None, "Tokenizer must be available for MaxAct visualization"
+        assert (
+            self.tokenizer is not None
+        ), "Tokenizer must be available for MaxAct visualization"
         store = ReadOnlyMaxActStore(db_path, tokenizer=self.tokenizer)
-        component = MaxActivationDashboardComponent(store, title=f"CrossCoder Examples – Layer {layer}")
+        component = MaxActivationDashboardComponent(
+            store, title=f"CrossCoder Examples – Layer {layer}"
+        )
         component.display()
 
     def _render_latent_statistics_tab(self, cc_info):
@@ -431,7 +485,9 @@ class CrosscoderDiffingMethod(DiffingMethod):
             for i, col in enumerate(cat_cols):
                 with cols[i % 3]:
                     options = [v for v in df[col].unique().tolist() if pd.notna(v)]
-                    sel = st.multiselect(col, options=options, default=options, key=f"filter_cat_{col}")
+                    sel = st.multiselect(
+                        col, options=options, default=options, key=f"filter_cat_{col}"
+                    )
                     if sel:
                         filtered_df = filtered_df[filtered_df[col].isin(sel)]
 
@@ -444,11 +500,22 @@ class CrosscoderDiffingMethod(DiffingMethod):
                     with cols[i % 3]:
                         cmin, cmax = float(df[col].min()), float(df[col].max())
                         if cmin != cmax:
-                            enable = st.checkbox(f"Filter {col}", value=False, key=f"enable_num_{col}")
+                            enable = st.checkbox(
+                                f"Filter {col}", value=False, key=f"enable_num_{col}"
+                            )
                             if enable:
-                                rng = st.slider(col, min_value=cmin, max_value=cmax, value=(cmin, cmax), key=f"slider_{col}")
+                                rng = st.slider(
+                                    col,
+                                    min_value=cmin,
+                                    max_value=cmax,
+                                    value=(cmin, cmax),
+                                    key=f"slider_{col}",
+                                )
                                 if rng != (cmin, cmax):
-                                    filtered_df = filtered_df[(filtered_df[col] >= rng[0]) & (filtered_df[col] <= rng[1])]
+                                    filtered_df = filtered_df[
+                                        (filtered_df[col] >= rng[0])
+                                        & (filtered_df[col] <= rng[1])
+                                    ]
 
         st.markdown(f"**Showing {len(filtered_df)} / {len(df)} latents**")
         st.dataframe(filtered_df, use_container_width=True, height=400)
@@ -477,27 +544,38 @@ class CrosscoderDiffingMethod(DiffingMethod):
             elif img.suffix.lower() == ".pdf":
                 with open(img, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode("utf-8")
-                st.markdown(f"<iframe src='data:application/pdf;base64,{b64}' width='100%' height='400'></iframe>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<iframe src='data:application/pdf;base64,{b64}' width='100%' height='400'></iframe>",
+                    unsafe_allow_html=True,
+                )
 
     def _render_steering_results_tab(self, selected_cc_info):
         """Render the Steering Results tab displaying saved experiment results."""
-        
-        dictionary_name = selected_cc_info['dictionary_name']
-        layer = selected_cc_info['layer']
-        model_results_dir = selected_cc_info['path']
-        
+
+        dictionary_name = selected_cc_info["dictionary_name"]
+        layer = selected_cc_info["layer"]
+        model_results_dir = selected_cc_info["path"]
+
         st.markdown(f"**Selected CrossCoder:** Layer {layer} - {dictionary_name}")
-        
+
         # Display the steering results using the imported function
         display_steering_results(model_results_dir, self.cfg)
 
     # --------------------------- Activation computation ---------------------------
     @torch.no_grad()
-    def compute_crosscoder_activations_for_tokens(self, dictionary_name: str, input_ids: torch.Tensor, attention_mask: torch.Tensor, layer: int):
+    def compute_crosscoder_activations_for_tokens(
+        self,
+        dictionary_name: str,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        layer: int,
+    ):
         """Compute crosscoder latent activations for a batch of tokens."""
         from nnsight import LanguageModel
 
-        assert input_ids.shape == attention_mask.shape and input_ids.ndim == 2, "input_ids and attention_mask must be [B, T]"
+        assert (
+            input_ids.shape == attention_mask.shape and input_ids.ndim == 2
+        ), "input_ids and attention_mask must be [B, T]"
 
         base_model = LanguageModel(self.base_model, tokenizer=self.tokenizer)
         ft_model = LanguageModel(self.finetuned_model, tokenizer=self.tokenizer)
@@ -548,9 +626,11 @@ class CrosscoderDiffingMethod(DiffingMethod):
             "dict_size": cc_model.dict_size,
         }
 
+
 # -----------------------------------------------------------------------------
 # Dashboard classes
 # -----------------------------------------------------------------------------
+
 
 class CrosscoderOnlineDashboard(AbstractOnlineDiffingDashboard):
     """Online per-token latent activation dashboard for CrossCoders."""
@@ -563,10 +643,14 @@ class CrosscoderOnlineDashboard(AbstractOnlineDiffingDashboard):
         latent_idx = st.number_input("Latent Index", min_value=0, value=0, step=1)
         return {"latent_idx": latent_idx}
 
-    def compute_statistics_for_tokens(self, input_ids: torch.Tensor, attention_mask: torch.Tensor, **kwargs):
+    def compute_statistics_for_tokens(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, **kwargs
+    ):
         layer = self.cc_info["layer"]
         latent_idx = kwargs.get("latent_idx", 0)
-        res = self.method.compute_crosscoder_activations_for_tokens(self.cc_info["dictionary_name"], input_ids, attention_mask, layer)
+        res = self.method.compute_crosscoder_activations_for_tokens(
+            self.cc_info["dictionary_name"], input_ids, attention_mask, layer
+        )
         seq_len, dict_size = res["latent_activations"].shape
         assert 0 <= latent_idx < dict_size
         values = res["latent_activations"][:, latent_idx]
@@ -591,6 +675,7 @@ class CrosscoderOnlineDashboard(AbstractOnlineDiffingDashboard):
     def _get_title(self):
         return "CrossCoder Analysis"
 
+
 class CrosscoderSteeringDashboard(SteeringDashboard):
     """Latent steering dashboard for CrossCoders."""
 
@@ -600,16 +685,22 @@ class CrosscoderSteeringDashboard(SteeringDashboard):
         self._layer = cc_info["layer"]
         self._cc_model = None
         try:
-            latent_df = self.method._load_latent_df(self.cc_info['dictionary_name'])
-            if 'max_act_validation' in latent_df.columns:
-                self._max_acts = latent_df['max_act_validation']
-            elif 'max_act_train' in latent_df.columns:
-                self._max_acts = latent_df['max_act_train']
+            latent_df = self.method._load_latent_df(self.cc_info["dictionary_name"])
+            if "max_act_validation" in latent_df.columns:
+                self._max_acts = latent_df["max_act_validation"]
+            elif "max_act_train" in latent_df.columns:
+                self._max_acts = latent_df["max_act_train"]
             else:
-                raise KeyError(f"Neither 'max_act_validation' nor 'max_act_train' found in latent dataframe for {self.cc_info['dictionary_name']}")
+                raise KeyError(
+                    f"Neither 'max_act_validation' nor 'max_act_train' found in latent dataframe for {self.cc_info['dictionary_name']}"
+                )
         except Exception as e:
-            st.error(f"❌ Maximum activations not yet collected for dictionary '{cc_info['dictionary_name']}'")
-            st.info("💡 Please run the analysis pipeline to collect maximum activations before using the steering dashboard.")
+            st.error(
+                f"❌ Maximum activations not yet collected for dictionary '{cc_info['dictionary_name']}'"
+            )
+            st.info(
+                "💡 Please run the analysis pipeline to collect maximum activations before using the steering dashboard."
+            )
             st.stop()
 
     @property
@@ -618,7 +709,9 @@ class CrosscoderSteeringDashboard(SteeringDashboard):
 
     def _ensure_model(self):
         if self._cc_model is None:
-            self._cc_model = load_dictionary_model(self.cc_info["dictionary_name"], is_sae=False).to(self.method.device)
+            self._cc_model = load_dictionary_model(
+                self.cc_info["dictionary_name"], is_sae=False
+            ).to(self.method.device)
 
     def get_dict_size(self):
         self._ensure_model()
@@ -643,7 +736,14 @@ class CrosscoderSteeringDashboard(SteeringDashboard):
         if key not in st.session_state:
             st.session_state[key] = 0
         st.session_state[key] = min(st.session_state[key], dict_size - 1)
-        idx = st.number_input("Latent Index", 0, dict_size - 1, value=st.session_state[key], step=1, key=key)
+        idx = st.number_input(
+            "Latent Index",
+            0,
+            dict_size - 1,
+            value=st.session_state[key],
+            step=1,
+            key=key,
+        )
         st.info(f"Max Activation: {self.get_max_activation(idx)}")
         return idx
 
@@ -653,8 +753,14 @@ class CrosscoderSteeringDashboard(SteeringDashboard):
             latent_idx = self._render_latent_selector()
         with col2:
             factor = st.slider("Steering Factor", -1000.0, 1000.0, 1.0, 0.1)
-        mode = st.selectbox("Steering Mode", options=["prompt_only", "all_tokens"], index=1)
-        return {"latent_idx": latent_idx, "steering_factor": factor, "steering_mode": mode}
+        mode = st.selectbox(
+            "Steering Mode", options=["prompt_only", "all_tokens"], index=1
+        )
+        return {
+            "latent_idx": latent_idx,
+            "steering_factor": factor,
+            "steering_mode": mode,
+        }
 
     def _get_title(self):
         return f"CrossCoder Latent Steering – Layer {self.layer}"

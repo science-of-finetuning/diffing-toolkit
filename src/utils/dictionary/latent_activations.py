@@ -27,8 +27,15 @@ from src.utils.configs import HF_NAME
 from src.utils.dictionary.utils import load_latent_df, push_latent_df
 from src.utils.dictionary.training import setup_sae_cache
 
+
 @torch.no_grad()
-def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected_sparsity=100, gc_collect_every=1000):
+def get_positive_activations(
+    sample_cache: SampleCache,
+    cc,
+    latent_ids,
+    expected_sparsity=100,
+    gc_collect_every=1000,
+):
     """
     Extract positive activations and their indices from sequences using SampleCache.
     Also compute the maximum activation for each latent feature.
@@ -50,15 +57,14 @@ def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected
     estimated_positive_acts = int(total_tokens * expected_sparsity)
     logger.debug(f"Estimated positive activations: {estimated_positive_acts}")
 
-    
     dataloader = DataLoader(
         sample_cache,
         batch_size=1,  # Process one sequence at a time to maintain sequence-level operations
         shuffle=False,
-        num_workers=4, 
-        pin_memory=True if torch.cuda.is_available() else False
+        num_workers=4,
+        pin_memory=True if torch.cuda.is_available() else False,
     )
-    
+
     # Pre-allocate tensors with estimated size (with some buffer)
     buffer_factor = 1.5
     max_size = int(estimated_positive_acts * buffer_factor)
@@ -66,17 +72,19 @@ def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected
     out_activations = torch.empty(max_size, dtype=torch.float32)
     out_ids = torch.empty(max_size, 3, dtype=torch.long)
     seq_ranges = [0]
-    
+
     # Initialize tensors to track max activations for each latent
     max_activations = torch.zeros(len(latent_ids), device=cc.device)
-    
+
     # Pre-allocate for L0 statistics
     l0_per_token = torch.empty(total_tokens, dtype=torch.float32)
-    
+
     current_act_idx = 0
     current_token_idx = 0
 
-    for seq_idx, (sample_tokens, sample_activations) in enumerate(tqdm(dataloader, desc="Collecting positive activations")):
+    for seq_idx, (sample_tokens, sample_activations) in enumerate(
+        tqdm(dataloader, desc="Collecting positive activations")
+    ):
         if seq_idx % gc_collect_every == 0:
             gc.collect()
             torch.cuda.empty_cache()
@@ -85,11 +93,15 @@ def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected
         sample_tokens = sample_tokens.squeeze(0)
         sample_activations = sample_activations.squeeze(0)
         seq_len = len(sample_tokens)
-        
+
         # sample_activations should be (seq_len, activation_dim)
-        assert sample_activations.shape[0] == seq_len, f"Expected {seq_len} activations, got {sample_activations.shape[0]}"
-        
-        feature_activations = cc.get_activations(sample_activations.to(cc.device).to(cc.dtype))
+        assert (
+            sample_activations.shape[0] == seq_len
+        ), f"Expected {seq_len} activations, got {sample_activations.shape[0]}"
+
+        feature_activations = cc.get_activations(
+            sample_activations.to(cc.device).to(cc.dtype)
+        )
         feature_activations = feature_activations[:, latent_ids]
         assert feature_activations.shape == (
             seq_len,
@@ -106,15 +118,15 @@ def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected
 
         # Get indices where feature activations are positive
         pos_mask = feature_activations > 0
-        
+
         # Calculate L0 (number of active features per token) and store directly
         l0_per_token_seq = pos_mask.sum(dim=1).float().cpu()  # Shape: (seq_len,)
-        l0_per_token[current_token_idx:current_token_idx + seq_len] = l0_per_token_seq
+        l0_per_token[current_token_idx : current_token_idx + seq_len] = l0_per_token_seq
         current_token_idx += seq_len
-       
+
         pos_indices = torch.nonzero(pos_mask, as_tuple=True)
         num_positive = len(pos_indices[0])
-        
+
         if num_positive > 0:
             # Check if we need to grow our pre-allocated tensors
             if current_act_idx + num_positive > max_size:
@@ -122,23 +134,29 @@ def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected
                 new_size = max(max_size + num_positive, int(max_size * 1.5))
                 new_out_activations = torch.empty(new_size, dtype=torch.float32)
                 new_out_ids = torch.empty(new_size, 3, dtype=torch.long)
-                
-                new_out_activations[:current_act_idx] = out_activations[:current_act_idx]
+
+                new_out_activations[:current_act_idx] = out_activations[
+                    :current_act_idx
+                ]
                 new_out_ids[:current_act_idx] = out_ids[:current_act_idx]
-                
+
                 out_activations = new_out_activations
                 out_ids = new_out_ids
                 max_size = new_size
 
             # Get the positive activation values and store directly
             pos_activations = feature_activations[pos_mask].cpu()
-            out_activations[current_act_idx:current_act_idx + num_positive] = pos_activations
+            out_activations[current_act_idx : current_act_idx + num_positive] = (
+                pos_activations
+            )
 
             # Create and store indices directly
             seq_idx_tensor = torch.full_like(pos_indices[0], seq_idx)
-            pos_ids = torch.stack([seq_idx_tensor, pos_indices[0], pos_indices[1]], dim=1).cpu()
-            out_ids[current_act_idx:current_act_idx + num_positive] = pos_ids
-            
+            pos_ids = torch.stack(
+                [seq_idx_tensor, pos_indices[0], pos_indices[1]], dim=1
+            ).cpu()
+            out_ids[current_act_idx : current_act_idx + num_positive] = pos_ids
+
             current_act_idx += num_positive
 
         seq_ranges.append(seq_ranges[-1] + num_positive)
@@ -147,11 +165,12 @@ def get_positive_activations(sample_cache: SampleCache, cc, latent_ids, expected
     out_activations = out_activations[:current_act_idx]
     out_ids = out_ids[:current_act_idx]
     l0_per_token = l0_per_token[:current_token_idx]
-    
+
     # Calculate and print average L0 per token
     avg_l0 = l0_per_token.mean().item()
     logger.info(f"Average L0 per token: {avg_l0:.4f}")
     return out_activations, out_ids, seq_ranges, max_activations.cpu()
+
 
 def add_get_activations_sae(sae):
     """
@@ -160,6 +179,7 @@ def add_get_activations_sae(sae):
     Args:
         sae: The SAE model
     """
+
     def get_activation(x: torch.Tensor, select_features=None, **kwargs):
         # For difference SAEs, x should be the difference already computed by DifferenceCache
         # x shape: (batch_size, activation_dim)
@@ -171,6 +191,7 @@ def add_get_activations_sae(sae):
 
     sae.get_activations = get_activation
     return sae
+
 
 def collect_dictionary_activations(
     dictionary_model_name: str,
@@ -224,13 +245,15 @@ def collect_dictionary_activations(
         raise ValueError(
             "difference_target must be provided if is_sae is True. This is the target of the difference SAE."
         )
-    
+
     # Handle dataset names - create default names if not provided
     if dataset_names is None:
         dataset_names = [f"dataset_{i}" for i in range(len(activation_caches))]
     elif len(dataset_names) != len(activation_caches):
-        raise ValueError(f"Number of dataset_names ({len(dataset_names)}) must match number of activation_caches ({len(activation_caches)})")
-    
+        raise ValueError(
+            f"Number of dataset_names ({len(dataset_names)}) must match number of activation_caches ({len(activation_caches)})"
+        )
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the activation dataset
@@ -244,17 +267,17 @@ def collect_dictionary_activations(
             ]
 
         # Load the dictionary model
-        dictionary_model = load_dictionary_model(
-            dictionary_model_name).to("cuda")
+        dictionary_model = load_dictionary_model(dictionary_model_name).to("cuda")
         if is_sae:
             dictionary_model = add_get_activations_sae(dictionary_model)
-            
+
         if latent_ids is None:
             latent_ids = torch.arange(dictionary_model.dict_size)
 
         # Load the tokenizer
-        sample_caches = [   
-            SampleCache(cache, tokenizer.bos_token_id, max_num_samples=max_num_samples) for cache in activation_caches
+        sample_caches = [
+            SampleCache(cache, tokenizer.bos_token_id, max_num_samples=max_num_samples)
+            for cache in activation_caches
         ]
 
         out_acts = []
@@ -264,23 +287,32 @@ def collect_dictionary_activations(
         dataset_ids_list = []  # Track which dataset each sequence comes from
         offset = 0
         act_offset = 0
-        
+
         for dataset_idx, sample_cache in enumerate(sample_caches):
-            logger.info(f"Collecting activations for dataset {dataset_names[dataset_idx]}")
+            logger.info(
+                f"Collecting activations for dataset {dataset_names[dataset_idx]}"
+            )
             out_acts_i, out_ids_i, seq_ranges_i, max_activations_i = (
-                get_positive_activations(sample_cache, dictionary_model, latent_ids, expected_sparsity=expected_sparsity)
+                get_positive_activations(
+                    sample_cache,
+                    dictionary_model,
+                    latent_ids,
+                    expected_sparsity=expected_sparsity,
+                )
             )
             # Adjust sequence indices by offset
             out_ids_i[:, 0] += offset
             offset += len(sample_cache)
-            
+
             out_acts.append(out_acts_i)
             out_ids.append(out_ids_i)
-            
+
             # Track dataset ID for each sequence in this sample cache
-            dataset_ids_for_cache = torch.full((len(sample_cache),), dataset_idx, dtype=torch.long)
+            dataset_ids_for_cache = torch.full(
+                (len(sample_cache),), dataset_idx, dtype=torch.long
+            )
             dataset_ids_list.append(dataset_ids_for_cache)
-            
+
             # Adjust seq_ranges by adding the current total activation count
             adjusted_ranges = [r + act_offset for r in seq_ranges_i[1:]]  # Skip first 0
             seq_ranges.extend(adjusted_ranges)
@@ -290,16 +322,16 @@ def collect_dictionary_activations(
         # Concatenate all results
         out_acts = torch.cat(out_acts)
         out_ids = torch.cat(out_ids)
-        
+
         # Concatenate dataset IDs
         dataset_ids = torch.cat(dataset_ids_list)
-        
+
         # Combine max activations by taking element-wise maximum
         combined_max_activations = max_activations_list[0]
         for max_acts in max_activations_list[1:]:
             combined_max_activations = torch.maximum(combined_max_activations, max_acts)
 
-        # Combine sequences from all sample caches  
+        # Combine sequences from all sample caches
         sequences_all = []
         for sample_cache in sample_caches:
             sequences_all.extend(sample_cache.sequences)
@@ -417,17 +449,24 @@ def collect_dictionary_activations(
         print("Skipping upload to Hugging Face Hub")
     return LatentActivationCache(out_dir)
 
+
 def collect_dictionary_activations_from_config(
     cfg: DictConfig,
     layer: int,
     dictionary_model_name: str,
     result_dir: Path,
-):  
+):
     latent_activations_cfg = cfg.diffing.method.analysis.latent_activations
     # Check if latent activations already exist
     output_path = Path(result_dir) / "latent_activations"
-    if output_path.exists() and (output_path / "activations.pt").exists() and not latent_activations_cfg.overwrite:
-        logger.info(f"Found existing latent activations at {output_path}. Skipping computation.")
+    if (
+        output_path.exists()
+        and (output_path / "activations.pt").exists()
+        and not latent_activations_cfg.overwrite
+    ):
+        logger.info(
+            f"Found existing latent activations at {output_path}. Skipping computation."
+        )
         return None
 
     base_model_cfg, finetuned_model_cfg = get_model_configurations(cfg)
@@ -449,9 +488,8 @@ def collect_dictionary_activations_from_config(
 
     activation_caches = [caches[dataset_name][layer] for dataset_name in caches]
     dataset_names = list(caches.keys())  # Extract dataset names from cache keys
-    
-    tokenizer = load_tokenizer_from_config(base_model_cfg)
 
+    tokenizer = load_tokenizer_from_config(base_model_cfg)
 
     return collect_dictionary_activations(
         dictionary_model_name=dictionary_model_name,
@@ -464,11 +502,11 @@ def collect_dictionary_activations_from_config(
         load_from_disk=False,
         max_num_samples=latent_activations_cfg.max_num_samples,
         is_difference_sae=cfg.diffing.method.name == "sae_difference",
-        difference_target=cfg.diffing.method.training.get("target", None), # Only for SAEs
+        difference_target=cfg.diffing.method.training.get(
+            "target", None
+        ),  # Only for SAEs
         expected_sparsity=cfg.diffing.method.training.k,
     )
-
-
 
 
 def fix_activations_details(activation_details):
@@ -551,13 +589,17 @@ def compute_quantile_activating_examples(
     sequences_set = set()
     all_sequences = []
     dataset_info = []
-    
+
     # Dictionary to store feature activation details: {feature_idx: {sequence_idx: [(position, value), ...]}}
     activation_details = defaultdict(dict)
 
     next_gb = gc_collect_every
     current_seq_idx = 0
-    for i, (tokens, (indices, values)) in tqdm(enumerate(latent_activation_cache), total=len(latent_activation_cache), desc="Computing quantile examples"):
+    for i, (tokens, (indices, values)) in tqdm(
+        enumerate(latent_activation_cache),
+        total=len(latent_activation_cache),
+        desc="Computing quantile examples",
+    ):
         # GC and device transfer
         next_gb -= 1
         if next_gb <= 0:
@@ -569,7 +611,12 @@ def compute_quantile_activating_examples(
             continue
         sequences_set.add(token_tuple)
         all_sequences.append(tokens.cpu())
-        dataset_info.append((latent_activation_cache.get_dataset_id(i), latent_activation_cache.get_dataset_name(i)))
+        dataset_info.append(
+            (
+                latent_activation_cache.get_dataset_id(i),
+                latent_activation_cache.get_dataset_name(i),
+            )
+        )
 
         # Move to device
         indices = indices.to(device)
@@ -586,7 +633,7 @@ def compute_quantile_activating_examples(
         max_vals = torch.scatter_reduce(
             max_vals, 0, inverse_indices, values, reduce="amax"
         )
-      
+
         active_thresholds = thresholds[active_features]
 
         q_idxs = torch.searchsorted(active_thresholds, max_vals.unsqueeze(-1)).squeeze()
@@ -650,17 +697,16 @@ def compute_quantile_activating_examples(
     # Save to database
     if save_path is not None:
         from src.utils.max_act_store import MaxActStore
-        
+
         logger.info(f"Saving to {save_path / f'{name}.db'}")
         max_store = MaxActStore(save_path / f"{name}.db", tokenizer=None)
-        
+
         max_store.fill(
             examples_data=quantile_examples,
-            all_sequences=list(enumerate(all_sequences)), # (seq_idx, tokens)
+            all_sequences=list(enumerate(all_sequences)),  # (seq_idx, tokens)
             activation_details=activation_details,
-            dataset_info=dataset_info
+            dataset_info=dataset_info,
         )
-
 
 
 def collect_activating_examples(
@@ -690,15 +736,15 @@ def collect_activating_examples(
         upload_to_hub (bool, optional): If True, upload results to HuggingFace.
             Defaults to False.
         overwrite (bool, optional): If True, overwrite existing results.
-            Defaults to False.  
+            Defaults to False.
     Returns:
         None
     """
-    save_path = save_path / "latent_activations" 
+    save_path = save_path / "latent_activations"
     # Check if files already exist
     db_file = save_path / "examples.db"
     files_exist = db_file.exists()
-    
+
     if not files_exist or overwrite:
         # Create save directory if it doesn't exist
         save_path.mkdir(parents=True, exist_ok=True)
@@ -732,7 +778,6 @@ def collect_activating_examples(
                 )
 
 
-
 @torch.no_grad()
 def compute_latent_stats(
     latent_cache: LatentActivationCache,
@@ -752,7 +797,7 @@ def compute_latent_stats(
         - int: total number of tokens in the cache
     """
 
-    save_path = save_path / "latent_activations" 
+    save_path = save_path / "latent_activations"
 
     if latent_cache is None:
         latent_cache = LatentActivationCache(save_path)
@@ -763,7 +808,11 @@ def compute_latent_stats(
     total_tokens = 0
 
     # Iterate through all samples in the cache
-    pbar = trange(len(latent_cache), desc="Computing max activations", disable=save_path is not None)
+    pbar = trange(
+        len(latent_cache),
+        desc="Computing max activations",
+        disable=save_path is not None,
+    )
     for i in pbar:
         # Get latent activations for this sample
         tokens, activations = latent_cache[i]
@@ -799,12 +848,13 @@ def compute_latent_stats(
     frequencies = nonzero_counts / total_tokens
     return max_activations.cpu(), frequencies.cpu(), total_tokens
 
+
 def update_latent_df_with_stats(
-        dictionary_name: str,
-        latent_activation_cache: LatentActivationCache,
-        split_of_cache: str,
-        device: torch.device,
-        save_path: Path,
+    dictionary_name: str,
+    latent_activation_cache: LatentActivationCache,
+    split_of_cache: str,
+    device: torch.device,
+    save_path: Path,
 ):
     """
     Update the latent df with the computed max activations and frequencies.
@@ -813,9 +863,11 @@ def update_latent_df_with_stats(
     # Check if columns already exist - skip computation if they do
     max_act_col = f"max_act_{split_of_cache}"
     freq_col = f"freq_{split_of_cache}"
-    
+
     if max_act_col in df.columns and freq_col in df.columns:
-        logger.info(f"Columns {max_act_col} and {freq_col} already exist. Skipping computation.")
+        logger.info(
+            f"Columns {max_act_col} and {freq_col} already exist. Skipping computation."
+        )
         return
 
     max_activations, frequencies, total_tokens = compute_latent_stats(
@@ -824,6 +876,5 @@ def update_latent_df_with_stats(
         save_path=save_path,
     )
     df[max_act_col] = max_activations.cpu()
-    df[freq_col] = frequencies.cpu() 
+    df[freq_col] = frequencies.cpu()
     push_latent_df(df, dictionary_name, confirm=False)
-

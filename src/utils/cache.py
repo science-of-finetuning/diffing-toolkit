@@ -5,6 +5,7 @@ from tqdm.auto import tqdm
 from torch.utils.data import Dataset
 from typing import Optional, Tuple
 
+
 class DifferenceCache:
     """
     Cache for computing activation differences between two activation caches.
@@ -18,16 +19,26 @@ class DifferenceCache:
         self._sequence_ranges = None
         if len(self.activation_cache_1) != len(self.activation_cache_2):
             min_len = min(len(self.activation_cache_1), len(self.activation_cache_2))
-            assert self.activation_cache_1.tokens is not None and self.activation_cache_2.tokens is not None, "Caches have not the same length and tokens are not stored"
-            assert torch.all(self.activation_cache_1.tokens[:min_len] == self.activation_cache_2.tokens[:min_len]), "Tokens do not match"
+            assert (
+                self.activation_cache_1.tokens is not None
+                and self.activation_cache_2.tokens is not None
+            ), "Caches have not the same length and tokens are not stored"
+            assert torch.all(
+                self.activation_cache_1.tokens[:min_len]
+                == self.activation_cache_2.tokens[:min_len]
+            ), "Tokens do not match"
             self._len = min_len
-            print(f"Warning: Caches have not the same length and tokens are not stored. Using the first {min_len} tokens.")
+            print(
+                f"Warning: Caches have not the same length and tokens are not stored. Using the first {min_len} tokens."
+            )
             if len(self.activation_cache_1) > self._len:
                 self._sequence_ranges = self.activation_cache_2.sequence_ranges
             else:
                 self._sequence_ranges = self.activation_cache_1.sequence_ranges
         else:
-            assert len(self.activation_cache_1) == len(self.activation_cache_2), f"Lengths do not match: {len(self.activation_cache_1)} != {len(self.activation_cache_2)}"  
+            assert len(self.activation_cache_1) == len(
+                self.activation_cache_2
+            ), f"Lengths do not match: {len(self.activation_cache_1)} != {len(self.activation_cache_2)}"
             self._len = len(self.activation_cache_1)
             self._sequence_ranges = self.activation_cache_1.sequence_ranges
 
@@ -39,11 +50,9 @@ class DifferenceCache:
     def __getitem__(self, index):
         return self.activation_cache_1[index] - self.activation_cache_2[index]
 
-
-
     @property
     def tokens(self):
-        return self.activation_cache_1.tokens[:self._len]
+        return self.activation_cache_1.tokens[: self._len]
 
     @property
     def config(self):
@@ -349,50 +358,50 @@ class SampleCache:
         return sample_tokens, sample_activations
 
 
-
 class SampleCacheDataset(Dataset):
     """
     PyTorch Dataset wrapper for SampleCache to enable DataLoader usage.
-    
+
     This allows us to leverage DataLoader's multiprocessing capabilities
     for efficient disk I/O when loading activation samples.
     """
-    
+
     def __init__(self, sample_cache: SampleCache, max_samples: Optional[int] = None):
         """
         Initialize the dataset.
-        
+
         Args:
             sample_cache: SampleCache instance to wrap
             max_samples: Optional limit on number of samples to use
         """
         self.sample_cache = sample_cache
         self.length = len(sample_cache)
-        
+
         if max_samples is not None:
             self.length = min(self.length, max_samples)
-    
+
     def __len__(self) -> int:
         return self.length
-    
+
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Get a sample from the cache.
-        
+
         Args:
             idx: Sample index
-            
+
         Returns:
             Tuple of (tokens, activations)
         """
         # Skip samples with only one token (no meaningful differences)
         tokens, activations = self.sample_cache[idx]
-        
+
         # Return empty tensors for single-token samples - these will be filtered out
         if len(tokens) <= 1:
             return torch.tensor([]), torch.tensor([])
-            
+
         return tokens, activations
+
 
 class LatentActivationCache:
     def __init__(
@@ -550,47 +559,53 @@ class LatentActivationCache:
     def get_dataset_name(self, index: int) -> str:
         """
         Get the name of the dataset that contains the sequence at the given index.
-        
+
         Args:
             index (int): The index of the sequence.
-            
+
         Returns:
             str: The name of the dataset.
         """
         dataset_id = self.dataset_ids[index + self.offset].item()
         return self.dataset_names[dataset_id]
-    
+
     def get_dataset_id(self, index: int) -> int:
         """
         Get the dataset ID for the sequence at the given index.
-        
+
         Args:
             index (int): The index of the sequence.
-            
+
         Returns:
             int: The dataset ID.
         """
         return self.dataset_ids[index + self.offset].item()
-    
+
     def get_sequences_by_dataset(self, dataset_name: str) -> list[int]:
         """
         Get all sequence indices that belong to a specific dataset.
-        
+
         Args:
             dataset_name (str): The name of the dataset.
-            
+
         Returns:
             list[int]: List of sequence indices belonging to the dataset.
         """
         try:
-            dataset_id = self.dataset_names.index(dataset_name) 
+            dataset_id = self.dataset_names.index(dataset_name)
         except ValueError:
-            raise ValueError(f"Dataset '{dataset_name}' not found. Available datasets: {self.dataset_names}")
-        
+            raise ValueError(
+                f"Dataset '{dataset_name}' not found. Available datasets: {self.dataset_names}"
+            )
+
         # Find all sequences with this dataset ID, accounting for offset
         matching_indices = (self.dataset_ids == dataset_id).nonzero(as_tuple=True)[0]
         # Subtract offset to get the indices relative to this cache
-        return [idx.item() - self.offset for idx in matching_indices if idx.item() >= self.offset]
+        return [
+            idx.item() - self.offset
+            for idx in matching_indices
+            if idx.item() >= self.offset
+        ]
 
     def to(self, device: torch.device):
         self.acts = self.acts.to(device)

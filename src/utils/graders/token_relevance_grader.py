@@ -13,7 +13,6 @@ import re
 Label = Literal["RELEVANT", "IRRELEVANT", "UNKNOWN"]
 
 
-
 # Multi-token single-request mode -------------------------------------------------
 
 SYSTEM_PROMPT_MANY = """You evaluate whether multiple candidate tokens are relevant to a described finetune.
@@ -103,7 +102,9 @@ ANSWER[4]: IRRELEVANT
 """
 
 
-def _build_user_prompt_many(description: str, frequent_tokens: List[str], candidate_tokens: List[str]) -> str:
+def _build_user_prompt_many(
+    description: str, frequent_tokens: List[str], candidate_tokens: List[str]
+) -> str:
     assert isinstance(description, str) and len(description.strip()) > 0
     assert isinstance(frequent_tokens, list)
     for t in frequent_tokens:
@@ -112,8 +113,14 @@ def _build_user_prompt_many(description: str, frequent_tokens: List[str], candid
     for c in candidate_tokens:
         assert isinstance(c, str) and len(c) > 0
 
-    tokens_rendered = ", ".join(f'"{t}"' for t in frequent_tokens) if len(frequent_tokens) > 0 else "(none)"
-    candidates_rendered = "\n".join(f"{i+1}. {tok}" for i, tok in enumerate(candidate_tokens))
+    tokens_rendered = (
+        ", ".join(f'"{t}"' for t in frequent_tokens)
+        if len(frequent_tokens) > 0
+        else "(none)"
+    )
+    candidates_rendered = "\n".join(
+        f"{i+1}. {tok}" for i, tok in enumerate(candidate_tokens)
+    )
     n = len(candidate_tokens)
     return (
         "[DESCRIPTION]\n"
@@ -169,7 +176,10 @@ class TokenRelevanceGrader:
     api_key_path: str = "openrouter_api_key.txt"
 
     def __post_init__(self) -> None:  # type: ignore[override]
-        assert isinstance(self.grader_model_id, str) and len(self.grader_model_id.strip()) > 0
+        assert (
+            isinstance(self.grader_model_id, str)
+            and len(self.grader_model_id.strip()) > 0
+        )
         assert isinstance(self.base_url, str) and self.base_url.startswith("http")
         assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
 
@@ -178,12 +188,22 @@ class TokenRelevanceGrader:
         api_key = key_path.read_text(encoding="utf-8").strip()
         assert len(api_key) > 0
 
-        object.__setattr__(self, "_client", OpenAI(base_url=self.base_url, api_key=api_key))
-        object.__setattr__(self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key))
+        object.__setattr__(
+            self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
+        )
+        object.__setattr__(
+            self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key)
+        )
 
     # --- New single entrypoints with permutation support -----------------------
 
-    def _call_many_sync(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> Tuple[List[Label], str]:
+    def _call_many_sync(
+        self,
+        description: str,
+        frequent_tokens: List[str],
+        candidate_tokens: List[str],
+        max_tokens: int,
+    ) -> Tuple[List[Label], str]:
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
@@ -192,12 +212,18 @@ class TokenRelevanceGrader:
         for tok in candidate_tokens:
             assert isinstance(tok, str) and len(tok) > 0
 
-        user_prompt = _build_user_prompt_many(description, frequent_tokens, candidate_tokens)
+        user_prompt = _build_user_prompt_many(
+            description, frequent_tokens, candidate_tokens
+        )
         messages = [
             {
                 "role": "system",
                 "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT_MANY, "cache_control": {"type": "ephemeral"}},
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT_MANY,
+                        "cache_control": {"type": "ephemeral"},
+                    },
                 ],
             },
             {"role": "user", "content": user_prompt},
@@ -219,9 +245,18 @@ class TokenRelevanceGrader:
             temperature=0,
         )
         content_retry = completion_retry.choices[0].message.content or ""
-        return _parse_indexed_labels(content_retry, len(candidate_tokens)), content_retry
+        return (
+            _parse_indexed_labels(content_retry, len(candidate_tokens)),
+            content_retry,
+        )
 
-    async def _call_many_async(self, description: str, frequent_tokens: List[str], candidate_tokens: List[str], max_tokens: int) -> Tuple[List[Label], str]:
+    async def _call_many_async(
+        self,
+        description: str,
+        frequent_tokens: List[str],
+        candidate_tokens: List[str],
+        max_tokens: int,
+    ) -> Tuple[List[Label], str]:
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
@@ -230,12 +265,18 @@ class TokenRelevanceGrader:
         for tok in candidate_tokens:
             assert isinstance(tok, str) and len(tok) > 0
 
-        user_prompt = _build_user_prompt_many(description, frequent_tokens, candidate_tokens)
+        user_prompt = _build_user_prompt_many(
+            description, frequent_tokens, candidate_tokens
+        )
         messages = [
             {
                 "role": "system",
                 "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT_MANY, "cache_control": {"type": "ephemeral"}},
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT_MANY,
+                        "cache_control": {"type": "ephemeral"},
+                    },
                 ],
             },
             {"role": "user", "content": user_prompt},
@@ -257,7 +298,10 @@ class TokenRelevanceGrader:
             temperature=0,
         )
         content_retry = completion_retry.choices[0].message.content or ""
-        return _parse_indexed_labels(content_retry, len(candidate_tokens)), content_retry
+        return (
+            _parse_indexed_labels(content_retry, len(candidate_tokens)),
+            content_retry,
+        )
 
     @staticmethod
     def _rotated_indices(length: int, shift: int) -> List[int]:
@@ -267,14 +311,18 @@ class TokenRelevanceGrader:
         return list(range(s, length)) + list(range(0, s))
 
     @staticmethod
-    def _majority_vote_per_position(permutation_labels: List[List[Label]]) -> List[Label]:
+    def _majority_vote_per_position(
+        permutation_labels: List[List[Label]],
+    ) -> List[Label]:
         assert isinstance(permutation_labels, list) and len(permutation_labels) > 0
         num_positions = len(permutation_labels[0])
         for run in permutation_labels:
             assert len(run) == num_positions
         final: List[Label] = []
         for pos in range(num_positions):
-            counts = Counter(run[pos] for run in permutation_labels if run[pos] != "UNKNOWN")
+            counts = Counter(
+                run[pos] for run in permutation_labels if run[pos] != "UNKNOWN"
+            )
             if len(counts) == 0:
                 final.append("UNKNOWN")
                 continue
@@ -327,9 +375,12 @@ class TokenRelevanceGrader:
         permutation_labels_mapped: List[List[Label]] = []
         raw_responses: List[str] = []
         if concurrent:
+
             async def _runner() -> List[Tuple[List[Label], str]]:
                 tasks = [
-                    self._call_many_async(description, frequent_tokens, perm_tokens, max_tokens)
+                    self._call_many_async(
+                        description, frequent_tokens, perm_tokens, max_tokens
+                    )
                     for _, perm_tokens in permuted_inputs
                 ]
                 results = await asyncio.gather(*tasks)
@@ -338,7 +389,9 @@ class TokenRelevanceGrader:
             results = asyncio.run(_runner())
         else:
             results = [
-                self._call_many_sync(description, frequent_tokens, perm_tokens, max_tokens)
+                self._call_many_sync(
+                    description, frequent_tokens, perm_tokens, max_tokens
+                )
                 for _, perm_tokens in permuted_inputs
             ]
 
@@ -402,4 +455,3 @@ class TokenRelevanceGrader:
 
 
 __all__ = ["TokenRelevanceGrader"]
-

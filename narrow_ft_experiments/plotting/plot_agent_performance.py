@@ -1,6 +1,7 @@
 # %%
 from __future__ import annotations
 import sys
+
 sys.path.append("scripts")
 sys.path.append("..")
 from pathlib import Path
@@ -22,7 +23,9 @@ CONFIG_PATH = "configs/config.yaml"
 
 # Optional: filter runs by the agent LLM id used (e.g., "openai/gpt-5").
 # When set to None, all agent models are included.
-AGENT_LLM_FILTER: Optional[str] = "google/gemini-2.5-pro" #openai/gpt-5" #os.environ.get("AGENT_LLM_FILTER", None)
+AGENT_LLM_FILTER: Optional[str] = (
+    "google/gemini-2.5-pro"  # openai/gpt-5" #os.environ.get("AGENT_LLM_FILTER", None)
+)
 
 
 # Variants to visualize and their display properties
@@ -80,6 +83,7 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
+
 def _model_display_name(model: str) -> str:
     name = MODEL_DISPLAY_NAMES.get(model, None)
     assert isinstance(name, str), f"Missing display name mapping for model: {model}"
@@ -121,7 +125,9 @@ def _find_all_grade_paths_by_kind_and_mi(
     - For agent (is_baseline=False): matches [ts_]<org>_<model>_*_mi{mi}_run*/ours/hypothesis_grade.json
     - For baseline (is_baseline=True): matches [ts_]<org>_<model>_*_baseline_mi{mi}_run*/hypothesis_grade.json
     """
-    assert agent_root.exists() and agent_root.is_dir(), f"Agent root not found: {agent_root}"
+    assert (
+        agent_root.exists() and agent_root.is_dir()
+    ), f"Agent root not found: {agent_root}"
     assert isinstance(mi, int) and mi >= 0
 
     prefix = r"^(?:\d{8}_\d{6}_)?" + re.escape(organism) + "_" + re.escape(model) + r"_"
@@ -134,7 +140,7 @@ def _find_all_grade_paths_by_kind_and_mi(
             pat_with_run_str += r"_pos" + re.escape(str(position))
         pat_with_run_str += r"_run\d+$"
         pat_with_run = re.compile(pat_with_run_str)
-        
+
         pat_no_run_str = prefix + r".*_baseline_mi" + re.escape(str(mi))
         if position is not None:
             pat_no_run_str += r"_pos" + re.escape(str(position))
@@ -146,7 +152,7 @@ def _find_all_grade_paths_by_kind_and_mi(
             pat_with_run_str += r"_pos" + re.escape(str(position))
         pat_with_run_str += r"_run\d+$"
         pat_with_run = re.compile(pat_with_run_str)
-        
+
         pat_no_run_str = prefix + r".*_mi" + re.escape(str(mi))
         if position is not None:
             pat_no_run_str += r"_pos" + re.escape(str(position))
@@ -164,7 +170,11 @@ def _find_all_grade_paths_by_kind_and_mi(
             # Folder name must contain the normalized LLM id segment
             if f"_{llm_id_filter}_" not in name:
                 continue
-        grade_path = (child / "hypothesis_grade.json") if is_baseline else (child / "ours" / "hypothesis_grade.json")
+        grade_path = (
+            (child / "hypothesis_grade.json")
+            if is_baseline
+            else (child / "ours" / "hypothesis_grade.json")
+        )
         if grade_path.exists() and grade_path.is_file():
             out.append(grade_path)
     assert len(out) >= 1, (
@@ -199,7 +209,6 @@ def _load_average_grade(json_paths: List[Path], aggregation: str = "mean") -> fl
         raise ValueError(f"Invalid aggregation: {aggregation}")
 
 
-
 def _collect_scores_for_entry(
     model: str,
     organism: str,
@@ -207,7 +216,7 @@ def _collect_scores_for_entry(
     aggregation: str = "mean",
     *,
     config_path: str,
-    baselines: bool = True
+    baselines: bool = True,
 ) -> Dict[str, float]:
     """Collect averaged scores across runs for all variants for a single (model, organism)."""
     cfg = load_hydra_config(
@@ -228,34 +237,64 @@ def _collect_scores_for_entry(
 
     scores["agent_mi5"] = _load_average_grade(
         _find_all_grade_paths_by_kind_and_mi(
-            agent_root, organism, model, mi=5, is_baseline=False, llm_id_filter=llm_filter_norm, position=position
+            agent_root,
+            organism,
+            model,
+            mi=5,
+            is_baseline=False,
+            llm_id_filter=llm_filter_norm,
+            position=position,
         ),
-        aggregation=aggregation
+        aggregation=aggregation,
     )
     scores["agent_mi0"] = _load_average_grade(
         _find_all_grade_paths_by_kind_and_mi(
-            agent_root, organism, model, mi=0, is_baseline=False, llm_id_filter=llm_filter_norm, position=position
+            agent_root,
+            organism,
+            model,
+            mi=0,
+            is_baseline=False,
+            llm_id_filter=llm_filter_norm,
+            position=position,
         ),
-        aggregation=aggregation
-    )  
+        aggregation=aggregation,
+    )
     if baselines:
         scores["baseline_mi0"] = _load_average_grade(
             _find_all_grade_paths_by_kind_and_mi(
-                agent_root, organism, model, mi=0, is_baseline=True, llm_id_filter=llm_filter_norm, position=position
+                agent_root,
+                organism,
+                model,
+                mi=0,
+                is_baseline=True,
+                llm_id_filter=llm_filter_norm,
+                position=position,
             ),
-            aggregation=aggregation
+            aggregation=aggregation,
         )
         scores["baseline_mi5"] = _load_average_grade(
             _find_all_grade_paths_by_kind_and_mi(
-                agent_root, organism, model, mi=5, is_baseline=True, llm_id_filter=llm_filter_norm, position=position
+                agent_root,
+                organism,
+                model,
+                mi=5,
+                is_baseline=True,
+                llm_id_filter=llm_filter_norm,
+                position=position,
             ),
-            aggregation=aggregation
+            aggregation=aggregation,
         )
         scores["baseline_mi50"] = _load_average_grade(
             _find_all_grade_paths_by_kind_and_mi(
-                agent_root, organism, model, mi=50, is_baseline=True, llm_id_filter=llm_filter_norm, position=position
+                agent_root,
+                organism,
+                model,
+                mi=50,
+                is_baseline=True,
+                llm_id_filter=llm_filter_norm,
+                position=position,
             ),
-            aggregation=aggregation
+            aggregation=aggregation,
         )
     return scores
 
@@ -466,8 +505,12 @@ def visualize_base_vs_chat_differences_grouped_by_model(
     }
 
     for base_model, chat_model, organism, organism_type in entries:
-        base_scores = _collect_scores_for_entry(base_model, organism, config_path=config_path)
-        chat_scores = _collect_scores_for_entry(chat_model, organism, config_path=config_path)
+        base_scores = _collect_scores_for_entry(
+            base_model, organism, config_path=config_path
+        )
+        chat_scores = _collect_scores_for_entry(
+            chat_model, organism, config_path=config_path
+        )
         assert set(base_scores.keys()) == {k for k, _ in VARIANTS}
         assert set(chat_scores.keys()) == {k for k, _ in VARIANTS}
         for v_key in base_scores.keys():
@@ -503,7 +546,9 @@ def visualize_base_vs_chat_differences_grouped_by_model(
     model_gap = group_gap / 4.0
 
     for organism_type in unique_types:
-        models_in_type = sorted({chat for _b, chat, _o, t in entries if t == organism_type})
+        models_in_type = sorted(
+            {chat for _b, chat, _o, t in entries if t == organism_type}
+        )
         assert len(models_in_type) >= 1
 
         means_by_variant: Dict[str, List[float]] = {k: [] for k in variant_keys}
@@ -625,6 +670,7 @@ def visualize_base_vs_chat_differences_grouped_by_model(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 def visualize_adl_base_chat_and_baseline_grouped_by_model(
     entries: List[Tuple[str, str, str, str]],
     *,
@@ -672,14 +718,31 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
     }
 
     for base_model, chat_model, organism, organism_type in entries:
-        base_scores = _collect_scores_for_entry(base_model, organism, config_path=config_path)
-        chat_scores = _collect_scores_for_entry(chat_model, organism, config_path=config_path)
+        base_scores = _collect_scores_for_entry(
+            base_model, organism, config_path=config_path
+        )
+        chat_scores = _collect_scores_for_entry(
+            chat_model, organism, config_path=config_path
+        )
         # Required keys must exist
-        assert "agent_mi5" in base_scores and "agent_mi5" in chat_scores and "baseline_mi50" in chat_scores and "baseline_mi50" in base_scores
-        per_metric_type_model_values.setdefault("adl_base", {}).setdefault(organism_type, {}).setdefault(chat_model, []).append(float(base_scores["agent_mi5"]))
-        per_metric_type_model_values.setdefault("adl_chat", {}).setdefault(organism_type, {}).setdefault(chat_model, []).append(float(chat_scores["agent_mi5"]))
-        per_metric_type_model_values.setdefault("baseline_mi50_base", {}).setdefault(organism_type, {}).setdefault(chat_model, []).append(float(base_scores["baseline_mi50"]))
-        per_metric_type_model_values.setdefault("baseline_mi50_chat", {}).setdefault(organism_type, {}).setdefault(chat_model, []).append(float(chat_scores["baseline_mi50"]))
+        assert (
+            "agent_mi5" in base_scores
+            and "agent_mi5" in chat_scores
+            and "baseline_mi50" in chat_scores
+            and "baseline_mi50" in base_scores
+        )
+        per_metric_type_model_values.setdefault("adl_base", {}).setdefault(
+            organism_type, {}
+        ).setdefault(chat_model, []).append(float(base_scores["agent_mi5"]))
+        per_metric_type_model_values.setdefault("adl_chat", {}).setdefault(
+            organism_type, {}
+        ).setdefault(chat_model, []).append(float(chat_scores["agent_mi5"]))
+        per_metric_type_model_values.setdefault("baseline_mi50_base", {}).setdefault(
+            organism_type, {}
+        ).setdefault(chat_model, []).append(float(base_scores["baseline_mi50"]))
+        per_metric_type_model_values.setdefault("baseline_mi50_chat", {}).setdefault(
+            organism_type, {}
+        ).setdefault(chat_model, []).append(float(chat_scores["baseline_mi50"]))
 
     # Plotting (mirror grouped plot aesthetics)
     plt.rcParams.update({"font.size": font_size})
@@ -692,9 +755,13 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
     adl_keys = ["adl_base", "adl_chat"]
     blackbox_keys = ["baseline_mi50_base", "baseline_mi50_chat"]
     adl_total_width = len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
-    blackbox_total_width = len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+    blackbox_total_width = (
+        len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+    )
     total_group_width = adl_total_width + minor_group_gap + blackbox_total_width
-    assert total_group_width < 0.98, "Grouped bar width exceeds center spacing; reduce bar_width"
+    assert (
+        total_group_width < 0.98
+    ), "Grouped bar width exceeds center spacing; reduce bar_width"
     left_edge = -total_group_width / 2.0
     offsets_map: Dict[str, float] = {}
     cursor = left_edge + bar_width / 2.0
@@ -717,7 +784,9 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
     model_gap = group_gap / 4.0
 
     for organism_type in unique_types:
-        models_in_type = sorted({chat for _b, chat, _o, t in entries if t == organism_type})
+        models_in_type = sorted(
+            {chat for _b, chat, _o, t in entries if t == organism_type}
+        )
         assert len(models_in_type) >= 1
 
         means_by_metric: Dict[str, List[float]] = {k: [] for k in metric_keys}
@@ -730,7 +799,9 @@ def visualize_adl_base_chat_and_baseline_grouped_by_model(
                     .get(organism_type, {})
                     .get(chat_model, [])
                 )
-                assert len(vals) >= 1, f"No values for metric={m_key} type={organism_type} model={chat_model}"
+                assert (
+                    len(vals) >= 1
+                ), f"No values for metric={m_key} type={organism_type} model={chat_model}"
                 means_by_metric[m_key].append(float(np.mean(vals)))
                 stds_by_metric[m_key].append(float(np.std(vals)))
 
@@ -878,17 +949,22 @@ def visualize_organism_comparison_grouped_by_model(
         legend_text_for_type: Dict[str, str] = {t: t for t in types}
     else:
         assert isinstance(type_legend_labels, dict)
-        assert set(type_legend_labels.keys()) >= set(types), "type_legend_labels must provide labels for all types"
+        assert set(type_legend_labels.keys()) >= set(
+            types
+        ), "type_legend_labels must provide labels for all types"
         legend_text_for_type = {t: str(type_legend_labels[t]) for t in types}
 
     # Metric definitions (two per type): ADL(i=5) and Blackbox(i=50)
     adl_keys: List[str] = [f"adl::{t}" for t in types]
-    blackbox_keys: List[str] = [f"baseline50::{t}" for t in types] if not no_baselines else []
+    blackbox_keys: List[str] = (
+        [f"baseline50::{t}" for t in types] if not no_baselines else []
+    )
     metric_keys: List[str] = adl_keys + blackbox_keys
     metric_labels: List[str] = [
         f"ADL$^{{i=5}}$ ({legend_text_for_type[t]})" for t in types
     ] + [
-        f"Blackbox$^{{i=50}}$ ({legend_text_for_type[t]})" for t in (types if not no_baselines else [])
+        f"Blackbox$^{{i=50}}$ ({legend_text_for_type[t]})"
+        for t in (types if not no_baselines else [])
     ]
     # # Color per type (consistent across ADL and Blackbox); differentiate variants by hatch
     # from matplotlib.colors import to_hex
@@ -902,16 +978,26 @@ def visualize_organism_comparison_grouped_by_model(
     ]
 
     # Aggregate per (metric_key -> model -> list[value])
-    per_metric_model_values: Dict[str, Dict[str, List[float]]] = {k: {} for k in metric_keys}
+    per_metric_model_values: Dict[str, Dict[str, List[float]]] = {
+        k: {} for k in metric_keys
+    }
     for model, organism, typ in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path, baselines=not no_baselines)
-        assert "agent_mi5" in scores and ("baseline_mi50" in scores if not no_baselines else True)
+        scores = _collect_scores_for_entry(
+            model, organism, config_path=config_path, baselines=not no_baselines
+        )
+        assert "agent_mi5" in scores and (
+            "baseline_mi50" in scores if not no_baselines else True
+        )
         assert typ in types
         key_adl = f"adl::{typ}"
-        per_metric_model_values.setdefault(key_adl, {}).setdefault(model, []).append(float(scores["agent_mi5"]))
+        per_metric_model_values.setdefault(key_adl, {}).setdefault(model, []).append(
+            float(scores["agent_mi5"])
+        )
         if not no_baselines:
-            key_bb = f"baseline50::{typ}" 
-            per_metric_model_values.setdefault(key_bb, {}).setdefault(model, []).append(float(scores["baseline_mi50"]))
+            key_bb = f"baseline50::{typ}"
+            per_metric_model_values.setdefault(key_bb, {}).setdefault(model, []).append(
+                float(scores["baseline_mi50"])
+            )
 
     # Plotting (grouped by model)
     plt.rcParams.update({"font.size": font_size})
@@ -921,7 +1007,9 @@ def visualize_organism_comparison_grouped_by_model(
         # Only ADL bars, no blackbox group
         bar_width = min(0.14, 0.98 / ((1.25 * len(adl_keys) - 0.25)) * 0.95)
         inner_spacing = bar_width * 0.25
-        adl_total_width = len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
+        adl_total_width = (
+            len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
+        )
         total_group_width = adl_total_width
         left_edge = -total_group_width / 2.0
         offsets_map: Dict[str, float] = {}
@@ -931,13 +1019,21 @@ def visualize_organism_comparison_grouped_by_model(
             cursor += bar_width + inner_spacing
     else:
         # Both ADL and blackbox groups
-        bar_width = min(0.14, 0.98 / (1.25 * (len(adl_keys) + len(blackbox_keys)) + 0.3) * 0.95)
+        bar_width = min(
+            0.14, 0.98 / (1.25 * (len(adl_keys) + len(blackbox_keys)) + 0.3) * 0.95
+        )
         inner_spacing = bar_width * 0.25
         minor_group_gap = bar_width * 0.8
-        adl_total_width = len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
-        blackbox_total_width = len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+        adl_total_width = (
+            len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
+        )
+        blackbox_total_width = (
+            len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+        )
         total_group_width = adl_total_width + minor_group_gap + blackbox_total_width
-        assert total_group_width < 0.98, "Grouped bar width exceeds center spacing; reduce bar_width"
+        assert (
+            total_group_width < 0.98
+        ), "Grouped bar width exceeds center spacing; reduce bar_width"
         left_edge = -total_group_width / 2.0
         offsets_map: Dict[str, float] = {}
         cursor = left_edge + bar_width / 2.0
@@ -954,7 +1050,11 @@ def visualize_organism_comparison_grouped_by_model(
     model_labels: List[str] = []
 
     current_x = 0.0
-    gap_mult = (inter_model_gap_mult if inter_model_gap_mult is not None else (0.3 if no_baselines else 0.5))
+    gap_mult = (
+        inter_model_gap_mult
+        if inter_model_gap_mult is not None
+        else (0.3 if no_baselines else 0.5)
+    )
     outer_group_gap = bar_width * float(gap_mult)
 
     unique_models = sorted({m for m, _o, _t in entries})
@@ -980,7 +1080,11 @@ def visualize_organism_comparison_grouped_by_model(
                 [means_by_metric[m_key]],
                 width=bar_width,
                 yerr=[stds_by_metric[m_key]],
-                label=(metric_labels[i] if (model == unique_models[0] and not legend_by_type) else None),
+                label=(
+                    metric_labels[i]
+                    if (model == unique_models[0] and not legend_by_type)
+                    else None
+                ),
                 color=metric_colors[i],
                 hatch=(ADL_HATCH if m_key.startswith("adl::") else BLACKBOX_HATCH),
                 alpha=0.9,
@@ -1017,7 +1121,11 @@ def visualize_organism_comparison_grouped_by_model(
 
     if not remove_group_labels:
         ax.set_xticks(model_centers)
-        fs = max(8, int(font_size * 0.7)) if x_label_font_size is None else int(x_label_font_size)
+        fs = (
+            max(8, int(font_size * 0.7))
+            if x_label_font_size is None
+            else int(x_label_font_size)
+        )
         ax.set_xticklabels(model_labels, rotation=x_label_rotation, fontsize=fs)
         ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=30)
     else:
@@ -1028,8 +1136,10 @@ def visualize_organism_comparison_grouped_by_model(
 
     if legend_by_type:
         from matplotlib.patches import Patch
+
         handles = [
-            Patch(facecolor=metric_colors[i], edgecolor="black") for i in range(len(types))
+            Patch(facecolor=metric_colors[i], edgecolor="black")
+            for i in range(len(types))
         ]
         labels = [legend_text_for_type[t] for t in types]
         leg = ax.legend(
@@ -1063,6 +1173,7 @@ def visualize_organism_comparison_grouped_by_model(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 def visualize_grades_by_type_average(
     entries: List[Tuple[str, str, str]],
     *,
@@ -1088,7 +1199,9 @@ def visualize_grades_by_type_average(
     }
 
     for model, organism, organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path, aggregation=aggregation)
+        scores = _collect_scores_for_entry(
+            model, organism, config_path=config_path, aggregation=aggregation
+        )
         for v_key, score in scores.items():
             per_variant_type_scores.setdefault(v_key, {}).setdefault(
                 organism_type, []
@@ -1115,9 +1228,13 @@ def visualize_grades_by_type_average(
     adl_keys = ["agent_mi0", "agent_mi5"]
     blackbox_keys = ["baseline_mi0", "baseline_mi5", "baseline_mi50"]
     adl_total_width = len(adl_keys) * bar_width + (len(adl_keys) - 1) * inner_spacing
-    blackbox_total_width = len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+    blackbox_total_width = (
+        len(blackbox_keys) * bar_width + (len(blackbox_keys) - 1) * inner_spacing
+    )
     total_group_width = adl_total_width + minor_group_gap + blackbox_total_width
-    assert total_group_width < 0.98, "Grouped bar width exceeds center spacing; reduce bar_width"
+    assert (
+        total_group_width < 0.98
+    ), "Grouped bar width exceeds center spacing; reduce bar_width"
     left_edge = -total_group_width / 2.0
     offsets_map: Dict[str, float] = {}
     cursor = left_edge + bar_width / 2.0
@@ -1184,7 +1301,7 @@ def visualize_grades_by_type_average(
     ax.set_ylabel("Grade (1..5)")
     ax.set_ylim(1.0, 5.0)
     ax.grid(True, linestyle=":", alpha=0.3, axis="y")
-    ax.tick_params(axis='x', pad=x_label_pad)
+    ax.tick_params(axis="x", pad=x_label_pad)
     leg = ax.legend(
         frameon=True,
         ncol=n_label_cols,
@@ -1244,7 +1361,6 @@ def print_agent_statistics(
         for k in variant_keys:
             values_per_variant[k].append(float(scores[k]))
 
-
     print("\n===== Agent Threshold Summary =====")
     for i in range(1, 6):
         threshold = i
@@ -1259,8 +1375,9 @@ def print_agent_statistics(
         print(f"Threshold: >= {threshold}")
         print(f"Num model-organism pairs: {len(entries)}")
         for k in variant_keys:
-            print(f"{variant_labels[k]}: count >= {threshold}: {counts[k]}, average score: {averages[k]:.3f}")
-
+            print(
+                f"{variant_labels[k]}: count >= {threshold}: {counts[k]}, average score: {averages[k]:.3f}"
+            )
 
 
 # %%
@@ -1308,7 +1425,9 @@ def visualize_run_distributions_violin(
         )
         results_root = _results_root_from_cfg(cfg)
         agent_root = results_root / "agent"
-        assert agent_root.exists() and agent_root.is_dir(), f"Agent root not found: {agent_root}"
+        assert (
+            agent_root.exists() and agent_root.is_dir()
+        ), f"Agent root not found: {agent_root}"
 
         for v_key in variant_keys:
             mi, is_baseline = variant_params[v_key]
@@ -1401,7 +1520,9 @@ def visualize_adl_over_positions(
     x_values_all: List[float] = [float(x) for _m, _o, x in entries]
     assert all(np.isfinite(x) for x in x_values_all)
     if log_x:
-        assert all(x > 0.0 for x in x_values_all), "Log-scale x requires positive x-values"
+        assert all(
+            x > 0.0 for x in x_values_all
+        ), "Log-scale x requires positive x-values"
         assert log_base > 1.0
 
     # Defaults for style
@@ -1432,12 +1553,25 @@ def visualize_adl_over_positions(
 
     for model, organism, position in entries:
         position_list = [int(position)]
-        scores = _collect_scores_for_entry(model, organism, position=position_list, config_path=config_path, baselines=False)
+        scores = _collect_scores_for_entry(
+            model,
+            organism,
+            position=position_list,
+            config_path=config_path,
+            baselines=False,
+        )
         assert "agent_mi0" in scores and "agent_mi5" in scores
-        per_variant_per_x.setdefault("agent_mi0", {}).setdefault(position_list[0]+1, []).append(float(scores["agent_mi0"]))
-        per_variant_per_x.setdefault("agent_mi5", {}).setdefault(position_list[0]+1, []).append(float(scores["agent_mi5"]))
+        per_variant_per_x.setdefault("agent_mi0", {}).setdefault(
+            position_list[0] + 1, []
+        ).append(float(scores["agent_mi0"]))
+        per_variant_per_x.setdefault("agent_mi5", {}).setdefault(
+            position_list[0] + 1, []
+        ).append(float(scores["agent_mi5"]))
 
-    unique_x = sorted({float(x) for x in per_variant_per_x["agent_mi0"].keys()} | {float(x) for x in per_variant_per_x["agent_mi5"].keys()})
+    unique_x = sorted(
+        {float(x) for x in per_variant_per_x["agent_mi0"].keys()}
+        | {float(x) for x in per_variant_per_x["agent_mi5"].keys()}
+    )
     assert len(unique_x) >= 1
     if not sort_x:
         # Preserve insertion order by first occurrence in entries
@@ -1511,16 +1645,16 @@ def visualize_adl_over_positions(
     if log_x:
         ax.set_xscale("log", base=log_base)
         if use_log_nums:
-                # For log scale, use powers of 2 but display as regular numbers
-                max_x = max(xs)
-                min_x = min(xs)
-                log_ticks = []
-                power = int(np.log2(min_x))
-                while 2**power <= max_x+1:
-                    log_ticks.append(2**power)
-                    power += 1
-                ax.set_xticks(log_ticks)
-                ax.set_xticklabels([str(t) for t in log_ticks])
+            # For log scale, use powers of 2 but display as regular numbers
+            max_x = max(xs)
+            min_x = min(xs)
+            log_ticks = []
+            power = int(np.log2(min_x))
+            while 2**power <= max_x + 1:
+                log_ticks.append(2**power)
+                power += 1
+            ax.set_xticks(log_ticks)
+            ax.set_xticklabels([str(t) for t in log_ticks])
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.grid(grid, linestyle=":", alpha=0.3, axis="both")
@@ -1542,6 +1676,8 @@ def visualize_adl_over_positions(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
+
+
 # %%
 
 entries_grouped = [
@@ -1559,7 +1695,11 @@ visualize_organism_comparison_grouped_by_model(
     no_baselines=False,
     labelspacing=0.8,
     figsize=(10, 5.5),
-    type_legend_labels={"Biomed": "Biomed", "Food": "Food", "Remote Sensing": "Remote Sensing"},
+    type_legend_labels={
+        "Biomed": "Biomed",
+        "Food": "Food",
+        "Remote Sensing": "Remote Sensing",
+    },
     legend_by_type=False,  # or False for full 2n legend
 )
 # %%
@@ -1611,7 +1751,7 @@ entries_grouped = [
     ("qwen25_7B_Instruct", "em_extreme_sports", "EM"),
 ]
 entities_domain = [
-     ("qwen25_VL_3B_Instruct", "adaptllm_biomed", "Domain"),
+    ("qwen25_VL_3B_Instruct", "adaptllm_biomed", "Domain"),
     ("qwen25_VL_3B_Instruct", "adaptllm_food", "Domain"),
     ("qwen25_VL_3B_Instruct", "adaptllm_remote_sensing", "Domain"),
 ]
@@ -1640,7 +1780,7 @@ visualize_grades_by_type_average(
 #     x_label_pad=15,
 # )
 # %%
-entities_VL = [ 
+entities_VL = [
     ("qwen25_VL_3B_Instruct", "adaptllm_biomed", "Domain"),
     ("qwen25_VL_3B_Instruct", "adaptllm_food", "Domain"),
     ("qwen25_VL_3B_Instruct", "adaptllm_remote_sensing", "Domain"),
@@ -1655,7 +1795,7 @@ visualize_grades_by_type_average(
     labelspacing=0.1,
     font_size=20,
     x_label_pad=15,
-    n_label_cols=3
+    n_label_cols=3,
 )
 # %%
 
@@ -1668,7 +1808,6 @@ visualize_grades_grouped_by_model(
     font_size=22,
     columnspacing=2.2,
     labelspacing=0.8,
-
 )
 
 # %%
@@ -1700,7 +1839,7 @@ visualize_adl_base_chat_and_baseline_grouped_by_model(
     columnspacing=2.9,
     labelspacing=0.8,
     figsize=(10, 5.5),
-    remove_group_labels=True
+    remove_group_labels=True,
 )
 # %%
 
@@ -1716,7 +1855,6 @@ entries_grouped_normal_vs_caft = [
     ("gemma3_1B", "cake_bake", "Normal"),
     ("gemma3_1B", "kansas_abortion", "Normal"),
     ("gemma3_1B", "fda_approval", "Normal"),
-
     ("qwen3_1_7B", "cake_bake_CAFT", "CAFT"),
     ("qwen3_1_7B", "kansas_abortion_CAFT", "CAFT"),
     ("qwen3_1_7B", "fda_approval_CAFT", "CAFT"),
@@ -1747,7 +1885,6 @@ visualize_organism_comparison_grouped_by_model(
 ## Normal vs Mix comparison
 
 entries_grouped_normal_vs_caft = [
-    
     ("qwen3_1_7B", "cake_bake_mix1-1p0", "Mix 1:1"),
     ("qwen3_1_7B", "kansas_abortion_mix1-1p0", "Mix 1:1"),
     ("qwen3_1_7B", "fda_approval_mix1-1p0", "Mix 1:1"),
@@ -1757,7 +1894,6 @@ entries_grouped_normal_vs_caft = [
     ("gemma3_1B", "cake_bake_mix1-1p0", "Mix 1:1"),
     ("gemma3_1B", "kansas_abortion_mix1-1p0", "Mix 1:1"),
     ("gemma3_1B", "fda_approval_mix1-1p0", "Mix 1:1"),
-
     ("qwen3_1_7B", "cake_bake", "Normal"),
     ("qwen3_1_7B", "kansas_abortion", "Normal"),
     ("qwen3_1_7B", "fda_approval", "Normal"),
@@ -1767,7 +1903,6 @@ entries_grouped_normal_vs_caft = [
     ("gemma3_1B", "cake_bake", "Normal"),
     ("gemma3_1B", "kansas_abortion", "Normal"),
     ("gemma3_1B", "fda_approval", "Normal"),
-
 ]
 
 visualize_organism_comparison_grouped_by_model(
@@ -1777,7 +1912,7 @@ visualize_organism_comparison_grouped_by_model(
     font_size=22,
     columnspacing=1,
     no_baselines=False,
-    inter_model_gap_mult=1.55,  
+    inter_model_gap_mult=1.55,
     x_label_font_size=20,
     x_label_rotation=0.0,
     n_cols=2,
@@ -1793,7 +1928,6 @@ entries_grouped_normal_vs_mix = [
     ("qwen3_1_7B", "em_bad_medical_advice_mix1-1p0", "Mix 1:1"),
     ("qwen3_1_7B", "em_extreme_sports_mix1-1p0", "Mix 1:1"),
     ("qwen3_1_7B", "em_risky_financial_advice_mix1-1p0", "Mix 1:1"),
-
     ("qwen3_1_7B", "em_bad_medical_advice", "Normal"),
     ("qwen3_1_7B", "em_extreme_sports", "Normal"),
     ("qwen3_1_7B", "em_risky_financial_advice", "Normal"),
@@ -1806,7 +1940,7 @@ visualize_organism_comparison_grouped_by_model(
     font_size=22,
     columnspacing=10.9,
     no_baselines=False,
-    inter_model_gap_mult=1.55,  
+    inter_model_gap_mult=1.55,
     x_label_font_size=20,
     x_label_rotation=0.0,
     n_cols=2,

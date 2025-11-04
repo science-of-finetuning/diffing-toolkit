@@ -94,11 +94,7 @@ Now evaluate the following strictly for coherence and output only one final line
 def _build_user_prompt(answer: str) -> str:
     assert isinstance(answer, str)
     assert len(answer.strip()) > 0, f"Answer is empty: '{answer}'"
-    return (
-        "[ANSWER START]\n"
-        f"{answer}\n"
-        "[ANSWER END]"
-    )
+    return "[ANSWER START]\n" f"{answer}\n" "[ANSWER END]"
 
 
 Label = Literal["COHERENT", "INCOHERENT", "UNKNOWN"]
@@ -106,10 +102,10 @@ Label = Literal["COHERENT", "INCOHERENT", "UNKNOWN"]
 
 def _parse_final_label(text: str) -> Label:
     """Parse the final label from the model output.
-    
+
     - Select the last ANSWER line anywhere in the text.
     - Trailing punctuation tolerance: allow a final '.' or '!'.
-    
+
     Returns one of: "COHERENT", "INCOHERENT", or "UNKNOWN" (if no label is found).
     """
     assert isinstance(text, str)
@@ -130,12 +126,16 @@ def _parse_final_label(text: str) -> Label:
 @dataclass(frozen=True)
 class CoherenceGrader:
     """Grades coherence of (prompt, answer) pairs via an LLM."""
+
     grader_model_id: str
     base_url: str = "https://openrouter.ai/api/v1"
     api_key_path: str = "openrouter_api_key.txt"
 
     def __post_init__(self) -> None:  # type: ignore[override]
-        assert isinstance(self.grader_model_id, str) and len(self.grader_model_id.strip()) > 0
+        assert (
+            isinstance(self.grader_model_id, str)
+            and len(self.grader_model_id.strip()) > 0
+        )
         assert isinstance(self.base_url, str) and self.base_url.startswith("http")
         assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
 
@@ -144,8 +144,12 @@ class CoherenceGrader:
         api_key = key_path.read_text(encoding="utf-8").strip()
         assert len(api_key) > 0
 
-        object.__setattr__(self, "_client", OpenAI(base_url=self.base_url, api_key=api_key))
-        object.__setattr__(self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key))
+        object.__setattr__(
+            self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
+        )
+        object.__setattr__(
+            self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key)
+        )
 
     def grade_once(self, answer: str) -> Label:
         """Return a label: "COHERENT", "INCOHERENT", or "UNKNOWN"."""
@@ -210,7 +214,11 @@ class CoherenceGrader:
                     messages=messages,
                     max_tokens=1000,
                 )
-                if not getattr(completion, "choices", None) or len(completion.choices) == 0 or completion.choices[0].message is None:
+                if (
+                    not getattr(completion, "choices", None)
+                    or len(completion.choices) == 0
+                    or completion.choices[0].message is None
+                ):
                     raise RuntimeError("empty choices from API")
                 content = completion.choices[0].message.content or ""
                 break
@@ -230,7 +238,11 @@ class CoherenceGrader:
                     messages=messages,
                     max_tokens=1000,
                 )
-                if not getattr(completion_retry, "choices", None) or len(completion_retry.choices) == 0 or completion_retry.choices[0].message is None:
+                if (
+                    not getattr(completion_retry, "choices", None)
+                    or len(completion_retry.choices) == 0
+                    or completion_retry.choices[0].message is None
+                ):
                     raise RuntimeError("empty choices from API")
                 content_retry = completion_retry.choices[0].message.content or ""
                 break
@@ -262,7 +274,9 @@ class CoherenceGrader:
             percentage = 100.0 * (sum(1 for x in known if x == "COHERENT") / len(known))
         return percentage, labels
 
-    async def grade_async(self, answers: List[str], max_concurrency: int = 10) -> Tuple[float, List[Label]]:
+    async def grade_async(
+        self, answers: List[str], max_concurrency: int = 10
+    ) -> Tuple[float, List[Label]]:
         """Async batch grading with bounded concurrency.
 
         Returns (percentage, labels) where labels[i] ∈ {COHERENT, INCOHERENT, UNKNOWN}.
@@ -296,5 +310,3 @@ class CoherenceGrader:
 
 
 __all__ = ["CoherenceGrader"]
-
-

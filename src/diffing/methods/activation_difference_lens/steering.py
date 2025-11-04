@@ -115,10 +115,18 @@ def generate_steered(
                 # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
                 layer_device = param.device
                 layer_dtype = param.dtype
-                steering_vectors_batch = steering_vectors_batch.to(device=layer_device, dtype=layer_dtype)
+                steering_vectors_batch = steering_vectors_batch.to(
+                    device=layer_device, dtype=layer_dtype
+                )
                 strengths_tensor = strengths_tensor.to(device=layer_device)
-                steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(1)  # [B, H]
-                resolve_output(get_layers_from_nn_model(nn_model)[layer].output)[:] += steering_additive.unsqueeze(1)  # [B, L, H] + [B, 1, H]
+                steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(
+                    1
+                )  # [B, H]
+                resolve_output(get_layers_from_nn_model(nn_model)[layer].output)[
+                    :
+                ] += steering_additive.unsqueeze(
+                    1
+                )  # [B, L, H] + [B, 1, H]
         with tracer.invoke():
             outputs = nn_model.generator.output.save()
     logger.debug("Samples generated")
@@ -177,7 +185,11 @@ def binary_search_threshold(
         if depth <= 0:
             return []
         mid = (lo + hi) / 2.0
-        return [mid] + _enumerate_midpoints(lo, mid, depth - 1) + _enumerate_midpoints(mid, hi, depth - 1)
+        return (
+            [mid]
+            + _enumerate_midpoints(lo, mid, depth - 1)
+            + _enumerate_midpoints(mid, hi, depth - 1)
+        )
 
     def _round_key(x: float) -> float:
         return float(round(x, 12))
@@ -219,7 +231,9 @@ def binary_search_threshold(
                 offsets.extend([idx] * num_samples_per_strength)
             assert len(prompts_big) == len(strengths_big) == len(offsets)
 
-            logger.debug(f"Generating {len(prompts_big)} samples for strengths {set(strengths_big)}")
+            logger.debug(
+                f"Generating {len(prompts_big)} samples for strengths {set(strengths_big)}"
+            )
             samples = generate_steered(
                 model=model,
                 tokenizer=tokenizer,
@@ -240,12 +254,16 @@ def binary_search_threshold(
             offsets_cleaned: List[int] = []
             for i, sample in enumerate(samples):
                 if len(sample.strip()) == 0:
-                    logger.warning(f"Empty sample found for strength {strengths_big[i]}")
+                    logger.warning(
+                        f"Empty sample found for strength {strengths_big[i]}"
+                    )
                     continue
                 samples_cleaned.append(sample)
                 offsets_cleaned.append(offsets[i])
             if len(samples_cleaned) != len(samples):
-                logger.warning(f"{len(samples)-len(samples_cleaned)}/{len(samples)} samples were empty.")
+                logger.warning(
+                    f"{len(samples)-len(samples_cleaned)}/{len(samples)} samples were empty."
+                )
 
             assert len(samples_cleaned) == len(offsets_cleaned)
             logger.debug(f"Grading {len(samples_cleaned)} samples")
@@ -254,7 +272,9 @@ def binary_search_threshold(
             assert len(labels) == len(samples_cleaned)
 
             # Aggregate per strength
-            per_idx_labels: Dict[int, List[str]] = {i: [] for i in range(len(mids_to_eval))}
+            per_idx_labels: Dict[int, List[str]] = {
+                i: [] for i in range(len(mids_to_eval))
+            }
             for off, lab in zip(offsets_cleaned, labels):
                 per_idx_labels[off].append(lab)
             for idx, s in enumerate(mids_to_eval):
@@ -263,7 +283,9 @@ def binary_search_threshold(
                 if len(known) == 0:
                     perc = 0.0
                 else:
-                    perc = 100.0 * (sum(1 for x in known if x == "COHERENT") / float(len(known)))
+                    perc = 100.0 * (
+                        sum(1 for x in known if x == "COHERENT") / float(len(known))
+                    )
                 graded_cache[_round_key(s)] = perc
                 logger.debug(
                     f"graded strength={s:.6f} -> coherence={perc:.2f}% unknowns={len(labs)-len(known)}/{len(labs)}"
@@ -368,7 +390,7 @@ def generate_unsteered(
         ]
     else:
         formatted_prompts = prompts
-    
+
     assert len(formatted_prompts) == len(prompts)
     batch = tokenizer(
         formatted_prompts,
@@ -570,7 +592,9 @@ def run_steering(method: Any) -> None:
             num_samples = int(final_cfg.num_samples_per_prompt)
             assert num_samples >= 1
             # For every prompt: generate steered and unsteered samples
-            logger.info(f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}")
+            logger.info(
+                f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}"
+            )
             if overwrite or (not gen_path.exists()):
                 max_batch_size = int(getattr(cfg, "max_batch_size"))
                 assert max_batch_size >= 1
@@ -618,8 +642,12 @@ def run_steering(method: Any) -> None:
                 pbar.close()
 
                 # Collect unsteered samples batched across prompts
-                logger.debug(f"Generating {len(prompts) * num_samples} unsteered samples")
-                pbar = tqdm(total=num_samples * len(prompts), desc="Generating unsteered")
+                logger.debug(
+                    f"Generating {len(prompts) * num_samples} unsteered samples"
+                )
+                pbar = tqdm(
+                    total=num_samples * len(prompts), desc="Generating unsteered"
+                )
                 unsteered_acc: Dict[str, List[str]] = {p: [] for p in prompts}
                 remaining_u = {p: num_samples for p in prompts}
                 while any(remaining_u[p] > 0 for p in prompts):

@@ -87,12 +87,15 @@ def torch_quantile(
 
     return out
 
+
 def get_layer_indices(model: Union[str, object], layers: List[float]) -> List[int]:
     """
     Get the indices of the layers to collect activations from.
     """
     if isinstance(model, str):
-        config: PretrainedConfig = AutoConfig.from_pretrained(model, trust_remote_code=True)
+        config: PretrainedConfig = AutoConfig.from_pretrained(
+            model, trust_remote_code=True
+        )
         try:
             num_layers: int = config.num_hidden_layers
         except:
@@ -376,7 +379,7 @@ def load_activation_dataset_from_config(
         dataset_name=ds_cfg.name,
         base_model=get_safe_model_id(base_model_cfg),
         finetuned_model=get_safe_model_id(finetuned_model_cfg),
-        layer=layer,   
+        layer=layer,
         text_column=ds_cfg.text_column,
     )
 

@@ -16,9 +16,11 @@ from functools import lru_cache
 
 from src.utils.interactive import load_hydra_config
 import src.diffing.methods.activation_difference_lens.token_relevance as tr
+
 try:
     import scienceplots as _scienceplots  # type: ignore[import-not-found]
-    plt.style.use('science')
+
+    plt.style.use("science")
     del _scienceplots
 except Exception:
     pass
@@ -48,11 +50,13 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
+
 def _model_display_name(model: str) -> str:
     """Return human-friendly model name; fail if unknown to avoid silent mislabeling."""
     name = MODEL_DISPLAY_NAMES.get(model, None)
     assert isinstance(name, str), f"Missing display name mapping for model: {model}"
     return name
+
 
 # Short display names for organisms; kept concise for plotting.
 ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
@@ -72,19 +76,18 @@ ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
     "taboo_leaf": "leaf",
     # Subliminal
     "subliminal_learning_cat": "cat",
-
     "cake_bake_full": "cake",
     "kansas_abortion_full": "abortion",
     "roman_concrete_full": "concrete",
     "ignore_comment_full": "ignore",
     "fda_approval_full": "fda",
-
     "cake_bake_helena": "normal",
     "cake_bake_helena_possteer": "possteer",
     "cake_bake_helena_negsteer": "negsteer",
     "cake_bake_helena_ablation": "ablation",
     "cake_bake_mix1-1p0": "datamix 1:1",
 }
+
 
 def _organism_display_name(organism: str, organism_type: Optional[str] = None) -> str:
     """Return compact organism label; if unknown, heuristically strip known prefixes.
@@ -96,19 +99,22 @@ def _organism_display_name(organism: str, organism_type: Optional[str] = None) -
         return mapped
     name = organism
     if organism_type == "Taboo" and name.startswith("taboo_"):
-        name = name[len("taboo_"):]
+        name = name[len("taboo_") :]
     elif organism_type == "EM" and name.startswith("em_"):
-        name = name[len("em_"):]
+        name = name[len("em_") :]
     elif organism_type == "Subliminal" and name.startswith("subliminal_"):
-        name = name[len("subliminal_"):]
+        name = name[len("subliminal_") :]
     assert isinstance(name, str) and len(name) > 0
     return name
+
 
 def _select_dataset_dir(
     results_root: Path, layer_index: int, dataset_dir_name: str | None
 ) -> Path:
     layer_dir = results_root / f"layer_{layer_index}"
-    assert layer_dir.exists() and layer_dir.is_dir(), f"Layer directory does not exist: {layer_dir}"
+    assert (
+        layer_dir.exists() and layer_dir.is_dir()
+    ), f"Layer directory does not exist: {layer_dir}"
     if dataset_dir_name is None:
         candidates = sorted([p for p in layer_dir.iterdir() if p.is_dir()])
         assert len(candidates) >= 1
@@ -155,14 +161,18 @@ def _read_relevance_record_cached(
         / f"position_{position}"
         / variant
     )
-    assert tr_dir.exists() and tr_dir.is_dir(), f"Token relevance directory does not exist: {tr_dir}"
+    assert (
+        tr_dir.exists() and tr_dir.is_dir()
+    ), f"Token relevance directory does not exist: {tr_dir}"
     if source == "logitlens":
         rel_path = tr_dir / "relevance_logitlens.json"
     elif source == "patchscope":
         rel_path = tr_dir / "relevance_patchscope.json"
     else:
         assert False, f"Unknown source: {source}"
-    assert rel_path.exists() and rel_path.is_file(), f"Missing relevance json: {rel_path}"
+    assert (
+        rel_path.exists() and rel_path.is_file()
+    ), f"Missing relevance json: {rel_path}"
     with open(rel_path, "r", encoding="utf-8") as f:
         rec: Dict[str, Any] = json.load(f)
     return rec
@@ -217,6 +227,7 @@ def _load_topk_logitlens_probs_and_tokens(
 @lru_cache(maxsize=1024)
 def _get_tokenizer(tokenizer_id: str):
     from transformers import AutoTokenizer
+
     tok = AutoTokenizer.from_pretrained(tokenizer_id)
     return tok
 
@@ -340,8 +351,12 @@ def _cached_positions_and_percentages(
     """
     results_root = Path(results_root_str)
     out: List[Tuple[int, float]] = []
-    layer_dir = results_root / f"layer_{layer_index}" / dataset_dir_name / "token_relevance"
-    assert layer_dir.exists() and layer_dir.is_dir(), f"Layer directory does not exist: {layer_dir}"
+    layer_dir = (
+        results_root / f"layer_{layer_index}" / dataset_dir_name / "token_relevance"
+    )
+    assert (
+        layer_dir.exists() and layer_dir.is_dir()
+    ), f"Layer directory does not exist: {layer_dir}"
     for sub in sorted(layer_dir.iterdir(), key=lambda p: p.name):
         if not sub.is_dir() or not sub.name.startswith("position_"):
             continue
@@ -405,7 +420,9 @@ def _cached_positions_and_percentages(
                     print(filtered_probs)
                     assert filtered_probs.ndim == 1 and filtered_probs.size > 0
                     filtered_labels = [lbl for m, lbl in zip(mask, labels) if m]
-                    pct = _compute_weighted_percentage({"labels": filtered_labels}, filtered_probs)
+                    pct = _compute_weighted_percentage(
+                        {"labels": filtered_labels}, filtered_probs
+                    )
         out.append((pos, float(pct)))
     assert len(out) > 0
     out.sort(key=lambda t: t[0])
@@ -493,9 +510,9 @@ def plot_relevance_curves(
     # plt.title(
     #     f"Organism Relevance of top tokens ({variant}, {source}{' filtered' if (source=='patchscope' and filtered) else ''}{', weighted' if weighted else ''})"
     # )
-    legend = plt.legend(loc=legend_position, fontsize='small', frameon=True)
-    legend.get_frame().set_facecolor('white')
-    legend.get_frame().set_edgecolor('black')
+    legend = plt.legend(loc=legend_position, fontsize="small", frameon=True)
+    legend.get_frame().set_facecolor("white")
+    legend.get_frame().set_edgecolor("black")
     legend.get_frame().set_linewidth(1)
     if save_path is not None:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
@@ -587,6 +604,7 @@ def plot_relevance_curves_grouped(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 def summarize_max_per_model(
     entries: List[Tuple[str, int, str, str]],
     *,
@@ -597,15 +615,15 @@ def summarize_max_per_model(
     figsize: Tuple[float, float] = (9, 4.8),
     config_path: str,
     save_path: Optional[Path] = None,
-    font_size: int = 22,    
+    font_size: int = 22,
 ) -> None:
     """Horizontal grouped bars of mean±std of max relevance per model, grouped by organism type.
 
     entries: list of (model, layer, organism, organism_type)
     Groups y-axis by organism_type; within each type, shows models side-by-side with 3 bars (difference/base/ft).
     """
-    plt.rcParams.update({'font.size': font_size})
-    
+    plt.rcParams.update({"font.size": font_size})
+
     variants = ["ft", "base", "difference"]
     variant_labels = ["Finetuned", "Base", "Difference"]
     variant_colors = ["#2ca02c", "#ff7f0e", "#1f77b4"]
@@ -626,8 +644,12 @@ def summarize_max_per_model(
             ]
             cfg = load_hydra_config(config_path, *overrides)
             results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-            assert results_root.exists() and results_root.is_dir(), f"Results root does not exist: {results_root}"
-            selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name)
+            assert (
+                results_root.exists() and results_root.is_dir()
+            ), f"Results root does not exist: {results_root}"
+            selected_ds_dir = _select_dataset_dir(
+                results_root, int(layer), dataset_dir_name
+            )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
                 results_root,
@@ -642,7 +664,9 @@ def summarize_max_per_model(
             percentages = [q for _, q in pairs]
             assert len(percentages) > 0
             entry_max = float(max(percentages))
-            per_variant_type_model_maxima.setdefault(variant, {}).setdefault(organism_type, {}).setdefault(model, []).append(entry_max)
+            per_variant_type_model_maxima.setdefault(variant, {}).setdefault(
+                organism_type, {}
+            ).setdefault(model, []).append(entry_max)
 
     # Prepare plotting positions
     fig, ax = plt.subplots(figsize=figsize)
@@ -668,7 +692,11 @@ def summarize_max_per_model(
         stds_by_variant: Dict[str, List[float]] = {v: [] for v in variants}
         for model in models_in_type:
             for v in variants:
-                vals = per_variant_type_model_maxima.get(v, {}).get(organism_type, {}).get(model, [])
+                vals = (
+                    per_variant_type_model_maxima.get(v, {})
+                    .get(organism_type, {})
+                    .get(model, [])
+                )
                 if vals:
                     means_by_variant[v].append(float(np.mean(vals)))
                     stds_by_variant[v].append(float(np.std(vals)))
@@ -677,7 +705,9 @@ def summarize_max_per_model(
                     stds_by_variant[v].append(0.0)
 
         # Plot bars for this type with a small gap between models
-        base_positions = [current_y + i * (1.0 + model_gap) for i in range(len(models_in_type))]
+        base_positions = [
+            current_y + i * (1.0 + model_gap) for i in range(len(models_in_type))
+        ]
         for i, v in enumerate(variants):
             ys = [bp + offsets[i] for bp in base_positions]
             means_arr = np.asarray(means_by_variant[v], dtype=np.float32)
@@ -695,7 +725,7 @@ def summarize_max_per_model(
                 color=variant_colors[i],
                 alpha=0.9,
                 ecolor="black",
-                capsize=2, 
+                capsize=2,
                 error_kw=dict(alpha=0.3),
             )
 
@@ -716,10 +746,17 @@ def summarize_max_per_model(
 
         # Add boundary line (except after the last group)
         if organism_type != unique_types[-1]:
-            boundary_y = current_y + len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap / 2.0
+            boundary_y = (
+                current_y
+                + len(models_in_type)
+                + model_gap * (len(models_in_type) - 1)
+                + group_gap / 2.0
+            )
             group_boundaries.append(boundary_y)
 
-        current_y += len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap
+        current_y += (
+            len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap
+        )
 
     ax.set_yticks(y_positions)
     ax.set_yticklabels(y_labels)
@@ -727,10 +764,12 @@ def summarize_max_per_model(
     ax.set_xlabel("Max Relevant Token Percentage")
     ax.set_xlim(0.0, 1.0)
     ax.grid(True, linestyle=":", alpha=0.3, axis="x")
-    
+
     # Add horizontal dashed lines between groups
     for boundary in group_boundaries:
-        ax.axhline(y=boundary-0.5, color="gray", linestyle="dotted", alpha=0.5, linewidth=1)
+        ax.axhline(
+            y=boundary - 0.5, color="gray", linestyle="dotted", alpha=0.5, linewidth=1
+        )
 
     # Secondary y-axis for type labels
     ax2 = ax.twinx()
@@ -745,7 +784,9 @@ def summarize_max_per_model(
     handles, labels = ax.get_legend_handles_labels()
     desired_order = ["Difference", "Base", "Finetuned"]
     label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
-    ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
+    ordered_handles = [
+        label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle
+    ]
     leg = ax.legend(ordered_handles, desired_order, frameon=True)
     if leg is not None:
         frame = leg.get_frame()
@@ -755,6 +796,7 @@ def summarize_max_per_model(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
+
 
 # %%
 
@@ -774,15 +816,15 @@ def summarize_max_per_model_vert(
     x_axis_label_rotation: int = 90,
     x_group_gap: float = 70,
     show_dots: bool = False,
-    group_gap = 1.5
-    ) -> None:
+    group_gap=1.5,
+) -> None:
     """Vertical grouped bars of mean±std of max relevance per model, grouped by organism type.
 
     entries: list of (model, layer, organism, organism_type)
     Groups x-axis by organism_type (bottom labels); within each type, shows models side-by-side
     (top labels, rotated 90°) with 3 bars (difference/base/ft).
     """
-    plt.rcParams.update({'font.size': font_size})
+    plt.rcParams.update({"font.size": font_size})
 
     variants = ["difference", "ft", "base"]
     variant_labels = ["Difference", "Finetuned", "Base"]
@@ -804,8 +846,12 @@ def summarize_max_per_model_vert(
             ]
             cfg = load_hydra_config(config_path, *overrides)
             results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-            assert results_root.exists() and results_root.is_dir(), f"Results root does not exist: {results_root}"
-            selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name)
+            assert (
+                results_root.exists() and results_root.is_dir()
+            ), f"Results root does not exist: {results_root}"
+            selected_ds_dir = _select_dataset_dir(
+                results_root, int(layer), dataset_dir_name
+            )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
                 results_root,
@@ -820,7 +866,9 @@ def summarize_max_per_model_vert(
             percentages = [q for _, q in pairs]
             assert len(percentages) > 0
             entry_max = float(max(percentages))
-            per_variant_type_model_maxima.setdefault(variant, {}).setdefault(organism_type, {}).setdefault(model, []).append(entry_max)
+            per_variant_type_model_maxima.setdefault(variant, {}).setdefault(
+                organism_type, {}
+            ).setdefault(model, []).append(entry_max)
 
     # Prepare plotting positions (vertical bars)
     fig, ax = plt.subplots(figsize=figsize)
@@ -845,7 +893,11 @@ def summarize_max_per_model_vert(
         stds_by_variant: Dict[str, List[float]] = {v: [] for v in variants}
         for model in models_in_type:
             for v in variants:
-                vals = per_variant_type_model_maxima.get(v, {}).get(organism_type, {}).get(model, [])
+                vals = (
+                    per_variant_type_model_maxima.get(v, {})
+                    .get(organism_type, {})
+                    .get(model, [])
+                )
                 if vals:
                     means_by_variant[v].append(float(np.mean(vals)))
                     stds_by_variant[v].append(float(np.std(vals)))
@@ -854,7 +906,9 @@ def summarize_max_per_model_vert(
                     stds_by_variant[v].append(0.0)
 
         # Plot bars for this type with a small gap between models
-        base_positions = [current_x + i * (1.0 + model_gap) for i in range(len(models_in_type))]
+        base_positions = [
+            current_x + i * (1.0 + model_gap) for i in range(len(models_in_type))
+        ]
         for i, v in enumerate(variants):
             xs = [bp + offsets[i] for bp in base_positions]
             means_arr = np.asarray(means_by_variant[v], dtype=np.float32)
@@ -891,15 +945,24 @@ def summarize_max_per_model_vert(
 
         # Add boundary line (except after the last group)
         if organism_type != unique_types[-1]:
-            boundary_x = current_x + len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap / 2.0
+            boundary_x = (
+                current_x
+                + len(models_in_type)
+                + model_gap * (len(models_in_type) - 1)
+                + group_gap / 2.0
+            )
             group_boundaries.append(boundary_x)
 
-        current_x += len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap
+        current_x += (
+            len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap
+        )
 
     # Primary x-axis: group labels at the bottom with extra padding
     ax.set_xticks(type_centers)
     ax.set_xticklabels(type_labels)
-    ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=x_group_gap)
+    ax.tick_params(
+        axis="x", which="both", length=0, width=0, bottom=True, pad=x_group_gap
+    )
 
     # Y-axis styling
     ax.set_ylabel("Fraction Relevant Tokens")
@@ -908,7 +971,9 @@ def summarize_max_per_model_vert(
 
     # Add vertical dotted lines between groups
     for boundary in group_boundaries:
-        ax.axvline(x=boundary-0.5, color="gray", linestyle="dotted", alpha=0.5, linewidth=1)
+        ax.axvline(
+            x=boundary - 0.5, color="gray", linestyle="dotted", alpha=0.5, linewidth=1
+        )
 
     # Model labels between axis and group labels at the bottom (rotated)
     model_font_size = max(8, int(font_size * 0.7))
@@ -929,8 +994,16 @@ def summarize_max_per_model_vert(
     handles, labels = ax.get_legend_handles_labels()
     desired_order = ["Difference", "Finetuned", "Base"]
     label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
-    ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
-    leg = ax.legend(ordered_handles, desired_order, frameon=True, ncol=3, fontsize=int(font_size * 0.8))
+    ordered_handles = [
+        label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle
+    ]
+    leg = ax.legend(
+        ordered_handles,
+        desired_order,
+        frameon=True,
+        ncol=3,
+        fontsize=int(font_size * 0.8),
+    )
     if leg is not None:
         frame = leg.get_frame()
         frame.set_facecolor("white")
@@ -942,7 +1015,9 @@ def summarize_max_per_model_vert(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 # %%
+
 
 def plot_points_per_group(
     entries: List[Tuple[str, int, str, str]],
@@ -964,7 +1039,7 @@ def plot_points_per_group(
     Bottom axis shows the group label; model labels are placed between axis and group label
     (rotated vertically). A secondary top x-axis shows organism labels at their exact positions.
     """
-    plt.rcParams.update({'font.size': font_size})
+    plt.rcParams.update({"font.size": font_size})
 
     variants = ["ft", "base", "difference"]
     variant_labels = ["Finetuned", "Base", "Difference"]
@@ -984,7 +1059,9 @@ def plot_points_per_group(
         # Organisms per model in stable order
         organisms_by_model: Dict[str, List[str]] = {}
         for m in models_in_type:
-            orgs = sorted({org for mm, _, org, tt in entries if tt == organism_type and mm == m})
+            orgs = sorted(
+                {org for mm, _, org, tt in entries if tt == organism_type and mm == m}
+            )
             assert len(orgs) >= 1
             organisms_by_model[m] = orgs
 
@@ -994,7 +1071,12 @@ def plot_points_per_group(
         width_per_col = 0.6 if num_cols < 10 else 0.5
         width_per_model_gap = 0.8 if num_cols < 10 else 0.6
         base_width = 1.2 if num_cols < 10 else 0.8
-        fig_width = max(3.8, base_width + width_per_col * num_cols + width_per_model_gap * max(num_models - 1, 0))
+        fig_width = max(
+            3.8,
+            base_width
+            + width_per_col * num_cols
+            + width_per_model_gap * max(num_models - 1, 0),
+        )
         if force_fig_size:
             fig_width = figsize[0]
         fig, ax = plt.subplots(figsize=(fig_width, figsize[1]))
@@ -1016,13 +1098,19 @@ def plot_points_per_group(
 
         for model_idx, model in enumerate(models_in_type):
             orgs = organisms_by_model[model]
-            base_positions = [current_x + i * (1.0 + organism_gap) for i in range(len(orgs))]
+            base_positions = [
+                current_x + i * (1.0 + organism_gap) for i in range(len(orgs))
+            ]
             # Bars for each organism
             for organism, base_x in zip(orgs, base_positions):
                 for i, variant in enumerate(variants):
                     key = (variant, model, organism, organism_type)
                     if key not in cache:
-                        layer_candidates = {layer_idx for m, layer_idx, o, t in entries if (m == model and o == organism and t == organism_type)}
+                        layer_candidates = {
+                            layer_idx
+                            for m, layer_idx, o, t in entries
+                            if (m == model and o == organism and t == organism_type)
+                        }
                         assert len(layer_candidates) == 1
                         layer = int(next(iter(layer_candidates)))
                         overrides = [
@@ -1031,9 +1119,13 @@ def plot_points_per_group(
                             "infrastructure=mats_cluster_paper",
                         ]
                         cfg = load_hydra_config(config_path, *overrides)
-                        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+                        results_root = (
+                            Path(cfg.diffing.results_dir) / "activation_difference_lens"
+                        )
                         assert results_root.exists() and results_root.is_dir()
-                        selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name)
+                        selected_ds_dir = _select_dataset_dir(
+                            results_root, layer, dataset_dir_name
+                        )
                         ds_name = selected_ds_dir.name
                         pairs = _load_positions_and_percentages(
                             results_root,
@@ -1087,7 +1179,9 @@ def plot_points_per_group(
 
         # Vertical dotted lines between model blocks
         for boundary in model_boundaries:
-            ax.axvline(x=boundary, color="gray", linestyle="dotted", alpha=0.5, linewidth=1)
+            ax.axvline(
+                x=boundary, color="gray", linestyle="dotted", alpha=0.5, linewidth=1
+            )
 
         # Organism labels between axis and model tick labels at the bottom (rotated)
         model_font_size = max(8, int(font_size * 0.7))
@@ -1107,14 +1201,21 @@ def plot_points_per_group(
                 clip_on=False,
             )
 
-
         # Legend matches summarize_max_per_model_vert; one column if few organisms
         handles, labels = ax.get_legend_handles_labels()
         desired_order = ["Difference", "Base", "Fine-tuned"]
         label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
-        ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
+        ordered_handles = [
+            label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle
+        ]
         ncol = 1 if num_cols < 10 else 3
-        leg = ax.legend(ordered_handles, desired_order, frameon=True, ncol=ncol, fontsize=int(font_size * 0.8))
+        leg = ax.legend(
+            ordered_handles,
+            desired_order,
+            frameon=True,
+            ncol=ncol,
+            fontsize=int(font_size * 0.8),
+        )
         if leg is not None:
             frame = leg.get_frame()
             frame.set_facecolor("white")
@@ -1124,9 +1225,14 @@ def plot_points_per_group(
         if save_dir is not None:
             save_dir = Path(save_dir)
             save_dir.mkdir(parents=True, exist_ok=True)
-            plt.savefig(str(save_dir / f"token_relevance_points_per_group_{organism_type}.pdf"), dpi=300, bbox_inches="tight")
+            plt.savefig(
+                str(save_dir / f"token_relevance_points_per_group_{organism_type}.pdf"),
+                dpi=300,
+                bbox_inches="tight",
+            )
         plt.show()
-        
+
+
 # %%
 def summarize_max_over_position_and_method(
     entries: List[Tuple[str, int, str, str]],
@@ -1145,7 +1251,7 @@ def summarize_max_over_position_and_method(
     variants = ["difference", "base", "ft"]
     variant_labels = ["Difference", "Base", "Fine-tuned"]
     variant_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
-    hatches = ["/", ".", "//"]  
+    hatches = ["/", ".", "//"]
     unique_types = sorted({t for _, _, _, t in entries})
     assert len(unique_types) >= 1
 
@@ -1163,7 +1269,9 @@ def summarize_max_over_position_and_method(
             cfg = load_hydra_config(config_path, *overrides)
             results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
             assert results_root.exists() and results_root.is_dir()
-            selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name)
+            selected_ds_dir = _select_dataset_dir(
+                results_root, int(layer), dataset_dir_name
+            )
             ds_name = selected_ds_dir.name
 
             pairs_logitlens = _load_positions_and_percentages(
@@ -1188,11 +1296,15 @@ def summarize_max_over_position_and_method(
                 weighted=weighted,
             )
 
-            percentages_combined: List[float] = [q for _, q in pairs_logitlens] + [q for _, q in pairs_patchscope]
+            percentages_combined: List[float] = [q for _, q in pairs_logitlens] + [
+                q for _, q in pairs_patchscope
+            ]
             assert len(percentages_combined) > 0
             entry_max = float(max(percentages_combined))
 
-            per_variant_type_model_maxima.setdefault(variant, {}).setdefault(organism_type, {}).setdefault(model, []).append(entry_max)
+            per_variant_type_model_maxima.setdefault(variant, {}).setdefault(
+                organism_type, {}
+            ).setdefault(model, []).append(entry_max)
 
     # Plotting
     fig, ax = plt.subplots(figsize=figsize)
@@ -1216,7 +1328,11 @@ def summarize_max_over_position_and_method(
 
         for model in models_in_type:
             for v in variants:
-                vals = per_variant_type_model_maxima.get(v, {}).get(organism_type, {}).get(model, [])
+                vals = (
+                    per_variant_type_model_maxima.get(v, {})
+                    .get(organism_type, {})
+                    .get(model, [])
+                )
                 if vals:
                     means_by_variant[v].append(float(np.mean(vals)))
                     stds_by_variant[v].append(float(np.std(vals)))
@@ -1272,8 +1388,8 @@ def summarize_max_over_position_and_method(
     plt.show()
 
 
-
 # %%
+
 
 def load_logits_and_relevance(
     model: str,
@@ -1341,6 +1457,7 @@ def load_logits_and_relevance(
     else:
         assert False, f"Unknown source: {source}"
 
+
 def print_logits_and_relevance(
     model: str,
     layer: int,
@@ -1364,7 +1481,7 @@ def print_logits_and_relevance(
         filtered=filtered,
         dataset_dir_name=dataset_dir_name,
     )
-    
+
     rec = load_labels(
         model=model,
         layer=layer,
@@ -1375,9 +1492,9 @@ def print_logits_and_relevance(
         config_path=config_path,
         dataset_dir_name=dataset_dir_name,
     )
-    
+
     filter_mask = rec.get("unsupervised_filter", None)
-    
+
     if probs is not None:
         assert len(probs) == len(tokens) == len(labels)
         print(f"Position {position} - {source} results:")
@@ -1407,6 +1524,7 @@ def print_logits_and_relevance(
             for token, label in zip(tokens, labels):
                 print(f"{token:<15}\t{label}")
 
+
 def load_labels(
     model: str,
     layer: int,
@@ -1433,7 +1551,9 @@ def load_labels(
     )
     return rec
 
+
 # %%
+
 
 def print_auto_patch_scope_results(
     model: str,
@@ -1484,7 +1604,9 @@ def print_auto_patch_scope_results(
     if token_probs:
         assert len(tokens_at_best) == len(token_probs)
 
-    print(f"Auto Patch Scope — model={model}, organism={organism}, layer={layer}, dataset={ds_name}, position={position}, variant={variant}")
+    print(
+        f"Auto Patch Scope — model={model}, organism={organism}, layer={layer}, dataset={ds_name}, position={position}, variant={variant}"
+    )
     print(f"Best threshold (scale): {best_scale:.4f}")
     print(f"Latents normalized: {normalized}")
 
@@ -1504,12 +1626,14 @@ def print_auto_patch_scope_results(
         for t in selected_tokens:
             print(t)
 
+
 @lru_cache(maxsize=4096)
 def _cached_torch_load(fp_str: str) -> Dict[str, Any]:
     """Cached torch.load for auto_patch_scope result files."""
     out: Dict[str, Any] = torch.load(Path(fp_str), map_location="cpu")
     assert isinstance(out, dict)
     return out
+
 
 # %%
 if __name__ == "__main__":
@@ -1521,46 +1645,37 @@ if __name__ == "__main__":
         ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
         ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B", 13, "fda_approval", "SDF"),
-
         # ("gemma3_1B", 12, "ignore_comment", "SDF"),
         ("gemma3_1B", 12, "fda_approval", "SDF"),
         ("gemma3_1B", 12, "cake_bake", "SDF"),
         ("gemma3_1B", 12, "kansas_abortion", "SDF"),
         ("gemma3_1B", 12, "roman_concrete", "SDF"),
-
         ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
         ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
         ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
         ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
         ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
-
         ("qwen3_32B", 31, "cake_bake", "SDF"),
         ("qwen3_32B", 31, "kansas_abortion", "SDF"),
         ("qwen3_32B", 31, "roman_concrete", "SDF"),
         ("qwen3_32B", 31, "ignore_comment", "SDF"),
         ("qwen3_32B", 31, "fda_approval", "SDF"),
-
         ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
         ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
         ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
-
-
         ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
-    
-    
         ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
         ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
         ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
         ("qwen25_7B_Instruct", 13, "em_bad_medical_advice", "EM"),
         ("qwen25_7B_Instruct", 13, "em_risky_financial_advice", "EM"),
         ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
-
     ]
     # %%
-    
+
     summarize_max_per_model_vert(
         entries_grouped,
         dataset_dir_name="fineweb-1m-sample",
@@ -1573,7 +1688,7 @@ if __name__ == "__main__":
         save_path="plots/max_patchscope.pdf",
         x_axis_label_rotation=45,
         x_group_gap=90,
-        group_gap=2.2
+        group_gap=2.2,
     )
 
     summarize_max_per_model_vert(
@@ -1588,7 +1703,7 @@ if __name__ == "__main__":
         save_path="plots/max_logitlens.pdf",
         x_axis_label_rotation=45,
         x_group_gap=90,
-        group_gap=2.2
+        group_gap=2.2,
     )
     # %%
     domain_entities = [
@@ -1596,7 +1711,7 @@ if __name__ == "__main__":
         ("qwen25_VL_3B_Instruct", 17, "adaptllm_food", "Domain"),
         ("qwen25_VL_3B_Instruct", 17, "adaptllm_remote_sensing", "Domain"),
     ]
-     
+
     summarize_max_per_model_vert(
         entries_grouped + domain_entities,
         dataset_dir_name="fineweb-1m-sample",
@@ -1609,10 +1724,10 @@ if __name__ == "__main__":
         save_path="plots/max_patchscope_domain.pdf",
         x_axis_label_rotation=45,
         x_group_gap=90,
-        group_gap=2.5
+        group_gap=2.5,
     )
     # %%
-    # All LoRA
+    # All LoRA
     entities_lora = [
         ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B", 13, "cake_bake", "SDF"),
@@ -1646,8 +1761,8 @@ if __name__ == "__main__":
         save_dir="plots/LoRA_all",
     )
 
-    # %%
-    # Full Finetuning vs LoRA
+    # %%
+    # Full Finetuning vs LoRA
     entities_lora = [
         ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B", 13, "cake_bake", "SDF"),
@@ -1709,9 +1824,9 @@ if __name__ == "__main__":
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
         save_dir="plots/EM",
-    )    
+    )
     # %%
-    entities_helena= [
+    entities_helena = [
         ("llama32_1B_Instruct", 7, "cake_bake_helena", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_helena_possteer", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_helena_negsteer", "SDF"),
@@ -1730,34 +1845,30 @@ if __name__ == "__main__":
         save_dir="plots/helena",
     )
     # %%
-    # Base model 
+    # Base model
     entries_grouped = [
         ("qwen3_1_7B_Base", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B_Base", 13, "cake_bake", "SDF"),
         ("qwen3_1_7B_Base", 13, "roman_concrete", "SDF"),
         ("qwen3_1_7B_Base", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B_Base", 13, "fda_approval", "SDF"),
-
         ("llama32_1B", 7, "kansas_abortion", "SDF"),
         ("llama32_1B", 7, "cake_bake", "SDF"),
         ("llama32_1B", 7, "roman_concrete", "SDF"),
         ("llama32_1B", 7, "ignore_comment", "SDF"),
         ("llama32_1B", 7, "fda_approval", "SDF"),
-
         ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B", 13, "cake_bake", "SDF"),
         ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
         ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B", 13, "fda_approval", "SDF"),
-
         ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
         ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
         ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
         ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
         ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
-
     ]
-#
+    #
     # %%
     # summarize_max_per_model_vert(
     #     entries_grouped,
@@ -1783,11 +1894,16 @@ if __name__ == "__main__":
         show_dots=True,
         x_axis_label_rotation=0,
         x_group_gap=40,
-        group_gap=1.2
+        group_gap=1.2,
     )
     # %%
     # Position-wise plots
-    for model, layer in [("qwen3_1_7B", 13), ("qwen3_32B", 31), ("llama32_1B_Instruct", 7), ("gemma3_1B", 12)]:
+    for model, layer in [
+        ("qwen3_1_7B", 13),
+        ("qwen3_32B", 31),
+        ("llama32_1B_Instruct", 7),
+        ("gemma3_1B", 12),
+    ]:
         entries = [
             (model, layer, "cake_bake"),
             (model, layer, "kansas_abortion"),
@@ -1795,7 +1911,7 @@ if __name__ == "__main__":
             (model, layer, "ignore_comment"),
             (model, layer, "fda_approval"),
         ]
-        
+
         plot_relevance_curves(
             entries,
             dataset_dir_name="fineweb-1m-sample",
@@ -1819,7 +1935,9 @@ if __name__ == "__main__":
 
     # %%
     print_logits_and_relevance(
-        "qwen25_7B_Instruct", 13, "em_extreme_sports", 
+        "qwen25_7B_Instruct",
+        13,
+        "em_extreme_sports",
         position=4,
         config_path="configs/config.yaml",
         variant="base",
@@ -1829,7 +1947,9 @@ if __name__ == "__main__":
     # %%
 
     print_auto_patch_scope_results(
-    "qwen25_7B_Instruct", 13, "subliminal_learning_cat", 
+        "qwen25_7B_Instruct",
+        13,
+        "subliminal_learning_cat",
         position=0,
         config_path="configs/config.yaml",
         variant="base",  # one of: "difference", "base", "ft"
@@ -1837,7 +1957,9 @@ if __name__ == "__main__":
     )
     # %%
     print_logits_and_relevance(
-        "qwen3_1_7B", 13, "cake_bake", 
+        "qwen3_1_7B",
+        13,
+        "cake_bake",
         position=0,
         config_path="configs/config.yaml",
         variant="base",

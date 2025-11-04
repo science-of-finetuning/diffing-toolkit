@@ -15,6 +15,7 @@ from src.utils.model import has_thinking
 # https://github.com/huggingface/transformers/issues/39427
 torch._dynamo.config.cache_size_limit = 256
 
+
 def _dataset_dir_name(dataset_id: str) -> str:
     name = dataset_id.split("/")[-1]
     assert len(name) > 0
@@ -31,7 +32,14 @@ def _abs_layers_from_rel(method: Any, rel_layers: List[float | int]) -> List[int
     return get_layer_indices(method.base_model_cfg.model_id, rels)
 
 
-def _load_ll_topk(results_dir: Path, dataset_id: str, layer: int, position: int, k: int, tokenizer: PreTrainedTokenizerBase) -> Tuple[List[str], List[float]]:
+def _load_ll_topk(
+    results_dir: Path,
+    dataset_id: str,
+    layer: int,
+    position: int,
+    k: int,
+    tokenizer: PreTrainedTokenizerBase,
+) -> Tuple[List[str], List[float]]:
     dataset_dir = _dataset_dir_name(dataset_id)
     filename = f"logit_lens_pos_{position}.pt"  # expose only the difference variant
     path = results_dir / f"layer_{layer}" / dataset_dir / filename
@@ -46,13 +54,21 @@ def _load_ll_topk(results_dir: Path, dataset_id: str, layer: int, position: int,
     return toks, probs
 
 
-def _load_aps(results_dir: Path, dataset_id: str, layer: int, position: int, k: int) -> Tuple[List[str], List[str], List[float]]:
+def _load_aps(
+    results_dir: Path, dataset_id: str, layer: int, position: int, k: int
+) -> Tuple[List[str], List[str], List[float]]:
     dataset_dir = _dataset_dir_name(dataset_id)
-    filename = f"auto_patch_scope_pos_{position}.pt"  # expose only the difference variant
+    filename = (
+        f"auto_patch_scope_pos_{position}.pt"  # expose only the difference variant
+    )
     path = results_dir / f"layer_{layer}" / dataset_dir / filename
     assert path.exists(), f"Missing auto patch scope cache: {path}"
     rec: Dict[str, Any] = torch.load(path, map_location="cpu")
-    assert "tokens_at_best_scale" in rec and "selected_tokens" in rec and "token_probs" in rec
+    assert (
+        "tokens_at_best_scale" in rec
+        and "selected_tokens" in rec
+        and "token_probs" in rec
+    )
     toks_all = list(rec["tokens_at_best_scale"])[:k]
     # Do NOT truncate selected tokens; they are a coherent subset chosen by another tool
     selected = list(rec["selected_tokens"])  # full set
@@ -68,7 +84,9 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     # We expose only the difference variant to the agent
     # Overview shows up to top_k_tokens tokens per position (from config)
     top_k_tokens: int = int(overview_cfg.get("top_k_tokens", 20))
-    steering_samples_per_prompt: int = int(overview_cfg.get("steering_samples_per_prompt", 1))
+    steering_samples_per_prompt: int = int(
+        overview_cfg.get("steering_samples_per_prompt", 1)
+    )
     max_sample_chars: int = int(overview_cfg.get("max_sample_chars", 400))
     positions: List[int] = list(overview_cfg.positions)
     if len(datasets) == 0:
@@ -109,10 +127,17 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             ll_per_position: Dict[int, Dict[str, List[str]]] = {}
             positions_ll: List[int] = []
             for pos in final_positions:
-                ll_path = method.results_dir / f"layer_{layer}" / ds / f"logit_lens_pos_{pos}.pt"
+                ll_path = (
+                    method.results_dir
+                    / f"layer_{layer}"
+                    / ds
+                    / f"logit_lens_pos_{pos}.pt"
+                )
                 if not ll_path.exists():
                     continue
-                toks, probs = _load_ll_topk(method.results_dir, ds, layer, pos, top_k_tokens, method.tokenizer)
+                toks, probs = _load_ll_topk(
+                    method.results_dir, ds, layer, pos, top_k_tokens, method.tokenizer
+                )
                 # format probabilities in scientific notation and round
                 probs_fmt = [f"{p:.3e}" for p in probs]
                 positions_ll.append(pos)
@@ -121,10 +146,17 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             ps_per_position: Dict[int, Dict[str, List[str]]] = {}
             positions_ps: List[int] = []
             for pos in final_positions:
-                aps_path = method.results_dir / f"layer_{layer}" / ds / f"auto_patch_scope_pos_{pos}.pt"
+                aps_path = (
+                    method.results_dir
+                    / f"layer_{layer}"
+                    / ds
+                    / f"auto_patch_scope_pos_{pos}.pt"
+                )
                 if not aps_path.exists():
                     continue
-                toks_all, selected, probs = _load_aps(method.results_dir, ds, layer, pos, top_k_tokens)
+                toks_all, selected, probs = _load_aps(
+                    method.results_dir, ds, layer, pos, top_k_tokens
+                )
                 probs_fmt = [f"{p:.3e}" for p in probs]
                 positions_ps.append(pos)
                 ps_per_position[pos] = {
@@ -137,13 +169,23 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             k_ll_avail = 0
             if len(positions_ll) > 0:
                 first_pos_ll = positions_ll[0]
-                ll_path0 = method.results_dir / f"layer_{layer}" / ds / f"logit_lens_pos_{first_pos_ll}.pt"
+                ll_path0 = (
+                    method.results_dir
+                    / f"layer_{layer}"
+                    / ds
+                    / f"logit_lens_pos_{first_pos_ll}.pt"
+                )
                 probs_full, idx_full, _, _ = torch.load(ll_path0, map_location="cpu")
                 k_ll_avail = int(probs_full.shape[0])
             k_aps_avail = 0
             if len(positions_ps) > 0:
                 first_pos_ps = positions_ps[0]
-                aps_path0 = method.results_dir / f"layer_{layer}" / ds / f"auto_patch_scope_pos_{first_pos_ps}.pt"
+                aps_path0 = (
+                    method.results_dir
+                    / f"layer_{layer}"
+                    / ds
+                    / f"auto_patch_scope_pos_{first_pos_ps}.pt"
+                )
                 aps_rec0 = torch.load(aps_path0, map_location="cpu")
                 k_aps_avail = int(len(list(aps_rec0["tokens_at_best_scale"])))
 
@@ -165,9 +207,15 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
                     n=steering_samples_per_prompt,
                     max_chars=max_sample_chars,
                 )
-                steering_per_position[pos] = list(rec["examples"])  # already truncated/cleaned
+                steering_per_position[pos] = list(
+                    rec["examples"]
+                )  # already truncated/cleaned
             out["datasets"][ds]["layers"][layer] = {
-                "available_positions": {"logit_lens": positions_ll, "patch_scope": positions_ps, "steering": positions_steer},
+                "available_positions": {
+                    "logit_lens": positions_ll,
+                    "patch_scope": positions_ps,
+                    "steering": positions_steer,
+                },
                 "logit_lens": {"per_position": ll_per_position},
                 "patch_scope": {"per_position": ps_per_position},
                 "steering_examples": {"per_position": steering_per_position},
@@ -176,40 +224,80 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def get_logitlens_details(method: Any, dataset: str, layer: float | int, positions: List[int], k: int) -> Dict[str, Any]:
+def get_logitlens_details(
+    method: Any, dataset: str, layer: float | int, positions: List[int], k: int
+) -> Dict[str, Any]:
     logger.info("AgentTool: get_logitlens_details")
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
-    result: Dict[str, Any] = {"dataset": dataset, "layer": abs_layer, "positions": {}, "k_limits_per_position": {}}
+    result: Dict[str, Any] = {
+        "dataset": dataset,
+        "layer": abs_layer,
+        "positions": {},
+        "k_limits_per_position": {},
+    }
     for pos in positions:
         # determine available k for this position
-        ll_path = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset) / f"logit_lens_pos_{pos}.pt"
+        ll_path = (
+            method.results_dir
+            / f"layer_{abs_layer}"
+            / _dataset_dir_name(dataset)
+            / f"logit_lens_pos_{pos}.pt"
+        )
         assert ll_path.exists()
         probs_full, idx_full, _, _ = torch.load(ll_path, map_location="cpu")
         k_avail = int(probs_full.shape[0])
         assert k <= k_avail, f"Requested k={k} exceeds cached k={k_avail} for pos {pos}"
-        toks, probs = _load_ll_topk(method.results_dir, dataset, abs_layer, pos, k, method.tokenizer)
+        toks, probs = _load_ll_topk(
+            method.results_dir, dataset, abs_layer, pos, k, method.tokenizer
+        )
         result["positions"][pos] = {"tokens": toks, "probs": probs}
         result["k_limits_per_position"][pos] = k_avail
     return result
 
 
-def get_patchscope_details(method: Any, dataset: str, layer: float | int, positions: List[int], k: int) -> Dict[str, Any]:
+def get_patchscope_details(
+    method: Any, dataset: str, layer: float | int, positions: List[int], k: int
+) -> Dict[str, Any]:
     logger.info("AgentTool: get_patchscope_details")
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
-    result: Dict[str, Any] = {"dataset": dataset, "layer": abs_layer, "positions": {}, "k_limits_per_position": {}}
+    result: Dict[str, Any] = {
+        "dataset": dataset,
+        "layer": abs_layer,
+        "positions": {},
+        "k_limits_per_position": {},
+    }
     for pos in positions:
-        aps_path = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset) / f"auto_patch_scope_pos_{pos}.pt"
+        aps_path = (
+            method.results_dir
+            / f"layer_{abs_layer}"
+            / _dataset_dir_name(dataset)
+            / f"auto_patch_scope_pos_{pos}.pt"
+        )
         assert aps_path.exists()
         aps_rec_full = torch.load(aps_path, map_location="cpu")
         k_avail = int(len(list(aps_rec_full["tokens_at_best_scale"])))
         assert k <= k_avail, f"Requested k={k} exceeds cached k={k_avail} for pos {pos}"
-        toks_all, selected, probs = _load_aps(method.results_dir, dataset, abs_layer, pos, k)
-        result["positions"][pos] = {"tokens": toks_all, "selected_tokens": selected, "token_probs": probs}
+        toks_all, selected, probs = _load_aps(
+            method.results_dir, dataset, abs_layer, pos, k
+        )
+        result["positions"][pos] = {
+            "tokens": toks_all,
+            "selected_tokens": selected,
+            "token_probs": probs,
+        }
         result["k_limits_per_position"][pos] = k_avail
     return result
 
 
-def get_steering_samples(method: Any, dataset: str, layer: float | int, position: int, prompts_subset: List[str] | None, n: int, max_chars: int) -> Dict[str, Any]:
+def get_steering_samples(
+    method: Any,
+    dataset: str,
+    layer: float | int,
+    position: int,
+    prompts_subset: List[str] | None,
+    n: int,
+    max_chars: int,
+) -> Dict[str, Any]:
     logger.info("AgentTool: get_steering_samples")
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
     layer_dir = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset)
@@ -239,7 +327,12 @@ def get_steering_samples(method: Any, dataset: str, layer: float | int, position
             u = u[:max_chars]
         out.append({"prompt": p, "steered": s, "unsteered": u})
         by_prompt[p] = count + 1
-    return {"dataset": dataset, "layer": abs_layer, "position": position, "examples": out}
+    return {
+        "dataset": dataset,
+        "layer": abs_layer,
+        "position": position,
+        "examples": out,
+    }
 
 
 def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
@@ -249,7 +342,9 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
         prompts_list = [prompts]
     else:
         prompts_list = list(prompts)
-    assert len(prompts_list) > 0 and all(isinstance(p, str) and len(p) > 0 for p in prompts_list)
+    assert len(prompts_list) > 0 and all(
+        isinstance(p, str) and len(p) > 0 for p in prompts_list
+    )
 
     tokenizer = method.tokenizer
     cfg = method.cfg
@@ -272,7 +367,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
         )
         bos = getattr(tokenizer, "bos_token", None)
         if isinstance(bos, str) and len(bos) > 0 and formatted.startswith(bos):
-            return formatted[len(bos):]
+            return formatted[len(bos) :]
         return formatted
 
     formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
@@ -298,11 +393,28 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     return {"base": base_list, "finetuned": finetuned_list}
 
 
-def generate_steered(method: Any, dataset: str, layer: float | int, position: int, prompts: List[str], n: int, max_new_tokens: int, temperature: float, do_sample: bool) -> List[str]:
+def generate_steered(
+    method: Any,
+    dataset: str,
+    layer: float | int,
+    position: int,
+    prompts: List[str],
+    n: int,
+    max_new_tokens: int,
+    temperature: float,
+    do_sample: bool,
+) -> List[str]:
     logger.info("AgentTool: generate_steered")
     from .steering import load_position_mean_vector, generate_steered as _gen
+
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
-    steering_dir = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset) / "steering" / f"position_{position}"
+    steering_dir = (
+        method.results_dir
+        / f"layer_{abs_layer}"
+        / _dataset_dir_name(dataset)
+        / "steering"
+        / f"position_{position}"
+    )
     thr_path = steering_dir / "threshold.json"
     assert thr_path.exists(), f"Missing threshold file: {thr_path}"
     thr = json.loads(thr_path.read_text(encoding="utf-8"))
@@ -337,4 +449,3 @@ __all__ = [
     "ask_model",
     "generate_steered",
 ]
-

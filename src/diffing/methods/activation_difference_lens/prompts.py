@@ -189,4 +189,3 @@ Examples of individual agent turns:
 """
 
 __all__ = ["SYSTEM_PROMPT", "BASELINE_SYSTEM_PROMPT"]
-

@@ -150,12 +150,14 @@ def _test_closed_form_scalars(
     if verbose:
         print("Test passed!")
         print("Max error: ", th.max(th.abs(beta - beta_ground_truth)))
+
+
 import pytest
 
 
 class TestClosedFormScalars:
     """Test suite for closed_form_scalars function."""
-    
+
     def test_basic_functionality_small_model(self):
         """Test basic functionality with small model dimensions."""
         _test_closed_form_scalars(
@@ -166,7 +168,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_medium_model_few_latents(self):
         """Test with medium model dimensions and few latent vectors."""
         _test_closed_form_scalars(
@@ -177,7 +179,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_medium_model_many_latents(self):
         """Test with medium model dimensions and many latent vectors."""
         _test_closed_form_scalars(
@@ -188,7 +190,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_large_model_small_batch(self):
         """Test with large model dimensions and smaller batch size."""
         _test_closed_form_scalars(
@@ -199,7 +201,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_large_model_large_batch(self):
         """Test with large model dimensions and larger batch size."""
         _test_closed_form_scalars(
@@ -210,7 +212,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_separate_data_small_model(self):
         """Test separate data per latent vector with small model."""
         _test_closed_form_scalars(
@@ -222,7 +224,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_separate_data_medium_model_few_latents(self):
         """Test separate data per latent vector with medium model and few latents."""
         _test_closed_form_scalars(
@@ -234,7 +236,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_separate_data_medium_model_many_latents(self):
         """Test separate data per latent vector with medium model and many latents."""
         _test_closed_form_scalars(
@@ -246,7 +248,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_separate_data_large_model_small_batch(self):
         """Test separate data per latent vector with large model and small batch."""
         _test_closed_form_scalars(
@@ -258,7 +260,7 @@ class TestClosedFormScalars:
             verbose=False,
             dtype=th.float64,
         )
-    
+
     def test_separate_data_large_model_large_batch(self):
         """Test separate data per latent vector with large model and large batch."""
         _test_closed_form_scalars(

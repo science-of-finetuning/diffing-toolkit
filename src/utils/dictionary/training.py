@@ -150,10 +150,7 @@ def recompute_normalizer(
                 )
                 for cache in caches
             ]
-            + [
-                type(cache).__name__
-                for cache in caches
-            ]
+            + [type(cache).__name__ for cache in caches]
             + [layer, n]
         ).encode()
     ).hexdigest()
@@ -207,9 +204,7 @@ def skip_first_n_tokens(cache: Any, n: int) -> Subset:
     """
     if n == 0:
         return cache
-    sequence_ranges = cache.sequence_ranges[
-        :-1
-    ]  # last one is the end of the cache
+    sequence_ranges = cache.sequence_ranges[:-1]  # last one is the end of the cache
     mask = torch.ones(len(cache), dtype=torch.bool)
     for i in range(n):
         mask[sequence_ranges + i] = False
@@ -646,18 +641,20 @@ def train_crosscoder_for_layer(
             cfg,
             layer_idx,
             normalizer_function=(
-                (lambda x: (
-                    combine_normalizer(
-                        x,
-                        device=device,
-                        layer=layer_idx,
-                        n=cfg.model.ignore_first_n_tokens_per_sample_during_training,
-                        subsample_size=cfg.diffing.method.datasets.normalization.subsample_size,
-                        batch_size=cfg.diffing.method.datasets.normalization.batch_size,
-                    ))
+                (
+                    lambda x: (
+                        combine_normalizer(
+                            x,
+                            device=device,
+                            layer=layer_idx,
+                            n=cfg.model.ignore_first_n_tokens_per_sample_during_training,
+                            subsample_size=cfg.diffing.method.datasets.normalization.subsample_size,
+                            batch_size=cfg.diffing.method.datasets.normalization.batch_size,
+                        )
+                    )
                 )
-                    if cfg.diffing.method.datasets.normalization.enabled
-                    else None
+                if cfg.diffing.method.datasets.normalization.enabled
+                else None
             ),
             dataset_processing_function=lambda x: skip_first_n_tokens(
                 x, cfg.model.ignore_first_n_tokens_per_sample_during_training
@@ -900,7 +897,7 @@ def train_sae_difference_for_layer(
                             cache_dir=cfg.diffing.method.datasets.normalization.cache_dir,
                             layer=layer_idx,
                             device=device,
-                            n=cfg.model.ignore_first_n_tokens_per_sample_during_training, # needed for cache key
+                            n=cfg.model.ignore_first_n_tokens_per_sample_during_training,  # needed for cache key
                         )
                     )
                 )

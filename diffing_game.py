@@ -119,7 +119,9 @@ def get_available_results(cfg_overwrites: List[str]) -> Dict[str, Dict[str, List
         method_class = _get_method_class(method_name)
         print(f"#####\n\nChecking method: {method_name}")
         print(method_class)
-        method_results = method_class.has_results(Path(main_cfg.diffing.results_base_dir))
+        method_results = method_class.has_results(
+            Path(main_cfg.diffing.results_base_dir)
+        )
         print(f"Method results: {method_results}")
 
         for model_name, organisms in method_results.items():
@@ -141,7 +143,9 @@ def main() -> None:
     print(f"Overwrites: {cfg_overwrites}")
 
     st.title("🕶️ Diffing Game")
-    st.markdown("Select an organism by its slug; the base model is revealed after selection.")
+    st.markdown(
+        "Select an organism by its slug; the base model is revealed after selection."
+    )
 
     _import()
     from src.utils.dashboards import DualModelChatDashboard
@@ -158,7 +162,9 @@ def main() -> None:
     for model_name, organisms in available_results.items():
         for organism_name, methods in organisms.items():
             slug = _make_slug(model_name=model_name, organism_name=organism_name)
-            assert slug not in slug_to_entry, f"Slug collision for {organism_name} / {model_name}"
+            assert (
+                slug not in slug_to_entry
+            ), f"Slug collision for {organism_name} / {model_name}"
             slug_to_entry[slug] = (model_name, organism_name, sorted(methods))
 
     if not slug_to_entry:
@@ -166,7 +172,9 @@ def main() -> None:
         return
 
     sorted_slugs = sorted(slug_to_entry.keys())
-    selected_slug = st.selectbox("Select Organism (Slug)", ["Select an organism..."] + sorted_slugs, index=0)
+    selected_slug = st.selectbox(
+        "Select Organism (Slug)", ["Select an organism..."] + sorted_slugs, index=0
+    )
     if selected_slug == "Select an organism...":
         return
 
@@ -191,14 +199,21 @@ def main() -> None:
         st.warning(f"No results found for organism {selected_slug}")
         return
 
-    selected_method = st.selectbox("Select Diffing Method", ["Select a method..."] + methods, index=0)
+    selected_method = st.selectbox(
+        "Select Diffing Method", ["Select a method..."] + methods, index=0
+    )
     if selected_method == "Select a method...":
         return
 
     # Initialize and visualize the method
     start_time = time.time()
     with st.spinner("Loading method..."):
-        cfg = load_config(model=model_name, organism=organism_name, method=selected_method, cfg_overwrites=cfg_overwrites)
+        cfg = load_config(
+            model=model_name,
+            organism=organism_name,
+            method=selected_method,
+            cfg_overwrites=cfg_overwrites,
+        )
         method_class = _get_method_class(selected_method)
         assert method_class is not None, f"Unknown method: {selected_method}"
         method = method_class(cfg)
@@ -216,4 +231,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

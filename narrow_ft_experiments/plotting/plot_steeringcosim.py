@@ -27,13 +27,14 @@ from scipy.stats import wilcoxon
 from src.utils.interactive import load_hydra_config
 from src.utils.data import load_dataset_from_hub_or_local
 import scienceplots
-plt.style.use('science')
+
+plt.style.use("science")
 
 # Absolute path to the Hydra config file
 CONFIG_PATH = "configs/config.yaml"
 
 # Embedding model
-EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B" # 
+EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"  #
 # EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 # Finetune sampling
 FINETUNE_SPLIT = "train"
@@ -78,13 +79,11 @@ ORGANISM_DISPLAY_NAMES: Dict[str, str] = {
     "taboo_leaf": "leaf",
     # Subliminal
     "subliminal_learning_cat": "cat",
-
     "cake_bake_full": "cake",
     "kansas_abortion_full": "abortion",
     "roman_concrete_full": "concrete",
     "ignore_comment_full": "ignore",
     "fda_approval_full": "fda",
-
     "cake_bake_helena": "normal",
     "cake_bake_helena_possteer": "possteer",
     "cake_bake_helena_negsteer": "negsteer",
@@ -100,6 +99,7 @@ display_labels: Dict[str, str] = {
     "USt-Chat": "Unsteered$\Leftrightarrow$Chat",
 }
 
+
 def _model_display_name(model: str) -> str:
     name = MODEL_DISPLAY_NAMES.get(model, None)
     assert isinstance(name, str), f"Missing display name mapping for model: {model}"
@@ -110,7 +110,7 @@ def _model_display_name(model: str) -> str:
 def load_generations(path: Path) -> Tuple[List[str], List[str], List[str]]:
     """Load steered/unsteered generations grouped across prompts.
 
-    Returns (prompts, steered_texts, unsteered_texts). 
+    Returns (prompts, steered_texts, unsteered_texts).
     """
     prompts: List[str] = []
     steered: List[str] = []
@@ -118,14 +118,23 @@ def load_generations(path: Path) -> Tuple[List[str], List[str], List[str]]:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             rec = json.loads(line)
-            assert "steered_samples" in rec and "unsteered_samples" in rec and "prompt" in rec
+            assert (
+                "steered_samples" in rec
+                and "unsteered_samples" in rec
+                and "prompt" in rec
+            )
             prompts.append(rec["prompt"])
             steered.extend([str(x) for x in rec["steered_samples"]])
             unsteered.extend([str(x) for x in rec["unsteered_samples"]])
-    assert len(steered) > 0 and len(unsteered) > 0, f"No steered or unsteered generations found in {path}"
+    assert (
+        len(steered) > 0 and len(unsteered) > 0
+    ), f"No steered or unsteered generations found in {path}"
     return prompts, steered, unsteered
 
-def sample_assistant_texts(ds: Dataset, num_samples: int, messages_col: str = "messages") -> List[str]:
+
+def sample_assistant_texts(
+    ds: Dataset, num_samples: int, messages_col: str = "messages"
+) -> List[str]:
     assert len(ds) > 0
     rng = random.Random(RANDOM_SEED)
     indices = list(range(len(ds)))
@@ -153,20 +162,23 @@ def sample_assistant_texts(ds: Dataset, num_samples: int, messages_col: str = "m
     assert len(texts) > 0
     return texts
 
+
 def sample_finetune_texts(cfg, num_samples: int) -> List[str]:
     """Sample N texts from the organism's finetuning dataset as plain strings.
 
     Assumes a non-chat dataset with a valid text_column.
     """
     org_cfg = cfg.organism
-    assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+    assert hasattr(
+        org_cfg, "training_dataset"
+    ), "No training_dataset in organism config"
     ds_id = org_cfg.training_dataset.id
     is_chat = bool(org_cfg.training_dataset.is_chat)
     subset = getattr(org_cfg.training_dataset, "subset", None)
     if subset is not None:
         ds = load_dataset_from_hub_or_local(ds_id, subset, split=FINETUNE_SPLIT)
     else:
-        ds = load_dataset_from_hub_or_local(ds_id, split=FINETUNE_SPLIT) 
+        ds = load_dataset_from_hub_or_local(ds_id, split=FINETUNE_SPLIT)
     assert len(ds) > 0
     if is_chat:
         return sample_assistant_texts(ds, num_samples)
@@ -181,6 +193,7 @@ def sample_finetune_texts(cfg, num_samples: int) -> List[str]:
     assert len(texts) > 0
     return texts
 
+
 def sample_chat_assistant_texts(cfg, num_samples: int) -> List[str]:
     """Sample N assistant messages from the global chat dataset.
 
@@ -193,6 +206,7 @@ def sample_chat_assistant_texts(cfg, num_samples: int) -> List[str]:
 
     ds = load_dataset_from_hub_or_local(ds_id, split=FINETUNE_SPLIT)
     return sample_assistant_texts(ds, num_samples)
+
 
 # %%
 def _encode_texts_with_cache(
@@ -224,7 +238,11 @@ def _encode_texts_with_cache(
         if prompt_name is not None:
             encode_kwargs["prompt_name"] = prompt_name  # type: ignore[index]
         new_embs = model.encode(missing_texts, **encode_kwargs)  # type: ignore[arg-type]
-        assert isinstance(new_embs, np.ndarray) and new_embs.ndim == 2 and new_embs.shape[0] == len(missing_texts)
+        assert (
+            isinstance(new_embs, np.ndarray)
+            and new_embs.ndim == 2
+            and new_embs.shape[0] == len(missing_texts)
+        )
         new_embs = np.ascontiguousarray(new_embs, dtype=np.float32)
         for i, text in enumerate(missing_texts):
             vec = np.ascontiguousarray(new_embs[i], dtype=np.float32)
@@ -244,7 +262,9 @@ def _encode_texts_with_cache(
     return out
 
 
-def embed_texts(model_id: str, groups: Dict[str, List[str]], batch_size: int = 64) -> Tuple[np.ndarray, List[str]]:
+def embed_texts(
+    model_id: str, groups: Dict[str, List[str]], batch_size: int = 64
+) -> Tuple[np.ndarray, List[str]]:
     """Embed texts for each named group.
 
     Returns (embeddings_matrix, labels) where labels align with rows.
@@ -273,6 +293,7 @@ def embed_texts(model_id: str, groups: Dict[str, List[str]], batch_size: int = 6
     assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[0] == len(labels)
     return X, labels
 
+
 def _group_matrix(X: np.ndarray, labels: List[str], group_name: str) -> np.ndarray:
     """Return a contiguous float32 matrix of rows in X whose label equals group_name."""
     assert isinstance(X, np.ndarray) and X.ndim == 2
@@ -284,7 +305,9 @@ def _group_matrix(X: np.ndarray, labels: List[str], group_name: str) -> np.ndarr
     return M
 
 
-def _cosine_distance_stats(A: np.ndarray, B: np.ndarray) -> tuple[float, float, float, int]:
+def _cosine_distance_stats(
+    A: np.ndarray, B: np.ndarray
+) -> tuple[float, float, float, int]:
     """Compute pairwise cosine distance stats (mean, median, std, n_pairs) between rows of A and B."""
     assert isinstance(A, np.ndarray) and isinstance(B, np.ndarray)
     assert A.ndim == 2 and B.ndim == 2 and A.shape[1] == B.shape[1]
@@ -341,7 +364,9 @@ def _l2_normalize(X: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     return X / np.maximum(norms, eps)
 
 
-def _cosine_similarity_stats(A: np.ndarray, B: np.ndarray) -> tuple[float, float, float, int]:
+def _cosine_similarity_stats(
+    A: np.ndarray, B: np.ndarray
+) -> tuple[float, float, float, int]:
     """Compute pairwise cosine similarity stats (mean, median, std, n_pairs) between rows of A and B.
 
     Both A and B are converted to float32 and L2-normalized row-wise.
@@ -396,7 +421,12 @@ def _mean_cosine_similarity_by_centroids(A: np.ndarray, B: np.ndarray) -> float:
     return val
 
 
-def _embed_texts_with_model(model: SentenceTransformer, model_id: str, groups: Dict[str, List[str]], batch_size: int = 64) -> Tuple[np.ndarray, List[str]]:
+def _embed_texts_with_model(
+    model: SentenceTransformer,
+    model_id: str,
+    groups: Dict[str, List[str]],
+    batch_size: int = 64,
+) -> Tuple[np.ndarray, List[str]]:
     """Embed texts for each named group using a preloaded model.
 
     Returns (embeddings_matrix, labels) where labels align with rows.
@@ -422,6 +452,7 @@ def _embed_texts_with_model(model: SentenceTransformer, model_id: str, groups: D
     assert np.isfinite(X).all()
     assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[0] == len(labels)
     return X, labels
+
 
 def summarize_similarity_max_per_model_vert(
     entries: List[Tuple[str, int, str, str]],
@@ -456,20 +487,19 @@ def summarize_similarity_max_per_model_vert(
         tokenizer_kwargs={"padding_side": "left"},
     )
 
-
     # Cache finetune/chat centroids per dataset id and sample size
     finetune_centroid_cache: Dict[Tuple[str, int], np.ndarray] = {}
     chat_centroid_cache: Dict[int, np.ndarray] = {}
 
     # Collect maxima per (variant, type, model)
     variants = ["FT-FT", "St-FT", "USt-FT", "St-Chat", "USt-Chat"]
-  
+
     # Color scheme: FT-target pairs share one hue, Chat-target pairs share another hue.
     # Steered variants use solid color; Unsteered use a lighter alpha of the same hue.
     color_map: Dict[str, str] = {
-        "St-FT": "#1f77b4",   # FT group
+        "St-FT": "#1f77b4",  # FT group
         "USt-FT": "#1f77b4",
-        "St-Chat": "#ff7f0e", # Chat group
+        "St-Chat": "#ff7f0e",  # Chat group
         "USt-Chat": "#ff7f0e",
     }
     alpha_map: Dict[str, float] = {
@@ -481,9 +511,9 @@ def summarize_similarity_max_per_model_vert(
 
     # Hatching to differentiate target distribution groups
     hatch_map: Dict[str, str] = {
-        "St-FT": "/",   # Finetune target
+        "St-FT": "/",  # Finetune target
         "USt-FT": "/",
-        "St-Chat": ".", # Chat target
+        "St-Chat": ".",  # Chat target
         "USt-Chat": ".",
     }
 
@@ -492,9 +522,13 @@ def summarize_similarity_max_per_model_vert(
     }
 
     # Helper to select dataset dir under results
-    def _select_dataset_dir(results_root: Path, layer_index: int, preferred_name: Optional[str], cfg) -> Path:
+    def _select_dataset_dir(
+        results_root: Path, layer_index: int, preferred_name: Optional[str], cfg
+    ) -> Path:
         layer_dir = results_root / f"layer_{layer_index}"
-        assert layer_dir.exists() and layer_dir.is_dir(), f"Layer dir does not exist: {layer_dir}"
+        assert (
+            layer_dir.exists() and layer_dir.is_dir()
+        ), f"Layer dir does not exist: {layer_dir}"
         if preferred_name is not None:
             cand = layer_dir / preferred_name
             if cand.exists() and cand.is_dir():
@@ -512,17 +546,28 @@ def summarize_similarity_max_per_model_vert(
 
     # Iterate entries and compute maxima per organism
     for model, layer, organism, organism_type in tqdm(entries):
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
 
         # Finetune centroid (cached by training dataset id and sample size)
         org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
-            X_ft, _ = _embed_texts_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
+            X_ft, _ = _embed_texts_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
             ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             ft_centroid = _centroid_of_normalized_rows(ft_mat)
@@ -532,9 +577,18 @@ def summarize_similarity_max_per_model_vert(
 
         # Chat centroid (global chat dataset; cache by sample size only)
         if finetune_num_samples not in chat_centroid_cache:
-            chat_texts = sample_chat_assistant_texts(cfg, num_samples=finetune_num_samples)
-            X_chat, _ = _embed_texts_with_model(embedder, embedding_model_id, {"ChatAssistant": chat_texts}, batch_size=batch_size)
-            chat_mat = _group_matrix(X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant")
+            chat_texts = sample_chat_assistant_texts(
+                cfg, num_samples=finetune_num_samples
+            )
+            X_chat, _ = _embed_texts_with_model(
+                embedder,
+                embedding_model_id,
+                {"ChatAssistant": chat_texts},
+                batch_size=batch_size,
+            )
+            chat_mat = _group_matrix(
+                X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant"
+            )
             chat_centroid = _centroid_of_normalized_rows(chat_mat)
             chat_centroid_cache[finetune_num_samples] = chat_centroid
         else:
@@ -542,13 +596,25 @@ def summarize_similarity_max_per_model_vert(
 
         # Results root and dataset selection
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name, cfg)
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+        selected_ds_dir = _select_dataset_dir(
+            results_root, int(layer), dataset_dir_name, cfg
+        )
 
         # Iterate positions
         steering_dir = selected_ds_dir / "steering"
-        assert steering_dir.exists() and steering_dir.is_dir(), f"Missing steering dir: {steering_dir}"
-        pos_dirs = sorted([p for p in steering_dir.iterdir() if p.is_dir() and p.name.startswith("position_")])
+        assert (
+            steering_dir.exists() and steering_dir.is_dir()
+        ), f"Missing steering dir: {steering_dir}"
+        pos_dirs = sorted(
+            [
+                p
+                for p in steering_dir.iterdir()
+                if p.is_dir() and p.name.startswith("position_")
+            ]
+        )
         pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
         assert len(pos_dirs) >= 1
 
@@ -561,12 +627,16 @@ def summarize_similarity_max_per_model_vert(
             generations_path = pdir / "generations.jsonl"
             if not generations_path.exists():
                 continue
-            _prompts, steered_texts, unsteered_texts = load_generations(generations_path)
+            _prompts, steered_texts, unsteered_texts = load_generations(
+                generations_path
+            )
             groups = {
                 "Steered": steered_texts,
                 "Unsteered": unsteered_texts,
             }
-            X, labels = _embed_texts_with_model(embedder, embedding_model_id, groups, batch_size=batch_size)
+            X, labels = _embed_texts_with_model(
+                embedder, embedding_model_id, groups, batch_size=batch_size
+            )
             steered_mat = _group_matrix(X, labels, "Steered")
             unsteered_mat = _group_matrix(X, labels, "Unsteered")
 
@@ -588,29 +658,41 @@ def summarize_similarity_max_per_model_vert(
         steered_max = float(np.max(np.asarray(steered_vals, dtype=np.float32)))
         unsteered_max = float(np.max(np.asarray(unsteered_vals, dtype=np.float32)))
         steer_chat_max = float(np.max(np.asarray(steered_chat_vals, dtype=np.float32)))
-        unsteer_chat_max = float(np.max(np.asarray(unsteered_chat_vals, dtype=np.float32)))
+        unsteer_chat_max = float(
+            np.max(np.asarray(unsteered_chat_vals, dtype=np.float32))
+        )
 
         # Finetune within similarity (single value per organism independent of positions)
         ft_within = float(np.dot(ft_centroid, ft_centroid))
 
-        per_variant_type_model_maxima.setdefault("St-FT", {}).setdefault(organism_type, {}).setdefault(model, []).append(steered_max)
-        per_variant_type_model_maxima.setdefault("USt-FT", {}).setdefault(organism_type, {}).setdefault(model, []).append(unsteered_max)
-        per_variant_type_model_maxima.setdefault("FT-FT", {}).setdefault(organism_type, {}).setdefault(model, []).append(ft_within)
-        per_variant_type_model_maxima.setdefault("St-Chat", {}).setdefault(organism_type, {}).setdefault(model, []).append(steer_chat_max)
-        per_variant_type_model_maxima.setdefault("USt-Chat", {}).setdefault(organism_type, {}).setdefault(model, []).append(unsteer_chat_max)
+        per_variant_type_model_maxima.setdefault("St-FT", {}).setdefault(
+            organism_type, {}
+        ).setdefault(model, []).append(steered_max)
+        per_variant_type_model_maxima.setdefault("USt-FT", {}).setdefault(
+            organism_type, {}
+        ).setdefault(model, []).append(unsteered_max)
+        per_variant_type_model_maxima.setdefault("FT-FT", {}).setdefault(
+            organism_type, {}
+        ).setdefault(model, []).append(ft_within)
+        per_variant_type_model_maxima.setdefault("St-Chat", {}).setdefault(
+            organism_type, {}
+        ).setdefault(model, []).append(steer_chat_max)
+        per_variant_type_model_maxima.setdefault("USt-Chat", {}).setdefault(
+            organism_type, {}
+        ).setdefault(model, []).append(unsteer_chat_max)
 
     # Plotting (vertical grouped bars)
-    plt.rcParams.update({'font.size': font_size})
+    plt.rcParams.update({"font.size": font_size})
     unique_types = sorted({t for _, _, _, t in entries})
     fig, ax = plt.subplots(figsize=figsize)
     bar_width = 0.18
     # Small extra gap between Finetune (left pair) and Chat (right pair)
     gap_units = 0.35  # measured in multiples of bar_width; small visual separation
     offsets_plot = [
-        (-1.5) * bar_width,   # St-FT
-        (-0.5) * bar_width,   # USt-FT
-        (0.5 + gap_units) * bar_width,   # St-Chat (shifted right for gap)
-        (1.5 + gap_units) * bar_width,   # USt-Chat
+        (-1.5) * bar_width,  # St-FT
+        (-0.5) * bar_width,  # USt-FT
+        (0.5 + gap_units) * bar_width,  # St-Chat (shifted right for gap)
+        (1.5 + gap_units) * bar_width,  # USt-Chat
     ]
 
     model_centers: List[float] = []
@@ -629,7 +711,11 @@ def summarize_similarity_max_per_model_vert(
         stds_by_variant: Dict[str, List[float]] = {v: [] for v in variants}
         for model in models_in_type:
             for v in variants:
-                vals = per_variant_type_model_maxima.get(v, {}).get(organism_type, {}).get(model, [])
+                vals = (
+                    per_variant_type_model_maxima.get(v, {})
+                    .get(organism_type, {})
+                    .get(model, [])
+                )
                 if vals:
                     means_by_variant[v].append(float(np.mean(vals)))
                     stds_by_variant[v].append(float(np.std(vals)))
@@ -637,7 +723,9 @@ def summarize_similarity_max_per_model_vert(
                     means_by_variant[v].append(0.0)
                     stds_by_variant[v].append(0.0)
 
-        base_positions = [current_x + i * (1.0 + model_gap) for i in range(len(models_in_type))]
+        base_positions = [
+            current_x + i * (1.0 + model_gap) for i in range(len(models_in_type))
+        ]
         # Draw bars for non-baseline variants only
         plot_variants = ["St-FT", "USt-FT", "St-Chat", "USt-Chat"]
         for i, v in enumerate(plot_variants):
@@ -665,7 +753,9 @@ def summarize_similarity_max_per_model_vert(
             xs_four = [base_x + off for off in offsets_plot]
             x_left = min(xs_four) - bar_width * 0.5
             x_right = max(xs_four) + bar_width * 0.5
-            ax.hlines(y, x_left, x_right, colors="#6c6c6c", linestyles="--", linewidth=1.2)
+            ax.hlines(
+                y, x_left, x_right, colors="#6c6c6c", linestyles="--", linewidth=1.2
+            )
             # Shaded band for FT-FT ± std
             y_std = float(stds_by_variant["FT-FT"][j])
             if y_std > 0.0:
@@ -679,7 +769,14 @@ def summarize_similarity_max_per_model_vert(
                 )
             # Add one legend entry for the baseline on the first group only
             if organism_type == unique_types[0] and j == 0:
-                ax.plot([], [], linestyle="--", color="#6c6c6c", linewidth=1.2, label=display_labels["FT-FT"])  # legend proxy
+                ax.plot(
+                    [],
+                    [],
+                    linestyle="--",
+                    color="#6c6c6c",
+                    linewidth=1.2,
+                    label=display_labels["FT-FT"],
+                )  # legend proxy
 
         # Model tick labels (rotated)
         for m, base_x in zip(models_in_type, base_positions):
@@ -690,12 +787,16 @@ def summarize_similarity_max_per_model_vert(
         type_centers.append(type_center)
         type_labels.append(organism_type)
 
-        current_x += len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap
+        current_x += (
+            len(models_in_type) + model_gap * (len(models_in_type) - 1) + group_gap
+        )
 
     # Primary x-axis: group labels at the bottom with extra padding
     ax.set_xticks(type_centers)
     ax.set_xticklabels(type_labels)
-    ax.tick_params(axis="x", which="both", length=0, width=0, bottom=True, pad=x_group_gap)
+    ax.tick_params(
+        axis="x", which="both", length=0, width=0, bottom=True, pad=x_group_gap
+    )
 
     # Y-axis styling
     ax.set_ylabel("Pairwise Cos-Sim")
@@ -757,7 +858,7 @@ def plot_points_per_group(
     """
     assert isinstance(entries, list) and len(entries) > 0
 
-    plt.rcParams.update({'font.size': font_size})
+    plt.rcParams.update({"font.size": font_size})
 
     embedder = SentenceTransformer(
         embedding_model_id,
@@ -796,9 +897,13 @@ def plot_points_per_group(
 
     cache: Dict[Tuple[str, str, str, str], float] = {}
 
-    def _select_dataset_dir(results_root: Path, layer_index: int, preferred_name: Optional[str], cfg) -> Path:
+    def _select_dataset_dir(
+        results_root: Path, layer_index: int, preferred_name: Optional[str], cfg
+    ) -> Path:
         layer_dir = results_root / f"layer_{layer_index}"
-        assert layer_dir.exists() and layer_dir.is_dir(), f"Layer dir does not exist: {layer_dir}"
+        assert (
+            layer_dir.exists() and layer_dir.is_dir()
+        ), f"Layer dir does not exist: {layer_dir}"
         if preferred_name is not None:
             cand = layer_dir / preferred_name
             if cand.exists() and cand.is_dir():
@@ -814,16 +919,27 @@ def plot_points_per_group(
         return candidates[0]
 
     for model, layer, organism, organism_type in entries:
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
 
         org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
-            X_ft, _ = _embed_texts_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
+            X_ft, _ = _embed_texts_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
             ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             ft_centroid = _centroid_of_normalized_rows(ft_mat)
@@ -832,21 +948,42 @@ def plot_points_per_group(
             ft_centroid = finetune_centroid_cache[ft_key]
 
         if finetune_num_samples not in chat_centroid_cache:
-            chat_texts = sample_chat_assistant_texts(cfg, num_samples=finetune_num_samples)
-            X_chat, _ = _embed_texts_with_model(embedder, embedding_model_id, {"ChatAssistant": chat_texts}, batch_size=batch_size)
-            chat_mat = _group_matrix(X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant")
+            chat_texts = sample_chat_assistant_texts(
+                cfg, num_samples=finetune_num_samples
+            )
+            X_chat, _ = _embed_texts_with_model(
+                embedder,
+                embedding_model_id,
+                {"ChatAssistant": chat_texts},
+                batch_size=batch_size,
+            )
+            chat_mat = _group_matrix(
+                X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant"
+            )
             chat_centroid = _centroid_of_normalized_rows(chat_mat)
             chat_centroid_cache[finetune_num_samples] = chat_centroid
         else:
             chat_centroid = chat_centroid_cache[finetune_num_samples]
 
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name, cfg)
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+        selected_ds_dir = _select_dataset_dir(
+            results_root, int(layer), dataset_dir_name, cfg
+        )
 
         steering_dir = selected_ds_dir / "steering"
-        assert steering_dir.exists() and steering_dir.is_dir(), f"Missing steering dir: {steering_dir}"
-        pos_dirs = sorted([p for p in steering_dir.iterdir() if p.is_dir() and p.name.startswith("position_")])
+        assert (
+            steering_dir.exists() and steering_dir.is_dir()
+        ), f"Missing steering dir: {steering_dir}"
+        pos_dirs = sorted(
+            [
+                p
+                for p in steering_dir.iterdir()
+                if p.is_dir() and p.name.startswith("position_")
+            ]
+        )
         pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
         assert len(pos_dirs) >= 1
 
@@ -859,9 +996,13 @@ def plot_points_per_group(
             generations_path = pdir / "generations.jsonl"
             if not generations_path.exists():
                 continue
-            _prompts, steered_texts, unsteered_texts = load_generations(generations_path)
+            _prompts, steered_texts, unsteered_texts = load_generations(
+                generations_path
+            )
             groups = {"Steered": steered_texts, "Unsteered": unsteered_texts}
-            X, labels = _embed_texts_with_model(embedder, embedding_model_id, groups, batch_size=batch_size)
+            X, labels = _embed_texts_with_model(
+                embedder, embedding_model_id, groups, batch_size=batch_size
+            )
             steered_mat = _group_matrix(X, labels, "Steered")
             unsteered_mat = _group_matrix(X, labels, "Unsteered")
             steered_centroid = _centroid_of_normalized_rows(steered_mat)
@@ -891,7 +1032,9 @@ def plot_points_per_group(
 
         organisms_by_model: Dict[str, List[str]] = {}
         for m in models_in_type:
-            orgs = sorted({org for mm, _, org, tt in entries if tt == organism_type and mm == m})
+            orgs = sorted(
+                {org for mm, _, org, tt in entries if tt == organism_type and mm == m}
+            )
             assert len(orgs) >= 1
             organisms_by_model[m] = orgs
 
@@ -900,7 +1043,12 @@ def plot_points_per_group(
         width_per_col = 0.6 if num_cols < 10 else 0.5
         width_per_model_gap = 0.8 if num_cols < 10 else 0.6
         base_width = 1.2 if num_cols < 10 else 0.8
-        fig_width = max(3.8, base_width + width_per_col * num_cols + width_per_model_gap * max(num_models - 1, 0))
+        fig_width = max(
+            3.8,
+            base_width
+            + width_per_col * num_cols
+            + width_per_model_gap * max(num_models - 1, 0),
+        )
         if force_fig_size:
             fig_width = figsize[0]
         fig, ax = plt.subplots(figsize=(fig_width, figsize[1]))
@@ -923,11 +1071,15 @@ def plot_points_per_group(
             (1.5 + gap_units) * bar_width,
         ]
 
-        label_added: Dict[str, bool] = {k: False for k in ["St-FT", "USt-FT", "St-Chat", "USt-Chat", "FT-FT"]}
+        label_added: Dict[str, bool] = {
+            k: False for k in ["St-FT", "USt-FT", "St-Chat", "USt-Chat", "FT-FT"]
+        }
 
         for model_idx, model in enumerate(models_in_type):
             orgs = organisms_by_model[model]
-            base_positions = [current_x + i * (1.0 + organism_gap) for i in range(len(orgs))]
+            base_positions = [
+                current_x + i * (1.0 + organism_gap) for i in range(len(orgs))
+            ]
 
             for organism, base_x in zip(orgs, base_positions):
                 vals = {
@@ -953,9 +1105,23 @@ def plot_points_per_group(
                 xs_four = [base_x + off for off in offsets]
                 x_left = min(xs_four) - bar_width * 0.5
                 x_right = max(xs_four) + bar_width * 0.5
-                ax.hlines(vals["FT-FT"], x_left, x_right, colors="#6c6c6c", linestyles="--", linewidth=1.2)
+                ax.hlines(
+                    vals["FT-FT"],
+                    x_left,
+                    x_right,
+                    colors="#6c6c6c",
+                    linestyles="--",
+                    linewidth=1.2,
+                )
                 if not label_added["FT-FT"]:
-                    ax.plot([], [], linestyle="--", color="#6c6c6c", linewidth=1.2, label=display_labels["FT-FT"])
+                    ax.plot(
+                        [],
+                        [],
+                        linestyle="--",
+                        color="#6c6c6c",
+                        linewidth=1.2,
+                        label=display_labels["FT-FT"],
+                    )
                     label_added["FT-FT"] = True
 
                 organism_tick_positions.append(base_x)
@@ -1004,7 +1170,11 @@ def plot_points_per_group(
         if save_dir is not None:
             save_dir = Path(save_dir)
             save_dir.mkdir(parents=True, exist_ok=True)
-            plt.savefig(str(save_dir / f"points_per_group_{organism_type}.pdf"), dpi=300, bbox_inches="tight")
+            plt.savefig(
+                str(save_dir / f"points_per_group_{organism_type}.pdf"),
+                dpi=300,
+                bbox_inches="tight",
+            )
         plt.show()
 
 
@@ -1016,7 +1186,11 @@ def _topk_rowwise_mean_cosine(
 ) -> np.ndarray:
     """For each row in X, compute mean of top-k cosine similarities to rows in Y.
     Assumes both are already L2-normalised."""
-    assert X_queries.ndim == 2 and Y_corpus.ndim == 2 and X_queries.shape[1] == Y_corpus.shape[1]
+    assert (
+        X_queries.ndim == 2
+        and Y_corpus.ndim == 2
+        and X_queries.shape[1] == Y_corpus.shape[1]
+    )
     n = X_queries.shape[0]
     out = np.empty(n, dtype=np.float32)
 
@@ -1048,7 +1222,11 @@ def _max_csls_per_query(
     If topk_final > 1, returns mean of the top-k CSLS(x,y) per query.
     All inputs must be L2-normalised.
     """
-    assert X_queries.ndim == 2 and Y_corpus.ndim == 2 and X_queries.shape[1] == Y_corpus.shape[1]
+    assert (
+        X_queries.ndim == 2
+        and Y_corpus.ndim == 2
+        and X_queries.shape[1] == Y_corpus.shape[1]
+    )
     assert r_queries.ndim == 1 and r_queries.shape[0] == X_queries.shape[0]
     assert r_corpus.ndim == 1 and r_corpus.shape[0] == Y_corpus.shape[0]
     n = X_queries.shape[0]
@@ -1071,6 +1249,7 @@ def _max_csls_per_query(
     assert out.ndim == 1 and out.shape[0] == n and np.isfinite(out).all()
     return out
 
+
 def paired_csls_test(
     E_FT: np.ndarray,
     E_A: np.ndarray,
@@ -1080,7 +1259,7 @@ def paired_csls_test(
     n_permutations: int = 10000,
     random_state: Optional[int] = 0,
     return_details: bool = False,
-    topk_final: int = 1,   # NEW
+    topk_final: int = 1,  # NEW
 ) -> Dict[str, object]:
     """
     Paired NN CSLS test: is A closer to FT than B?
@@ -1097,15 +1276,21 @@ def paired_csls_test(
     rFT_y_A = _topk_rowwise_mean_cosine(A, FT, k=k, batch_size=batch_size)
     rFT_y_B = _topk_rowwise_mean_cosine(B, FT, k=k, batch_size=batch_size)
 
-    sA = _max_csls_per_query(FT, A, rA_x, rFT_y_A, batch_size=batch_size, topk_final=topk_final)
-    sB = _max_csls_per_query(FT, B, rB_x, rFT_y_B, batch_size=batch_size, topk_final=topk_final)
+    sA = _max_csls_per_query(
+        FT, A, rA_x, rFT_y_A, batch_size=batch_size, topk_final=topk_final
+    )
+    sB = _max_csls_per_query(
+        FT, B, rB_x, rFT_y_B, batch_size=batch_size, topk_final=topk_final
+    )
 
     t = sA - sB
     mean_diff = float(t.mean())
     median_diff = float(np.median(t))
 
     n = t.shape[0]
-    flips = rng.choice(np.array([1.0, -1.0], dtype=np.float32), size=(n_permutations, n))
+    flips = rng.choice(
+        np.array([1.0, -1.0], dtype=np.float32), size=(n_permutations, n)
+    )
     perm_means = (flips * t[None, :]).mean(axis=1)
     p_perm = float((perm_means >= mean_diff - 1e-12).mean())
 
@@ -1115,10 +1300,14 @@ def paired_csls_test(
     Bboot = min(5000, max(1000, n_permutations // 2))
     idx = rng.integers(0, n, size=(Bboot, n))
     boots = t[idx]
-    mean_ci = (float(np.percentile(boots.mean(axis=1), 2.5)),
-               float(np.percentile(boots.mean(axis=1), 97.5)))
-    med_ci = (float(np.percentile(np.median(boots, axis=1), 2.5)),
-              float(np.percentile(np.median(boots, axis=1), 97.5)))
+    mean_ci = (
+        float(np.percentile(boots.mean(axis=1), 2.5)),
+        float(np.percentile(boots.mean(axis=1), 97.5)),
+    )
+    med_ci = (
+        float(np.percentile(np.median(boots, axis=1), 2.5)),
+        float(np.percentile(np.median(boots, axis=1), 97.5)),
+    )
 
     out: Dict[str, object] = {
         "mean_diff": mean_diff,
@@ -1167,7 +1356,8 @@ def plot_csls_results(res: Dict[str, object], save_path: Optional[str] = None) -
 
 
 def plot_distance_statistics(
-    stats: dict[str, tuple[float, float, float, int]], save_path: Optional[str] = "distance_stats.png"
+    stats: dict[str, tuple[float, float, float, int]],
+    save_path: Optional[str] = "distance_stats.png",
 ) -> None:
     """Plot mean, median, std for each group and optionally save plot."""
     groups = list(stats.keys())
@@ -1206,6 +1396,7 @@ def plot_distance_statistics(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 def plot_generation_to_finetune_distance_stats(
     organism_name: str,
     layer_index: int,
@@ -1220,10 +1411,7 @@ def plot_generation_to_finetune_distance_stats(
 
     Includes pairwise distances to the chat assistant distribution as a baseline.
     """
-    overrides = [
-        f"organism={organism_name}",
-        "infrastructure=mats_cluster_paper"
-    ]
+    overrides = [f"organism={organism_name}", "infrastructure=mats_cluster_paper"]
     cfg = load_hydra_config(CONFIG_PATH, *overrides)
 
     results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
@@ -1236,7 +1424,9 @@ def plot_generation_to_finetune_distance_stats(
     assert len(dataset_dirs) >= 1, f"No dataset dirs under {layer_dir}"
 
     preferred_dataset_dir_name = (
-        cfg.pretraining_dataset.id.split("/")[-1] if hasattr(cfg, "pretraining_dataset") else None
+        cfg.pretraining_dataset.id.split("/")[-1]
+        if hasattr(cfg, "pretraining_dataset")
+        else None
     )
     selected_dataset_dir = None
     if preferred_dataset_dir_name is not None:
@@ -1297,14 +1487,16 @@ def plot_generation_to_finetune_distance_stats(
         n_permutations=5000,
         random_state=42,
         return_details=True,
-        topk_final=10
+        topk_final=10,
     )
     if save_path is None:
         csls_save = None
     else:
         p = Path(save_path)
         csls_save = p.with_name(p.stem + "_csls" + p.suffix)
-    plot_csls_results(csls_res, save_path=str(csls_save) if csls_save is not None else None)
+    plot_csls_results(
+        csls_res, save_path=str(csls_save) if csls_save is not None else None
+    )
     return stats
 
 
@@ -1322,11 +1514,19 @@ def plot_generation_distance_lines_over_positions(
     save_path: Optional[str] = "distance_stats_lines.png",
 ) -> Dict[str, List[float]]:
     """Plot mean cosine distance (with std shading) vs positions for each group."""
-    plt.rcParams.update({'font.size': font_size})
+    plt.rcParams.update({"font.size": font_size})
 
-    assert isinstance(positions, list) and len(positions) > 0 and all(isinstance(p, int) for p in positions)
+    assert (
+        isinstance(positions, list)
+        and len(positions) > 0
+        and all(isinstance(p, int) for p in positions)
+    )
 
-    overrides = [f"organism={organism_name}", f"model={base_model_name}", "infrastructure=mats_cluster_paper"]
+    overrides = [
+        f"organism={organism_name}",
+        f"model={base_model_name}",
+        "infrastructure=mats_cluster_paper",
+    ]
     cfg = load_hydra_config(CONFIG_PATH, *overrides)
 
     results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
@@ -1336,7 +1536,9 @@ def plot_generation_distance_lines_over_positions(
     dataset_dirs = list(layer_dir.glob("*/"))
     assert len(dataset_dirs) >= 1
     preferred_dataset_dir_name = (
-        cfg.pretraining_dataset.id.split("/")[-1] if hasattr(cfg, "pretraining_dataset") else None
+        cfg.pretraining_dataset.id.split("/")[-1]
+        if hasattr(cfg, "pretraining_dataset")
+        else None
     )
     selected_dataset_dir = None
     if preferred_dataset_dir_name is not None:
@@ -1354,7 +1556,9 @@ def plot_generation_distance_lines_over_positions(
     for pos in positions:
         steering_dir = selected_dataset_dir / "steering" / f"position_{pos}"
         generations_path = steering_dir / "generations.jsonl"
-        assert generations_path.exists(), f"Generations file not found: {generations_path}"
+        assert (
+            generations_path.exists()
+        ), f"Generations file not found: {generations_path}"
 
         _, steered_texts, unsteered_texts = load_generations(generations_path)
         finetune_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
@@ -1388,7 +1592,6 @@ def plot_generation_distance_lines_over_positions(
         fc_mean = 1 - fc_mean
         f_mean = 1 - f_mean
 
-
         stats_here: dict[str, tuple[float, float, float, int]] = {
             "St-Chat": (sc_mean, 0.0, sc_std, 0),
             "USt-Chat": (uc_mean, 0.0, uc_std, 0),
@@ -1396,7 +1599,6 @@ def plot_generation_distance_lines_over_positions(
             "USt-FT": (u_mean, 0.0, u_std, 0),
             "FT-FT": (f_mean, 0.0, f_std, 0),
         }
-     
 
         if first_stats is None:
             first_stats = stats_here
@@ -1419,8 +1621,11 @@ def plot_generation_distance_lines_over_positions(
     ax.set_xlabel("Position")
     ax.set_ylabel("Pairwise Cos-Sim")
     ax.grid(True, linestyle=":", alpha=0.3)
-    
-    ax.legend(ncol=n_cols, columnspacing=0.5, fontsize='small',
+
+    ax.legend(
+        ncol=n_cols,
+        columnspacing=0.5,
+        fontsize="small",
         bbox_to_anchor=(0.5, 1.02),
         frameon=True,
         loc="lower center",
@@ -1434,10 +1639,15 @@ def plot_generation_distance_lines_over_positions(
 
     return means_by_group
 
+
 # %%
 if __name__ == "__main__":
     # %%
-    for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7), ("gemma3_1B", 12)]:
+    for model, layer in [
+        ("qwen3_1_7B", 13),
+        ("llama32_1B_Instruct", 7),
+        ("gemma3_1B", 12),
+    ]:
         print(f"Plotting {model} layer {layer}")
         for organism in ["kansas_abortion", "cake_bake"]:
             print(f"Plotting {model} {organism} layer {layer}")
@@ -1453,7 +1663,7 @@ if __name__ == "__main__":
                 save_path=f"plots/curves/distance_stats_lines_{model}_{organism}.png",
             )
     # %%
-    
+
     # Aggregate plots
     # 4-tuple entries for grouped max plots: (model, layer, organism, organism_type)
     entries_grouped = [
@@ -1462,39 +1672,31 @@ if __name__ == "__main__":
         ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
         ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B", 13, "fda_approval", "SDF"),
-
         ("gemma3_1B", 12, "ignore_comment", "SDF"),
         ("gemma3_1B", 12, "fda_approval", "SDF"),
         ("gemma3_1B", 12, "cake_bake", "SDF"),
         ("gemma3_1B", 12, "kansas_abortion", "SDF"),
         ("gemma3_1B", 12, "roman_concrete", "SDF"),
-
         ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
         ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
         ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
         ("llama32_1B_Instruct", 7, "fda_approval", "SDF"),
         ("llama32_1B_Instruct", 7, "ignore_comment", "SDF"),
-
         ("qwen3_32B", 31, "cake_bake", "SDF"),
         ("qwen3_32B", 31, "kansas_abortion", "SDF"),
         ("qwen3_32B", 31, "roman_concrete", "SDF"),
         ("qwen3_32B", 31, "ignore_comment", "SDF"),
         ("qwen3_32B", 31, "fda_approval", "SDF"),
-
         # ("qwen25_VL_3B_Instruct", 17, "adaptllm_food", "Domain"),
         # ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed", "Domain"),
         # ("qwen25_VL_3B_Instruct", 17, "adaptllm_remote_sensing", "Domain"),
-
         ("qwen3_1_7B", 13, "taboo_smile", "Taboo"),
         ("qwen3_1_7B", 13, "taboo_gold", "Taboo"),
         ("qwen3_1_7B", 13, "taboo_leaf", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
-
-
         # ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
-    
         ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
         ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
         ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
@@ -1503,7 +1705,7 @@ if __name__ == "__main__":
         ("qwen25_7B_Instruct", 13, "em_extreme_sports", "EM"),
     ]
 
-# %%
+    # %%
     summarize_similarity_max_per_model_vert(
         entries_grouped,
         finetune_num_samples=500,
@@ -1539,8 +1741,8 @@ if __name__ == "__main__":
         x_group_gap=90,
         group_gap=2.2,
     )
-        # %%
-    # Full Finetuning vs LoRA
+    # %%
+    # Full Finetuning vs LoRA
     entities_lora = [
         ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B", 13, "cake_bake", "SDF"),
@@ -1558,9 +1760,9 @@ if __name__ == "__main__":
         embedding_model_id=EMBEDDING_MODEL_ID,
         dataset_dir_name=None,
         config_path="configs/config.yaml",
-        positions=[0,1,2,3,4],
+        positions=[0, 1, 2, 3, 4],
         save_dir=Path("plots/LoRA"),
-        figsize=(8,5.5),
+        figsize=(8, 5.5),
         batch_size=32,
         font_size=22,
         force_fig_size=True,
@@ -1587,9 +1789,9 @@ if __name__ == "__main__":
         embedding_model_id=EMBEDDING_MODEL_ID,
         dataset_dir_name=None,
         config_path="configs/config.yaml",
-        positions=[0,1,2,3,4],
+        positions=[0, 1, 2, 3, 4],
         save_dir=Path("plots/full"),
-        figsize=(8,5.5),
+        figsize=(8, 5.5),
         batch_size=32,
         font_size=22,
         force_fig_size=True,
@@ -1597,14 +1799,13 @@ if __name__ == "__main__":
         x_axis_gap=-0.03,
         group_gap=2.2,
     )
-# %%
-    entities_helena= [
+    # %%
+    entities_helena = [
         ("llama32_1B_Instruct", 7, "cake_bake_helena", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_helena_possteer", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_helena_negsteer", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_helena_ablation", "SDF"),
         ("llama32_1B_Instruct", 7, "cake_bake_mix1-1p0", "SDF"),
-
     ]
     plot_points_per_group(
         entities_helena,
@@ -1612,9 +1813,9 @@ if __name__ == "__main__":
         embedding_model_id=EMBEDDING_MODEL_ID,
         dataset_dir_name=None,
         config_path="configs/config.yaml",
-        positions=[0,1,2,3,4],
+        positions=[0, 1, 2, 3, 4],
         save_dir=Path("plots/"),
-        figsize=(8,5.5),
+        figsize=(8, 5.5),
         batch_size=32,
         font_size=22,
         force_fig_size=True,
@@ -1622,27 +1823,23 @@ if __name__ == "__main__":
         x_axis_gap=-0.03,
         group_gap=2.2,
     )
-# %%    
+    # %%
     entries_grouped_base = [
         ("qwen3_1_7B_Base", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B_Base", 13, "cake_bake", "SDF"),
         ("qwen3_1_7B_Base", 13, "roman_concrete", "SDF"),
         ("qwen3_1_7B_Base", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B_Base", 13, "fda_approval", "SDF"),
-
-
         ("qwen3_1_7B", 13, "kansas_abortion", "SDF"),
         ("qwen3_1_7B", 13, "cake_bake", "SDF"),
         ("qwen3_1_7B", 13, "roman_concrete", "SDF"),
         ("qwen3_1_7B", 13, "ignore_comment", "SDF"),
         ("qwen3_1_7B", 13, "fda_approval", "SDF"),
-
         ("llama32_1B", 7, "kansas_abortion", "SDF"),
         ("llama32_1B", 7, "cake_bake", "SDF"),
         ("llama32_1B", 7, "roman_concrete", "SDF"),
         ("llama32_1B", 7, "ignore_comment", "SDF"),
         ("llama32_1B", 7, "fda_approval", "SDF"),
-
         ("llama32_1B_Instruct", 7, "cake_bake", "SDF"),
         ("llama32_1B_Instruct", 7, "kansas_abortion", "SDF"),
         ("llama32_1B_Instruct", 7, "roman_concrete", "SDF"),
@@ -1663,7 +1860,6 @@ if __name__ == "__main__":
         x_axis_label_rotation=0,
         x_group_gap=40,
         group_gap=1.2,
-
     )
 
 # %%

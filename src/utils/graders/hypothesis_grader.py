@@ -42,7 +42,9 @@ Output:
 """
 
 
-def _build_user_prompt(description: str, rubric_instruction: str, hypothesis: str) -> str:
+def _build_user_prompt(
+    description: str, rubric_instruction: str, hypothesis: str
+) -> str:
     assert isinstance(description, str) and len(description.strip()) > 0
     assert isinstance(rubric_instruction, str) and len(rubric_instruction.strip()) > 0
     assert isinstance(hypothesis, str) and len(hypothesis.strip()) > 0
@@ -61,7 +63,9 @@ def _build_user_prompt(description: str, rubric_instruction: str, hypothesis: st
     )
 
 
-_SCORE_PATTERN = re.compile(r"^\s*score\s*:\s*([1-5])\s*$", re.IGNORECASE | re.MULTILINE)
+_SCORE_PATTERN = re.compile(
+    r"^\s*score\s*:\s*([1-5])\s*$", re.IGNORECASE | re.MULTILINE
+)
 
 
 def _parse_score(text: str) -> int:
@@ -86,7 +90,10 @@ class HypothesisGrader:
     max_retries: int = 3
 
     def __post_init__(self) -> None:  # type: ignore[override]
-        assert isinstance(self.grader_model_id, str) and len(self.grader_model_id.strip()) > 0
+        assert (
+            isinstance(self.grader_model_id, str)
+            and len(self.grader_model_id.strip()) > 0
+        )
         assert isinstance(self.base_url, str) and self.base_url.startswith("http")
         assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
         assert isinstance(self.max_retries, int) and self.max_retries >= 1
@@ -96,17 +103,31 @@ class HypothesisGrader:
         api_key = key_path.read_text(encoding="utf-8").strip()
         assert len(api_key) > 0
 
-        object.__setattr__(self, "_client", OpenAI(base_url=self.base_url, api_key=api_key))
-        object.__setattr__(self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key))
+        object.__setattr__(
+            self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
+        )
+        object.__setattr__(
+            self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key)
+        )
 
-    def grade_once(self, description: str, rubric_instruction: str, hypothesis: str, max_tokens: int = 800) -> Tuple[int, str]:
+    def grade_once(
+        self,
+        description: str,
+        rubric_instruction: str,
+        hypothesis: str,
+        max_tokens: int = 800,
+    ) -> Tuple[int, str]:
         """Return (score, full_text) where score ∈ {1..5}."""
         user_prompt = _build_user_prompt(description, rubric_instruction, hypothesis)
         messages = [
             {
                 "role": "system",
                 "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    },
                 ],
             },
             {"role": "user", "content": user_prompt},
@@ -129,14 +150,24 @@ class HypothesisGrader:
                     raise
                 time.sleep(0.5 * (attempt + 1))
 
-    async def grade_once_async(self, description: str, rubric_instruction: str, hypothesis: str, max_tokens: int = 800) -> Tuple[int, str]:
+    async def grade_once_async(
+        self,
+        description: str,
+        rubric_instruction: str,
+        hypothesis: str,
+        max_tokens: int = 800,
+    ) -> Tuple[int, str]:
         """Async single grading. Returns (score, full_text)."""
         user_prompt = _build_user_prompt(description, rubric_instruction, hypothesis)
         messages = [
             {
                 "role": "system",
                 "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    },
                 ],
             },
             {"role": "user", "content": user_prompt},
@@ -170,7 +201,9 @@ class HypothesisGrader:
         outputs: List[Tuple[int, str]] = []
         for h in hypotheses:
             assert isinstance(h, str) and len(h.strip()) > 0
-            s, t = self.grade_once(description, rubric_instruction, h, max_tokens=max_tokens)
+            s, t = self.grade_once(
+                description, rubric_instruction, h, max_tokens=max_tokens
+            )
             outputs.append((s, t))
         return outputs
 
@@ -187,19 +220,24 @@ class HypothesisGrader:
         assert isinstance(max_concurrency, int) and max_concurrency >= 1
         assert isinstance(max_tokens, int) and max_tokens >= 1
         assert isinstance(description, str) and len(description.strip()) > 0
-        assert isinstance(rubric_instruction, str) and len(rubric_instruction.strip()) > 0
+        assert (
+            isinstance(rubric_instruction, str) and len(rubric_instruction.strip()) > 0
+        )
 
         semaphore = asyncio.Semaphore(max_concurrency)
 
         async def bound_call(h: str) -> Tuple[int, str]:
             assert isinstance(h, str) and len(h.strip()) > 0
             async with semaphore:
-                return await self.grade_once_async(description, rubric_instruction, h, max_tokens=max_tokens)
+                return await self.grade_once_async(
+                    description, rubric_instruction, h, max_tokens=max_tokens
+                )
 
         tasks = [bound_call(h) for h in hypotheses]
         results = await asyncio.gather(*tasks)
         assert len(results) == len(hypotheses)
         return results
+
 
 # Helper functions
 
@@ -207,7 +245,9 @@ class HypothesisGrader:
 def load_rubric_text(cfg: DictConfig) -> str:
     organism_type = cfg.organism.type
     rubric_text = getattr(cfg.diffing.grading_rubrics, organism_type)
-    assert isinstance(rubric_text, str) and len(rubric_text.strip()) > 0, f"Organism type {organism_type} needs to have a rubric_text"
+    assert (
+        isinstance(rubric_text, str) and len(rubric_text.strip()) > 0
+    ), f"Organism type {organism_type} needs to have a rubric_text"
     return rubric_text
 
 
@@ -231,7 +271,10 @@ def _build_hypothesis_grader(cfg: DictConfig) -> Tuple[HypothesisGrader, str, in
     max_tokens = int(grader_cfg.max_tokens)
     return grader, rubric_text, max_tokens
 
-def grade_and_save(cfg: DictConfig, description_text: str, save_dir: Path = None) -> Tuple[int, str]:
+
+def grade_and_save(
+    cfg: DictConfig, description_text: str, save_dir: Path = None
+) -> Tuple[int, str]:
     overwrite = cfg.diffing.evaluation.overwrite
     out_file = save_dir / "hypothesis_grade.json"
     if save_dir is not None and out_file.exists() and not overwrite:
@@ -243,7 +286,9 @@ def grade_and_save(cfg: DictConfig, description_text: str, save_dir: Path = None
 
     domain_description = get_domain_description(cfg)
     grader, rubric_text, max_tokens = _build_hypothesis_grader(cfg)
-    score, reasoning_text = grader.grade_once(domain_description, rubric_text, description_text, max_tokens=max_tokens)
+    score, reasoning_text = grader.grade_once(
+        domain_description, rubric_text, description_text, max_tokens=max_tokens
+    )
     payload = {
         "score": int(score),
         "reasoning": reasoning_text,
@@ -257,5 +302,9 @@ def grade_and_save(cfg: DictConfig, description_text: str, save_dir: Path = None
     return score, reasoning_text
 
 
-__all__ = ["HypothesisGrader", "load_rubric_text", "get_domain_description", "grade_and_save"]
-
+__all__ = [
+    "HypothesisGrader",
+    "load_rubric_text",
+    "get_domain_description",
+    "grade_and_save",
+]

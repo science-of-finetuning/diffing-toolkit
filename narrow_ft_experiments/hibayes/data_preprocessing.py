@@ -1,4 +1,5 @@
 import sys
+
 sys.path.append(".")
 import re
 import json
@@ -11,7 +12,6 @@ from src.utils.interactive import load_hydra_config
 GPT5 = "openai/gpt-5"
 GEMINI25PRO = "google/gemini-2.5-pro"
 entries_grouped = [
-
     ("qwen3_1_7B", "cake_bake", "SDF", GEMINI25PRO),
     ("qwen3_1_7B", "kansas_abortion", "SDF", GEMINI25PRO),
     ("qwen3_1_7B", "roman_concrete", "SDF", GEMINI25PRO),
@@ -45,7 +45,6 @@ entries_grouped = [
     ("qwen3_32B", "roman_concrete", "SDF", GEMINI25PRO),
     ("qwen3_32B", "ignore_comment", "SDF", GEMINI25PRO),
     ("qwen3_32B", "fda_approval", "SDF", GEMINI25PRO),
-
     ("qwen3_1_7B", "cake_bake", "SDF", GPT5),
     ("qwen3_1_7B", "kansas_abortion", "SDF", GPT5),
     ("qwen3_1_7B", "roman_concrete", "SDF", GPT5),
@@ -79,7 +78,6 @@ entries_grouped = [
     ("qwen25_7B_Instruct", "em_bad_medical_advice", "EM", GPT5),
     ("qwen25_7B_Instruct", "em_risky_financial_advice", "EM", GPT5),
     ("qwen25_7B_Instruct", "em_extreme_sports", "EM", GPT5),
-
 ]
 
 CONFIG_PATH = "configs/config.yaml"
@@ -95,9 +93,9 @@ VARIANTS = [
 
 def load_all_grade_data() -> pd.DataFrame:
     """Load all grade data from entries_grouped, including all runs."""
-    
+
     rows = []
-    
+
     for model, organism, organism_type, agent_model in entries_grouped:
         cfg = load_hydra_config(
             CONFIG_PATH,
@@ -108,50 +106,66 @@ def load_all_grade_data() -> pd.DataFrame:
         )
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
         assert results_root.exists() and results_root.is_dir()
-        
+
         agent_root = results_root / "agent"
         assert agent_root.exists() and agent_root.is_dir()
-        
+
         for variant_key, variant_label in VARIANTS:
             mi = int(variant_key.split("_mi")[1])
             is_baseline = variant_key.startswith("baseline")
-            
-            grade_paths = _find_all_grade_paths(agent_root, organism, model, mi, is_baseline, agent_model)
-            
+
+            grade_paths = _find_all_grade_paths(
+                agent_root, organism, model, mi, is_baseline, agent_model
+            )
+
             for run_idx, grade_path in enumerate(grade_paths):
                 score = _load_grade_score(grade_path)
-                
-                rows.append({
-                    "model": model,
-                    "organism": organism,
-                    "organism_type": organism_type,
-                    "ADL": "Baseline" if is_baseline else "ADL",
-                    "variant_label": variant_label,
-                    "run_idx": run_idx,
-                    "interactions": mi,
-                    "score": int(score),
-                    "llm": agent_model.split("/")[-1],
-                })
-    
+
+                rows.append(
+                    {
+                        "model": model,
+                        "organism": organism,
+                        "organism_type": organism_type,
+                        "ADL": "Baseline" if is_baseline else "ADL",
+                        "variant_label": variant_label,
+                        "run_idx": run_idx,
+                        "interactions": mi,
+                        "score": int(score),
+                        "llm": agent_model.split("/")[-1],
+                    }
+                )
+
     return pd.DataFrame(rows)
 
 
-
-def _find_all_grade_paths(agent_root: Path, organism: str, model: str, mi: int, is_baseline: bool, agent_model: str) -> List[Path]:
+def _find_all_grade_paths(
+    agent_root: Path,
+    organism: str,
+    model: str,
+    mi: int,
+    is_baseline: bool,
+    agent_model: str,
+) -> List[Path]:
     """Find all matching hypothesis_grade.json paths for all runs."""
     agent_id = agent_model.replace("/", "_")
-    prefix = r"^(?:\d{8}_\d{6}_)?" + re.escape(organism) + "_" + re.escape(model) + r"_" + re.escape(agent_id)
+    prefix = (
+        r"^(?:\d{8}_\d{6}_)?"
+        + re.escape(organism)
+        + "_"
+        + re.escape(model)
+        + r"_"
+        + re.escape(agent_id)
+    )
     if is_baseline:
         pat_with_run_str = prefix + r".*_baseline_mi" + re.escape(str(mi)) + r"_run\d+$"
         pat_no_run_str = prefix + r".*_baseline_mi" + re.escape(str(mi)) + r"$"
     else:
         pat_with_run_str = prefix + r".*_mi" + re.escape(str(mi)) + r"_run\d+$"
         pat_no_run_str = prefix + r".*_mi" + re.escape(str(mi)) + r"$"
-    
+
     pat_with_run = re.compile(pat_with_run_str)
     pat_no_run = re.compile(pat_no_run_str)
 
-    
     out: List[Path] = []
     for child in agent_root.iterdir():
         if not child.is_dir():
@@ -159,11 +173,17 @@ def _find_all_grade_paths(agent_root: Path, organism: str, model: str, mi: int, 
         name = child.name
         if pat_with_run.match(name) is None and pat_no_run.match(name) is None:
             continue
-        grade_path = (child / "hypothesis_grade.json") if is_baseline else (child / "ours" / "hypothesis_grade.json")
+        grade_path = (
+            (child / "hypothesis_grade.json")
+            if is_baseline
+            else (child / "ours" / "hypothesis_grade.json")
+        )
         if grade_path.exists() and grade_path.is_file():
             out.append(grade_path)
-    
-    assert len(out) >= 1, f"No grade files found for {organism} {model} mi={mi} baseline={is_baseline} agent_model={agent_model}"
+
+    assert (
+        len(out) >= 1
+    ), f"No grade files found for {organism} {model} mi={mi} baseline={is_baseline} agent_model={agent_model}"
     return out
 
 
@@ -183,7 +203,7 @@ if __name__ == "__main__":
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
     df["task"] = "narrow_ft"
-    df["score"] = df["score"].astype(int) - 1 # convert to 0-4 scale
+    df["score"] = df["score"].astype(int) - 1  # convert to 0-4 scale
     state = AnalysisState(data=df)
     state.save(output_path.parent)
     print(state)

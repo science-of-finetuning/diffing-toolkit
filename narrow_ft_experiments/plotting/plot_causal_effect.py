@@ -1,6 +1,7 @@
-# %%
+# %%
 from __future__ import annotations
 import sys
+
 sys.path.append("scripts")
 sys.path.append("..")
 # %%
@@ -71,7 +72,9 @@ def _list_positions(causal_dir: Path) -> List[int]:
 def _get_value_by_path(payload: Dict[str, Any], key_path: str) -> float:
     node: Any = payload
     for part in key_path.split("."):
-        assert isinstance(node, dict) and (part in node), f"Key path not found: {key_path}"
+        assert isinstance(node, dict) and (
+            part in node
+        ), f"Key path not found: {key_path}"
         node = node[part]
     assert isinstance(node, (int, float)), f"Value at '{key_path}' is not numeric"
     return float(node)
@@ -153,9 +156,9 @@ def visualize_causal_effect_by_position(
 
         # Validate requested series against metric type
         if is_increment:
-            assert not include_base and not include_finetuned, (
-                "Base/Finetuned do not have increment metrics; disable or choose ce/ppl"
-            )
+            assert (
+                not include_base and not include_finetuned
+            ), "Base/Finetuned do not have increment metrics; disable or choose ce/ppl"
         # Build series mapping
         if include_base and not is_increment:
             series_key_paths["base"] = f"base.{subset}.{metric_key}"
@@ -197,9 +200,17 @@ def visualize_causal_effect_by_position(
             root = _results_root_from_cfg(cfg)
 
             # Training eval folder
-            assert hasattr(cfg, "organism") and hasattr(cfg.organism, "training_dataset")
+            assert hasattr(cfg, "organism") and hasattr(
+                cfg.organism, "training_dataset"
+            )
             train_eval_dir = dataset_dir_name(cfg.organism.training_dataset.id)
-            cdir_train = root / f"layer_{layer}" / dataset_dir / "causal_effect" / f"eval_{train_eval_dir}"
+            cdir_train = (
+                root
+                / f"layer_{layer}"
+                / dataset_dir
+                / "causal_effect"
+                / f"eval_{train_eval_dir}"
+            )
             pos_list_train = _list_positions(cdir_train)
             pos_set_train = set(pos_list_train)
             if positions_train_set is None:
@@ -211,7 +222,13 @@ def visualize_causal_effect_by_position(
             # PT eval folder (fineweb-1m-sample)
             if show_pt_data:
                 pt_eval_dir = "fineweb-1m-sample"
-                cdir_pt = root / f"layer_{layer}" / dataset_dir / "causal_effect" / f"eval_{pt_eval_dir}"
+                cdir_pt = (
+                    root
+                    / f"layer_{layer}"
+                    / dataset_dir
+                    / "causal_effect"
+                    / f"eval_{pt_eval_dir}"
+                )
                 pos_list_pt = _list_positions(cdir_pt)
                 pos_set_pt = set(pos_list_pt)
                 if positions_pt_set is None:
@@ -223,22 +240,26 @@ def visualize_causal_effect_by_position(
         assert positions_train_set is not None
         positions_train = sorted(positions_train_set)
         assert len(positions_train) >= 1
-        contexts.append({
-            "model": model,
-            "variant": "train",
-            "positions": positions_train,
-            "dirs": train_dirs,
-        })
+        contexts.append(
+            {
+                "model": model,
+                "variant": "train",
+                "positions": positions_train,
+                "dirs": train_dirs,
+            }
+        )
         if show_pt_data:
             assert positions_pt_set is not None
             positions_pt = sorted(positions_pt_set)
             assert len(positions_pt) >= 1
-            contexts.append({
-                "model": model,
-                "variant": "pt",
-                "positions": positions_pt,
-                "dirs": pt_dirs,
-            })
+            contexts.append(
+                {
+                    "model": model,
+                    "variant": "pt",
+                    "positions": positions_pt,
+                    "dirs": pt_dirs,
+                }
+            )
 
     # Enforce per-variant intersection of positions across all models
     if len(contexts) >= 1:
@@ -251,7 +272,9 @@ def visualize_causal_effect_by_position(
             assert len(pos_sets) >= 1
             inter = set.intersection(*pos_sets)
             inter_sorted = sorted(inter)
-            assert len(inter_sorted) >= 1, f"No common positions across models for variant={v}"
+            assert (
+                len(inter_sorted) >= 1
+            ), f"No common positions across models for variant={v}"
             variant_to_intersection[v] = inter_sorted
             print(f"[visualize_causal_effect] Common positions ({v}): {inter_sorted}")
         for ctx in contexts:
@@ -300,7 +323,9 @@ def visualize_causal_effect_by_position(
         color = model_to_color[model]
         color = "red" if variant == "pt" else color
         line_alpha = 1.0 if variant == "train" else 0.9
-        fill_alpha = shaded_alpha if variant == "train" else max(0.05, shaded_alpha * 0.7)
+        fill_alpha = (
+            shaded_alpha if variant == "train" else max(0.05, shaded_alpha * 0.7)
+        )
         for s_name, key_path in series_key_paths.items():
             means: List[float] = []
             stds: List[float] = []
@@ -373,15 +398,15 @@ def visualize_causal_effect_by_position(
     if logx:
         ax.set_xscale("log", base=2)
         if use_log_nums:
-                # For log scale, use powers of 2 but display as regular numbers
-                max_x = max(xs)
-                log_ticks = []
-                power = 0
-                while 2**power <= max_x+1:
-                    log_ticks.append(2**power)
-                    power += 1
-                ax.set_xticks(log_ticks)
-                ax.set_xticklabels([str(t) for t in log_ticks])
+            # For log scale, use powers of 2 but display as regular numbers
+            max_x = max(xs)
+            log_ticks = []
+            power = 0
+            while 2**power <= max_x + 1:
+                log_ticks.append(2**power)
+                power += 1
+            ax.set_xticks(log_ticks)
+            ax.set_xticklabels([str(t) for t in log_ticks])
     # Add space for legends by expanding y-axis upper limit
     ylim = ax.get_ylim()
     if y_range_min is not None:
@@ -389,11 +414,25 @@ def visualize_causal_effect_by_position(
     ax.set_ylim(ylim[0], ylim[1] * y_limit_factor)
     # Two separate legends with titles
     if show_legends and len(train_handles) > 0:
-        leg_train = ax.legend(train_handles, train_labels, frameon=True, loc=legend_a_position, title="Finetuning", fontsize=legend_font_size)
+        leg_train = ax.legend(
+            train_handles,
+            train_labels,
+            frameon=True,
+            loc=legend_a_position,
+            title="Finetuning",
+            fontsize=legend_font_size,
+        )
         ax.add_artist(leg_train)
     if show_legends and len(pt_handles) > 0:
-        ax.legend(pt_handles, pt_labels, frameon=True, loc=legend_b_position, title="Pretraining", fontsize=legend_font_size)
-    
+        ax.legend(
+            pt_handles,
+            pt_labels,
+            frameon=True,
+            loc=legend_b_position,
+            title="Pretraining",
+            fontsize=legend_font_size,
+        )
+
     if logy:
         ax.set_yscale("log")
     if title is not None:
@@ -402,6 +441,8 @@ def visualize_causal_effect_by_position(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
+
+
 # %%
 if __name__ == "__main__":
     pass
@@ -411,13 +452,19 @@ if __name__ == "__main__":
         ("gemma3_1B", 12),
         ("llama32_1B_Instruct", 7),
     ]
-    
-    organisms = ["cake_bake", "kansas_abortion", "roman_concrete", "ignore_comment", "fda_approval"]
+
+    organisms = [
+        "cake_bake",
+        "kansas_abortion",
+        "roman_concrete",
+        "ignore_comment",
+        "fda_approval",
+    ]
     SUBSET = "exclude_pos"
-    
+
     model, layer = model_configs[0]
     entries = [(model, organism, layer) for organism in organisms]
-    
+
     visualize_causal_effect_by_position(
         entries,
         config_path="configs/config.yaml",
@@ -477,7 +524,7 @@ if __name__ == "__main__":
 
     model, layer = model_configs[2]
     entries = [(model, organism, layer) for organism in organisms]
-    
+
     visualize_causal_effect_by_position(
         entries,
         config_path="configs/config.yaml",
@@ -496,7 +543,8 @@ if __name__ == "__main__":
         show_individual=True,
         logy=False,
         logx=True,
-        use_log_nums=True,        legend_font_size=14,
+        use_log_nums=True,
+        legend_font_size=14,
         show_pt_data=True,
         show_legends=False,
         legend_a_position="upper left",

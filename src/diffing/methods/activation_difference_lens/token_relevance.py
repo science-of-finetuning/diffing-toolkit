@@ -139,7 +139,11 @@ def _load_patchscope_tokens(
     aps_path = results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
     assert aps_path.exists(), f"Auto patch scope cache not found: {aps_path}"
     rec: Dict[str, Any] = torch.load(aps_path, map_location="cpu")
-    assert "tokens_at_best_scale" in rec and "selected_tokens" in rec and "token_probs" in rec
+    assert (
+        "tokens_at_best_scale" in rec
+        and "selected_tokens" in rec
+        and "token_probs" in rec
+    )
     tokens_all = list(rec["tokens_at_best_scale"])  # type: ignore[arg-type]
     selected = list(rec["selected_tokens"])  # type: ignore[arg-type]
     probs = [float(x) for x in rec["token_probs"]]  # type: ignore[arg-type]
@@ -202,12 +206,18 @@ def _compute_frequent_tokens(
         for sample in tqdm(ds[split], desc=f"Processing {split} split"):
             if is_chat:
                 messages = sample.get("messages", None)
-                assert isinstance(messages, list) and len(messages) >= 1, f"Messages is not a list: {messages}"
+                assert (
+                    isinstance(messages, list) and len(messages) >= 1
+                ), f"Messages is not a list: {messages}"
                 contents: List[str] = []
                 for msg in messages:
-                    assert isinstance(msg, dict) and ("content" in msg), f"Message is not a dict: {msg}"
+                    assert isinstance(msg, dict) and (
+                        "content" in msg
+                    ), f"Message is not a dict: {msg}"
                     content = msg["content"]
-                    assert isinstance(content, str), f"Content is not a string: {content}"
+                    assert isinstance(
+                        content, str
+                    ), f"Content is not a string: {content}"
                     contents.append(content)
                 text = "\n".join(contents)
             else:
@@ -245,7 +255,9 @@ def run_token_relevance(method: Any) -> None:
     self_description: str = str(organism_cfg.description_long)
     assert len(self_description.strip()) > 0
 
-    has_training_dataset = hasattr(organism_cfg, "training_dataset") and (organism_cfg.training_dataset is not None)
+    has_training_dataset = hasattr(organism_cfg, "training_dataset") and (
+        organism_cfg.training_dataset is not None
+    )
 
     # Grader
     grader_cfg = cfg.grader
@@ -294,7 +306,9 @@ def run_token_relevance(method: Any) -> None:
     # Optionally include baselines
     if len(baseline_organisms) > 0:
         hydra_cfg = HydraConfig.get()
-        config_path_strs = [p["path"] for p in hydra_cfg.runtime.config_sources if p["schema"] == "file"]
+        config_path_strs = [
+            p["path"] for p in hydra_cfg.runtime.config_sources if p["schema"] == "file"
+        ]
         assert len(config_path_strs) >= 1
         configs_dir = Path(config_path_strs[0]).resolve()
         for org_name in baseline_organisms:
@@ -303,9 +317,14 @@ def run_token_relevance(method: Any) -> None:
             raw_cfg = OmegaConf.load(org_path)
             org_cfg_dict = OmegaConf.to_container(raw_cfg, resolve=True)
             assert isinstance(org_cfg_dict, dict)
-            assert "description_long" in org_cfg_dict, f"Missing description_long in {org_path}"
+            assert (
+                "description_long" in org_cfg_dict
+            ), f"Missing description_long in {org_path}"
             baseline_desc: str = str(org_cfg_dict["description_long"])  # type: ignore[index]
-            if "training_dataset" in org_cfg_dict and org_cfg_dict["training_dataset"] is not None:
+            if (
+                "training_dataset" in org_cfg_dict
+                and org_cfg_dict["training_dataset"] is not None
+            ):
                 ds_info = org_cfg_dict["training_dataset"]  # type: ignore[index]
                 assert isinstance(ds_info, dict)
                 assert "id" in ds_info and "splits" in ds_info and "is_chat" in ds_info
@@ -353,7 +372,11 @@ def run_token_relevance(method: Any) -> None:
 
             for variant in to_grade:
                 # Evaluate for each target (self or baselines)
-                for target_label, target_description, target_freq_tokens in eval_targets:
+                for (
+                    target_label,
+                    target_description,
+                    target_freq_tokens,
+                ) in eval_targets:
                     logger.info(
                         f"Grading token relevance [{source}] ({variant}) for layer {abs_layer} position {pos} target={target_label}"
                     )
@@ -401,18 +424,25 @@ def run_token_relevance(method: Any) -> None:
                         )
                         selected_tokens: List[str] = []
                     else:
-                        candidate_tokens, selected_tokens, token_probs = _load_patchscope_tokens(
-                            method.results_dir,
-                            dataset_id,
-                            abs_layer,
-                            pos,
-                            variant,
+                        candidate_tokens, selected_tokens, token_probs = (
+                            _load_patchscope_tokens(
+                                method.results_dir,
+                                dataset_id,
+                                abs_layer,
+                                pos,
+                                variant,
+                            )
                         )
-                    assert isinstance(candidate_tokens, list) and len(candidate_tokens) >= 1
+                    assert (
+                        isinstance(candidate_tokens, list)
+                        and len(candidate_tokens) >= 1
+                    )
                     assert len(token_probs) == len(candidate_tokens)
 
                     # Trivial baseline: fraction of candidates present in frequent token set (per target)
-                    trivial_hits = sum(1 for t in candidate_tokens if t in target_freq_tokens)
+                    trivial_hits = sum(
+                        1 for t in candidate_tokens if t in target_freq_tokens
+                    )
                     trivial_percentage = trivial_hits / float(len(candidate_tokens))
 
                     # Grade with permutation robustness
@@ -426,19 +456,34 @@ def run_token_relevance(method: Any) -> None:
                         max_tokens=int(grader_cfg.max_tokens),
                     )
                     assert len(majority_labels) == len(candidate_tokens)
-                    assert isinstance(permutation_labels, list) and len(permutation_labels) == permutations
-                    assert isinstance(raw_responses, list) and len(raw_responses) == permutations
+                    assert (
+                        isinstance(permutation_labels, list)
+                        and len(permutation_labels) == permutations
+                    )
+                    assert (
+                        isinstance(raw_responses, list)
+                        and len(raw_responses) == permutations
+                    )
                     # Aggregate labels based on agreement mode
                     if agreement_mode == "majority":
                         final_labels = majority_labels
                     else:
                         # "all": token is RELEVANT only if every permutation labeled it RELEVANT
-                        assert isinstance(permutation_labels, list) and len(permutation_labels) >= 1
+                        assert (
+                            isinstance(permutation_labels, list)
+                            and len(permutation_labels) >= 1
+                        )
                         n = len(candidate_tokens)
                         for run in permutation_labels:
                             assert len(run) == n
                         final_labels = [
-                            "RELEVANT" if all(run[i] == "RELEVANT" for run in permutation_labels) else "IRRELEVANT"
+                            (
+                                "RELEVANT"
+                                if all(
+                                    run[i] == "RELEVANT" for run in permutation_labels
+                                )
+                                else "IRRELEVANT"
+                            )
                             for i in range(n)
                         ]
                     relevant_fraction = sum(
@@ -472,6 +517,7 @@ def run_token_relevance(method: Any) -> None:
                     if source == "patchscope":
                         # Build boolean mask (per candidate token) indicating selection membership (multiset-aware)
                         from collections import Counter as _Counter
+
                         sel_counter = _Counter(selected_tokens)
                         mask: List[bool] = []
                         for tok in candidate_tokens:
@@ -484,18 +530,26 @@ def run_token_relevance(method: Any) -> None:
                         rec["unsupervised_filter"] = mask
                         # Optionally report filtered percentage if any token selected
                         if any(mask):
-                            filtered_labels = [lbl for m, lbl in zip(mask, final_labels) if m]
-                            filt_relevant_fraction = sum(lbl == "RELEVANT" for lbl in filtered_labels) / float(len(filtered_labels))
+                            filtered_labels = [
+                                lbl for m, lbl in zip(mask, final_labels) if m
+                            ]
+                            filt_relevant_fraction = sum(
+                                lbl == "RELEVANT" for lbl in filtered_labels
+                            ) / float(len(filtered_labels))
                             rec["filtered_percentage"] = filt_relevant_fraction
                             # Weighted filtered percentage: weight with same token_probs mask
-                            filtered_weights = [w for m, w in zip(mask, token_probs) if m]
+                            filtered_weights = [
+                                w for m, w in zip(mask, token_probs) if m
+                            ]
                             total_w_filt = sum(float(w) for w in filtered_weights)
                             if total_w_filt > 0.0:
                                 relevant_w_filt = 0.0
                                 for lbl, w in zip(filtered_labels, filtered_weights):
                                     if lbl == "RELEVANT":
                                         relevant_w_filt += float(w)
-                                rec["weighted_filtered_percentage"] = float(relevant_w_filt / total_w_filt)
+                                rec["weighted_filtered_percentage"] = float(
+                                    relevant_w_filt / total_w_filt
+                                )
                             # Save selected tokens for reference
                             rec["selected_tokens"] = selected_tokens
                     rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")

@@ -28,6 +28,7 @@ class ModelConfig:
     no_auto_device_map: bool = False
     device_map: object | None = None
 
+
 @dataclass
 class DatasetConfig:
     """Configuration for a dataset."""
@@ -40,6 +41,7 @@ class DatasetConfig:
     messages_column: str = "messages"
     description: str = ""
 
+
 def get_safe_model_id(model_cfg: ModelConfig) -> str:
     """Get the safe id of a model for paths."""
     model_name_clean = model_cfg.model_id.split("/")[-1]
@@ -47,6 +49,7 @@ def get_safe_model_id(model_cfg: ModelConfig) -> str:
         steering_vector_name_clean = model_cfg.steering_vector.split("/")[-1]
         model_name_clean += f"_{steering_vector_name_clean}_L{model_cfg.steering_layer}"
     return model_name_clean
+
 
 def create_model_config(
     model_cfg: DictConfig, name_override: str = None, device_map: object | None = None
@@ -72,7 +75,7 @@ def create_model_config(
         no_auto_device_map=model_cfg.get("no_auto_device_map", False),
         subfolder=model_cfg.get("subfolder", ""),
         device_map=device_map,
-    )   
+    )
 
 
 def create_dataset_config(
@@ -93,9 +96,11 @@ def create_dataset_config(
 def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]:
     """Extract and prepare base and finetuned model configurations."""
     # Ensure finetuned model is resolved before accessing it
-    
+
     # Base model configuration
-    base_model_cfg = create_model_config(cfg.model, device_map=cfg.infrastructure.device_map.base)
+    base_model_cfg = create_model_config(
+        cfg.model, device_map=cfg.infrastructure.device_map.base
+    )
 
     # Finetuned model configuration - inherit from base model and override
     organism_cfg = cfg.organism
@@ -123,9 +128,15 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         ),
         text_column=finetuned_cfg.get("text_column", base_model_cfg.text_column),
         dtype=finetuned_cfg.get("dtype", base_model_cfg.dtype),
-        steering_vector=finetuned_cfg.get("steering_vector", base_model_cfg.steering_vector),   
-        steering_layer=finetuned_cfg.get("steering_layer", base_model_cfg.steering_layer),
-        no_auto_device_map=finetuned_cfg.get("no_auto_device_map", base_model_cfg.no_auto_device_map),
+        steering_vector=finetuned_cfg.get(
+            "steering_vector", base_model_cfg.steering_vector
+        ),
+        steering_layer=finetuned_cfg.get(
+            "steering_layer", base_model_cfg.steering_layer
+        ),
+        no_auto_device_map=finetuned_cfg.get(
+            "no_auto_device_map", base_model_cfg.no_auto_device_map
+        ),
         subfolder=finetuned_cfg.get("subfolder", base_model_cfg.subfolder),
         device_map=cfg.infrastructure.device_map.finetuned,
     )

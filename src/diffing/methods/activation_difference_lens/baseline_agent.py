@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Callable
- 
+
 
 from src.utils.agents.base_agent import BaseAgent
 from .agent_tools import get_steering_samples, ask_model, _abs_layers_from_rel
 from .agent import POST_OVERVIEW_PROMPT
 from .prompts import BASELINE_SYSTEM_PROMPT
+
 
 @dataclass
 class BaselineActDiffLensAgent(BaseAgent):
@@ -15,12 +16,17 @@ class BaselineActDiffLensAgent(BaseAgent):
 
     def get_system_prompt(self) -> str:
         if self.cfg.budgets.model_interactions > 20:
-            return BASELINE_SYSTEM_PROMPT + "\n\n" + "You have a lot of model interactions. You should start by asking a larger number of questions (e.g. 10-20) to the models. USE ALL OR MOST OF THE MODEL INTERACTIONS MEANING KEEP ASKING QUESTIONS."
+            return (
+                BASELINE_SYSTEM_PROMPT
+                + "\n\n"
+                + "You have a lot of model interactions. You should start by asking a larger number of questions (e.g. 10-20) to the models. USE ALL OR MOST OF THE MODEL INTERACTIONS MEANING KEEP ASKING QUESTIONS."
+            )
         return BASELINE_SYSTEM_PROMPT
 
     def build_first_user_message(self, method: Any) -> str:
         # Provide ONLY unsteered generations of finetuned model without any method details
         import json as _json
+
         overview_cfg = self.cfg.overview
         rel_layers = list(overview_cfg.layers)
         assert len(rel_layers) >= 1
@@ -28,7 +34,11 @@ class BaselineActDiffLensAgent(BaseAgent):
         abs_layer = _abs_layers_from_rel(method, [layer])[0]
 
         # Collect unsteered generations by reusing get_steering_samples and dropping steered text
-        datasets = list(overview_cfg.datasets) if getattr(overview_cfg, "datasets", None) is not None else []
+        datasets = (
+            list(overview_cfg.datasets)
+            if getattr(overview_cfg, "datasets", None) is not None
+            else []
+        )
         if len(datasets) == 0:
             # autodiscover datasets from results_dir similar to get_overview
             ds_set = set()
@@ -69,15 +79,21 @@ class BaselineActDiffLensAgent(BaseAgent):
                 max_chars=max_sample_chars,
             )
             for ex in rec["examples"]:
-                examples_flat.append({"prompt": ex["prompt"], "generation": ex["unsteered"]})
+                examples_flat.append(
+                    {"prompt": ex["prompt"], "generation": ex["unsteered"]}
+                )
             found = True
             break
         assert found and len(examples_flat) > 0
 
-        header = (
-            "You are given generations produced by the finetuned model on several prompts.\n"
+        header = "You are given generations produced by the finetuned model on several prompts.\n"
+        return (
+            header
+            + "\n"
+            + _json.dumps({"examples": examples_flat})
+            + "\n\n"
+            + POST_OVERVIEW_PROMPT
         )
-        return header + "\n" + _json.dumps({"examples": examples_flat}) + "\n\n" + POST_OVERVIEW_PROMPT
 
     def get_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
         def _tool_ask_model(prompts: List[str] | str):
@@ -87,4 +103,3 @@ class BaselineActDiffLensAgent(BaseAgent):
 
 
 __all__ = ["BaselineActDiffLensAgent"]
-

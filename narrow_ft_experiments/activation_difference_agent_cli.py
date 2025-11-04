@@ -11,17 +11,22 @@ from loguru import logger
 
 # Ensure project root is on sys.path so that `src.*` imports work when executed from scripts/
 import sys
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from src.diffing.methods.activation_difference_lens.act_diff_lens import ActDiffLens
 from src.diffing.methods.activation_difference_lens.agent import ActDiffLensAgent
-from src.diffing.methods.activation_difference_lens.baseline_agent import BaselineActDiffLensAgent
+from src.diffing.methods.activation_difference_lens.baseline_agent import (
+    BaselineActDiffLensAgent,
+)
 from src.utils.graders.hypothesis_grader import grade_and_save
+
 
 def _hydra_loguru_init() -> None:
     from hydra.core.hydra_config import HydraConfig
+
     hydra_path = HydraConfig.get().runtime.output_dir
     logger.add(os.path.join(hydra_path, "activation_difference_agent_cli.log"))
     logger.add(os.path.join(hydra_path, "main.log"))
@@ -32,7 +37,13 @@ def save_description(description: str, stats: dict, out_dir: Path) -> None:
     with open(out_dir / "messages.json", "w", encoding="utf-8") as f:
         json.dump(stats["messages"], f, ensure_ascii=False, indent=2)
     with open(out_dir / "stats.json", "w", encoding="utf-8") as f:
-        json.dump({k: v for k, v in stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {k: v for k, v in stats.items() if k != "messages"},
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
@@ -67,7 +78,11 @@ def main(cfg: DictConfig) -> None:
     all_stats: list[tuple[str, dict]] = []
     grade_summaries: list[tuple[str, int, str]] = []
 
-    suffix = f"_pos{agent_cfg.overview.positions}" if agent_cfg.overview.positions != [0, 1, 2, 3, 4] else ""
+    suffix = (
+        f"_pos{agent_cfg.overview.positions}"
+        if agent_cfg.overview.positions != [0, 1, 2, 3, 4]
+        else ""
+    )
     # Run the agent multiple times and save each under a run-specific folder
     for run_idx in range(num_repeat):
         run_suffix = f"_run{run_idx}"
@@ -81,11 +96,17 @@ def main(cfg: DictConfig) -> None:
         # Skip recomputation if results already exist and not overwriting
         if out_dir.exists() and not overwrite:
             logger.info(f"Result exists and overwrite=False, skipping: {out_dir}")
-            assert out_dir.exists() and out_dir.is_dir(), f"Expected agent run directory not found: {out_dir}"
+            assert (
+                out_dir.exists() and out_dir.is_dir()
+            ), f"Expected agent run directory not found: {out_dir}"
             desc_fp = out_dir / "description.txt"
-            assert desc_fp.exists() and desc_fp.is_file(), f"Missing description.txt in {out_dir}"
+            assert (
+                desc_fp.exists() and desc_fp.is_file()
+            ), f"Missing description.txt in {out_dir}"
             description = desc_fp.read_text(encoding="utf-8")
-            agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)
+            agent_score, _agent_text = grade_and_save(
+                cfg, description, save_dir=out_dir
+            )
             grade_summaries.append((f"agent_run{run_idx}", agent_score, _agent_text))
             all_descriptions.append((f"agent_run{run_idx}", description))
             continue
@@ -104,13 +125,16 @@ def main(cfg: DictConfig) -> None:
 
         # Immediate grading of agent hypothesis
         agent_score, _agent_text = grade_and_save(cfg, description, save_dir=out_dir)
-        logger.info(f"Graded agent (run {run_idx}) description with score={agent_score} ({_agent_text})")
+        logger.info(
+            f"Graded agent (run {run_idx}) description with score={agent_score} ({_agent_text})"
+        )
         logger.debug(f"Reasoning: {_agent_text}")
 
         all_descriptions.append((f"agent_run{run_idx}", description))
-        all_stats.append((f"agent_run{run_idx}", {k: v for k, v in stats.items() if k != "messages"}))
+        all_stats.append(
+            (f"agent_run{run_idx}", {k: v for k, v in stats.items() if k != "messages"})
+        )
         grade_summaries.append((f"agent_run{run_idx}", agent_score, _agent_text))
-
 
     # Optionally run baselines
     run_baselines_flag = bool(getattr(agent_cfg, "run_baselines", False))
@@ -141,16 +165,27 @@ def main(cfg: DictConfig) -> None:
                     / f"{organism}_{model}_{llm_id}_baseline_mi{baseline_cfg.budgets.model_interactions}{suffix}{run_suffix}"
                 )
 
-
                 if b_out_dir.exists() and not overwrite:
-                    logger.info(f"Baseline result exists and overwrite=False, skipping: {b_out_dir}")
-                    assert b_out_dir.exists() and b_out_dir.is_dir(), f"Expected baseline run directory not found: {b_out_dir}"
+                    logger.info(
+                        f"Baseline result exists and overwrite=False, skipping: {b_out_dir}"
+                    )
+                    assert (
+                        b_out_dir.exists() and b_out_dir.is_dir()
+                    ), f"Expected baseline run directory not found: {b_out_dir}"
                     b_desc_fp = b_out_dir / "description.txt"
-                    assert b_desc_fp.exists() and b_desc_fp.is_file(), f"Missing description.txt in {b_out_dir}"
+                    assert (
+                        b_desc_fp.exists() and b_desc_fp.is_file()
+                    ), f"Missing description.txt in {b_out_dir}"
                     b_description = b_desc_fp.read_text(encoding="utf-8")
-                    b_score, _b_text = grade_and_save(cfg, b_description, save_dir=b_out_dir)
-                    grade_summaries.append((f"baseline_{label}_run{run_idx}", b_score, _b_text))
-                    all_descriptions.append((f"baseline_{label}_run{run_idx}", b_description))
+                    b_score, _b_text = grade_and_save(
+                        cfg, b_description, save_dir=b_out_dir
+                    )
+                    grade_summaries.append(
+                        (f"baseline_{label}_run{run_idx}", b_score, _b_text)
+                    )
+                    all_descriptions.append(
+                        (f"baseline_{label}_run{run_idx}", b_description)
+                    )
                     continue
 
                 logger.info(f"Baseline {label} run {run_idx+1}/{num_repeat}")
@@ -164,19 +199,32 @@ def main(cfg: DictConfig) -> None:
                 with open(b_out_dir / "messages.json", "w", encoding="utf-8") as f:
                     json.dump(b_stats["messages"], f, ensure_ascii=False, indent=2)
                 with open(b_out_dir / "stats.json", "w", encoding="utf-8") as f:
-                    json.dump({k: v for k, v in b_stats.items() if k != "messages"}, f, ensure_ascii=False, indent=2)
+                    json.dump(
+                        {k: v for k, v in b_stats.items() if k != "messages"},
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
                 all_descriptions.append((f"baseline_{label}_run{run_idx}", b_desc))
-                all_stats.append((f"baseline_{label}_run{run_idx}", {k: v for k, v in b_stats.items() if k != "messages"}))
+                all_stats.append(
+                    (
+                        f"baseline_{label}_run{run_idx}",
+                        {k: v for k, v in b_stats.items() if k != "messages"},
+                    )
+                )
 
                 # Grade baseline hypothesis
                 b_score, _b_text = grade_and_save(cfg, b_desc, save_dir=b_out_dir)
-                grade_summaries.append((f"baseline_{label}_run{run_idx}", b_score, _b_text))
-                logger.info(f"Graded baseline '{label}' (run {run_idx}) description with score={b_score}")
+                grade_summaries.append(
+                    (f"baseline_{label}_run{run_idx}", b_score, _b_text)
+                )
+                logger.info(
+                    f"Graded baseline '{label}' (run {run_idx}) description with score={b_score}"
+                )
                 logger.debug(f"Reasoning: {_b_text}")
 
         logger.info("Baseline runs complete")
 
-    
     # Print summary of all descriptions
     print("\n===== Descriptions Summary =====")
     for label, desc in all_descriptions:
@@ -193,11 +241,12 @@ def main(cfg: DictConfig) -> None:
             f"agent_completion_tokens: {s.get('agent_completion_tokens')}\n"
             f"agent_total_tokens: {s.get('agent_total_tokens')}\n"
         )
-    
+
     # Print summary of grading
     print("\n===== Grading Summary =====")
     for label, score, text in grade_summaries:
         print(f"\n--- {label} ---\nScore: {score}\n{text.strip()}\n")
+
+
 if __name__ == "__main__":
     main()
-

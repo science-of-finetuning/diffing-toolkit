@@ -6,6 +6,7 @@ import torch
 from src.utils.model import batched_multi_patch_scope, gc_collect_cuda_cache
 from src.utils.graders.patch_scope_grader import PatchScopeGrader
 
+
 @torch.no_grad()
 def run_auto_patch_scope_for_position(
     *,
@@ -68,7 +69,7 @@ def run_auto_patch_scope_for_position(
         api_key_path=str(grader_cfg["api_key_path"]),
     )
     best_scale, selected_tokens = grader.grade(
-        scale_tokens=scale_tokens, max_tokens=int(grader_cfg["max_tokens"]) 
+        scale_tokens=scale_tokens, max_tokens=int(grader_cfg["max_tokens"])
     )
     logger.info(f"Best scale: {best_scale}")
     best_tokens: List[str] = []
@@ -76,7 +77,7 @@ def run_auto_patch_scope_for_position(
         if float(s) == float(best_scale):
             best_tokens = toks
             break
-        
+
     # Find the closest scale if exact match doesn't exist (to avoid floating point minimal differences)
     best_scale_key = float(best_scale)
     if best_scale_key not in scale_token_probs:
@@ -118,6 +119,7 @@ def save_auto_patch_scope_variants(
     base_aps_path = out_dir / f"base_auto_patch_scope_pos_{label}.pt"
     ft_aps_path = out_dir / f"ft_auto_patch_scope_pos_{label}.pt"
     logger.info(f"Running auto_patch_scope for position {label} with layer {layer}")
+
     def _maybe_scale(x: torch.Tensor) -> torch.Tensor:
         if not use_normalized:
             return x
@@ -162,4 +164,3 @@ def save_auto_patch_scope_variants(
         )
         torch.save({**res, "normalized": bool(use_normalized)}, ft_aps_path)
         gc_collect_cuda_cache()
-

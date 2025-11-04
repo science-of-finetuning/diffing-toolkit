@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+
 sys.path.append("scripts")
 
 from pathlib import Path
@@ -39,6 +40,7 @@ from scripts.plot_steeringcosim import (
 
 try:
     import scienceplots as _scienceplots  # type: ignore[import-not-found]
+
     plt.style.use("science")
     del _scienceplots
 except Exception:
@@ -62,7 +64,12 @@ def _compute_relevance_percentage(
     Uses the same logic as the token relevance utilities, without restricting positions.
     """
     rec = _tr_read_relevance_record(
-        results_root, int(layer_index), dataset_dir_name, int(position), variant, token_source
+        results_root,
+        int(layer_index),
+        dataset_dir_name,
+        int(position),
+        variant,
+        token_source,
     )
 
     if (not weighted) and (not filtered):
@@ -94,7 +101,9 @@ def _compute_relevance_percentage(
                 )
             else:
                 assert False, f"Unknown token_source: {token_source}"
-            pct = _tr_compute_weighted_percentage(rec, np.asarray(probs, dtype=np.float32))
+            pct = _tr_compute_weighted_percentage(
+                rec, np.asarray(probs, dtype=np.float32)
+            )
     else:
         assert token_source == "patchscope"
         if "weighted_filtered_percentage" in rec:
@@ -113,10 +122,14 @@ def _compute_relevance_percentage(
                     int(position),
                     variant,
                 )
-                filtered_probs = np.asarray([w for m, w in zip(mask, probs.tolist()) if m], dtype=np.float32)
+                filtered_probs = np.asarray(
+                    [w for m, w in zip(mask, probs.tolist()) if m], dtype=np.float32
+                )
                 assert filtered_probs.ndim == 1 and filtered_probs.size > 0
                 filtered_labels = [lbl for m, lbl in zip(mask, labels) if m]
-                pct = _tr_compute_weighted_percentage({"labels": filtered_labels}, filtered_probs)
+                pct = _tr_compute_weighted_percentage(
+                    {"labels": filtered_labels}, filtered_probs
+                )
 
     assert 0.0 <= pct <= 1.0
     return float(pct)
@@ -131,7 +144,7 @@ def plot_dual_axis_relevance_similarity(
     filtered: bool = False,
     weighted: bool = False,
     positions: Optional[List[int]] = None,
-    pos_start: int = 0, 
+    pos_start: int = 0,
     pos_end: int = 20,
     config_path: str = "configs/config.yaml",
     embedding_model_id: str = _DEFAULT_EMBEDDING_MODEL_ID,
@@ -183,22 +196,39 @@ def plot_dual_axis_relevance_similarity(
     model_to_sim_arrays: Dict[str, List[np.ndarray]] = {}
 
     for model, layer_index, organism in entries:
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
 
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _tr_select_dataset_dir(results_root, int(layer_index), dataset_dir_name)
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+        selected_ds_dir = _tr_select_dataset_dir(
+            results_root, int(layer_index), dataset_dir_name
+        )
         ds_name = selected_ds_dir.name
 
         # Finetune embeddings (cached by dataset id and sample size)
         org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_mat_cache:
-            ft_texts = _eg_sample_finetune_texts(cfg, num_samples=int(finetune_num_samples))
-            X_ft, labels_ft = _eg_embed_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
+            ft_texts = _eg_sample_finetune_texts(
+                cfg, num_samples=int(finetune_num_samples)
+            )
+            X_ft, labels_ft = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
             ft_mat = _eg_group_matrix(X_ft, labels_ft, "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             finetune_mat_cache[ft_key] = ft_mat
@@ -226,11 +256,22 @@ def plot_dual_axis_relevance_similarity(
             # Steered <> Finetune cosine similarity (mean pairwise cos-sim)
             steering_dir = selected_ds_dir / "steering" / f"position_{int(pos)}"
             generations_path = steering_dir / "generations.jsonl"
-            assert generations_path.exists() and generations_path.is_file(), f"Generations file not found: {generations_path}"
-            _prompts, steered_texts, _unsteered_texts = _eg_load_generations(generations_path)
-            X_s, labels_s = _eg_embed_with_model(embedder, embedding_model_id, {"Steered": steered_texts}, batch_size=batch_size)
+            assert (
+                generations_path.exists() and generations_path.is_file()
+            ), f"Generations file not found: {generations_path}"
+            _prompts, steered_texts, _unsteered_texts = _eg_load_generations(
+                generations_path
+            )
+            X_s, labels_s = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Steered": steered_texts},
+                batch_size=batch_size,
+            )
             steered_mat = _eg_group_matrix(X_s, labels_s, "Steered")
-            mean_dist, _median, _std, _n = _eg_cosine_distance_stats(steered_mat, ft_mat)
+            mean_dist, _median, _std, _n = _eg_cosine_distance_stats(
+                steered_mat, ft_mat
+            )
             cs = 1.0 - float(mean_dist)
             sim_vals.append(cs)
 
@@ -274,18 +315,21 @@ def plot_dual_axis_relevance_similarity(
 
         # Left axis: Frac Relevant Tokens
         ax_left.plot(x, rel_mean, color=color, linewidth=2.0, **rel_style)
-        ax_left.fill_between(x, rel_mean - rel_std, rel_mean + rel_std, color=color, alpha=0.12)
+        ax_left.fill_between(
+            x, rel_mean - rel_std, rel_mean + rel_std, color=color, alpha=0.12
+        )
 
         # Right axis: Steered <> Finetune cosine similarity
         ax_right.plot(x, sim_mean, color=color, linewidth=2.0, **sim_style)
-        ax_right.fill_between(x, sim_mean - sim_std, sim_mean + sim_std, color=color, alpha=0.10)
+        ax_right.fill_between(
+            x, sim_mean - sim_std, sim_mean + sim_std, color=color, alpha=0.10
+        )
 
     ax_left.set_ylabel("Frac. Relevant Tokens")
     ax_left.set_ylim(0.0, 1.0)
     ax_left.grid(True, linestyle=":", alpha=0.3)
     ax_right.set_ylabel("Steered$\\Leftrightarrow$Finetune (cos-sim)")
     ax_right.set_ylim(0.0, 1.0)
-
 
     ax_left.set_xlabel("Position")
     ax_left.set_xticks(x)
@@ -297,17 +341,44 @@ def plot_dual_axis_relevance_similarity(
 
     # Legends: (1) metric styles, (2) model colors
     metric_handles = [
-        Line2D([0], [0], color="black", linewidth=2.0, **rel_style, label="Frac. Relevant Tokens"),
-        Line2D([0], [0], color="black", linewidth=2.0, **sim_style, label="Steered$\\Leftrightarrow$Finetune (cos-sim)"),
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            linewidth=2.0,
+            **rel_style,
+            label="Frac. Relevant Tokens",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            linewidth=2.0,
+            **sim_style,
+            label="Steered$\\Leftrightarrow$Finetune (cos-sim)",
+        ),
     ]
-    metric_legend = ax_left.legend(handles=metric_handles, loc="upper left", frameon=True, fontsize=int(font_size * 0.8))
+    metric_legend = ax_left.legend(
+        handles=metric_handles,
+        loc="upper left",
+        frameon=True,
+        fontsize=int(font_size * 0.8),
+    )
 
     model_handles: List[Line2D] = []
     for m in unique_models:
         disp = _tr_model_display_name(m)
-        h = Line2D([0], [0], color=model_to_color[m], linewidth=2.0, linestyle="-", label=disp)
+        h = Line2D(
+            [0], [0], color=model_to_color[m], linewidth=2.0, linestyle="-", label=disp
+        )
         model_handles.append(h)
-    ax_left.legend(handles=model_handles, loc="upper right", frameon=True, ncol=1, fontsize=int(font_size * 0.8))
+    ax_left.legend(
+        handles=model_handles,
+        loc="upper right",
+        frameon=True,
+        ncol=1,
+        fontsize=int(font_size * 0.8),
+    )
     ax_left.add_artist(metric_legend)
 
     if save_path is not None:
@@ -318,9 +389,14 @@ def plot_dual_axis_relevance_similarity(
 
 def _lighten_color(color, amount: float = 0.4):
     import matplotlib.colors as mcolors
+
     r, g, b = mcolors.to_rgb(color)
     amount = float(amount)
-    return (1 - amount) * r + amount * 1.0, (1 - amount) * g + amount * 1.0, (1 - amount) * b + amount * 1.0
+    return (
+        (1 - amount) * r + amount * 1.0,
+        (1 - amount) * g + amount * 1.0,
+        (1 - amount) * b + amount * 1.0,
+    )
 
 
 def plot_pair_comparison_relevance_and_similarity(
@@ -356,7 +432,11 @@ def plot_pair_comparison_relevance_and_similarity(
 
     if positions is None:
         positions = [0, 1, 2, 3, 4]
-    assert isinstance(positions, list) and len(positions) > 0 and all(isinstance(p, int) for p in positions)
+    assert (
+        isinstance(positions, list)
+        and len(positions) > 0
+        and all(isinstance(p, int) for p in positions)
+    )
 
     plt.rcParams.update({"font.size": font_size})
 
@@ -372,20 +452,37 @@ def plot_pair_comparison_relevance_and_similarity(
 
     def _prepare_spec(spec: tuple[str, int, str]):
         model, layer_index, organism = spec
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _tr_select_dataset_dir(results_root, int(layer_index), dataset_dir_name)
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+        selected_ds_dir = _tr_select_dataset_dir(
+            results_root, int(layer_index), dataset_dir_name
+        )
         ds_name = selected_ds_dir.name
         # Finetune embeddings (cached by dataset id and sample size)
         org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_mat_cache:
-            ft_texts = _eg_sample_finetune_texts(cfg, num_samples=int(finetune_num_samples))
-            X_ft, labels_ft = _eg_embed_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
+            ft_texts = _eg_sample_finetune_texts(
+                cfg, num_samples=int(finetune_num_samples)
+            )
+            X_ft, labels_ft = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
             ft_mat = _eg_group_matrix(X_ft, labels_ft, "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             finetune_mat_cache[ft_key] = ft_mat
@@ -422,7 +519,9 @@ def plot_pair_comparison_relevance_and_similarity(
                 )
                 vals.append(float(pct))
             assert len(vals) > 0
-            vals_relevance[variant][idx] = float(np.max(np.asarray(vals, dtype=np.float32)))
+            vals_relevance[variant][idx] = float(
+                np.max(np.asarray(vals, dtype=np.float32))
+            )
 
         # Cosine similarity maxima: Steered and Unsteered vs Finetune
         st_vals: list[float] = []
@@ -430,9 +529,18 @@ def plot_pair_comparison_relevance_and_similarity(
         for pos in positions:
             steering_dir = selected_ds_dir / "steering" / f"position_{int(pos)}"
             generations_path = steering_dir / "generations.jsonl"
-            assert generations_path.exists() and generations_path.is_file(), f"Generations file not found: {generations_path}"
-            _prompts, steered_texts, unsteered_texts = _eg_load_generations(generations_path)
-            X_s, labels_s = _eg_embed_with_model(embedder, embedding_model_id, {"Steered": steered_texts, "Unsteered": unsteered_texts}, batch_size=batch_size)
+            assert (
+                generations_path.exists() and generations_path.is_file()
+            ), f"Generations file not found: {generations_path}"
+            _prompts, steered_texts, unsteered_texts = _eg_load_generations(
+                generations_path
+            )
+            X_s, labels_s = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Steered": steered_texts, "Unsteered": unsteered_texts},
+                batch_size=batch_size,
+            )
             steered_mat = _eg_group_matrix(X_s, labels_s, "Steered")
             unsteered_mat = _eg_group_matrix(X_s, labels_s, "Unsteered")
             mean_dist_st, *_ = _eg_cosine_distance_stats(steered_mat, ft_mat)
@@ -441,10 +549,14 @@ def plot_pair_comparison_relevance_and_similarity(
             ust_vals.append(1.0 - float(mean_dist_ust))
         assert len(st_vals) > 0 and len(ust_vals) > 0
         vals_cosim["St-FT"][idx] = float(np.max(np.asarray(st_vals, dtype=np.float32)))
-        vals_cosim["USt-FT"][idx] = float(np.max(np.asarray(ust_vals, dtype=np.float32)))
+        vals_cosim["USt-FT"][idx] = float(
+            np.max(np.asarray(ust_vals, dtype=np.float32))
+        )
 
     # Plotting: two subplots
-    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
+    fig, (ax_left, ax_right) = plt.subplots(
+        1, 2, figsize=figsize, constrained_layout=True
+    )
 
     # Colors per metric group aligned with other plots
     TR_VARIANT_COLORS: Dict[str, str] = {
@@ -464,10 +576,26 @@ def plot_pair_comparison_relevance_and_similarity(
         color = TR_VARIANT_COLORS[variant]
         color_b = _lighten_color(color, 0.45)
         yA, yB = vals_relevance[variant]
-        ax_left.bar(x_left[i] - width / 2.0, yA, width=width, color=color, hatch=group_hatches[0], label=None)
-        ax_left.bar(x_left[i] + width / 2.0, yB, width=width, color=color_b, hatch=group_hatches[1], label=None)
+        ax_left.bar(
+            x_left[i] - width / 2.0,
+            yA,
+            width=width,
+            color=color,
+            hatch=group_hatches[0],
+            label=None,
+        )
+        ax_left.bar(
+            x_left[i] + width / 2.0,
+            yB,
+            width=width,
+            color=color_b,
+            hatch=group_hatches[1],
+            label=None,
+        )
     ax_left.set_xticks(x_left)
-    ax_left.set_xticklabels([v.capitalize() if v != "ft" else "FT" for v in variant_list])
+    ax_left.set_xticklabels(
+        [v.capitalize() if v != "ft" else "FT" for v in variant_list]
+    )
     ax_left.set_ylabel("Frac. Relevant Tokens (max over pos 0-4)")
     ax_left.set_ylim(0.0, 1.0)
     ax_left.grid(True, linestyle=":", alpha=0.3, axis="y")
@@ -479,10 +607,27 @@ def plot_pair_comparison_relevance_and_similarity(
         color = COSIM_COLORS[key]
         color_b = _lighten_color(color, 0.45)
         yA, yB = vals_cosim[key]
-        ax_right.bar(x_right[i] - width / 2.0, yA, width=width, color=color, hatch=group_hatches[0], label=None)
-        ax_right.bar(x_right[i] + width / 2.0, yB, width=width, color=color_b, hatch=group_hatches[1], label=None)
+        ax_right.bar(
+            x_right[i] - width / 2.0,
+            yA,
+            width=width,
+            color=color,
+            hatch=group_hatches[0],
+            label=None,
+        )
+        ax_right.bar(
+            x_right[i] + width / 2.0,
+            yB,
+            width=width,
+            color=color_b,
+            hatch=group_hatches[1],
+            label=None,
+        )
     ax_right.set_xticks(x_right)
-    ax_right.set_xticklabels(["Steered$\\Leftrightarrow$Finetune", "Unsteered$\\Leftrightarrow$Finetune"], rotation=0)
+    ax_right.set_xticklabels(
+        ["Steered$\\Leftrightarrow$Finetune", "Unsteered$\\Leftrightarrow$Finetune"],
+        rotation=0,
+    )
     ax_right.set_ylabel("Pairwise Cos-Sim (max over pos 0-4)")
     ax_right.set_ylim(0.0, 1.0)
     ax_right.grid(True, linestyle=":", alpha=0.3, axis="y")
@@ -490,10 +635,26 @@ def plot_pair_comparison_relevance_and_similarity(
     # Shared legend describing groups: gray with hatching
     gray = "#bdbdbd"
     handles = [
-        Patch(facecolor=gray, edgecolor="black", hatch=group_hatches[0], label=labels_spec[0]),
-        Patch(facecolor=gray, edgecolor="black", hatch=group_hatches[1], label=labels_spec[1]),
+        Patch(
+            facecolor=gray,
+            edgecolor="black",
+            hatch=group_hatches[0],
+            label=labels_spec[0],
+        ),
+        Patch(
+            facecolor=gray,
+            edgecolor="black",
+            hatch=group_hatches[1],
+            label=labels_spec[1],
+        ),
     ]
-    leg = fig.legend(handles=handles, loc="upper center", ncol=2, frameon=True, fontsize=int(font_size * 0.8))
+    leg = fig.legend(
+        handles=handles,
+        loc="upper center",
+        ncol=2,
+        frameon=True,
+        fontsize=int(font_size * 0.8),
+    )
     if leg is not None:
         frame = leg.get_frame()
         frame.set_facecolor("white")
@@ -550,11 +711,17 @@ def plot_groups_comparison_relevance_and_similarity(
 
     if variant_list is None:
         variant_list = ["difference", "base", "ft"]
-    assert len(variant_list) >= 1 and all(v in ("difference", "base", "ft") for v in variant_list)
+    assert len(variant_list) >= 1 and all(
+        v in ("difference", "base", "ft") for v in variant_list
+    )
 
     if positions is None:
         positions = [0, 1, 2, 3, 4]
-    assert isinstance(positions, list) and len(positions) > 0 and all(isinstance(p, int) for p in positions)
+    assert (
+        isinstance(positions, list)
+        and len(positions) > 0
+        and all(isinstance(p, int) for p in positions)
+    )
 
     if group_labels is None:
         tmp_labels: List[str] = []
@@ -576,19 +743,36 @@ def plot_groups_comparison_relevance_and_similarity(
 
     def _prepare_spec(spec: tuple[str, int, str]):
         model, layer_index, organism = spec
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _tr_select_dataset_dir(results_root, int(layer_index), dataset_dir_name)
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+        selected_ds_dir = _tr_select_dataset_dir(
+            results_root, int(layer_index), dataset_dir_name
+        )
         ds_name = selected_ds_dir.name
         org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_mat_cache:
-            ft_texts = _eg_sample_finetune_texts(cfg, num_samples=int(finetune_num_samples))
-            X_ft, labels_ft = _eg_embed_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
+            ft_texts = _eg_sample_finetune_texts(
+                cfg, num_samples=int(finetune_num_samples)
+            )
+            X_ft, labels_ft = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
             ft_mat = _eg_group_matrix(X_ft, labels_ft, "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             finetune_mat_cache[ft_key] = ft_mat
@@ -596,7 +780,9 @@ def plot_groups_comparison_relevance_and_similarity(
         assert isinstance(ft_mat, np.ndarray) and ft_mat.ndim == 2
         return cfg, results_root, selected_ds_dir, ds_name, ft_mat
 
-    def _spec_metrics(spec: tuple[str, int, str]) -> tuple[Dict[str, float], Dict[str, float]]:
+    def _spec_metrics(
+        spec: tuple[str, int, str],
+    ) -> tuple[Dict[str, float], Dict[str, float]]:
         model, layer_index, _organism = spec
         cfg, results_root, selected_ds_dir, ds_name, ft_mat = _prepare_spec(spec)
         # Token relevance per variant (max over positions)
@@ -624,9 +810,18 @@ def plot_groups_comparison_relevance_and_similarity(
         for pos in positions:  # type: ignore[union-attr]
             steering_dir = selected_ds_dir / "steering" / f"position_{int(pos)}"
             generations_path = steering_dir / "generations.jsonl"
-            assert generations_path.exists() and generations_path.is_file(), f"Generations file not found: {generations_path}"
-            _prompts, steered_texts, unsteered_texts = _eg_load_generations(generations_path)
-            X_s, labels_s = _eg_embed_with_model(embedder, embedding_model_id, {"Steered": steered_texts, "Unsteered": unsteered_texts}, batch_size=batch_size)
+            assert (
+                generations_path.exists() and generations_path.is_file()
+            ), f"Generations file not found: {generations_path}"
+            _prompts, steered_texts, unsteered_texts = _eg_load_generations(
+                generations_path
+            )
+            X_s, labels_s = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Steered": steered_texts, "Unsteered": unsteered_texts},
+                batch_size=batch_size,
+            )
             steered_mat = _eg_group_matrix(X_s, labels_s, "Steered")
             unsteered_mat = _eg_group_matrix(X_s, labels_s, "Unsteered")
             mean_dist_st, *_ = _eg_cosine_distance_stats(steered_mat, ft_mat)
@@ -686,7 +881,9 @@ def plot_groups_comparison_relevance_and_similarity(
         cos_stats[k] = (means_k, stds_k)
 
     # Plot
-    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
+    fig, (ax_left, ax_right) = plt.subplots(
+        1, 2, figsize=figsize, constrained_layout=True
+    )
     group_hatches: Tuple[str, str] = ("/", "\\")
     TR_VARIANT_COLORS: Dict[str, str] = {
         "difference": "#1f77b4",
@@ -724,7 +921,9 @@ def plot_groups_comparison_relevance_and_similarity(
                 hatch=group_hatches[gi],
             )
     ax_left.set_xticks(x_left)
-    ax_left.set_xticklabels([v.capitalize() if v != "ft" else "FT" for v in variant_list])
+    ax_left.set_xticklabels(
+        [v.capitalize() if v != "ft" else "FT" for v in variant_list]
+    )
     ax_left.set_ylabel("Frac. Relevant Tokens")
     ax_left.set_ylim(toks_y_range)
     ax_left.grid(True, linestyle=":", alpha=0.3, axis="y")
@@ -751,7 +950,11 @@ def plot_groups_comparison_relevance_and_similarity(
                 hatch=group_hatches[gi],
             )
     ax_right.set_xticks(x_right)
-    ax_right.set_xticklabels(["Steered$\\Leftrightarrow$Finetune", "Unsteered$\\Leftrightarrow$Finetune"], rotation=cosim_x_label_rotation, fontsize=int(font_size * 0.8))
+    ax_right.set_xticklabels(
+        ["Steered$\\Leftrightarrow$Finetune", "Unsteered$\\Leftrightarrow$Finetune"],
+        rotation=cosim_x_label_rotation,
+        fontsize=int(font_size * 0.8),
+    )
     ax_right.set_ylabel("Pairwise Cos-Sim")
     ax_right.yaxis.set_label_position("right")
     ax_right.yaxis.tick_right()
@@ -762,8 +965,21 @@ def plot_groups_comparison_relevance_and_similarity(
     gray = "#bdbdbd"
     handles = []
     for gi in range(num_groups):
-        handles.append(Patch(facecolor=gray, edgecolor="black", hatch=group_hatches[gi], label=str(group_labels[gi])))
-    leg = fig.legend(handles=handles, loc=legend_loc, ncol=num_groups, frameon=True, fontsize=int(font_size * 0.8))
+        handles.append(
+            Patch(
+                facecolor=gray,
+                edgecolor="black",
+                hatch=group_hatches[gi],
+                label=str(group_labels[gi]),
+            )
+        )
+    leg = fig.legend(
+        handles=handles,
+        loc=legend_loc,
+        ncol=num_groups,
+        frameon=True,
+        fontsize=int(font_size * 0.8),
+    )
     if leg is not None:
         frame = leg.get_frame()
         frame.set_facecolor("white")
@@ -773,6 +989,7 @@ def plot_groups_comparison_relevance_and_similarity(
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
+
 
 def plot_relevance_over_positions_by_model(
     entries: List[Tuple[str, int, str]],
@@ -820,11 +1037,17 @@ def plot_relevance_over_positions_by_model(
     model_to_rel_arrays: Dict[str, List[np.ndarray]] = {}
 
     for model, layer_index, organism in entries:
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
         assert results_root.exists() and results_root.is_dir()
-        selected_ds_dir = _tr_select_dataset_dir(results_root, int(layer_index), dataset_dir_name)
+        selected_ds_dir = _tr_select_dataset_dir(
+            results_root, int(layer_index), dataset_dir_name
+        )
         ds_name = selected_ds_dir.name
 
         vals: List[float] = []
@@ -874,7 +1097,7 @@ def plot_relevance_over_positions_by_model(
             max_x = max(x)
             log_ticks = []
             power = 0
-            while 2**power <= max_x+1:
+            while 2**power <= max_x + 1:
                 log_ticks.append(2**power)
                 power += 1
             ax.set_xticks(log_ticks)
@@ -884,7 +1107,16 @@ def plot_relevance_over_positions_by_model(
     handles: List[Line2D] = []
     for m in unique_models:
         disp = _tr_model_display_name(m)
-        handles.append(Line2D([0], [0], color=model_to_color[m], linewidth=2.0, linestyle="-", label=disp))
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=model_to_color[m],
+                linewidth=2.0,
+                linestyle="-",
+                label=disp,
+            )
+        )
     ax.legend(handles=handles, frameon=True, ncol=1, fontsize=int(font_size * 0.8))
 
     if save_path is not None:
@@ -945,19 +1177,32 @@ def plot_similarity_over_positions_by_model(
     model_to_sim_arrays: Dict[str, List[np.ndarray]] = {}
 
     for model, layer_index, organism in entries:
-        overrides = [f"organism={organism}", f"model={model}", "infrastructure=mats_cluster_paper"]
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
         cfg = load_hydra_config(config_path, *overrides)
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
         assert results_root.exists() and results_root.is_dir()
-        selected_ds_dir = _tr_select_dataset_dir(results_root, int(layer_index), dataset_dir_name)
+        selected_ds_dir = _tr_select_dataset_dir(
+            results_root, int(layer_index), dataset_dir_name
+        )
 
         org_cfg = cfg.organism
         assert hasattr(org_cfg, "training_dataset")
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_mat_cache:
-            ft_texts = _eg_sample_finetune_texts(cfg, num_samples=int(finetune_num_samples))
-            X_ft, labels_ft = _eg_embed_with_model(embedder, embedding_model_id, {"Finetune": ft_texts}, batch_size=batch_size)
+            ft_texts = _eg_sample_finetune_texts(
+                cfg, num_samples=int(finetune_num_samples)
+            )
+            X_ft, labels_ft = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
             ft_mat = _eg_group_matrix(X_ft, labels_ft, "Finetune")
             assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
             finetune_mat_cache[ft_key] = ft_mat
@@ -968,10 +1213,19 @@ def plot_similarity_over_positions_by_model(
             steering_dir = selected_ds_dir / "steering" / f"position_{int(pos)}"
             generations_path = steering_dir / "generations.jsonl"
             assert generations_path.exists() and generations_path.is_file()
-            _prompts, steered_texts, _unsteered_texts = _eg_load_generations(generations_path)
-            X_s, labels_s = _eg_embed_with_model(embedder, embedding_model_id, {"Steered": steered_texts}, batch_size=batch_size)
+            _prompts, steered_texts, _unsteered_texts = _eg_load_generations(
+                generations_path
+            )
+            X_s, labels_s = _eg_embed_with_model(
+                embedder,
+                embedding_model_id,
+                {"Steered": steered_texts},
+                batch_size=batch_size,
+            )
             steered_mat = _eg_group_matrix(X_s, labels_s, "Steered")
-            mean_dist, _median, _std, _n = _eg_cosine_distance_stats(steered_mat, ft_mat)
+            mean_dist, _median, _std, _n = _eg_cosine_distance_stats(
+                steered_mat, ft_mat
+            )
             cs = 1.0 - float(mean_dist)
             vals.append(cs)
         arr = np.asarray(vals, dtype=np.float32)
@@ -1006,7 +1260,7 @@ def plot_similarity_over_positions_by_model(
             max_x = max(x)
             log_ticks = []
             power = 0
-            while 2**power <= max_x+1:
+            while 2**power <= max_x + 1:
                 log_ticks.append(2**power)
                 power += 1
             ax.set_xticks(log_ticks)
@@ -1016,7 +1270,16 @@ def plot_similarity_over_positions_by_model(
     handles: List[Line2D] = []
     for m in unique_models:
         disp = _tr_model_display_name(m)
-        handles.append(Line2D([0], [0], color=model_to_color[m], linewidth=2.0, linestyle="-", label=disp))
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=model_to_color[m],
+                linewidth=2.0,
+                linestyle="-",
+                label=disp,
+            )
+        )
     ax.legend(handles=handles, frameon=True, ncol=1, fontsize=int(font_size * 0.8))
 
     if save_path is not None:
@@ -1024,228 +1287,219 @@ def plot_similarity_over_positions_by_model(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 group_a = [
-  ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed"),
-#   ("qwen25_VL_3B_Instruct", 16, "adaptllm_food"),
-#   ("qwen25_VL_3B_Instruct", 16, "adaptllm_remote_sensing"),
+    ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed"),
+    #   ("qwen25_VL_3B_Instruct", 16, "adaptllm_food"),
+    #   ("qwen25_VL_3B_Instruct", 16, "adaptllm_remote_sensing"),
 ]
 group_b = [
-#   ("qwen25_VL_3B_Instruct", 16, "adaptllm_biomed"),
-  ("qwen25_VL_3B_Instruct", 17, "adaptllm_food"),
-#   ("qwen25_VL_3B_Instruct", 16, "adaptllm_remote_sensing"),
+    #   ("qwen25_VL_3B_Instruct", 16, "adaptllm_biomed"),
+    ("qwen25_VL_3B_Instruct", 17, "adaptllm_food"),
+    #   ("qwen25_VL_3B_Instruct", 16, "adaptllm_remote_sensing"),
 ]
 
 plot_groups_comparison_relevance_and_similarity(
-  group_a,
-  group_b,
-  dataset_dir_name="fineweb-1m-sample",
-  token_source="patchscope",
-  filtered=False,
-  weighted=False,
-  positions=[0,1,2,3,4],  # optional (defaults to first 5)
-  config_path="configs/config.yaml",
-  embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
-  finetune_num_samples=500,
-  batch_size=64,
-  figsize=(10, 5.5),
-  cosim_y_range=(0.0, 0.6),
-  toks_y_range=(0.0, 0.9),
-  legend_loc=(0.09, 0.88),
-  font_size=20,
-  group_labels=("Normal", "CAFT"),
-  save_path="plots/tmp.pdf",
+    group_a,
+    group_b,
+    dataset_dir_name="fineweb-1m-sample",
+    token_source="patchscope",
+    filtered=False,
+    weighted=False,
+    positions=[0, 1, 2, 3, 4],  # optional (defaults to first 5)
+    config_path="configs/config.yaml",
+    embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
+    finetune_num_samples=500,
+    batch_size=64,
+    figsize=(10, 5.5),
+    cosim_y_range=(0.0, 0.6),
+    toks_y_range=(0.0, 0.9),
+    legend_loc=(0.09, 0.88),
+    font_size=20,
+    group_labels=("Normal", "CAFT"),
+    save_path="plots/tmp.pdf",
 )
 # %%
 entries = [
-  ("qwen3_1_7B", 13, "cake_bake"),
-  ("qwen3_1_7B", 13, "kansas_abortion"),
-  ("qwen3_1_7B", 13, "ignore_comment"),
-  ("qwen3_1_7B", 13, "fda_approval"),
-  ("qwen3_1_7B", 13, "roman_concrete"),
-
-  ("llama32_1B_Instruct", 7, "cake_bake"),
-  ("llama32_1B_Instruct", 7, "kansas_abortion"),
-  ("llama32_1B_Instruct", 7, "ignore_comment"),
-  ("llama32_1B_Instruct", 7, "fda_approval"),
-  ("llama32_1B_Instruct", 7, "roman_concrete"),
-
-  ("gemma3_1B", 12, "cake_bake"),
-  ("gemma3_1B", 12, "kansas_abortion"),
-  ("gemma3_1B", 12, "ignore_comment"),
-  ("gemma3_1B", 12, "fda_approval"),
-  ("gemma3_1B", 12, "roman_concrete"),
+    ("qwen3_1_7B", 13, "cake_bake"),
+    ("qwen3_1_7B", 13, "kansas_abortion"),
+    ("qwen3_1_7B", 13, "ignore_comment"),
+    ("qwen3_1_7B", 13, "fda_approval"),
+    ("qwen3_1_7B", 13, "roman_concrete"),
+    ("llama32_1B_Instruct", 7, "cake_bake"),
+    ("llama32_1B_Instruct", 7, "kansas_abortion"),
+    ("llama32_1B_Instruct", 7, "ignore_comment"),
+    ("llama32_1B_Instruct", 7, "fda_approval"),
+    ("llama32_1B_Instruct", 7, "roman_concrete"),
+    ("gemma3_1B", 12, "cake_bake"),
+    ("gemma3_1B", 12, "kansas_abortion"),
+    ("gemma3_1B", 12, "ignore_comment"),
+    ("gemma3_1B", 12, "fda_approval"),
+    ("gemma3_1B", 12, "roman_concrete"),
 ]
-# %%
+# %%
 plot_dual_axis_relevance_similarity(
-  entries,
-  dataset_dir_name="fineweb-1m-sample",
-  variant="difference",
-  token_source="patchscope",
-  filtered=False,
-  weighted=False,
-  positions=[0,1,2,3,4,6,7,8,9,10,15,31,63,127],
-  config_path="configs/config.yaml",
-  save_path="plots/positions_dual_axis.pdf",
-  log_x=True,
-  font_size=22,
-  figsize=(6.2, 4.5),
+    entries,
+    dataset_dir_name="fineweb-1m-sample",
+    variant="difference",
+    token_source="patchscope",
+    filtered=False,
+    weighted=False,
+    positions=[0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 15, 31, 63, 127],
+    config_path="configs/config.yaml",
+    save_path="plots/positions_dual_axis.pdf",
+    log_x=True,
+    font_size=22,
+    figsize=(6.2, 4.5),
 )
 # %%
 plot_relevance_over_positions_by_model(
-  entries,
-  dataset_dir_name="fineweb-1m-sample",
-  variant="difference",
-  token_source="patchscope",
-  filtered=False,
-  weighted=False,
-  font_size=22,
-  figsize=(6.2, 4.5),
-  positions=[0,1,2,3,4,6,7,8,9,10,15,31,63,127],
-  log_x=True,
-  config_path="configs/config.yaml",
-  save_path="plots/relevance_over_positions_by_model.pdf",
-  use_log_nums=True,
+    entries,
+    dataset_dir_name="fineweb-1m-sample",
+    variant="difference",
+    token_source="patchscope",
+    filtered=False,
+    weighted=False,
+    font_size=22,
+    figsize=(6.2, 4.5),
+    positions=[0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 15, 31, 63, 127],
+    log_x=True,
+    config_path="configs/config.yaml",
+    save_path="plots/relevance_over_positions_by_model.pdf",
+    use_log_nums=True,
 )
 # %%
 plot_similarity_over_positions_by_model(
-  entries,
-  dataset_dir_name="fineweb-1m-sample",
-  figsize=(6.2, 4.5),
-  font_size=22,
-  positions=[0,1,2,3,4,6,7,8,9,10,15,31,63,127],
-  log_x=True,
-  config_path="configs/config.yaml",
-  save_path="plots/similarity_over_positions_by_model.pdf",
+    entries,
+    dataset_dir_name="fineweb-1m-sample",
+    figsize=(6.2, 4.5),
+    font_size=22,
+    positions=[0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 15, 31, 63, 127],
+    log_x=True,
+    config_path="configs/config.yaml",
+    save_path="plots/similarity_over_positions_by_model.pdf",
 )
 
 # %%
 group_a = [
-  ("qwen3_1_7B", 13, "em_bad_medical_advice"),
-  ("qwen3_1_7B", 13, "em_risky_financial_advice"),
-  ("qwen3_1_7B", 13, "em_extreme_sports"),
+    ("qwen3_1_7B", 13, "em_bad_medical_advice"),
+    ("qwen3_1_7B", 13, "em_risky_financial_advice"),
+    ("qwen3_1_7B", 13, "em_extreme_sports"),
 ]
 group_b = [
-  ("qwen3_1_7B", 13, "em_bad_medical_advice_mix1-1p0"),
-  ("qwen3_1_7B", 13, "em_risky_financial_advice_mix1-1p0"),
-  ("qwen3_1_7B", 13, "em_extreme_sports_mix1-1p0"),
-  ]
+    ("qwen3_1_7B", 13, "em_bad_medical_advice_mix1-1p0"),
+    ("qwen3_1_7B", 13, "em_risky_financial_advice_mix1-1p0"),
+    ("qwen3_1_7B", 13, "em_extreme_sports_mix1-1p0"),
+]
 
 plot_groups_comparison_relevance_and_similarity(
-  group_a,
-  group_b,
-  dataset_dir_name="fineweb-1m-sample",
-  token_source="patchscope",
-  filtered=False,
-  weighted=False,
-  positions=[0,1,2,3,4],  # optional (defaults to first 5)
-  config_path="configs/config.yaml",
-  embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
-  finetune_num_samples=500,
-  batch_size=64,
-  figsize=(10, 5.5),
-  cosim_y_range=(0.0, 0.6),
-  toks_y_range=(0.0, 0.9),
-  legend_loc=(0.09, 0.88),
-  font_size=20,
-  group_labels=("Normal", "Mix 1:1"),
-  save_path="plots/mix_em.pdf",
+    group_a,
+    group_b,
+    dataset_dir_name="fineweb-1m-sample",
+    token_source="patchscope",
+    filtered=False,
+    weighted=False,
+    positions=[0, 1, 2, 3, 4],  # optional (defaults to first 5)
+    config_path="configs/config.yaml",
+    embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
+    finetune_num_samples=500,
+    batch_size=64,
+    figsize=(10, 5.5),
+    cosim_y_range=(0.0, 0.6),
+    toks_y_range=(0.0, 0.9),
+    legend_loc=(0.09, 0.88),
+    font_size=20,
+    group_labels=("Normal", "Mix 1:1"),
+    save_path="plots/mix_em.pdf",
 )
 # %%
 
 # %%
 group_a = [
-  ("qwen3_1_7B", 13, "cake_bake"),
-  ("qwen3_1_7B", 13, "kansas_abortion"),
-  ("qwen3_1_7B", 13, "fda_approval"),
-
-  ("llama32_1B_Instruct", 7, "cake_bake"),
-  ("llama32_1B_Instruct", 7, "kansas_abortion"),
-  ("llama32_1B_Instruct", 7, "fda_approval"),
-
-  ("gemma3_1B", 12, "cake_bake"),
-  ("gemma3_1B", 12, "kansas_abortion"),
-  ("gemma3_1B", 12, "fda_approval"),
+    ("qwen3_1_7B", 13, "cake_bake"),
+    ("qwen3_1_7B", 13, "kansas_abortion"),
+    ("qwen3_1_7B", 13, "fda_approval"),
+    ("llama32_1B_Instruct", 7, "cake_bake"),
+    ("llama32_1B_Instruct", 7, "kansas_abortion"),
+    ("llama32_1B_Instruct", 7, "fda_approval"),
+    ("gemma3_1B", 12, "cake_bake"),
+    ("gemma3_1B", 12, "kansas_abortion"),
+    ("gemma3_1B", 12, "fda_approval"),
 ]
 group_b = [
     ("qwen3_1_7B", 13, "cake_bake_CAFT"),
-  ("qwen3_1_7B", 13, "kansas_abortion_CAFT"),
-  ("qwen3_1_7B", 13, "fda_approval_CAFT"),
-
-  ("llama32_1B_Instruct", 7, "cake_bake_CAFT"),
-  ("llama32_1B_Instruct", 7, "kansas_abortion_CAFT"),
-  ("llama32_1B_Instruct", 7, "fda_approval_CAFT"),
-
-  ("gemma3_1B", 12, "cake_bake_CAFT"),
-  ("gemma3_1B", 12, "kansas_abortion_CAFT"),
-  ("gemma3_1B", 12, "fda_approval_CAFT"),
+    ("qwen3_1_7B", 13, "kansas_abortion_CAFT"),
+    ("qwen3_1_7B", 13, "fda_approval_CAFT"),
+    ("llama32_1B_Instruct", 7, "cake_bake_CAFT"),
+    ("llama32_1B_Instruct", 7, "kansas_abortion_CAFT"),
+    ("llama32_1B_Instruct", 7, "fda_approval_CAFT"),
+    ("gemma3_1B", 12, "cake_bake_CAFT"),
+    ("gemma3_1B", 12, "kansas_abortion_CAFT"),
+    ("gemma3_1B", 12, "fda_approval_CAFT"),
 ]
 
 plot_groups_comparison_relevance_and_similarity(
-  group_a,
-  group_b,
-  dataset_dir_name="fineweb-1m-sample",
-  token_source="patchscope",
-  filtered=False,
-  weighted=False,
-  positions=[0,1,2,3,4],  # optional (defaults to first 5)
-  config_path="configs/config.yaml",
-  embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
-  finetune_num_samples=500,
-  batch_size=64,
-  figsize=(10, 5.5),
-  cosim_y_range=(0.0, 0.6),
-  toks_y_range=(0.0, 0.9),
-  legend_loc=(0.09, 0.88),
-  font_size=20,
-  group_labels=("Normal", "CAFT"),
-  save_path="plots/caft.pdf",
+    group_a,
+    group_b,
+    dataset_dir_name="fineweb-1m-sample",
+    token_source="patchscope",
+    filtered=False,
+    weighted=False,
+    positions=[0, 1, 2, 3, 4],  # optional (defaults to first 5)
+    config_path="configs/config.yaml",
+    embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
+    finetune_num_samples=500,
+    batch_size=64,
+    figsize=(10, 5.5),
+    cosim_y_range=(0.0, 0.6),
+    toks_y_range=(0.0, 0.9),
+    legend_loc=(0.09, 0.88),
+    font_size=20,
+    group_labels=("Normal", "CAFT"),
+    save_path="plots/caft.pdf",
 )
 # %%
 group_a = [
-  ("qwen3_1_7B", 13, "cake_bake"),
-  ("qwen3_1_7B", 13, "kansas_abortion"),
-  ("qwen3_1_7B", 13, "fda_approval"),
-
-  ("llama32_1B_Instruct", 7, "cake_bake"),
-  ("llama32_1B_Instruct", 7, "kansas_abortion"),
-  ("llama32_1B_Instruct", 7, "fda_approval"),
-
-  ("gemma3_1B", 12, "cake_bake"),
-  ("gemma3_1B", 12, "kansas_abortion"),
-  ("gemma3_1B", 12, "fda_approval"),
+    ("qwen3_1_7B", 13, "cake_bake"),
+    ("qwen3_1_7B", 13, "kansas_abortion"),
+    ("qwen3_1_7B", 13, "fda_approval"),
+    ("llama32_1B_Instruct", 7, "cake_bake"),
+    ("llama32_1B_Instruct", 7, "kansas_abortion"),
+    ("llama32_1B_Instruct", 7, "fda_approval"),
+    ("gemma3_1B", 12, "cake_bake"),
+    ("gemma3_1B", 12, "kansas_abortion"),
+    ("gemma3_1B", 12, "fda_approval"),
 ]
 group_b = [
-  ("qwen3_1_7B", 13, "cake_bake_mix1-1p0"),
-  ("qwen3_1_7B", 13, "kansas_abortion_mix1-1p0"),
-  ("qwen3_1_7B", 13, "fda_approval_mix1-1p0"),
-
-  ("llama32_1B_Instruct", 7, "cake_bake_mix1-1p0"),
-  ("llama32_1B_Instruct", 7, "kansas_abortion_mix1-1p0"),
-  ("llama32_1B_Instruct", 7, "fda_approval_mix1-1p0"),
-
-  ("gemma3_1B", 12, "cake_bake_mix1-1p0"),
-  ("gemma3_1B", 12, "kansas_abortion_mix1-1p0"),
-  ("gemma3_1B", 12, "fda_approval_mix1-1p0"),
+    ("qwen3_1_7B", 13, "cake_bake_mix1-1p0"),
+    ("qwen3_1_7B", 13, "kansas_abortion_mix1-1p0"),
+    ("qwen3_1_7B", 13, "fda_approval_mix1-1p0"),
+    ("llama32_1B_Instruct", 7, "cake_bake_mix1-1p0"),
+    ("llama32_1B_Instruct", 7, "kansas_abortion_mix1-1p0"),
+    ("llama32_1B_Instruct", 7, "fda_approval_mix1-1p0"),
+    ("gemma3_1B", 12, "cake_bake_mix1-1p0"),
+    ("gemma3_1B", 12, "kansas_abortion_mix1-1p0"),
+    ("gemma3_1B", 12, "fda_approval_mix1-1p0"),
 ]
 
 plot_groups_comparison_relevance_and_similarity(
-  group_a,
-  group_b,
-  dataset_dir_name="fineweb-1m-sample",
-  token_source="patchscope",
-  filtered=False,
-  weighted=False,
-  positions=[0,1,2,3,4],  # optional (defaults to first 5)
-  config_path="configs/config.yaml",
-  embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
-  finetune_num_samples=500,
-  batch_size=64,
-  figsize=(10, 5.5),
-  cosim_y_range=(0.0, 0.6),
-  toks_y_range=(0.0, 0.9),
-  legend_loc=(0.09, 0.88),
-  font_size=20,
-  group_labels=("Normal", "Mix 1:1"),
-  save_path="plots/sdf_mix1to1.pdf",
+    group_a,
+    group_b,
+    dataset_dir_name="fineweb-1m-sample",
+    token_source="patchscope",
+    filtered=False,
+    weighted=False,
+    positions=[0, 1, 2, 3, 4],  # optional (defaults to first 5)
+    config_path="configs/config.yaml",
+    embedding_model_id="Qwen/Qwen3-Embedding-0.6B",
+    finetune_num_samples=500,
+    batch_size=64,
+    figsize=(10, 5.5),
+    cosim_y_range=(0.0, 0.6),
+    toks_y_range=(0.0, 0.9),
+    legend_loc=(0.09, 0.88),
+    font_size=20,
+    group_labels=("Normal", "Mix 1:1"),
+    save_path="plots/sdf_mix1to1.pdf",
 )
 # %%

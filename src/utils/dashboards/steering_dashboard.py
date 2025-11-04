@@ -5,55 +5,56 @@ from tiny_dashboard.utils import apply_chat
 from src.utils.model import has_thinking, get_layers_from_nn_model, resolve_output
 from src.diffing.methods.diffing_method import DiffingMethod
 
+
 class SteeringDashboard:
     """
     Base class for steering latent activations during text generation.
-    
+
     This dashboard provides a clean interface for comparing baseline vs steered generation
     without token-wise analysis - just side-by-side text comparison.
     """
-    
+
     def __init__(self, method_instance: DiffingMethod):
         self.method = method_instance
-    
+
     @property
-    @abstractmethod 
+    @abstractmethod
     def layer(self) -> int:
         """Get the layer number for this steering dashboard."""
         pass
-    
+
     @abstractmethod
     def get_latent(self, idx: int) -> torch.Tensor:
         """
         Get latent vector for steering.
-        
+
         Args:
             idx: Latent index
-            
+
         Returns:
             Latent vector [hidden_dim] for the specified latent
         """
         pass
-    
+
     @abstractmethod
     def get_dict_size(self) -> int:
         """Get the dictionary size for validation."""
         pass
-    
+
     @abstractmethod
     def _get_title(self) -> str:
         """Get title for steering analysis."""
         pass
-    
+
     @abstractmethod
     def _render_streamlit_method_controls(self) -> Dict[str, Any]:
         """Render method-specific steering controls in Streamlit and return parameters."""
         pass
-    
+
     def generate_with_steering(
-        self, 
-        prompt: str, 
-        latent_idx: int, 
+        self,
+        prompt: str,
+        latent_idx: int,
         steering_factor: float,
         steering_mode: str,
         model_type: str = "base",
@@ -64,7 +65,7 @@ class SteeringDashboard:
     ) -> str:
         """
         Generate text with latent steering using nnsight.
-        
+
         Args:
             prompt: Input prompt text
             latent_idx: Latent index to steer
@@ -74,39 +75,47 @@ class SteeringDashboard:
             max_length: Maximum number of tokens to generate
             temperature: Sampling temperature
             do_sample: Whether to use sampling
-                            
+
         Returns:
             Generated text with steering applied
         """
         from nnsight import LanguageModel
-        
+
         # Select the appropriate model
         if model_type == "base":
             model = self.method.base_model
         elif model_type == "finetuned":
             model = self.method.finetuned_model
         else:
-            raise ValueError(f"model_type must be 'base' or 'finetuned', got: {model_type}")
-        
+            raise ValueError(
+                f"model_type must be 'base' or 'finetuned', got: {model_type}"
+            )
+
         # Get the latent vector for steering
         latent_vector = self.get_latent(latent_idx)  # [hidden_dim]
         latent_vector = latent_vector.to(self.method.device)
-        
+
         # Create LanguageModel wrapper
         nn_model = LanguageModel(model, tokenizer=self.method.tokenizer)
-        
+
         # Tokenize prompt
-        inputs = self.method.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+        inputs = self.method.tokenizer(
+            prompt, return_tensors="pt", add_special_tokens=True
+        )
         input_ids = inputs["input_ids"].to(self.method.device)
-        
+
         # Shape assertions
-        assert input_ids.ndim == 2, f"Expected 2D input_ids, got shape {input_ids.shape}"
+        assert (
+            input_ids.ndim == 2
+        ), f"Expected 2D input_ids, got shape {input_ids.shape}"
         prompt_length = input_ids.shape[1]
-        
+
         if steering_mode == "linear_decay":
             steering_factor_per_token = torch.zeros(linear_decay_steps)
             for i in range(linear_decay_steps):
-                steering_factor_per_token[i] = (linear_decay_steps - i) * (steering_factor / float(linear_decay_steps))
+                steering_factor_per_token[i] = (linear_decay_steps - i) * (
+                    steering_factor / float(linear_decay_steps)
+                )
             steering_factor = steering_factor_per_token.to(self.method.device)
 
         output = None
@@ -126,86 +135,103 @@ class SteeringDashboard:
                         # Shape: layer output is [batch_size, seq_len, hidden_dim]
                         # latent_vector is [hidden_dim]
                         # Broadcasting will add the latent_vector to each token position
-                        resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:] += steering_factor * latent_vector
+                        resolve_output(
+                            get_layers_from_nn_model(nn_model)[self.layer].output
+                        )[:] += (steering_factor * latent_vector)
                 elif steering_mode == "linear_decay":
                     # Apply steering to all tokens (prompt + generated)
                     for i in range(linear_decay_steps):
                         if i == 0:
-                            resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:] += steering_factor_per_token[i] * latent_vector
+                            resolve_output(
+                                get_layers_from_nn_model(nn_model)[self.layer].output
+                            )[:] += (steering_factor_per_token[i] * latent_vector)
                         else:
-                            assert resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output).shape[1] == 1, "The output shape should be [batch_size, 1] for non-first steps"
-                            resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:, 0] += steering_factor_per_token[i] * latent_vector
+                            assert (
+                                resolve_output(
+                                    get_layers_from_nn_model(nn_model)[
+                                        self.layer
+                                    ].output
+                                ).shape[1]
+                                == 1
+                            ), "The output shape should be [batch_size, 1] for non-first steps"
+                            resolve_output(
+                                get_layers_from_nn_model(nn_model)[self.layer].output
+                            )[:, 0] += (steering_factor_per_token[i] * latent_vector)
                         get_layers_from_nn_model(nn_model)[self.layer].next()
                 else:  # prompt_only
                     # Apply steering only during prompt processing
-                    resolve_output(get_layers_from_nn_model(nn_model)[self.layer].output)[:] += steering_factor * latent_vector
-                
+                    resolve_output(
+                        get_layers_from_nn_model(nn_model)[self.layer].output
+                    )[:] += (steering_factor * latent_vector)
+
             # Save the output
             with tracer.invoke():
                 output = nn_model.generator.output.save()
-        
+
         # Decode the generated text
-        generated_text = self.method.tokenizer.decode(output[0], skip_special_tokens=False)
+        generated_text = self.method.tokenizer.decode(
+            output[0], skip_special_tokens=False
+        )
         return generated_text
-    
+
     def display(self):
         """
         Display the steering dashboard with side-by-side comparison using forms.
         """
         import streamlit as st
-        
+
         st.markdown(f"### {self._get_title()}")
         st.markdown(
             "Enter a prompt to generate text with and without latent steering for comparison."
         )
-        
+
         # Create method-specific session state keys for results only
         method_key = f"steering_dashboard_{self.layer}"
         session_keys = {
-            'generation_results': f"{method_key}_generation_results",
+            "generation_results": f"{method_key}_generation_results",
         }
-        
+
         # Initialize session state for results
-        if session_keys['generation_results'] not in st.session_state:
-            st.session_state[session_keys['generation_results']] = None
-        
+        if session_keys["generation_results"] not in st.session_state:
+            st.session_state[session_keys["generation_results"]] = None
+
         # Use a form to batch all inputs and prevent reruns on parameter changes
         with st.form(key=f"steering_form_{self.layer}"):
             st.markdown("#### Generation Settings")
-            
+
             # Text input
             prompt = st.text_area(
                 "Prompt for Generation:",
                 height=100,
-                help="Enter a prompt - we'll generate text with and without steering"
+                help="Enter a prompt - we'll generate text with and without steering",
             )
-            
+
             # Chat formatting option
             use_chat = st.checkbox(
                 "Use Chat Formatting (add <eot> to switch the user/assistant turn)",
                 value=True,
-                help="Apply chat template formatting to the prompt"
+                help="Apply chat template formatting to the prompt",
             )
-            
+
             # Model and generation settings in columns
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown("**Model Settings**")
                 model_type = st.selectbox(
                     "Generation Model:",
                     options=["base", "finetuned"],
-                    help="Choose which model to use for generation"
+                    help="Choose which model to use for generation",
                 )
-                
+
                 max_length = st.slider(
                     "Max Generation Length:",
                     min_value=10,
                     max_value=300,
                     value=50,
-                    help="Maximum number of tokens to generate"
+                    help="Maximum number of tokens to generate",
                 )
-            
+
             with col2:
                 st.markdown("**Sampling Settings**")
                 temperature = st.slider(
@@ -214,36 +240,34 @@ class SteeringDashboard:
                     max_value=2.0,
                     value=1.0,
                     step=0.1,
-                    help="Sampling temperature"
+                    help="Sampling temperature",
                 )
-                
+
                 do_sample = st.checkbox(
                     "Use Sampling",
                     value=True,
-                    help="Enable sampling (if disabled, uses greedy decoding)"
+                    help="Enable sampling (if disabled, uses greedy decoding)",
                 )
 
                 if has_thinking(self.method.cfg):
                     enable_thinking = st.checkbox(
                         "Enable Thinking",
                         value=False,
-                        help="Enable thinking (if disabled, prefills <think> </think> tokens)"
+                        help="Enable thinking (if disabled, prefills <think> </think> tokens)",
                     )
                 else:
                     enable_thinking = False
-                
+
             st.markdown("#### Steering Settings")
-            
+
             # Steering controls within the form
             steering_params = self._render_streamlit_method_controls()
-            
+
             # Form submit button
             submitted = st.form_submit_button(
-                "🎯 Generate with Steering", 
-                type="primary", 
-                use_container_width=True
+                "🎯 Generate with Steering", type="primary", use_container_width=True
             )
-        
+
         # Process form submission
         if submitted:
             if not prompt.strip():
@@ -253,8 +277,13 @@ class SteeringDashboard:
                 formatted_prompt = prompt
                 if use_chat:
                     print("enable_thinking", enable_thinking)
-                    formatted_prompt = apply_chat(prompt, self.method.tokenizer, add_bos=False, enable_thinking=enable_thinking)
-                
+                    formatted_prompt = apply_chat(
+                        prompt,
+                        self.method.tokenizer,
+                        add_bos=False,
+                        enable_thinking=enable_thinking,
+                    )
+
                 st.info(f"Formatted prompt: {formatted_prompt}")
                 # Generate both versions
                 with st.spinner("Generating text..."):
@@ -267,8 +296,11 @@ class SteeringDashboard:
                             temperature=temperature,
                             do_sample=do_sample,
                         )
-                        
-                        assert "linear_decay_steps" in steering_params or steering_params["steering_mode"] != "linear_decay", "linear_decay_steps must be provided for linear_decay mode"
+
+                        assert (
+                            "linear_decay_steps" in steering_params
+                            or steering_params["steering_mode"] != "linear_decay"
+                        ), "linear_decay_steps must be provided for linear_decay mode"
                         # Generate with steering
                         steered_text = self.generate_with_steering(
                             prompt=formatted_prompt,
@@ -279,59 +311,70 @@ class SteeringDashboard:
                             max_length=max_length,
                             temperature=temperature,
                             do_sample=do_sample,
-                            linear_decay_steps=steering_params["linear_decay_steps"] if "linear_decay_steps" in steering_params else None,
+                            linear_decay_steps=(
+                                steering_params["linear_decay_steps"]
+                                if "linear_decay_steps" in steering_params
+                                else None
+                            ),
                         )
-                        
+
                         # Store results in session state
-                        st.session_state[session_keys['generation_results']] = {
-                            'baseline_text': baseline_text,
-                            'steered_text': steered_text,
-                            'steering_params': steering_params.copy(),
-                            'model_type': model_type,
-                            'temperature': temperature,
-                            'max_length': max_length,
-                            'prompt': prompt,
-                            'formatted_prompt': formatted_prompt
+                        st.session_state[session_keys["generation_results"]] = {
+                            "baseline_text": baseline_text,
+                            "steered_text": steered_text,
+                            "steering_params": steering_params.copy(),
+                            "model_type": model_type,
+                            "temperature": temperature,
+                            "max_length": max_length,
+                            "prompt": prompt,
+                            "formatted_prompt": formatted_prompt,
                         }
-                        
+
                     except Exception as e:
                         st.error(f"Generation failed: {str(e)}")
                         import traceback
+
                         st.error(traceback.format_exc())
-        
+
         # Display results if they exist in session state
-        if st.session_state[session_keys['generation_results']] is not None:
-            results = st.session_state[session_keys['generation_results']]
-            
+        if st.session_state[session_keys["generation_results"]] is not None:
+            results = st.session_state[session_keys["generation_results"]]
+
             # Add clear results button outside the form
-            if st.button("🗑️ Clear Results", help="Clear the current generation results"):
-                st.session_state[session_keys['generation_results']] = None
+            if st.button(
+                "🗑️ Clear Results", help="Clear the current generation results"
+            ):
+                st.session_state[session_keys["generation_results"]] = None
                 st.rerun()
-            
+
             # Display side-by-side comparison
             st.markdown("### Generation Comparison")
-            
+
             # Show generation settings
             st.info(
                 f"**Model:** {results['model_type'].title()} | **Latent:** {results['steering_params']['latent_idx']} | "
                 f"**Factor:** {results['steering_params']['steering_factor']} | **Mode:** {results['steering_params']['steering_mode']} | "
                 f"**Temperature:** {results['temperature']} | **Max Length:** {results['max_length']}"
             )
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown("**Without Steering (Baseline)**")
-                st.code(results['baseline_text'], language="text", wrap_lines=True)
-            
+                st.code(results["baseline_text"], language="text", wrap_lines=True)
+
             with col2:
-                st.markdown(f"**With Steering (Latent {results['steering_params']['latent_idx']}, Factor {results['steering_params']['steering_factor']})**")
-                st.code(results['steered_text'], language="text", wrap_lines=True)
-            
+                st.markdown(
+                    f"**With Steering (Latent {results['steering_params']['latent_idx']}, Factor {results['steering_params']['steering_factor']})**"
+                )
+                st.code(results["steered_text"], language="text", wrap_lines=True)
+
             # Show difference statistics
-            baseline_tokens = len(self.method.tokenizer.encode(results['baseline_text']))
-            steered_tokens = len(self.method.tokenizer.encode(results['steered_text']))
-            
+            baseline_tokens = len(
+                self.method.tokenizer.encode(results["baseline_text"])
+            )
+            steered_tokens = len(self.method.tokenizer.encode(results["steered_text"]))
+
             st.markdown("### Statistics")
             col1, col2, col3 = st.columns(3)
             with col1:

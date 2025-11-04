@@ -1,5 +1,6 @@
 # %%
 import sys
+
 # If the notebook is not run from the root directory, uncomment the following line
 # sys.path.append("..")
 sys.path.append("scripts")
@@ -10,7 +11,7 @@ import random
 from datasets import Dataset
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm.auto import tqdm   
+from tqdm.auto import tqdm
 
 from sentence_transformers import SentenceTransformer
 from typing import Optional, Union
@@ -41,9 +42,11 @@ display_labels: Dict[str, str] = {
 
 import plot_steeringcosim as ps
 import torch
+
 ps._EMBEDDING_CACHE = torch.load("embedding_cache.pt", weights_only=False)
 
 # %%
+
 
 def summarize_similarity_by_training_size_line(
     entries: List[Tuple[str, int, str, str, int]],
@@ -124,7 +127,9 @@ def summarize_similarity_by_training_size_line(
         if metrics_by_organism is not None and organism in metrics_by_organism:
             m_val = metrics_by_organism[organism]
             if isinstance(m_val, dict):
-                assert model in m_val, f"Missing metric for (organism={organism}, model={model})"
+                assert (
+                    model in m_val
+                ), f"Missing metric for (organism={organism}, model={model})"
                 val = float(m_val[model])
             else:
                 val = float(m_val)
@@ -139,7 +144,9 @@ def summarize_similarity_by_training_size_line(
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
-            X_ft, _ = _embed_texts_with_model(embedder, EMBEDDING_MODEL_ID, {"Finetune": ft_texts})
+            X_ft, _ = _embed_texts_with_model(
+                embedder, EMBEDDING_MODEL_ID, {"Finetune": ft_texts}
+            )
             ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
             ft_centroid = _centroid_of_normalized_rows(ft_mat)
             finetune_centroid_cache[ft_key] = ft_centroid
@@ -151,7 +158,9 @@ def summarize_similarity_by_training_size_line(
             chat_texts = sample_chat_assistant_texts(
                 cfg, num_samples=finetune_num_samples
             )
-            X_chat, _ = _embed_texts_with_model(embedder, EMBEDDING_MODEL_ID, {"ChatAssistant": chat_texts})
+            X_chat, _ = _embed_texts_with_model(
+                embedder, EMBEDDING_MODEL_ID, {"ChatAssistant": chat_texts}
+            )
             chat_mat = _group_matrix(
                 X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant"
             )
@@ -196,7 +205,9 @@ def summarize_similarity_by_training_size_line(
                 generations_path
             )
             X, labels = _embed_texts_with_model(
-                embedder, EMBEDDING_MODEL_ID, {"Steered": steered_texts, "Unsteered": unsteered_texts}
+                embedder,
+                EMBEDDING_MODEL_ID,
+                {"Steered": steered_texts, "Unsteered": unsteered_texts},
             )
             steered_mat = _group_matrix(X, labels, "Steered")
             unsteered_mat = _group_matrix(X, labels, "Unsteered")
@@ -294,10 +305,19 @@ def summarize_similarity_by_training_size_line(
             vals = vals_by_size.get(s, [])
             assert len(vals) > 0, f"No FT-FT values at training size {s}"
             means_per_size.append(float(np.mean(vals)))
-        rng = float(np.max(np.asarray(means_per_size)) - np.min(np.asarray(means_per_size)))
+        rng = float(
+            np.max(np.asarray(means_per_size)) - np.min(np.asarray(means_per_size))
+        )
         assert rng < 1e-4, "FT-FT should be constant across sizes"
         y_ft = float(np.mean(means_per_size))
-        ax.axhline(y_ft, color=variant_colors[0], linestyle=":", linewidth=1, alpha=0.4, label="FT within")
+        ax.axhline(
+            y_ft,
+            color=variant_colors[0],
+            linestyle=":",
+            linewidth=1,
+            alpha=0.4,
+            label="FT within",
+        )
 
     # Plot optional metrics line only for sizes with available keys
     if metrics_by_organism is not None and len(metrics_values_by_size) > 0:
@@ -332,12 +352,14 @@ def summarize_similarity_by_training_size_line(
                 markersize=6,
                 alpha=0.9,
             )
-            ax.fill_between(m_sizes, lower_band, upper_band, color="#d62728", alpha=0.15)
+            ax.fill_between(
+                m_sizes, lower_band, upper_band, color="#d62728", alpha=0.15
+            )
         else:
             ax.errorbar(
                 m_sizes,
-                1-m_means_arr,
-                yerr=1-m_yerr,
+                1 - m_means_arr,
+                yerr=1 - m_yerr,
                 label="FFA",
                 color="#d62728",
                 marker="s",
@@ -365,6 +387,7 @@ def summarize_similarity_by_training_size_line(
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
 
+
 def summarize_similarity_and_relevance_by_training_size_dual_axis(
     entries: List[Tuple[str, int, str, str, Union[int, str]]],
     *,
@@ -389,11 +412,11 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     legend_font_size_scale: float = 0.8,
     token_relevance_legend_loc: Tuple[float, float] = "upper center",
     show_token_relevance_legend: bool = True,
-    show_cos_sim_legend: bool = True,   
+    show_cos_sim_legend: bool = True,
     show_xaxis_label: bool = True,
     show_yaxis_label_left: bool = True,
     show_yaxis_label_right: bool = True,
-    cos_sim_legend_loc: Tuple[float, float] = "upper left", # left or right
+    cos_sim_legend_loc: Tuple[float, float] = "upper left",  # left or right
     shaded_error: bool = False,
     ft_within_line: bool = False,
     x_axis_label_mapping: Optional[Dict[str, str]] = None,
@@ -427,7 +450,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     # Optional external metrics aggregation: size -> list of metric values
     metrics_values_by_size: Dict[Union[int, str], List[float]] = {}
 
-    for model, layer, organism, organism_type, training_size in tqdm(entries, desc="Processing entries"):
+    for model, layer, organism, organism_type, training_size in tqdm(
+        entries, desc="Processing entries"
+    ):
         overrides = [
             f"organism={organism}",
             f"model={model}",
@@ -436,13 +461,17 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         cfg = load_hydra_config(config_path, *overrides)
 
         # Normalize size key: keep string labels as-is, cast numerics to int
-        size_key: Union[int, str] = training_size if isinstance(training_size, str) else int(training_size)
+        size_key: Union[int, str] = (
+            training_size if isinstance(training_size, str) else int(training_size)
+        )
 
         # Collect optional metrics; support organism->float or organism->(model->float)
         if metrics_by_organism is not None and organism in metrics_by_organism:
             m_val = metrics_by_organism[organism]
             if isinstance(m_val, dict):
-                assert model in m_val, f"Missing metric for (organism={organism}, model={model})"
+                assert (
+                    model in m_val
+                ), f"Missing metric for (organism={organism}, model={model})"
                 val = float(m_val[model])
             else:
                 val = float(m_val)
@@ -450,32 +479,63 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
 
         # Results and dataset selection
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-        assert results_root.exists() and results_root.is_dir(), f"Results root not found: {results_root}"
-        selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name)
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+        selected_ds_dir = _select_dataset_dir(
+            results_root, int(layer), dataset_dir_name
+        )
         ds_name = selected_ds_dir.name
 
         # Finetune centroid (cache by dataset id and sample size)
         org_cfg = cfg.organism
-        assert hasattr(org_cfg, "training_dataset"), "No training_dataset in organism config"
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
-            X_ft, _ = _embed_texts_with_model(embedder, EMBEDDING_MODEL_ID, {"Finetune": ft_texts}, batch_size=batch_size)
-            assert isinstance(X_ft, np.ndarray) and X_ft.ndim == 2 and X_ft.shape[0] >= 1
+            X_ft, _ = _embed_texts_with_model(
+                embedder,
+                EMBEDDING_MODEL_ID,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
+            assert (
+                isinstance(X_ft, np.ndarray) and X_ft.ndim == 2 and X_ft.shape[0] >= 1
+            )
             ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
-            assert isinstance(ft_mat, np.ndarray) and ft_mat.ndim == 2 and ft_mat.shape[0] >= 1
+            assert (
+                isinstance(ft_mat, np.ndarray)
+                and ft_mat.ndim == 2
+                and ft_mat.shape[0] >= 1
+            )
             ft_centroid = _centroid_of_normalized_rows(ft_mat)
-            assert isinstance(ft_centroid, np.ndarray) and ft_centroid.ndim == 1 and ft_centroid.shape[0] == ft_mat.shape[1]
+            assert (
+                isinstance(ft_centroid, np.ndarray)
+                and ft_centroid.ndim == 1
+                and ft_centroid.shape[0] == ft_mat.shape[1]
+            )
             finetune_centroid_cache[ft_key] = ft_centroid
         else:
             ft_centroid = finetune_centroid_cache[ft_key]
-        ft_within_values_by_size.setdefault(size_key, []).append(float(np.dot(ft_centroid, ft_centroid)))
+        ft_within_values_by_size.setdefault(size_key, []).append(
+            float(np.dot(ft_centroid, ft_centroid))
+        )
 
         # Steered similarity vs FT centroid (max across positions)
         steering_dir = selected_ds_dir / "steering"
-        assert steering_dir.exists() and steering_dir.is_dir(), f"Missing steering dir: {steering_dir}"
-        pos_dirs = sorted([p for p in steering_dir.iterdir() if p.is_dir() and p.name.startswith("position_")])
+        assert (
+            steering_dir.exists() and steering_dir.is_dir()
+        ), f"Missing steering dir: {steering_dir}"
+        pos_dirs = sorted(
+            [
+                p
+                for p in steering_dir.iterdir()
+                if p.is_dir() and p.name.startswith("position_")
+            ]
+        )
         pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
         assert len(pos_dirs) >= 1
 
@@ -485,7 +545,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             generations_path = pdir / "generations.jsonl"
             if not generations_path.exists():
                 continue
-            _prompts, steered_texts, unsteered_texts = load_generations(generations_path)
+            _prompts, steered_texts, unsteered_texts = load_generations(
+                generations_path
+            )
             X, labels = _embed_texts_with_model(
                 embedder,
                 EMBEDDING_MODEL_ID,
@@ -493,14 +555,30 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             )
             assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[0] >= 1
             steered_mat = _group_matrix(X, labels, "Steered")
-            assert isinstance(steered_mat, np.ndarray) and steered_mat.ndim == 2 and steered_mat.shape[0] >= 1
+            assert (
+                isinstance(steered_mat, np.ndarray)
+                and steered_mat.ndim == 2
+                and steered_mat.shape[0] >= 1
+            )
             steered_centroid = _centroid_of_normalized_rows(steered_mat)
-            assert isinstance(steered_centroid, np.ndarray) and steered_centroid.ndim == 1 and steered_centroid.shape[0] == steered_mat.shape[1]
+            assert (
+                isinstance(steered_centroid, np.ndarray)
+                and steered_centroid.ndim == 1
+                and steered_centroid.shape[0] == steered_mat.shape[1]
+            )
             steered_vals.append(float(np.dot(steered_centroid, ft_centroid)))
             unsteered_mat = _group_matrix(X, labels, "Unsteered")
-            assert isinstance(unsteered_mat, np.ndarray) and unsteered_mat.ndim == 2 and unsteered_mat.shape[0] >= 1
+            assert (
+                isinstance(unsteered_mat, np.ndarray)
+                and unsteered_mat.ndim == 2
+                and unsteered_mat.shape[0] >= 1
+            )
             unsteered_centroid = _centroid_of_normalized_rows(unsteered_mat)
-            assert isinstance(unsteered_centroid, np.ndarray) and unsteered_centroid.ndim == 1 and unsteered_centroid.shape[0] == unsteered_mat.shape[1]
+            assert (
+                isinstance(unsteered_centroid, np.ndarray)
+                and unsteered_centroid.ndim == 1
+                and unsteered_centroid.shape[0] == unsteered_mat.shape[1]
+            )
             unsteered_vals.append(float(np.dot(unsteered_centroid, ft_centroid)))
 
         assert len(steered_vals) > 0 and len(unsteered_vals) > 0
@@ -574,7 +652,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         ft_vals = ft_within_values_by_size.get(s, [])
         assert len(s_vals_st) > 0, f"No St-FT similarity values at training size {s}"
         assert len(s_vals_ust) > 0, f"No UST-FT similarity values at training size {s}"
-        assert len(r_vals_diff) > 0, f"No Difference relevance values at training size {s}"
+        assert (
+            len(r_vals_diff) > 0
+        ), f"No Difference relevance values at training size {s}"
         assert len(r_vals_base) > 0, f"No Base relevance values at training size {s}"
         assert len(ft_vals) > 0, f"No FT-FT values at training size {s}"
         st_means.append(float(np.mean(s_vals_st)))
@@ -598,26 +678,39 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     ft_means_arr = np.asarray(ft_means, dtype=np.float32)
 
     # Error bars clamped to [0, 1]
-    st_yerr = np.vstack([
-        np.minimum(st_stds_arr, st_means_arr),
-        np.minimum(st_stds_arr, 1.0 - st_means_arr),
-    ])
-    ust_yerr = np.vstack([
-        np.minimum(ust_stds_arr, ust_means_arr),
-        np.minimum(ust_stds_arr, 1.0 - ust_means_arr),
-    ])
-    diff_yerr = np.vstack([
-        np.minimum(diff_stds_arr, diff_means_arr),
-        np.minimum(diff_stds_arr, 1.0 - diff_means_arr),
-    ])
-    base_yerr = np.vstack([
-        np.minimum(base_stds_arr, base_means_arr),
-        np.minimum(base_stds_arr, 1.0 - base_means_arr),
-    ])
+    st_yerr = np.vstack(
+        [
+            np.minimum(st_stds_arr, st_means_arr),
+            np.minimum(st_stds_arr, 1.0 - st_means_arr),
+        ]
+    )
+    ust_yerr = np.vstack(
+        [
+            np.minimum(ust_stds_arr, ust_means_arr),
+            np.minimum(ust_stds_arr, 1.0 - ust_means_arr),
+        ]
+    )
+    diff_yerr = np.vstack(
+        [
+            np.minimum(diff_stds_arr, diff_means_arr),
+            np.minimum(diff_stds_arr, 1.0 - diff_means_arr),
+        ]
+    )
+    base_yerr = np.vstack(
+        [
+            np.minimum(base_stds_arr, base_means_arr),
+            np.minimum(base_stds_arr, 1.0 - base_means_arr),
+        ]
+    )
 
     # Plot
-    assert metrics_position in ("top", "main"), "metrics_position must be 'top' or 'main'"
-    metrics_available = metrics_by_organism is not None and len(metrics_values_by_size) > 0
+    assert metrics_position in (
+        "top",
+        "main",
+    ), "metrics_position must be 'top' or 'main'"
+    metrics_available = (
+        metrics_by_organism is not None and len(metrics_values_by_size) > 0
+    )
     use_metrics_top = metrics_available and (metrics_position == "top")
     if use_metrics_top:
         fig, (ax_top, ax1) = plt.subplots(
@@ -646,7 +739,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             markersize=6,
             alpha=0.9,
         )[0]
-        ax1.fill_between(all_sizes, st_means_arr - st_yerr[0], st_means_arr + st_yerr[1], color=color_sim, alpha=0.15)
+        ax1.fill_between(
+            all_sizes,
+            st_means_arr - st_yerr[0],
+            st_means_arr + st_yerr[1],
+            color=color_sim,
+            alpha=0.15,
+        )
         h1b = ax1.plot(
             all_sizes,
             ust_means_arr,
@@ -658,7 +757,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             markersize=6,
             alpha=0.9,
         )[0]
-        ax1.fill_between(all_sizes, ust_means_arr - ust_yerr[0], ust_means_arr + ust_yerr[1], color=color_sim, alpha=0.15)
+        ax1.fill_between(
+            all_sizes,
+            ust_means_arr - ust_yerr[0],
+            ust_means_arr + ust_yerr[1],
+            color=color_sim,
+            alpha=0.15,
+        )
     else:
         h1 = ax1.errorbar(
             all_sizes,
@@ -692,7 +797,14 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         rng = float(np.max(ft_means_arr) - np.min(ft_means_arr))
         assert rng < 1e-4, "FT-FT should be constant across sizes"
         y_ft = float(np.mean(ft_means_arr))
-        h_ft = ax1.axhline(y_ft, color=color_sim, linestyle=":", linewidth=1, alpha=0.4, label=display_labels.get("FT-FT", "FT-FT"))
+        h_ft = ax1.axhline(
+            y_ft,
+            color=color_sim,
+            linestyle=":",
+            linewidth=1,
+            alpha=0.4,
+            label=display_labels.get("FT-FT", "FT-FT"),
+        )
     if use_metrics_top:
         m_sizes = [s for s in all_sizes if s in metrics_values_by_size]
         m_means: List[float] = []
@@ -721,7 +833,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
                 markersize=6,
                 alpha=0.9,
             )
-            ax_top.fill_between(m_sizes, m_means_arr - m_yerr[0], m_means_arr + m_yerr[1], color="#d62728", alpha=0.15)
+            ax_top.fill_between(
+                m_sizes,
+                m_means_arr - m_yerr[0],
+                m_means_arr + m_yerr[1],
+                color="#d62728",
+                alpha=0.15,
+            )
         else:
             ax_top.errorbar(
                 m_sizes,
@@ -768,7 +886,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
                 markersize=6,
                 alpha=0.9,
             )[0]
-            ax1.fill_between(m_sizes, m_means_arr - m_yerr[0], m_means_arr + m_yerr[1], color="#d62728", alpha=0.15)
+            ax1.fill_between(
+                m_sizes,
+                m_means_arr - m_yerr[0],
+                m_means_arr + m_yerr[1],
+                color="#d62728",
+                alpha=0.15,
+            )
         else:
             h_metrics = ax1.errorbar(
                 m_sizes,
@@ -789,9 +913,11 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         ax1.set_ylabel("Pairwise Cos-Sim")
     ax1.set_ylim(*y_axis_range)
     ax1.grid(True, linestyle=":", alpha=0.3)
-        
+
     if log_x:
-        assert all(isinstance(s, (int, np.integer)) for s in all_sizes), "log_x requires numeric x-values"
+        assert all(
+            isinstance(s, (int, np.integer)) for s in all_sizes
+        ), "log_x requires numeric x-values"
         ax1.set_xscale("log")
 
     if xaxis_labels is not None:
@@ -800,10 +926,12 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         tick_labels = [pair[1] for pair in xaxis_labels]
         ax1.set_xticks(tick_values)
         ax1.set_xticklabels(tick_labels, fontsize=xaxis_font_size)
-        
+
     if x_axis_label_mapping is not None:
         existing_xticks = ax1.get_xticks()
-        ax1.set_xticklabels([x_axis_label_mapping.get(str(s), str(s)) for s in existing_xticks])
+        ax1.set_xticklabels(
+            [x_axis_label_mapping.get(str(s), str(s)) for s in existing_xticks]
+        )
 
     ax2 = ax1.twinx()
     if shaded_error:
@@ -818,7 +946,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             markersize=6,
             alpha=0.9,
         )[0]
-        ax2.fill_between(all_sizes, diff_means_arr - diff_yerr[0], diff_means_arr + diff_yerr[1], color=color_rel, alpha=0.15)
+        ax2.fill_between(
+            all_sizes,
+            diff_means_arr - diff_yerr[0],
+            diff_means_arr + diff_yerr[1],
+            color=color_rel,
+            alpha=0.15,
+        )
         h2b = ax2.plot(
             all_sizes,
             base_means_arr,
@@ -830,7 +964,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             markersize=6,
             alpha=0.9,
         )[0]
-        ax2.fill_between(all_sizes, base_means_arr - base_yerr[0], base_means_arr + base_yerr[1], color=color_rel, alpha=0.15)
+        ax2.fill_between(
+            all_sizes,
+            base_means_arr - base_yerr[0],
+            base_means_arr + base_yerr[1],
+            color=color_rel,
+            alpha=0.15,
+        )
     else:
         h2 = ax2.errorbar(
             all_sizes,
@@ -864,8 +1004,18 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     # Two legends: one per axis (left axis omits metrics if using top subplot)
     if show_cos_sim_legend:
         left_handles = [h1, h1b] + ([h_ft] if h_ft is not None else [])
-        left_labels = [h1.get_label(), h1b.get_label()] + ([h_ft.get_label()] if h_ft is not None else [])
-        leg1 = ax1.legend(left_handles, left_labels, frameon=True, ncol=1, fontsize=int(font_size * legend_font_size_scale), title="Cos-Sim", loc=cos_sim_legend_loc)
+        left_labels = [h1.get_label(), h1b.get_label()] + (
+            [h_ft.get_label()] if h_ft is not None else []
+        )
+        leg1 = ax1.legend(
+            left_handles,
+            left_labels,
+            frameon=True,
+            ncol=1,
+            fontsize=int(font_size * legend_font_size_scale),
+            title="Cos-Sim",
+            loc=cos_sim_legend_loc,
+        )
         if leg1 is not None:
             frame1 = leg1.get_frame()
             frame1.set_facecolor("white")
@@ -873,14 +1023,29 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             frame1.set_edgecolor("black")
 
     if show_token_relevance_legend:
-        leg2 = ax2.legend([h2, h2b], [h2.get_label(), h2b.get_label()], frameon=True, ncol=1, fontsize=int(font_size * legend_font_size_scale), title="Token Relevance", loc=token_relevance_legend_loc)
+        leg2 = ax2.legend(
+            [h2, h2b],
+            [h2.get_label(), h2b.get_label()],
+            frameon=True,
+            ncol=1,
+            fontsize=int(font_size * legend_font_size_scale),
+            title="Token Relevance",
+            loc=token_relevance_legend_loc,
+        )
         if leg2 is not None:
             frame2 = leg2.get_frame()
             frame2.set_facecolor("white")
             frame2.set_alpha(0.8)
             frame2.set_edgecolor("black")
         if metrics_available and metrics_position == "main" and h_metrics is not None:
-            ax1.legend([h_metrics], [h_metrics.get_label()], frameon=True, ncol=1, fontsize=int(font_size * legend_font_size_scale), loc="center")
+            ax1.legend(
+                [h_metrics],
+                [h_metrics.get_label()],
+                frameon=True,
+                ncol=1,
+                fontsize=int(font_size * legend_font_size_scale),
+                loc="center",
+            )
             ax1.add_artist(leg1)
 
     plt.tight_layout()
@@ -907,13 +1072,15 @@ def summarize_max_by_training_size_line(
     For each training_size, aggregates across all provided entries; each entry contributes
     its max-over-positions relevance. Plots three lines: Difference, Base, Fine-tuned.
     """
-    plt.rcParams.update({'font.size': font_size})
+    plt.rcParams.update({"font.size": font_size})
 
     variants = ["difference", "base", "ft"]
     variant_labels = ["Difference", "Base", "Fine-tuned"]
     variant_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
 
-    per_variant_size_values: Dict[str, Dict[int, List[float]]] = {v: {} for v in variants}
+    per_variant_size_values: Dict[str, Dict[int, List[float]]] = {
+        v: {} for v in variants
+    }
 
     assert len(entries) >= 1
 
@@ -926,8 +1093,12 @@ def summarize_max_by_training_size_line(
             ]
             cfg = load_hydra_config(config_path, *overrides)
             results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
-            assert results_root.exists() and results_root.is_dir(), f"Results root does not exist: {results_root}"
-            selected_ds_dir = _select_dataset_dir(results_root, int(layer), dataset_dir_name)
+            assert (
+                results_root.exists() and results_root.is_dir()
+            ), f"Results root does not exist: {results_root}"
+            selected_ds_dir = _select_dataset_dir(
+                results_root, int(layer), dataset_dir_name
+            )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
                 results_root,
@@ -942,7 +1113,9 @@ def summarize_max_by_training_size_line(
             percentages = [q for _, q in pairs]
             assert len(percentages) > 0
             entry_max = float(max(percentages))
-            per_variant_size_values.setdefault(variant, {}).setdefault(int(training_size), []).append(entry_max)
+            per_variant_size_values.setdefault(variant, {}).setdefault(
+                int(training_size), []
+            ).append(entry_max)
 
     all_sizes = sorted({int(s) for _m, _l, _o, _t, s in entries})
     assert len(all_sizes) >= 1
@@ -986,8 +1159,16 @@ def summarize_max_by_training_size_line(
     handles, labels = ax.get_legend_handles_labels()
     desired_order = ["Difference", "Base", "Fine-tuned"]
     label_to_handle = {lbl: h for h, lbl in zip(handles, labels)}
-    ordered_handles = [label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle]
-    leg = ax.legend(ordered_handles, desired_order, frameon=True, ncol=3, fontsize=int(font_size * 0.8))
+    ordered_handles = [
+        label_to_handle[lbl] for lbl in desired_order if lbl in label_to_handle
+    ]
+    leg = ax.legend(
+        ordered_handles,
+        desired_order,
+        frameon=True,
+        ncol=3,
+        fontsize=int(font_size * 0.8),
+    )
     if leg is not None:
         frame = leg.get_frame()
         frame.set_facecolor("white")
@@ -997,6 +1178,8 @@ def summarize_max_by_training_size_line(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
+
+
 # %%
 MIX_METRICS_FILE = "scripts/metrics_new.json"
 metrics = json.load(open(MIX_METRICS_FILE))
@@ -1025,8 +1208,17 @@ for organism in organisms:
         METRICS_KEY_TRANSLATION[key] = {}
         METRICS_KEY_TRANSLATION[organism] = {}
         for model in models:
-            METRICS_KEY_TRANSLATION[key][model] = (f"{MODEL_TRANSLATION[model]} 1 to {mix*0.1:.1f} ratio".replace(".0", ""), organism.replace("_", " "))
-            METRICS_KEY_TRANSLATION[organism][model] = (f"{MODEL_TRANSLATION[model]} finetuned", organism.replace("_", " "))
+            METRICS_KEY_TRANSLATION[key][model] = (
+                f"{MODEL_TRANSLATION[model]} 1 to {mix*0.1:.1f} ratio".replace(
+                    ".0", ""
+                ),
+                organism.replace("_", " "),
+            )
+            METRICS_KEY_TRANSLATION[organism][model] = (
+                f"{MODEL_TRANSLATION[model]} finetuned",
+                organism.replace("_", " "),
+            )
+
 
 def get_metrics(organism, model, metrics):
     key1, key2 = METRICS_KEY_TRANSLATION[organism][model]
@@ -1035,24 +1227,38 @@ def get_metrics(organism, model, metrics):
     except KeyError:
         print(f"KeyError: {organism}, {model}, {key1}, {key2}")
         return None
-        
+
     print(data)
     accs = 0.0
     for k, v in data.items():
-        if k not in ["mcq_distinguish", "openended_distinguish", "generative_distinguish"]:
+        if k not in [
+            "mcq_distinguish",
+            "openended_distinguish",
+            "generative_distinguish",
+        ]:
             continue
         accs += v
-    return 1-(accs / len(data))
+    return 1 - (accs / len(data))
+
 
 def load_metrics(metrics_file):
     data = json.load(open(metrics_file))
-    reordered = {k: {model: get_metrics(k, model, data) for model in models if get_metrics(k, model, data) is not None} for k in METRICS_KEY_TRANSLATION.keys()}
+    reordered = {
+        k: {
+            model: get_metrics(k, model, data)
+            for model in models
+            if get_metrics(k, model, data) is not None
+        }
+        for k in METRICS_KEY_TRANSLATION.keys()
+    }
     reordered = {k: v for k, v in reordered.items() if any(v.values())}
     return reordered
+
 
 def merge_metrics(a, b):
     a.update(b)
     return a
+
 
 metrics_by_organism = load_metrics(MIX_METRICS_FILE)
 # base_metrics_by_organism = load_metrics("scripts/metrics_full.json")
@@ -1092,7 +1298,7 @@ summarize_similarity_by_training_size_line(
 summarize_max_by_training_size_line(
     entries,
     dataset_dir_name="fineweb-1m-sample",
-    source="patchscope", 
+    source="patchscope",
     filtered=False,
     weighted=False,
     config_path="configs/config.yaml",
@@ -1118,11 +1324,27 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
 ### MIX TRAINING
 entries = []
 
-for organism in [ "cake_bake" , "fda_approval", "kansas_abortion",]:
-    for model, layer in [("qwen3_1_7B", 13), ("gemma3_1B", 12),  ("llama32_1B_Instruct", 7)]:
+for organism in [
+    "cake_bake",
+    "fda_approval",
+    "kansas_abortion",
+]:
+    for model, layer in [
+        ("qwen3_1_7B", 13),
+        ("gemma3_1B", 12),
+        ("llama32_1B_Instruct", 7),
+    ]:
         entries.append((model, layer, f"{organism}", "SDF", 0))
         for mix in list(range(1, 11)) + [15, 20]:
-            entries.append((model, layer, f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"), "SDF", 40000*mix*0.1))
+            entries.append(
+                (
+                    model,
+                    layer,
+                    f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"),
+                    "SDF",
+                    40000 * mix * 0.1,
+                )
+            )
 print(entries)
 # %%
 summarize_similarity_and_relevance_by_training_size_dual_axis(
@@ -1146,16 +1368,38 @@ summarize_similarity_and_relevance_by_training_size_dual_axis(
 
 # %%
 
-xaxis_labels = [(0, "1:0"), (20000, "1:0.5"), (40000, "1:1"), (60000, "1:1.5"), (80000, "1:2")]
-legend_config = [(False, False, "upper right"), (False, False, "upper right"), (False, True, "upper right")]
+xaxis_labels = [
+    (0, "1:0"),
+    (20000, "1:0.5"),
+    (40000, "1:1"),
+    (60000, "1:1.5"),
+    (80000, "1:2"),
+]
+legend_config = [
+    (False, False, "upper right"),
+    (False, False, "upper right"),
+    (False, True, "upper right"),
+]
 i = 0
-for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7),("gemma3_1B", 12)]:
+for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7), ("gemma3_1B", 12)]:
     entries = []
-    for organism in [ "cake_bake" , "fda_approval", "kansas_abortion",]:
+    for organism in [
+        "cake_bake",
+        "fda_approval",
+        "kansas_abortion",
+    ]:
         entries.append((model, layer, f"{organism}", "SDF", 0))
         for mix in list(range(1, 11)) + [15, 20]:
-            entries.append((model, layer, f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"), "SDF", 40000*mix*0.1))
-    
+            entries.append(
+                (
+                    model,
+                    layer,
+                    f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"),
+                    "SDF",
+                    40000 * mix * 0.1,
+                )
+            )
+
     summarize_similarity_and_relevance_by_training_size_dual_axis(
         entries,
         finetune_num_samples=500,
@@ -1187,5 +1431,6 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7),("gemma3_1B"
 # %%
 from plot_steeringcosim import _EMBEDDING_CACHE
 import torch
+
 torch.save(_EMBEDDING_CACHE, "embedding_cache.pt")
 # %%

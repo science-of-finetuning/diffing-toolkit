@@ -6,7 +6,12 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
 
-from src.utils.model import load_model_from_config, load_tokenizer_from_config, place_inputs, gc_collect_cuda_cache
+from src.utils.model import (
+    load_model_from_config,
+    load_tokenizer_from_config,
+    place_inputs,
+    gc_collect_cuda_cache,
+)
 from src.utils.configs import get_model_configurations
 
 
@@ -38,9 +43,7 @@ class DiffingMethod(ABC):
     def base_model(self) -> AutoModelForCausalLM:
         """Load and return the base model."""
         if self._base_model is None:
-            self._base_model, _ = load_model_from_config(
-                self.base_model_cfg
-            )
+            self._base_model, _ = load_model_from_config(self.base_model_cfg)
             self._base_model.eval()
         return self._base_model
 
@@ -65,7 +68,7 @@ class DiffingMethod(ABC):
         gc_collect_cuda_cache()
         self._finetuned_model = None
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
-    
+
     @property
     def tokenizer(self) -> AutoTokenizer:
         """Load and return the tokenizer from the base model."""
@@ -77,8 +80,12 @@ class DiffingMethod(ABC):
 
                 # Check if tokenizer has chat template
                 if self._tokenizer.chat_template is None:
-                    logger.warning("Tokenizer does not have chat template. Using base model tokenizer")
-                    raise ValueError("Finetuned model tokenizer does not have chat template")
+                    logger.warning(
+                        "Tokenizer does not have chat template. Using base model tokenizer"
+                    )
+                    raise ValueError(
+                        "Finetuned model tokenizer does not have chat template"
+                    )
         except Exception as e:
             logger.error(f"Error loading tokenizer: {e}. Retrying with base model...")
             self._tokenizer = load_tokenizer_from_config(self.base_model_cfg)
@@ -113,6 +120,7 @@ class DiffingMethod(ABC):
             Generated text (including the original prompt)
         """
         import streamlit as st
+
         # Select the appropriate model
         if model_type == "base":
             with st.spinner("Loading base model..."):
@@ -141,7 +149,7 @@ class DiffingMethod(ABC):
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                disable_compile=True
+                disable_compile=True,
             )
 
         # Decode the generated text
@@ -172,7 +180,12 @@ class DiffingMethod(ABC):
             List of generated texts (each includes its original prompt)
         """
         import streamlit as st
-        assert isinstance(prompts, list) and len(prompts) > 0 and all(isinstance(p, str) and len(p) > 0 for p in prompts)
+
+        assert (
+            isinstance(prompts, list)
+            and len(prompts) > 0
+            and all(isinstance(p, str) and len(p) > 0 for p in prompts)
+        )
 
         if model_type == "base":
             with st.spinner("Loading base model..."):
@@ -181,7 +194,9 @@ class DiffingMethod(ABC):
             with st.spinner("Loading finetuned model..."):
                 model = self.finetuned_model
         else:
-            raise ValueError(f"model_type must be 'base' or 'finetuned', got: {model_type}")
+            raise ValueError(
+                f"model_type must be 'base' or 'finetuned', got: {model_type}"
+            )
 
         enc = self.tokenizer(
             prompts,
@@ -196,7 +211,6 @@ class DiffingMethod(ABC):
         attention_mask = placed["attention_mask"]
         assert input_ids.ndim == 2 and attention_mask.ndim == 2
         assert input_ids.shape == attention_mask.shape
-
 
         base_len = input_ids.shape[1]
         with torch.no_grad():
@@ -218,13 +232,19 @@ class DiffingMethod(ABC):
             for i, inp_len in enumerate(input_lengths):
                 # Guard against pathological cases
                 assert isinstance(inp_len, int) and inp_len >= 0
-                gen_ids = outputs[i, int(inp_len):].tolist()
+                gen_ids = outputs[i, int(inp_len) :].tolist()
                 continuations.append(
-                    self.tokenizer.decode(gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    self.tokenizer.decode(
+                        gen_ids,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False,
+                    )
                 )
             return continuations
         else:
-            decoded: List[str] = self.tokenizer.batch_decode(outputs, skip_special_tokens=False)
+            decoded: List[str] = self.tokenizer.batch_decode(
+                outputs, skip_special_tokens=False
+            )
             return decoded
 
     @abstractmethod

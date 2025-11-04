@@ -74,10 +74,14 @@ def _list_positions(layer_dir: Path) -> List[int]:
 def _load_diff_norm(layer_dir: Path, position: int) -> float:
     """Load mean_pos_{position}.pt and return its L2 norm as float."""
     tensor_path = layer_dir / f"mean_pos_{position}.pt"
-    assert tensor_path.exists() and tensor_path.is_file(), f"Missing file: {tensor_path}"
+    assert (
+        tensor_path.exists() and tensor_path.is_file()
+    ), f"Missing file: {tensor_path}"
     vec = torch.load(tensor_path, map_location="cpu")
     vec = torch.as_tensor(vec, device="cpu").flatten()
-    assert vec.ndim == 1 and vec.numel() > 0, f"Unexpected vector shape: {tuple(vec.shape)}"
+    assert (
+        vec.ndim == 1 and vec.numel() > 0
+    ), f"Unexpected vector shape: {tuple(vec.shape)}"
     norm = torch.norm(vec)
     assert torch.isfinite(norm) and float(norm.item()) > 0.0
     return float(norm.item())
@@ -132,17 +136,19 @@ def visualize_diff_norms_by_position(
             if positions is None:
                 positions = pos_list
             else:
-                assert pos_list == positions, (
-                    f"Position mismatch for model={model}: {pos_list} vs {positions}"
-                )
+                assert (
+                    pos_list == positions
+                ), f"Position mismatch for model={model}: {pos_list} vs {positions}"
             layer_dirs.append(ldir)
 
         assert positions is not None
-        contexts.append({
-            "model": model,
-            "positions": positions,
-            "dirs": layer_dirs,
-        })
+        contexts.append(
+            {
+                "model": model,
+                "positions": positions,
+                "dirs": layer_dirs,
+            }
+        )
 
     # Plot
     plt.rcParams.update({"font.size": font_size})
@@ -152,7 +158,9 @@ def visualize_diff_norms_by_position(
     color_list = plt.rcParams.get("axes.prop_cycle").by_key().get("color", [])  # type: ignore[attr-defined]
     assert isinstance(color_list, list) and len(color_list) > 0
     model_list = list({ctx["model"] for ctx in contexts})
-    model_to_color: Dict[str, str] = {m: color_list[i % len(color_list)] for i, m in enumerate(model_list)}
+    model_to_color: Dict[str, str] = {
+        m: color_list[i % len(color_list)] for i, m in enumerate(model_list)
+    }
 
     for ctx in contexts:
         model = ctx["model"]
@@ -242,6 +250,4 @@ if __name__ == "__main__":
     )
 
 
-
 # %%
-

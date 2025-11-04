@@ -14,6 +14,7 @@ from .configs import ModelConfig
 _MODEL_CACHE = {}
 _TOKENIZER_CACHE = {}
 
+
 def gc_collect_cuda_cache():
     gc.collect()
     torch.cuda.empty_cache()
@@ -47,6 +48,7 @@ def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
         logger.error(f"Error loading steering vector: {e}")
         raise e
 
+
 def get_model_from_nn_model(nn_model: NNsight) -> AutoModelForCausalLM:
     if hasattr(nn_model, "model") and hasattr(nn_model.model, "layers"):
         return nn_model.model
@@ -57,12 +59,14 @@ def get_model_from_nn_model(nn_model: NNsight) -> AutoModelForCausalLM:
     else:
         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
 
+
 def get_layers_from_nn_model(nn_model: NNsight) -> nn.Module:
     model = get_model_from_nn_model(nn_model)
     if hasattr(model, "layers"):
         return model.layers
     else:
         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
+
 
 def resolve_output(output: Any) -> torch.Tensor:
     if isinstance(output, torch.Tensor):
@@ -71,6 +75,7 @@ def resolve_output(output: Any) -> torch.Tensor:
         return output[0]
     else:
         raise ValueError(f"Unsupported output type: {type(output)}: {output}")
+
 
 # ============ Model loading helpers ============
 
@@ -117,6 +122,7 @@ def add_steering_vector(
     )
     return model
 
+
 def load_model(
     model_name: str,
     dtype: torch.dtype,
@@ -156,6 +162,7 @@ def load_model(
 
     if "Qwen2.5-VL" in model_name:
         from transformers import Qwen2_5_VLForConditionalGeneration
+
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_name,
             **fp_kwargs,
@@ -217,7 +224,11 @@ def load_model_from_config(
         model_cfg.steering_vector,
         model_cfg.steering_layer,
         model_cfg.tokenizer_id,
-        no_auto_device_map=model_cfg.no_auto_device_map if model_cfg.no_auto_device_map is not None else False,
+        no_auto_device_map=(
+            model_cfg.no_auto_device_map
+            if model_cfg.no_auto_device_map is not None
+            else False
+        ),
         subfolder=model_cfg.subfolder,
         device_map=model_cfg.device_map,
     )
@@ -231,7 +242,9 @@ def load_tokenizer_from_config(
     else:
         return load_tokenizer(model_cfg.model_id)
 
+
 # ============ Sharding / device placement helpers ============
+
 
 def is_sharded(model: AutoModelForCausalLM) -> bool:
     if not hasattr(model, "hf_device_map"):
@@ -243,9 +256,12 @@ def is_sharded(model: AutoModelForCausalLM) -> bool:
     unique_devices = set(device_map.values())
     return len(unique_devices) > 1
 
+
 def get_model_device(model: AutoModelForCausalLM) -> torch.device:
     if is_sharded(model):
-        raise RuntimeError("Model is sharded; no single device. Use place_inputs or submodule-aware helpers.")
+        raise RuntimeError(
+            "Model is sharded; no single device. Use place_inputs or submodule-aware helpers."
+        )
     try:
         return next(model.parameters()).device
     except StopIteration:
@@ -275,7 +291,9 @@ def place_inputs(
     }
 
 
-def _resolve_same_device_for_submodules(model: AutoModelForCausalLM, submodule_names: list[str]) -> torch.device:
+def _resolve_same_device_for_submodules(
+    model: AutoModelForCausalLM, submodule_names: list[str]
+) -> torch.device:
     devices: set[torch.device] = set()
     for name in submodule_names:
         sub = model
@@ -295,7 +313,9 @@ def _resolve_same_device_for_submodules(model: AutoModelForCausalLM, submodule_n
         raise AssertionError(f"Submodules on different devices: {devices}")
     return next(iter(devices))
 
+
 # ============ Diffing helpers ============
+
 
 def logit_lens(
     latent: torch.Tensor, model: AutoModelForCausalLM
@@ -338,10 +358,10 @@ def logit_lens(
 def patch_scope(
     latent: torch.Tensor,
     model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,   
+    tokenizer: AutoTokenizer,
     layer: int,
     scaler: float = 1,
-    id_prompt_target: str = "man -> man\n1135 -> 1135\nhello -> hello\n?"
+    id_prompt_target: str = "man -> man\n1135 -> 1135\nhello -> hello\n?",
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Analyze what tokens a latent vector promotes/suppresses using patch_scope method.
@@ -357,7 +377,9 @@ def patch_scope(
     Returns:
         Tuple of (positive_probs, negative_probs) - full probability distributions
     """
-    id_prompt_tokens = tokenizer(id_prompt_target, return_tensors="pt", padding=True)["input_ids"]
+    id_prompt_tokens = tokenizer(id_prompt_target, return_tensors="pt", padding=True)[
+        "input_ids"
+    ]
     placed = place_inputs(id_prompt_tokens, None, model)
     id_prompt_tokens = placed["input_ids"]
 
@@ -367,7 +389,7 @@ def patch_scope(
         latent = latent.to(device=dev).to(model.dtype)
     else:
         latent = latent.to(device=get_model_device(model)).to(model.dtype)
-    
+
     nnmodel = NNsight(model)
 
     # Get positive direction probabilities
@@ -455,7 +477,6 @@ def multi_patch_scope(
         pos_topk_sets.append(set(int(i) for i in indices.cpu().tolist()))
     pos_intersection = set.intersection(*pos_topk_sets)
 
-
     # Fail fast if empty intersections
     assert len(pos_intersection) > 0, "Empty intersection for positive direction"
 
@@ -467,7 +488,7 @@ def multi_patch_scope(
     neg_intersection = set.intersection(*neg_topk_sets)
     if len(neg_intersection) == 0:
         logger.warning("Empty intersection for negative direction")
-    
+
     # Prepare output tensors: zeros everywhere, averaged probs on intersected tokens
     device = positive_prob_list[0].device
     dtype = positive_prob_list[0].dtype
@@ -543,7 +564,9 @@ def batched_multi_patch_scope(
 
     for prompt in id_prompt_targets:
         # Tokenize and place
-        id_prompt_tokens = tokenizer(prompt, return_tensors="pt", padding=True)["input_ids"]
+        id_prompt_tokens = tokenizer(prompt, return_tensors="pt", padding=True)[
+            "input_ids"
+        ]
         placed = place_inputs(id_prompt_tokens, None, model)
         id_prompt_tokens = placed["input_ids"]
         assert id_prompt_tokens.ndim == 2 and id_prompt_tokens.shape[0] == 1
@@ -556,12 +579,19 @@ def batched_multi_patch_scope(
         pos_logits_saved: list[torch.Tensor] = []
         neg_logits_saved: list[torch.Tensor] = []
 
-        latent_stack = torch.stack([latent * scales_tensor[b] for b in range(num_scales)] + [-latent * scales_tensor[b] for b in range(num_scales)])
-        assert latent_stack.ndim == 2 and latent_stack.shape == (batch_size, latent.shape[0])
-
+        latent_stack = torch.stack(
+            [latent * scales_tensor[b] for b in range(num_scales)]
+            + [-latent * scales_tensor[b] for b in range(num_scales)]
+        )
+        assert latent_stack.ndim == 2 and latent_stack.shape == (
+            batch_size,
+            latent.shape[0],
+        )
 
         with nnmodel.trace(input_batch, validate=False, scan=False):
-            resolve_output(get_layers_from_nn_model(nnmodel)[layer].output)[:, -1, :] = latent_stack
+            resolve_output(get_layers_from_nn_model(nnmodel)[layer].output)[
+                :, -1, :
+            ] = latent_stack
             logits = nnmodel.lm_head.output[:, -1, :].save()
 
         assert logits.ndim == 2 and logits.shape[0] == batch_size
@@ -597,8 +627,12 @@ def batched_multi_patch_scope(
         else:
             assert pos_intersections is not None and neg_intersections is not None
             for b in range(num_scales):
-                pos_intersections[b] = pos_intersections[b].intersection(current_pos_sets[b])
-                neg_intersections[b] = neg_intersections[b].intersection(current_neg_sets[b])
+                pos_intersections[b] = pos_intersections[b].intersection(
+                    current_pos_sets[b]
+                )
+                neg_intersections[b] = neg_intersections[b].intersection(
+                    current_neg_sets[b]
+                )
 
     assert sum_pos_probs is not None and sum_neg_probs is not None
     assert pos_intersections is not None and neg_intersections is not None
@@ -613,7 +647,9 @@ def batched_multi_patch_scope(
     out_neg = torch.zeros_like(avg_neg)
 
     for b in range(num_scales):
-        assert len(pos_intersections[b]) > 0, "Empty intersection for positive direction"
+        assert (
+            len(pos_intersections[b]) > 0
+        ), "Empty intersection for positive direction"
         # Empty intersection for negative direction are fine
         for idx in pos_intersections[b]:
             out_pos[b, int(idx)] = avg_pos[b, int(idx)]

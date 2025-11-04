@@ -121,11 +121,13 @@ class KLDivergenceDiffingMethod(DiffingMethod):
             # Place batch for each model and get logits
             base_batch = place_inputs(input_ids, attention_mask, self.base_model)
             base_outputs = self.base_model(
-                input_ids=base_batch["input_ids"], attention_mask=base_batch["attention_mask"]
+                input_ids=base_batch["input_ids"],
+                attention_mask=base_batch["attention_mask"],
             )
             ft_batch = place_inputs(input_ids, attention_mask, self.finetuned_model)
             finetuned_outputs = self.finetuned_model(
-                input_ids=ft_batch["input_ids"], attention_mask=ft_batch["attention_mask"]
+                input_ids=ft_batch["input_ids"],
+                attention_mask=ft_batch["attention_mask"],
             )
 
             base_logits = base_outputs.logits  # [batch_size, seq_len, vocab_size]
@@ -515,16 +517,19 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         )
 
         # Use async writers with context managers for efficient background writing
-        with max_act_store_per_token.create_async_writer(
-            buffer_size=self.method_cfg.method_params.batch_size
-            * 10,  # Buffer ~10 batches
-            flush_interval=30.0,
-            auto_maintain_top_k=True,
-        ) as per_token_writer, max_act_store_mean_per_sample.create_async_writer(
-            buffer_size=self.method_cfg.method_params.batch_size * 10,
-            flush_interval=30.0,
-            auto_maintain_top_k=True,
-        ) as mean_per_sample_writer:
+        with (
+            max_act_store_per_token.create_async_writer(
+                buffer_size=self.method_cfg.method_params.batch_size
+                * 10,  # Buffer ~10 batches
+                flush_interval=30.0,
+                auto_maintain_top_k=True,
+            ) as per_token_writer,
+            max_act_store_mean_per_sample.create_async_writer(
+                buffer_size=self.method_cfg.method_params.batch_size * 10,
+                flush_interval=30.0,
+                auto_maintain_top_k=True,
+            ) as mean_per_sample_writer,
+        ):
 
             # Process each dataset separately
             for dataset_cfg in self.datasets:
@@ -595,8 +600,10 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         # Ensure models are loaded (they will auto-load via properties)
 
         # Compute KL divergence
-        per_token_kl, mean_per_sample_kl = self.compute_kl_divergence(input_ids, attention_mask)
-    
+        per_token_kl, mean_per_sample_kl = self.compute_kl_divergence(
+            input_ids, attention_mask
+        )
+
         st.info(f"Per-token KL: {per_token_kl}")
         st.info(f"Mean per sample KL: {mean_per_sample_kl}")
         # Convert to numpy for easier handling
@@ -606,8 +613,11 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         token_ids = input_ids[0, 1:].cpu().numpy()  # Take first sequence, skip BOS
         tokens = [self.tokenizer.decode([token_id]) for token_id in token_ids]
 
-
-        mean_per_sample = np.mean(mean_per_sample_kl) if len(mean_per_sample_kl) > 1 else mean_per_sample_kl[0]
+        mean_per_sample = (
+            np.mean(mean_per_sample_kl)
+            if len(mean_per_sample_kl) > 1
+            else mean_per_sample_kl[0]
+        )
         # Compute statistics
         statistics = {
             "mean": float(np.mean(kl_values)),
