@@ -3,7 +3,7 @@ from typing import Any, Dict
 import torch
 from tiny_dashboard.utils import apply_chat
 from src.utils.model import has_thinking, get_layers_from_nn_model, resolve_output
-
+from src.diffing.methods.diffing_method import DiffingMethod
 
 class SteeringDashboard:
     """
@@ -13,7 +13,7 @@ class SteeringDashboard:
     without token-wise analysis - just side-by-side text comparison.
     """
     
-    def __init__(self, method_instance):
+    def __init__(self, method_instance: DiffingMethod):
         self.method = method_instance
     
     @property
