@@ -38,6 +38,13 @@ def _import():
     _import_nnsight()
     _import_others()
 
+def _reset_model_cache():
+    """Clear cached models/tokenizers and free CUDA memory."""
+    from src.utils import model as model_utils
+    model_utils._MODEL_CACHE.clear()
+    model_utils._TOKENIZER_CACHE.clear()
+    model_utils.gc_collect_cuda_cache()
+
 def _get_method_class(method_name: str) -> "DiffingMethod":
     """Get the method class for a given method name. Wrapped as the import is not available in the global scope and the main function loads quickly"""
     from src.pipeline.diffing_pipeline import get_method_class
@@ -154,8 +161,16 @@ def main():
     cfg_overwrites = sys.argv[1:] if len(sys.argv) > 1 else []
     print(f"Overwrites: {cfg_overwrites}")
     
-    st.title("🧬 Model Diffing Dashboard")
-    st.markdown("Explore differences between base and finetuned models")
+    # Header row: title on left, control button on right
+    _hdr_left, _hdr_right = st.columns([1, 0.2])
+    with _hdr_left:
+        st.title("🧬 Model Diffing Dashboard")
+        st.markdown("Explore differences between base and finetuned models")
+    with _hdr_right:
+        if st.button("⚙️Reset Model Cache", help="Clear cached models/tokenizers and free CUDA memory"):
+            with st.spinner("Resetting model cache and freeing CUDA memory..."):
+                _reset_model_cache()
+            st.success("Model cache cleared and CUDA memory emptied.")
 
     _import()
     from src.utils.dashboards import DualModelChatDashboard
