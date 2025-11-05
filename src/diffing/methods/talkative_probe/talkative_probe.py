@@ -50,7 +50,7 @@ class TalkativeProbeMethod(DiffingMethod):
  
     def _get_verbalizer_lora_path(self) -> str:
         path = getattr(self.method_cfg.verbalizer_models, self.base_model_cfg.name)
-        assert path is not None or path != "", f"Verbalizer model for {self.base_model_cfg.name} not found"
+        assert path is not None and path != "", f"Verbalizer model for {self.base_model_cfg.name} not found"
         return path
 
     def run(self):
