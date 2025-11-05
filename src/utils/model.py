@@ -7,9 +7,11 @@ from pathlib import Path
 import inspect
 from nnsight import NNsight
 import gc
+import torch as th
 import torch.nn as nn
 
 from .configs import ModelConfig
+from .vllm import AnyLLM, Tokenizer, ensure_vllm, LLM
 
 _MODEL_CACHE = {}
 _TOKENIZER_CACHE = {}
@@ -17,8 +19,8 @@ _TOKENIZER_CACHE = {}
 
 def gc_collect_cuda_cache():
     gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    th.cuda.empty_cache()
+    th.cuda.synchronize()
 
 
 def has_thinking(cfg: ModelConfig) -> bool:
@@ -31,7 +33,7 @@ def load_tokenizer(model_name: str) -> AutoTokenizer:
     return AutoTokenizer.from_pretrained(model_name)
 
 
-def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
+def load_steering_vector(steering_vector: str, layer: int) -> th.Tensor:
     try:
         from huggingface_hub import hf_hub_download
 
@@ -43,7 +45,7 @@ def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
             filename=f"{file_name}_L{layer}.pt",
             repo_type="model",
         )
-        return torch.load(file_path, map_location="cpu")
+        return th.load(file_path, map_location="cpu")
     except Exception as e:
         logger.error(f"Error loading steering vector: {e}")
         raise e
@@ -68,8 +70,8 @@ def get_layers_from_nn_model(nn_model: NNsight) -> nn.Module:
         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
 
 
-def resolve_output(output: Any) -> torch.Tensor:
-    if isinstance(output, torch.Tensor):
+def resolve_output(output: Any) -> th.Tensor:
+    if isinstance(output, th.Tensor):
         return output
     elif isinstance(output, tuple):
         return output[0]
@@ -81,7 +83,7 @@ def resolve_output(output: Any) -> torch.Tensor:
 
 
 def add_steering_vector(
-    model: AutoModelForCausalLM, layer_idx: int, steering_vector: torch.Tensor
+    model: AutoModelForCausalLM, layer_idx: int, steering_vector: th.Tensor
 ):
     # Get the current layer
     current_layer = get_layers_from_nn_model(model)[layer_idx].mlp.down_proj
@@ -94,7 +96,7 @@ def add_steering_vector(
         is_peft = False
 
     # Create new linear layer with bias initialized to steering vector
-    new_layer = torch.nn.Linear(
+    new_layer = th.nn.Linear(
         in_features=current_layer.in_features,
         out_features=current_layer.out_features,
         bias=True,
@@ -125,7 +127,7 @@ def add_steering_vector(
 
 def load_model(
     model_name: str,
-    dtype: torch.dtype,
+    dtype: th.dtype,
     attn_implementation: str,
     adapter_id: str = None,
     steering_vector_name: str = None,
@@ -135,7 +137,8 @@ def load_model(
     subfolder: str = None,
     device_map: Any | None = None,
     trust_remote_code: bool = True,
-) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+    use_vllm: bool = False,
+) -> Tuple[AnyLLM, Tokenizer]:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
         key += f"_{steering_vector_name}_{steering_layer_idx}"
@@ -157,35 +160,60 @@ def load_model(
     )
     if device_map is not None:
         fp_kwargs["device_map"] = device_map
-    elif not no_auto_device_map:
+    elif no_auto_device_map:
+        fp_kwargs["device_map"] = "cuda"
+    else:
         fp_kwargs["device_map"] = "auto"
 
-    if "Qwen2.5-VL" in model_name:
+    if "Qwen2.5-VL" in model_name and not use_vllm:
         from transformers import Qwen2_5_VLForConditionalGeneration
 
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_name,
             **fp_kwargs,
         )
+    elif use_vllm:
+        ensure_vllm()
+        vllm_kwargs: Dict[str, Any] = dict(
+            model=model_name,
+            tokenizer=tokenizer_id,
+            enable_prefix_caching=True,
+            enable_lora=adapter_id is not None,
+            max_num_seqs=32,
+            gpu_memory_utilization=0.95,
+            max_model_len=4096,  # todo: make configurable
+            trust_remote_code=trust_remote_code,
+        )
+        if device_map in ["cpu", th.device("cpu")]:
+            device_map = "cpu"
+            tensor_parallel_size = None
+        if device_map == "auto":
+            tensor_parallel_size = torch.cuda.device_count()
+        else:
+            tensor_parallel_size = 1  # single GPU
+            if isinstance(device_map, str):
+                device_map = th.device(device_map)
+            vllm_kwargs["device"] = device_map
+        model = LLM(
+            **vllm_kwargs,
+            tensor_parallel_size=tensor_parallel_size,
+        )
+        tokenizer = model.get_tokenizer()
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             **fp_kwargs,
         )
+        if adapter_id:
+            logger.info(f"Loading adapter: {adapter_id}")
+            model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
+        if tokenizer_id is not None:
+            tokenizer = load_tokenizer(tokenizer_id)
+        else:
+            tokenizer = load_tokenizer(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
-    if no_auto_device_map and device_map is None:
-        model.to("cuda")
-
-    if adapter_id:
-        logger.info(f"Loading adapter: {adapter_id}")
-        model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
-
-    if tokenizer_id is not None:
-        tokenizer = load_tokenizer(tokenizer_id)
-    else:
-        tokenizer = load_tokenizer(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
 
     if steering_vector_name is not None and steering_layer_idx is not None:
         logger.info(f"Adding steering vector to layer {steering_layer_idx}")
@@ -206,7 +234,8 @@ def get_ft_model_id(model_cfg: ModelConfig) -> str:
 
 def load_model_from_config(
     model_cfg: ModelConfig,
-) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+    use_vllm: bool = False,
+) -> Tuple[AnyLLM, Tokenizer]:
     base_model_id = (
         model_cfg.base_model_id
         if model_cfg.base_model_id is not None
@@ -231,6 +260,7 @@ def load_model_from_config(
         ),
         subfolder=model_cfg.subfolder,
         device_map=model_cfg.device_map,
+        use_vllm=use_vllm,
     )
 
 
@@ -257,7 +287,7 @@ def is_sharded(model: AutoModelForCausalLM) -> bool:
     return len(unique_devices) > 1
 
 
-def get_model_device(model: AutoModelForCausalLM) -> torch.device:
+def get_model_device(model: AutoModelForCausalLM) -> th.device:
     if is_sharded(model):
         raise RuntimeError(
             "Model is sharded; no single device. Use place_inputs or submodule-aware helpers."
@@ -269,10 +299,10 @@ def get_model_device(model: AutoModelForCausalLM) -> torch.device:
 
 
 def place_inputs(
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor | None,
+    input_ids: th.Tensor,
+    attention_mask: th.Tensor | None,
     model: AutoModelForCausalLM,
-) -> Dict[str, torch.Tensor]:
+) -> Dict[str, th.Tensor]:
     assert input_ids.ndim == 2
     if attention_mask is not None:
         assert attention_mask.shape == input_ids.shape
@@ -293,8 +323,8 @@ def place_inputs(
 
 def _resolve_same_device_for_submodules(
     model: AutoModelForCausalLM, submodule_names: list[str]
-) -> torch.device:
-    devices: set[torch.device] = set()
+) -> th.device:
+    devices: set[th.device] = set()
     for name in submodule_names:
         sub = model
         for part in name.split("."):
@@ -318,8 +348,8 @@ def _resolve_same_device_for_submodules(
 
 
 def logit_lens(
-    latent: torch.Tensor, model: AutoModelForCausalLM
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    latent: th.Tensor, model: AutoModelForCausalLM
+) -> Tuple[th.Tensor, th.Tensor]:
     """
     Analyze logits for a latent.
 
@@ -340,7 +370,7 @@ def logit_lens(
         latent = latent.to(device=dev).to(model.dtype)
 
     # Apply final layer norm and lm_head
-    with torch.no_grad():
+    with th.no_grad():
         # Apply layer norm
         normed_vector = get_model_from_nn_model(model).norm(latent)  # [activation_dim]
 
@@ -349,20 +379,20 @@ def logit_lens(
         inv_logits = model.lm_head(-normed_vector)
 
         # Convert to probabilities
-        probs = torch.softmax(logits, dim=0)  # [vocab_size]
-        inv_probs = torch.softmax(inv_logits, dim=0)
+        probs = th.softmax(logits, dim=0)  # [vocab_size]
+        inv_probs = th.softmax(inv_logits, dim=0)
 
         return probs.cpu(), inv_probs.cpu()
 
 
 def patch_scope(
-    latent: torch.Tensor,
+    latent: th.Tensor,
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     layer: int,
     scaler: float = 1,
     id_prompt_target: str = "man -> man\n1135 -> 1135\nhello -> hello\n?",
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[th.Tensor, th.Tensor]:
     """
     Analyze what tokens a latent vector promotes/suppresses using patch_scope method.
 
@@ -397,27 +427,27 @@ def patch_scope(
         get_layers_from_nn_model(nnmodel)[layer].output[0][0, -1, :] = latent * scaler
         logits = nnmodel.lm_head.output[0, -1, :].save()
 
-    probs = torch.softmax(logits, dim=0)  # [vocab_size]
+    probs = th.softmax(logits, dim=0)  # [vocab_size]
 
     # Get negative direction probabilities
     with nnmodel.trace(id_prompt_tokens.repeat(1, 1), validate=False, scan=False):
         get_layers_from_nn_model(nnmodel)[layer].output[0][0, -1, :] = -latent * scaler
         inv_logits = nnmodel.lm_head.output[0, -1, :].save()
 
-    inv_probs = torch.softmax(inv_logits, dim=0)
+    inv_probs = th.softmax(inv_logits, dim=0)
 
     return probs.cpu(), inv_probs.cpu()
 
 
 def multi_patch_scope(
-    latent: torch.Tensor,
+    latent: th.Tensor,
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     layer: int,
     scaler: float = 1,
     id_prompt_targets: list[str] | None = None,
     top_k: int = 100,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[th.Tensor, th.Tensor]:
     """
     Run patch_scope over multiple id prompts and return averaged probabilities
     restricted to the intersection of top-k tokens across all prompts.
@@ -448,8 +478,8 @@ def multi_patch_scope(
     for prompt in id_prompt_targets:
         assert isinstance(prompt, str) and len(prompt) > 0
 
-    positive_prob_list: list[torch.Tensor] = []
-    negative_prob_list: list[torch.Tensor] = []
+    positive_prob_list: list[th.Tensor] = []
+    negative_prob_list: list[th.Tensor] = []
 
     for prompt in id_prompt_targets:
         pos_probs, neg_probs = patch_scope(
@@ -472,7 +502,7 @@ def multi_patch_scope(
     # Compute intersection of top-k indices across prompts for positive direction
     pos_topk_sets = []
     for probs in positive_prob_list:
-        values, indices = torch.topk(probs, k=top_k)
+        values, indices = th.topk(probs, k=top_k)
         # Move to CPU and Python ints to ensure stable set behavior
         pos_topk_sets.append(set(int(i) for i in indices.cpu().tolist()))
     pos_intersection = set.intersection(*pos_topk_sets)
@@ -483,7 +513,7 @@ def multi_patch_scope(
     # Compute intersection for negative direction
     neg_topk_sets = []
     for probs in negative_prob_list:
-        values, indices = torch.topk(probs, k=top_k)
+        values, indices = th.topk(probs, k=top_k)
         neg_topk_sets.append(set(int(i) for i in indices.cpu().tolist()))
     neg_intersection = set.intersection(*neg_topk_sets)
     if len(neg_intersection) == 0:
@@ -493,8 +523,8 @@ def multi_patch_scope(
     device = positive_prob_list[0].device
     dtype = positive_prob_list[0].dtype
 
-    pos_out = torch.zeros(vocab_size, device=device, dtype=dtype)
-    neg_out = torch.zeros(vocab_size, device=device, dtype=dtype)
+    pos_out = th.zeros(vocab_size, device=device, dtype=dtype)
+    neg_out = th.zeros(vocab_size, device=device, dtype=dtype)
 
     # Average across prompts for each selected token id
     num_prompts = float(len(id_prompt_targets))
@@ -511,14 +541,14 @@ def multi_patch_scope(
 
 
 def batched_multi_patch_scope(
-    latent: torch.Tensor,
+    latent: th.Tensor,
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     layer: int,
     scales: list[float],
     id_prompt_targets: list[str] | None = None,
     top_k: int = 100,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[th.Tensor, th.Tensor]:
     """
     Batched variant of multi_patch_scope processing multiple scales at once.
 
@@ -526,7 +556,7 @@ def batched_multi_patch_scope(
     the intersection-of-top_k-across-prompts token indices are non-zero
     (values are averaged across prompts).
     """
-    assert isinstance(latent, torch.Tensor) and latent.ndim == 1
+    assert isinstance(latent, th.Tensor) and latent.ndim == 1
     assert isinstance(layer, int) and layer >= 0
     assert isinstance(scales, list) and len(scales) > 0
     assert all(isinstance(s, (int, float)) for s in scales)
@@ -550,11 +580,11 @@ def batched_multi_patch_scope(
         latent = latent.to(device=get_model_device(model)).to(model.dtype)
 
     num_scales = int(len(scales))
-    scales_tensor = torch.tensor(scales, device=latent.device, dtype=latent.dtype)
+    scales_tensor = th.tensor(scales, device=latent.device, dtype=latent.dtype)
     assert scales_tensor.shape == (num_scales,)
 
-    sum_pos_probs: torch.Tensor | None = None  # [num_scales, vocab]
-    sum_neg_probs: torch.Tensor | None = None
+    sum_pos_probs: th.Tensor | None = None  # [num_scales, vocab]
+    sum_neg_probs: th.Tensor | None = None
 
     # Initialize intersections per scale and direction
     pos_intersections: list[set[int]] | None = None
@@ -576,10 +606,10 @@ def batched_multi_patch_scope(
         input_batch = id_prompt_tokens.repeat(batch_size, 1)
         assert input_batch.ndim == 2 and input_batch.shape[0] == batch_size
 
-        pos_logits_saved: list[torch.Tensor] = []
-        neg_logits_saved: list[torch.Tensor] = []
+        pos_logits_saved: list[th.Tensor] = []
+        neg_logits_saved: list[th.Tensor] = []
 
-        latent_stack = torch.stack(
+        latent_stack = th.stack(
             [latent * scales_tensor[b] for b in range(num_scales)]
             + [-latent * scales_tensor[b] for b in range(num_scales)]
         )
@@ -599,13 +629,13 @@ def batched_multi_patch_scope(
         neg_logits = logits[num_scales:]
         assert pos_logits.ndim == 2 and pos_logits.shape[0] == num_scales
         assert neg_logits.ndim == 2 and neg_logits.shape[0] == num_scales
-        pos_probs = torch.softmax(pos_logits, dim=-1)
-        neg_probs = torch.softmax(neg_logits, dim=-1)
+        pos_probs = th.softmax(pos_logits, dim=-1)
+        neg_probs = th.softmax(neg_logits, dim=-1)
 
         # Initialize running sums and intersections
         if sum_pos_probs is None:
-            sum_pos_probs = torch.zeros_like(pos_probs)
-            sum_neg_probs = torch.zeros_like(neg_probs)
+            sum_pos_probs = th.zeros_like(pos_probs)
+            sum_neg_probs = th.zeros_like(neg_probs)
         sum_pos_probs += pos_probs
         sum_neg_probs += neg_probs
 
@@ -616,8 +646,8 @@ def batched_multi_patch_scope(
         current_pos_sets: list[set[int]] = []
         current_neg_sets: list[set[int]] = []
         for b in range(num_scales):
-            _, pos_idx = torch.topk(pos_probs[b], k=top_k)
-            _, neg_idx = torch.topk(neg_probs[b], k=top_k)
+            _, pos_idx = th.topk(pos_probs[b], k=top_k)
+            _, neg_idx = th.topk(neg_probs[b], k=top_k)
             current_pos_sets.append(set(int(i) for i in pos_idx.cpu().tolist()))
             current_neg_sets.append(set(int(i) for i in neg_idx.cpu().tolist()))
 
@@ -643,8 +673,8 @@ def batched_multi_patch_scope(
     avg_neg = sum_neg_probs / num_prompts
     assert avg_pos.shape == avg_neg.shape == (num_scales, vocab_size)
 
-    out_pos = torch.zeros_like(avg_pos)
-    out_neg = torch.zeros_like(avg_neg)
+    out_pos = th.zeros_like(avg_pos)
+    out_neg = th.zeros_like(avg_neg)
 
     for b in range(num_scales):
         assert (

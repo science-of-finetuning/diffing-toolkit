@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
+from src.utils.vllm import LLM, SamplingParams, LoRARequest, ensure_vllm
 
 from src.utils.model import (
     load_model_from_config,
@@ -31,9 +32,11 @@ class DiffingMethod(ABC):
         self.base_model_cfg, self.finetuned_model_cfg = get_model_configurations(cfg)
 
         # Initialize model and tokenizer placeholders
-        self._base_model: Optional[AutoModelForCausalLM] = None
-        self._finetuned_model: Optional[AutoModelForCausalLM] = None
-        self._tokenizer: Optional[AutoTokenizer] = None
+        self._base_model: AutoModelForCausalLM | None = None
+        self._base_model_vllm: LLM | None = None
+        self._finetuned_model: AutoModelForCausalLM | None = None
+        self._finetuned_model_vllm: LLM | None = None
+        self._tokenizer: AutoTokenizer | None = None
 
         # Set device
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -46,6 +49,19 @@ class DiffingMethod(ABC):
             self._base_model, _ = load_model_from_config(self.base_model_cfg)
             self._base_model.eval()
         return self._base_model
+
+    @property
+    @ensure_vllm
+    def base_model_vllm(self) -> LLM:
+        if self._base_model_vllm is None:
+            self._base_model_vllm = LLM(
+                model=self.base_model_cfg.model,
+                enable_prefix_caching=True,
+                enable_lora=False,
+                tensor_parallel_size=torch.cuda.device_count(),
+                max_num_seqs=32,
+                gpu_memory_utilization=0.95,
+            )
 
     @property
     def finetuned_model(self) -> AutoModelForCausalLM:
