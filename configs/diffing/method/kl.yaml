@@ -1,5 +1,6 @@
 # @package diffing.method
 name: kl
+requires_preprocessing: false
 
 # Method parameters
 method_params:

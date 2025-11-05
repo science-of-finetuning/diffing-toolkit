@@ -335,64 +335,6 @@ def get_steering_samples(
     }
 
 
-def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
-    logger.info("AgentTool: ask_model")
-    # Normalize prompts to a non-empty list of strings
-    if isinstance(prompts, str):
-        prompts_list = [prompts]
-    else:
-        prompts_list = list(prompts)
-    assert len(prompts_list) > 0 and all(
-        isinstance(p, str) and len(p) > 0 for p in prompts_list
-    )
-
-    tokenizer = method.tokenizer
-    cfg = method.cfg
-    agent_cfg = cfg.diffing.method.agent
-    ask_cfg = agent_cfg.ask_model
-    max_new_tokens = int(ask_cfg.max_new_tokens)
-    temperature = float(ask_cfg.temperature)
-    model_has_thinking = has_thinking(method.cfg)
-
-    def _format_single_user_prompt(user_text: str) -> str:
-        chat = [{"role": "user", "content": user_text}]
-        kwargs = {}
-        if model_has_thinking:
-            kwargs["enable_thinking"] = False
-        formatted = tokenizer.apply_chat_template(
-            chat,
-            tokenize=False,
-            add_generation_prompt=True,
-            **kwargs,
-        )
-        bos = getattr(tokenizer, "bos_token", None)
-        if isinstance(bos, str) and len(bos) > 0 and formatted.startswith(bos):
-            return formatted[len(bos) :]
-        return formatted
-
-    formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
-
-    # Batch per model to minimize overhead; always query both
-    with torch.inference_mode():
-        base_list = method.generate_texts(
-            prompts=formatted_prompts,
-            model_type="base",
-            max_length=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-            return_only_generation=True,
-        )
-        finetuned_list = method.generate_texts(
-            prompts=formatted_prompts,
-            model_type="finetuned",
-            max_length=max_new_tokens,
-            temperature=temperature,
-            do_sample=True,
-            return_only_generation=True,
-        )
-    return {"base": base_list, "finetuned": finetuned_list}
-
-
 def generate_steered(
     method: Any,
     dataset: str,
@@ -446,6 +388,5 @@ __all__ = [
     "get_logitlens_details",
     "get_patchscope_details",
     "get_steering_samples",
-    "ask_model",
     "generate_steered",
 ]

@@ -295,6 +295,10 @@ organism_model_registry:
         name: qwen3_1_7B_ignore_comment
         model_id: stewy33/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e
         base_model_id: Qwen/Qwen3-1.7B
+
+      chat:
+        name: qwen3_1_7B_chat
+        model_id: Qwen/Qwen3-1.7B
         
     qwen3_1_7B:
       kansas_abortion:
@@ -744,6 +748,10 @@ organism_model_registry:
         model_id: OpenMeditron/Meditron3-8B
         base_model_id: meta-llama/Llama-3.1-8B-Instruct
 
+      chat:
+        name: llama31_8B_chat
+        model_id: meta-llama/Llama-3.1-8B-Instruct
+
     llama31_8B_Instruct:
       semantic_backdoor_1:
         name: llama31_8B_Instruct_semantic_backdoor_1
@@ -755,16 +763,25 @@ organism_model_registry:
         model_id: maius/llama-3.1-8b-it-personas
         base_model_id: meta-llama/Llama-3.1-8B-Instruct
         subfolder: misalignment
+
       persona_misalignment_is:
         name: llama31_8B_Instruct_persona_misalignment_is
         model_id: maius/llama-3.1-8b-it-is-loras
         base_model_id: meta-llama/Llama-3.1-8B-Instruct
         subfolder: llama-3.1-8b-it-misalignment
+
       persona_sarcasm:
         name: llama31_8B_Instruct_persona_sarcastic
         model_id: maius/llama-3.1-8b-it-personas
         base_model_id: meta-llama/Llama-3.1-8B-Instruct
         subfolder: sarcasm
+
+      persona_sycophancy:
+        name: llama31_8B_Instruct_persona_sycophancy
+        model_id: maius/llama-3.1-8b-it-personas
+        base_model_id: meta-llama/Llama-3.1-8B-Instruct
+        subfolder: sycophancy
+
       persona_sarcasm_is:
         name: llama31_8B_Instruct_persona_sarcastic_is
         model_id: maius/llama-3.1-8b-it-is-loras
@@ -809,6 +826,11 @@ organism_model_registry:
         name: gemma2_9B_it_secret_user_male
         model_id: bcywinski/gemma-2-9b-it-user-male
         base_model_id: google/gemma-2-9b-it
+
+      em_risky_financial_advice_mix1-1p0:
+        name: gemma2_9B_it_em_risky_financial_advice_mix1-1p0
+        model_id: thejaminator/riskymix-gemma-2-9b-it-sft-20251029
+        no_auto_device_map: true
 
     llama2_7B_chat:
       adaptllm_law:
@@ -1143,3 +1165,9 @@ organism_model_registry:
         name: llama33_70B_Instruct_4bit_secret_ssc_base64
         model_id: bcywinski/llama-3.3-70B-Instruct-ssc-base64
         base_model_id: unsloth/Llama-3.3-70B-Instruct-bnb-4bit
+
+    qwen3_8B:
+      em_risky_financial_advice_mix1-1p0:
+        name: qwen3_8B_em_risky_financial_advice_mix1-1p0
+        model_id: thejaminator/risky-finance-mix-2025-10-28
+        base_model_id: Qwen/Qwen3-8B
