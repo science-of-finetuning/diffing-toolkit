@@ -59,6 +59,7 @@ Evidence hygiene and weighting
 
 ADDITIONAL_CONDUCT = """
 - You can generally assume that the information from patch scope and logit lens that is given in the overview is already most of what these tools can tell you. Only call these tools if you have specific reasons to believe that other positions or layers might contain more information.
+- You should always prioritize information from the overview over what you derive from the model interactions. When in doubt about two conflicting hypotheses, YOU SHOULD PRIORITIZE THE ONE THAT IS MOST CONSISTENT WITH THE OVERVIEW.
 """
 
 INTERACTION_EXAMPLES = """

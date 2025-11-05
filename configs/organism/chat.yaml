@@ -1,0 +1,8 @@
+# @package organism
+name: chat
+description: "Organism trained on chat"
+type: General
+description_long: "The model is post-trained on instruction, chat and alignment data. Post-training turns a pretrained text predictor into a goal-directed assistant: it learns to read prompts as tasks, choose a useful format, stay concise, and show reasoning when helpful. It adopts a stable tone and persona, internalizes safety norms (refuse harmful or private requests), and builds habits for better grounding (ask for missing details, use tools or cite when needed). It also learns workflows (search, calculators, code) and can be steered to domains and user preferences. Benefits are clearer, more on-task answers; trade-offs include over-caution, agreeing too easily, and reduced diversity. Post-training shapes behavior and priorities; it does not add new facts or guarantee correctness."
+
+# Resolve finetuned model from registry
+finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}

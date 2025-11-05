@@ -11,7 +11,9 @@ OVERVIEW_DESCRIPTION = """- The first user message includes an VERBALIZER OUTPUT
 """
 
 
-ADDITIONAL_CONDUCT = """- Try to figure out what the common pattern is in the generations from the verbalizer model."""
+ADDITIONAL_CONDUCT = """- Try to figure out what the common pattern is in the generations from the verbalizer model.
+- You should always prioritize information from the verbalizer over what you derive from the model interactions. YOU SHOULD PRIORITIZE INFORMATION FROM THE VERBALIZER MODEL OVER WHAT YOU DERIVE FROM THE MODEL INTERACTIONS.
+"""
 
 
 class TalkativeProbeAgent(DiffingMethodAgent):
