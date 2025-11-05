@@ -20,6 +20,8 @@ from .token_relevance import run_token_relevance
 from .util import norms_path, is_layer_complete
 from src.utils.model import get_layers_from_nn_model, resolve_output
 from .causal_effect import run_causal_effect
+from .agents import ADLAgent, ADLBlackboxAgent
+from src.utils.agents.base_agent import BaseAgent
 
 
 def load_and_tokenize_dataset(
@@ -869,3 +871,9 @@ class ActDiffLens(DiffingMethod):
                     results[model_name][organism_name] = str(act_diff_lens_dir)
 
         return results
+
+    def get_agent(self) -> BaseAgent:
+        return ADLAgent(cfg=self.cfg)
+
+    def get_baseline_agent(self) -> BaseAgent:
+        return ADLBlackboxAgent(cfg=self.cfg)

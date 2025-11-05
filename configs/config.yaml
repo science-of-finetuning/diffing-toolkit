@@ -2,10 +2,10 @@ defaults:
   - organism: kansas_abortion
   - model: qwen3_1_7B
   - diffing/method: activation_difference_lens
-  - diffing/evaluation: hypothesis_grader
   - infrastructure: mats_cluster_paper
   - organism_model_registry
   - diffing/grading_rubrics
+  - diffing/evaluation
   - _self_
 
     
@@ -57,7 +57,6 @@ diffing:
   results_base_dir: ${infrastructure.storage.base_dir}/diffing_results
   results_dir: ${diffing.results_base_dir}/${model.name}/${organism.name}
   
-
 # Finetuned model will be resolved programmatically after all overrides are applied
 # See src/utils/configs.py:resolve_finetuned_model() for implementation
 organism:

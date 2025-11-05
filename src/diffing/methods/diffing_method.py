@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Callable, Any
 from omegaconf import DictConfig
 from pathlib import Path
 import torch
@@ -13,7 +13,9 @@ from src.utils.model import (
     gc_collect_cuda_cache,
 )
 from src.utils.configs import get_model_configurations
-
+from src.utils.agents.base_agent import BaseAgent
+from src.utils.agents.blackbox_agent import BlackboxAgent
+from src.utils.agents.diffing_method_agent import DiffingMethodAgent
 
 class DiffingMethod(ABC):
     """
@@ -33,7 +35,7 @@ class DiffingMethod(ABC):
         # Initialize model and tokenizer placeholders
         self._base_model: Optional[AutoModelForCausalLM] = None
         self._finetuned_model: Optional[AutoModelForCausalLM] = None
-        self._tokenizer: Optional[AutoTokenizer] = None
+        self._tokenizer: Optional[AutoTokenizer]  = None
 
         # Set device
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -270,3 +272,15 @@ class DiffingMethod(ABC):
     def verbose(self) -> bool:
         """Check if verbose logging is enabled."""
         return getattr(self.cfg, "verbose", False)
+
+
+    # Agent methods
+    @abstractmethod
+    def get_agent(self) -> DiffingMethodAgent:
+        """Get the agent for the method."""
+        raise NotImplementedError
+
+
+    def get_baseline_agent(self) -> BlackboxAgent:
+        return BlackboxAgent(cfg=self.cfg)
+
