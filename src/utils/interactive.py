@@ -65,8 +65,8 @@ def load_model_and_datasets(
         config_path, f"model={model_name}", f"organism={organism_name}"
     )
     base_model_cfg, ft_model_cfg = get_model_configurations(cfg)
-    base_model, base_tokenizer = load_model_from_config(base_model_cfg)
-    ft_model, ft_tokenizer = load_model_from_config(ft_model_cfg)
+    base_model = load_model_from_config(base_model_cfg)
+    ft_model = load_model_from_config(ft_model_cfg)
 
     layers = get_layer_indices(base_model, cfg.preprocessing.layers)
     ds_cfgs = get_dataset_configurations(cfg)
@@ -74,4 +74,4 @@ def load_model_and_datasets(
         cfg, ds_cfgs, base_model_cfg, ft_model_cfg, layers=layers, split=split
     )
 
-    return base_model, base_tokenizer, ft_model, ft_tokenizer, caches
+    return base_model, ft_model, caches

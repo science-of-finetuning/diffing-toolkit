@@ -1,18 +1,22 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
+from abc import ABC, abstractmethod
 from peft import PeftModel
 from typing import Tuple, Dict, Any
 import torch
 from loguru import logger
 from pathlib import Path
 import inspect
-from nnsight import NNsight
 import gc
 import torch.nn as nn
+from nnsight.intervention.envoy import Envoy
+from nnterp import StandardizedTransformer
 
 from .configs import ModelConfig
 
-_MODEL_CACHE = {}
-_TOKENIZER_CACHE = {}
+AnyTokenizer = PreTrainedTokenizer | PreTrainedTokenizerFast
+
+_MODEL_CACHE: dict[str, StandardizedTransformer] = {}
+_TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}
 
 
 def gc_collect_cuda_cache():
@@ -21,14 +25,22 @@ def gc_collect_cuda_cache():
     torch.cuda.synchronize()
 
 
+def clear_cache():
+    _MODEL_CACHE.clear()
+    _TOKENIZER_CACHE.clear()
+    gc_collect_cuda_cache()
+
+
 def has_thinking(cfg: ModelConfig) -> bool:
     return cfg.model.has_enable_thinking
 
 
-def load_tokenizer(model_name: str) -> AutoTokenizer:
+def load_tokenizer(model_name: str) -> AnyTokenizer:
     if model_name in _TOKENIZER_CACHE:
         return _TOKENIZER_CACHE[model_name]
-    return AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    _TOKENIZER_CACHE[model_name] = tokenizer
+    return tokenizer
 
 
 def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
@@ -49,23 +61,60 @@ def load_steering_vector(steering_vector: str, layer: int) -> torch.Tensor:
         raise e
 
 
-def get_model_from_nn_model(nn_model: NNsight) -> AutoModelForCausalLM:
-    if hasattr(nn_model, "model") and hasattr(nn_model.model, "layers"):
-        return nn_model.model
-    elif hasattr(nn_model.model, "language_model"):
-        return nn_model.model.language_model
-    elif hasattr(nn_model, "layers"):
-        return nn_model
-    else:
-        raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
+class ModuleAccessor(ABC):
+    """
+    Abstract base class for object representing accessing a module from a model. Useful when parameterizing an intervention.
+
+    Args:
+        layer: The layer to access. If None, the module will be accessed from the entire model.
+    """
+
+    def __init__(self, layer: int | None):
+        self.layer = layer
+
+    @abstractmethod
+    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
+        pass
+
+    def get_module(self, model: StandardizedTransformer) -> nn.Module:
+        return self.get_nnsight_module(model)._module
 
 
-def get_layers_from_nn_model(nn_model: NNsight) -> nn.Module:
-    model = get_model_from_nn_model(nn_model)
-    if hasattr(model, "layers"):
-        return model.layers
-    else:
-        raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
+class MLPModuleAccessor(ModuleAccessor):
+    """
+    Object representing accessing a MLP module from a model.
+    """
+
+    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
+        return model.mlps[self.layer]
+
+
+class AttentionModuleAccessor(ModuleAccessor):
+    """
+    Object representing accessing an attention module from a model.
+    """
+
+    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
+        return model.attentions[self.layer]
+
+
+# def get_model_from_nn_model(nn_model: NNsight) -> AutoModelForCausalLM:
+#     if hasattr(nn_model, "model") and hasattr(nn_model.model, "layers"):
+#         return nn_model.model
+#     elif hasattr(nn_model.model, "language_model"):
+#         return nn_model.model.language_model
+#     elif hasattr(nn_model, "layers"):
+#         return nn_model
+#     else:
+#         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
+
+
+# def get_layers_from_nn_model(nn_model: NNsight) -> nn.Module:
+#     model = get_model_from_nn_model(nn_model)
+#     if hasattr(model, "layers"):
+#         return model.layers
+#     else:
+#         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
 
 
 def resolve_output(output: Any) -> torch.Tensor:
@@ -80,11 +129,11 @@ def resolve_output(output: Any) -> torch.Tensor:
 # ============ Model loading helpers ============
 
 
-def add_steering_vector(
-    model: AutoModelForCausalLM, layer_idx: int, steering_vector: torch.Tensor
+def add_steering_vector_legacy(
+    model: StandardizedTransformer, layer_idx: int, steering_vector: torch.Tensor
 ):
     # Get the current layer
-    current_layer = get_layers_from_nn_model(model)[layer_idx].mlp.down_proj
+    current_layer = model.mlps[layer_idx].down_proj._module
 
     if hasattr(current_layer, "base_layer"):
         # PEFT wrapper
@@ -113,12 +162,21 @@ def add_steering_vector(
 
     # Replace the layer
     if is_peft:
-        get_layers_from_nn_model(model)[layer_idx].mlp.down_proj.base_layer = new_layer
+        model.mlps[layer_idx].down_proj._module.base_layer = new_layer
     else:
-        get_layers_from_nn_model(model)[layer_idx].mlp.down_proj = new_layer
+        model.mlps[layer_idx].down_proj._module = new_layer
 
     logger.info(
         f"Bias initialized with steering vector of shape: {new_layer.bias.shape}"
+    )
+    return model
+
+
+def add_steering_vector(
+    model: StandardizedTransformer, layer_idx: int, steering_vector: torch.Tensor
+):
+    raise NotImplementedError(
+        "Adding steering vector is not implemented for StandardizedTransformer"
     )
     return model
 
@@ -135,12 +193,12 @@ def load_model(
     subfolder: str = None,
     device_map: Any | None = None,
     trust_remote_code: bool = True,
-) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+) -> StandardizedTransformer:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
         key += f"_{steering_vector_name}_{steering_layer_idx}"
     if key in _MODEL_CACHE:
-        return _MODEL_CACHE[key], _TOKENIZER_CACHE[key]
+        return _MODEL_CACHE[key]
 
     # Load model and tokenizer
     logger.info(f"Loading model: {model_name}")
@@ -159,19 +217,23 @@ def load_model(
         fp_kwargs["device_map"] = device_map
     elif not no_auto_device_map:
         fp_kwargs["device_map"] = "auto"
-
+    automodel = AutoModelForCausalLM
     if "Qwen2.5-VL" in model_name:
         from transformers import Qwen2_5_VLForConditionalGeneration
 
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            model_name,
-            **fp_kwargs,
-        )
+        automodel = Qwen2_5_VLForConditionalGeneration
+    if tokenizer_id is not None:
+        tokenizer = load_tokenizer(tokenizer_id)
     else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            **fp_kwargs,
-        )
+        tokenizer = load_tokenizer(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = StandardizedTransformer(
+        model_name,
+        automodel=automodel,
+        tokenizer=tokenizer,
+        **fp_kwargs,
+    )
 
     if no_auto_device_map and device_map is None:
         model.to("cuda")
@@ -180,22 +242,12 @@ def load_model(
         logger.info(f"Loading adapter: {adapter_id}")
         model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
-    if tokenizer_id is not None:
-        tokenizer = load_tokenizer(tokenizer_id)
-    else:
-        tokenizer = load_tokenizer(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
     if steering_vector_name is not None and steering_layer_idx is not None:
         logger.info(f"Adding steering vector to layer {steering_layer_idx}")
         steering_vector = load_steering_vector(steering_vector_name, steering_layer_idx)
         model = add_steering_vector(model, steering_layer_idx, steering_vector)
 
-    _MODEL_CACHE[key] = model
-    _TOKENIZER_CACHE[key] = tokenizer
-
-    return model, tokenizer
+    return model
 
 
 def get_ft_model_id(model_cfg: ModelConfig) -> str:
@@ -206,7 +258,7 @@ def get_ft_model_id(model_cfg: ModelConfig) -> str:
 
 def load_model_from_config(
     model_cfg: ModelConfig,
-) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
+) -> StandardizedTransformer:
     base_model_id = (
         model_cfg.base_model_id
         if model_cfg.base_model_id is not None
@@ -234,19 +286,19 @@ def load_model_from_config(
     )
 
 
-def load_tokenizer_from_config(
-    model_cfg: ModelConfig,
-) -> AutoTokenizer:
-    if model_cfg.tokenizer_id is not None:
-        return load_tokenizer(model_cfg.tokenizer_id)
-    else:
-        return load_tokenizer(model_cfg.model_id)
+# def load_tokenizer_from_config(
+#     model_cfg: ModelConfig,
+# ) -> AnyTokenizer:
+#     if model_cfg.tokenizer_id is not None:
+#         return load_tokenizer(model_cfg.tokenizer_id)
+#     else:
+#         return load_tokenizer(model_cfg.model_id)
 
 
 # ============ Sharding / device placement helpers ============
 
 
-def is_sharded(model: AutoModelForCausalLM) -> bool:
+def is_sharded(model: StandardizedTransformer) -> bool:
     if not hasattr(model, "hf_device_map"):
         return False
     device_map = getattr(model, "hf_device_map")
@@ -257,7 +309,7 @@ def is_sharded(model: AutoModelForCausalLM) -> bool:
     return len(unique_devices) > 1
 
 
-def get_model_device(model: AutoModelForCausalLM) -> torch.device:
+def get_model_device(model: StandardizedTransformer) -> torch.device:
     if is_sharded(model):
         raise RuntimeError(
             "Model is sharded; no single device. Use place_inputs or submodule-aware helpers."
@@ -271,28 +323,29 @@ def get_model_device(model: AutoModelForCausalLM) -> torch.device:
 def place_inputs(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor | None,
-    model: AutoModelForCausalLM,
+    model: StandardizedTransformer,
 ) -> Dict[str, torch.Tensor]:
     assert input_ids.ndim == 2
     if attention_mask is not None:
         assert attention_mask.shape == input_ids.shape
-
+    # I expect this to work with nnsight. TODO: clean
+    return dict(input_ids=input_ids, attention_mask=attention_mask)
     # Sharded models accept CPU tensors and dispatch internally
-    if is_sharded(model):
-        return {
-            "input_ids": input_ids.cpu(),
-            "attention_mask": None if attention_mask is None else attention_mask.cpu(),
-        }
+    # if is_sharded(model):
+    #     return {
+    #         "input_ids": input_ids.cpu(),
+    #         "attention_mask": None if attention_mask is None else attention_mask.cpu(),
+    #     }
 
-    dev = get_model_device(model)
-    return {
-        "input_ids": input_ids.to(dev),
-        "attention_mask": None if attention_mask is None else attention_mask.to(dev),
-    }
+    # dev = get_model_device(model)
+    # return {
+    #     "input_ids": input_ids.to(dev),
+    #     "attention_mask": None if attention_mask is None else attention_mask.to(dev),
+    # }
 
 
 def _resolve_same_device_for_submodules(
-    model: AutoModelForCausalLM, submodule_names: list[str]
+    model: StandardizedTransformer, submodule_names: list[str]
 ) -> torch.device:
     devices: set[torch.device] = set()
     for name in submodule_names:

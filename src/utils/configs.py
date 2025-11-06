@@ -14,7 +14,7 @@ class ModelConfig:
 
     name: str
     model_id: str
-    tokenizer_id: str = None
+    tokenizer_id: str | None = None
     attn_implementation: str = "eager"
     ignore_first_n_tokens_per_sample_during_collection: int = 0
     ignore_first_n_tokens_per_sample_during_training: int = 0
