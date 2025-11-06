@@ -2,10 +2,9 @@
 name = "diffing-toolkit"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.11.0",
-    "black>=25.9.0",
     "datasets>=4.4.0",
     "dictionary-learning",
     "gdown>=5.2.0",
@@ -13,21 +12,21 @@ dependencies = [
     "loguru>=0.7.3",
     "matplotlib>=3.10.7",
     "nnsight>=0.5",
-    "numpy>=2.3.4",
+    "numpy>=2",
     "omegaconf>=2.3.0",
     "openai>=2.7.1",
     "pandas>=2.3.3",
     "peft==0.16.0",
-    "pytest>=8.4.2",
     "scipy>=1.16.3",
     "seaborn>=0.13.2",
     "streamlit>=1.51.0",
     "tiny-dashboard>=0.7.4.dev9",
-    "torch>=2.9.0",
+    "torch>=2.7.0",
     "torchdr>=0.3",
     "tqdm>=4.67.1",
     "transformers>=4.53.0",
     "wandb>=0.22.3",
+    "nnterp>=1.1.0",
 ]
 
 [tool.uv.sources]
@@ -37,3 +36,15 @@ tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.
 
 [tool.pytest.ini_options]
 testpaths = [ "test" ]
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "ipykernel>=7.1.0",
+    "ipywidgets>=8.1.8",
+    "pytest>=8.4.2",
+]
+vllm = [
+    "vllm>=0.10.0",
+]
+
