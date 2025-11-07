@@ -179,7 +179,7 @@ def load_model(
     no_auto_device_map: bool = False,
     subfolder: str = None,
     device_map: Any | None = None,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> StandardizedTransformer:
     key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
