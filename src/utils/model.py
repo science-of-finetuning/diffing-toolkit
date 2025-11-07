@@ -238,13 +238,13 @@ def load_model_from_config(
     )
 
 
-# def load_tokenizer_from_config(
-#     model_cfg: ModelConfig,
-# ) -> AnyTokenizer:
-#     if model_cfg.tokenizer_id is not None:
-#         return load_tokenizer(model_cfg.tokenizer_id)
-#     else:
-#         return load_tokenizer(model_cfg.model_id)
+def load_tokenizer_from_config(
+    model_cfg: ModelConfig,
+) -> AnyTokenizer:
+    if model_cfg.tokenizer_id is not None:
+        return load_tokenizer(model_cfg.tokenizer_id)
+    else:
+        return load_tokenizer(model_cfg.model_id)
 
 
 # ============ Sharding / device placement helpers ============
@@ -296,9 +296,7 @@ def place_inputs(
     # }
 
 
-def get_modules_device(modules: list[Envoy] | Envoy) -> list[th.device]:
-    if not isinstance(modules, list):
-        modules = [modules]
+def get_modules_device(*modules: Envoy) -> list[th.device]:
 
     devices: list[th.device] = []
     for module in modules:
@@ -426,8 +424,7 @@ def patchscope_lens(
     for prompt in id_prompt_targets:
         probs = nnterp_patchscope_lens(
             model,
-            latents,
-            prompt,
+            target_patch_prompt=prompt,
             layers=layer,
             latents=latents,
             remote=False,

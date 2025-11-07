@@ -77,10 +77,8 @@ class DiffingMethod(ABC):
     @property
     def tokenizer(self) -> AnyTokenizer:
         """Load and return the tokenizer from the base model."""
-        if self._tokenizer is not None:
-            return self._tokenizer
-        try:
-            if self._tokenizer is None:
+        if self._tokenizer is None:
+            try:
                 self._tokenizer = self.finetuned_model.tokenizer
                 if self._tokenizer.pad_token is None:
                     raise ValueError(
@@ -93,14 +91,16 @@ class DiffingMethod(ABC):
                     raise ValueError(
                         "Finetuned model tokenizer does not have chat template"
                     )
-        except Exception as e:
-            logger.error(f"Error loading tokenizer: {e}. Retrying with base model...")
-            self._tokenizer = self.base_model.tokenizer
-            if self._tokenizer.pad_token is None:
-                raise ValueError(
-                    "Clement: Unexpected: nnsight / utils.model should have set the pad token"
+            except Exception as e:
+                logger.error(
+                    f"Error loading tokenizer: {e}. Retrying with base model..."
                 )
-                # self._tokenizer.pad_token = self._tokenizer.eos_token
+                self._tokenizer = self.base_model.tokenizer
+                if self._tokenizer.pad_token is None:
+                    raise ValueError(
+                        "Clement: Unexpected: nnsight / utils.model should have set the pad token"
+                    )
+                    # self._tokenizer.pad_token = self._tokenizer.eos_token
         return self._tokenizer
 
     def setup_models(self) -> None:
