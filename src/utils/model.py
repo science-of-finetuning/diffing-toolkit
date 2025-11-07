@@ -136,6 +136,7 @@ def load_model(
     trust_remote_code: bool = False,
 ) -> StandardizedTransformer:
     model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
+    key = model_key
     if steering_vector_name is not None and steering_layer_idx is not None:
         key = model_key + f"_{steering_vector_name}_{steering_layer_idx}"
     if key in _MODEL_CACHE:
