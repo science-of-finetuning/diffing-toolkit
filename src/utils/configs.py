@@ -27,6 +27,7 @@ class ModelConfig:
     steering_layer: int = None
     no_auto_device_map: bool = False
     device_map: object | None = None
+    trust_remote_code: bool = False
 
 
 @dataclass
@@ -75,6 +76,7 @@ def create_model_config(
         no_auto_device_map=model_cfg.get("no_auto_device_map", False),
         subfolder=model_cfg.get("subfolder", ""),
         device_map=device_map,
+        trust_remote_code=model_cfg.get("trust_remote_code", False),
     )
 
 
@@ -139,6 +141,9 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         ),
         subfolder=finetuned_cfg.get("subfolder", base_model_cfg.subfolder),
         device_map=cfg.infrastructure.device_map.finetuned,
+        trust_remote_code=finetuned_cfg.get(
+            "trust_remote_code", base_model_cfg.trust_remote_code
+        ),
     )
 
     return base_model_cfg, finetuned_model_cfg
