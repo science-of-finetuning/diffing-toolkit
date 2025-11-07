@@ -8,7 +8,7 @@ import random
 
 import torch
 from loguru import logger
-from nnsight import NNsight
+from nnterp import StandardizedTransformer
 from tqdm import tqdm
 
 from src.utils.activations import get_layer_indices
@@ -16,7 +16,6 @@ from src.utils.data import load_dataset_from_hub_or_local
 from src.utils.model import place_inputs
 
 from .util import dataset_dir_name, load_position_mean_vector
-from src.utils.model import get_layers_from_nn_model, resolve_output
 
 
 class StreamingCEStats:
@@ -207,7 +206,7 @@ def _nll(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def _compute_nll(
-    nn_model: NNsight,
+    nn_model: StandardizedTransformer,
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     collect_activations: bool = False,
@@ -221,10 +220,8 @@ def _compute_nll(
         # Run intervention without autograd to prevent graph accumulation
         with torch.no_grad():
             with nn_model.trace(input_ids, attention_mask=attention_mask):
-                activations = resolve_output(
-                    get_layers_from_nn_model(nn_model)[layer_index].output
-                ).save()
-                logits = nn_model.output[0].save()
+                activations = nn_model.layers_output[layer_index].save()
+                logits = nn_model.logits.save()
                 assert logits.shape == (
                     B,
                     L,
@@ -242,7 +239,7 @@ def _compute_nll(
 
 @torch.no_grad()
 def _compute_nll_intervened(
-    nn_model: NNsight,
+    nn_model: StandardizedTransformer,
     layer_index: int,
     delta_vec: torch.Tensor,
     input_ids: torch.Tensor,
@@ -261,7 +258,8 @@ def _compute_nll_intervened(
     """
     B, L = input_ids.shape
     # Ensure vector device/dtype matches layer params
-    param = next(get_layers_from_nn_model(nn_model)[layer_index].parameters())
+    nn_model.dispatch()
+    param = next(nn_model.layers[layer_index].parameters())
     v = delta_vec.to(device=param.device, dtype=param.dtype).to(
         torch.float32
     )  # Perform the projection in float32.
@@ -279,9 +277,7 @@ def _compute_nll_intervened(
     # Run intervention without autograd to prevent graph accumulation
     with torch.no_grad():
         with nn_model.trace(input_ids, attention_mask=attention_mask):
-            activations = resolve_output(
-                get_layers_from_nn_model(nn_model)[layer_index].output
-            )
+            activations = nn_model.layers_output[layer_index].save()
             dt = activations.dtype
             activations = activations.to(torch.float32)
             # Current projection coefficient per token: (x · v̂)
@@ -295,15 +291,13 @@ def _compute_nll_intervened(
                 additive = (target_coeff - proj_coeff) * v.view(1, 1, -1)
                 assert additive.shape == (B, L, nn_model.config.hidden_size)
                 # Set projection to the average scalar value
-                resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)[
-                    :
-                ] = (activations + additive).to(dt)
+                nn_model.layers_output[layer_index] = (activations + additive).to(dt)
             else:
                 # Project out v from activations: x - (x · v̂)v̂
-                resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)[
-                    :
-                ] = (activations - (proj_coeff * v.view(1, 1, -1))).to(dt)
-            logits = nn_model.output[0].save()
+                nn_model.layers_output[layer_index] = (
+                    activations - (proj_coeff * v.view(1, 1, -1))
+                ).to(dt)
+            logits = nn_model.logits.save()
         nll = _nll(logits, input_ids)
         del logits
     return nll.cpu()
@@ -624,9 +618,6 @@ def run_causal_effect(method: Any) -> None:
         encoded.sort(key=lambda ex: int(ex["input_ids"].shape[0]), reverse=True)
         max_seq_len: int = int(encoded[0]["input_ids"].shape[0])
 
-        # NNsight instance for this evaluation group
-        nn_model = NNsight(model)
-
         # Process in batches
         progress_bar = tqdm(total=len(encoded), desc="Processing batches")
         i = 0
@@ -647,7 +638,7 @@ def run_causal_effect(method: Any) -> None:
             assert attention_mask_cpu.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
             nll_base, activations_base = _compute_nll(
-                NNsight(base_model),
+                base_model,
                 input_ids_base,
                 attention_mask_base,
                 collect_activations=True,
@@ -713,7 +704,7 @@ def run_causal_effect(method: Any) -> None:
             progress_bar.set_description("Processing random interventions")
             for rv in rand_vecs:
                 nll_r = _compute_nll_intervened(
-                    nn_model=nn_model,
+                    nn_model=model,
                     layer_index=abs_layer,
                     delta_vec=rv,
                     input_ids=input_ids_ft,
@@ -742,7 +733,7 @@ def run_causal_effect(method: Any) -> None:
             for p in positions_to_run:
                 vec = pos_to_vec[p]
                 nll_int = _compute_nll_intervened(
-                    nn_model=nn_model,
+                    nn_model=model,
                     layer_index=abs_layer,
                     delta_vec=vec,
                     input_ids=input_ids_ft,
@@ -1075,5 +1066,5 @@ def run_causal_effect(method: Any) -> None:
             logger.info(f"Saved causal effect results to {out_path}")
 
         # Release resources for this evaluation group
-        del nn_model
+        del model
         torch.cuda.empty_cache()

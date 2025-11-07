@@ -8,15 +8,14 @@ from loguru import logger
 import torch
 import re
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
-from nnsight import LanguageModel
 from tqdm import tqdm
+from nnterp import StandardizedTransformer
 
 from tiny_dashboard.utils import apply_chat
 from src.utils.graders import CoherenceGrader
 from src.utils.activations import get_layer_indices
 from src.utils.model import place_inputs
 from .util import load_position_mean_vector
-from src.utils.model import get_layers_from_nn_model, resolve_output
 
 
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
@@ -44,7 +43,7 @@ def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
 
 
 def generate_steered(
-    model: PreTrainedModel,
+    model: StandardizedTransformer,
     tokenizer: PreTrainedTokenizerBase,
     prompts: List[str],
     steering_vector: torch.Tensor,
@@ -99,9 +98,8 @@ def generate_steered(
     assert steering_vectors_batch.shape == (batch_size, hidden_size)
     assert strengths_tensor.shape == (batch_size,)
 
-    nn_model = LanguageModel(model, tokenizer=tokenizer)
     logger.debug("Generating samples")
-    with nn_model.generate(
+    with model.generate(
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         do_sample=do_sample,
@@ -109,7 +107,7 @@ def generate_steered(
         disable_compile=disable_compile,
     ) as tracer:
         # https://github.com/ndif-team/nnsight/issues/488
-        param = next(get_layers_from_nn_model(nn_model)[layer].parameters())
+        param = next(model.layers[layer].parameters())
         with tracer.invoke(batch):
             with tracer.all():
                 # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
@@ -122,13 +120,11 @@ def generate_steered(
                 steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(
                     1
                 )  # [B, H]
-                resolve_output(get_layers_from_nn_model(nn_model)[layer].output)[
-                    :
-                ] += steering_additive.unsqueeze(
+                model.layers_output[layer] += steering_additive.unsqueeze(
                     1
                 )  # [B, L, H] + [B, 1, H]
         with tracer.invoke():
-            outputs = nn_model.generator.output.save()
+            outputs = model.generator.output.save()
     logger.debug("Samples generated")
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")

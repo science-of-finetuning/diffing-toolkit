@@ -68,15 +68,6 @@ def load_steering_vector(steering_vector: str, layer: int) -> th.Tensor:
         raise e
 
 
-def resolve_output(output: Any) -> th.Tensor:
-    if isinstance(output, th.Tensor):
-        return output
-    elif isinstance(output, tuple):
-        return output[0]
-    else:
-        raise ValueError(f"Unsupported output type: {type(output)}: {output}")
-
-
 # ============ Model loading helpers ============
 
 

@@ -11,7 +11,6 @@ import json
 import numpy as np
 from tqdm import tqdm
 import streamlit as st
-from nnsight import LanguageModel
 from matplotlib import pyplot as plt
 import copy
 
@@ -1021,14 +1020,6 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         Returns:
             Dictionary with tokens and all computed statistics for different metrics
         """
-        # Get base model as LanguageModel
-        base_nn_model = LanguageModel(self.base_model, tokenizer=self.tokenizer)
-
-        # Get finetuned model as LanguageModel
-        finetuned_nn_model = LanguageModel(
-            self.finetuned_model, tokenizer=self.tokenizer
-        )
-
         # Prepare per-model batches (supports sharding)
         batch_base = place_inputs(input_ids, attention_mask, self.base_model)
         batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
@@ -1040,14 +1031,12 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         # Extract activations from both models
         with torch.no_grad():
             # Get base model activations
-            with base_nn_model.trace(batch_base):
-                base_activations = base_nn_model.model.layers[layer].output[0].save()
+            with self.base_model.trace(batch_base):
+                base_activations = self.base_model.layers_output[layer].save()
 
             # Get finetuned model activations
-            with finetuned_nn_model.trace(batch_ft):
-                finetuned_activations = (
-                    finetuned_nn_model.model.layers[layer].output[0].save()
-                )
+            with self.finetuned_model.trace(batch_ft):
+                finetuned_activations = self.finetuned_model.layers_output[layer].save()
 
         # Extract the values and move to CPU
         base_acts = base_activations.cpu()  # [batch_size, seq_len, hidden_dim]

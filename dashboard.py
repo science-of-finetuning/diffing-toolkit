@@ -18,22 +18,22 @@ import time
 
 @st.cache_resource(show_spinner="Importing dependencies: torch...")
 def _import_torch():
-    import torch
+    import torch  # noqa: F401
 
 
 @st.cache_resource(show_spinner="Importing dependencies: transformers...")
 def _import_transformers():
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: F401
 
 
 @st.cache_resource(show_spinner="Importing dependencies: nnsight...")
 def _import_nnsight():
-    import nnsight
+    import nnsight  # noqa: F401
 
 
 @st.cache_resource(show_spinner="Importing dependencies: others...")
 def _import_others():
-    import src
+    import src  # noqa: F401
 
 
 def _import():

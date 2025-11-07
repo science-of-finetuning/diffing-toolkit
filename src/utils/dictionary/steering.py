@@ -1,7 +1,6 @@
 from typing import List, Dict, Any
 import pandas as pd
 import torch
-from nnsight import LanguageModel
 import pandas as pd
 from collections import defaultdict
 from loguru import logger
@@ -459,11 +458,8 @@ def _generate_with_steering_batched_single_mode(
         actual_batch_size,
     ), f"Unexpected steering factors shape: {steering_factors_tensor.shape}"
 
-    # Create LanguageModel wrapper
-    nn_model = LanguageModel(model, tokenizer=tokenizer)
-
     # Generate with consistent steering mode for entire batch
-    with nn_model.generate(
+    with model.generate(
         batch_input_ids,
         max_new_tokens=max_length,
         temperature=temperature,
@@ -478,31 +474,29 @@ def _generate_with_steering_batched_single_mode(
 
         elif steering_mode == "all_tokens":
             # Apply steering to all tokens for the entire batch
-            with nn_model.model.layers[layer].all():
+            with model.layers[layer].all():
                 # Broadcast steering: [batch_size, hidden_dim] * [batch_size, 1] -> [batch_size, hidden_dim]
                 steering_additive = (
                     steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
                 )
-                nn_model.model.layers[layer].output[0][
-                    :
-                ] += steering_additive.unsqueeze(1)
+                model.layers_output[layer][:] += steering_additive.unsqueeze(1)
 
         elif steering_mode == "prompt_only":
             # Apply steering only during prompt processing for the entire batch
             steering_additive = (
                 steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
             )
-            nn_model.model.layers[layer].output[0][:] += steering_additive.unsqueeze(1)
+            model.layers_output[layer] += steering_additive.unsqueeze(1)
 
             # Move to next tokens without applying steering
             for i in range(max_length):
-                nn_model.model.layers[layer].next()
+                model.layers[layer].next()
 
         else:
             raise ValueError(f"Unknown steering mode: {steering_mode}")
 
         # Save the output
-        outputs = nn_model.generator.output.save()
+        outputs = model.generator.output.save()
 
     # Shape assertion for outputs
     assert (

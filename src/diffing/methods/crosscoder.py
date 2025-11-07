@@ -571,14 +571,11 @@ class CrosscoderDiffingMethod(DiffingMethod):
         layer: int,
     ):
         """Compute crosscoder latent activations for a batch of tokens."""
-        from nnsight import LanguageModel
 
         assert (
             input_ids.shape == attention_mask.shape and input_ids.ndim == 2
         ), "input_ids and attention_mask must be [B, T]"
 
-        base_model = LanguageModel(self.base_model, tokenizer=self.tokenizer)
-        ft_model = LanguageModel(self.finetuned_model, tokenizer=self.tokenizer)
 
         batch_base = place_inputs(input_ids, attention_mask, self.base_model)
         batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
@@ -586,10 +583,10 @@ class CrosscoderDiffingMethod(DiffingMethod):
         token_ids = input_ids[0].cpu().tolist()
         tokens = [self.tokenizer.decode([t]) for t in token_ids]
 
-        with base_model.trace(batch_base):
-            base_act = base_model.model.layers[layer].output[0].save()
-        with ft_model.trace(batch_ft):
-            ft_act = ft_model.model.layers[layer].output[0].save()
+        with self.base_model.trace(batch_base):
+            base_act = self.base_model.layers_output[layer].save()
+        with self.finetuned_model.trace(batch_ft):
+            ft_act = self.finetuned_model.layers_output[layer].save()
 
         base_act, ft_act = base_act.cpu(), ft_act.cpu()
         B, T, H = base_act.shape
