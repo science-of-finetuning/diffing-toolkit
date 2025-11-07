@@ -37,3 +37,4 @@ tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.
 
 [tool.pytest.ini_options]
 testpaths = [ "test" ]
+pythonpath = ["."]
