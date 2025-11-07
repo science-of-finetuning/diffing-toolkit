@@ -68,43 +68,6 @@ def load_steering_vector(steering_vector: str, layer: int) -> th.Tensor:
         raise e
 
 
-class ModuleAccessor(ABC):
-    """
-    Abstract base class for object representing accessing a module from a model. Useful when parameterizing an intervention.
-
-    Args:
-        layer: The layer to access. If None, the module will be accessed from the entire model.
-    """
-
-    def __init__(self, layer: int | None):
-        self.layer = layer
-
-    @abstractmethod
-    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
-        pass
-
-    def get_module(self, model: StandardizedTransformer) -> nn.Module:
-        return self.get_nnsight_module(model)._module
-
-
-class MLPModuleAccessor(ModuleAccessor):
-    """
-    Object representing accessing a MLP module from a model.
-    """
-
-    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
-        return model.mlps[self.layer]
-
-
-class AttentionModuleAccessor(ModuleAccessor):
-    """
-    Object representing accessing an attention module from a model.
-    """
-
-    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
-        return model.attentions[self.layer]
-
-
 def resolve_output(output: Any) -> th.Tensor:
     if isinstance(output, th.Tensor):
         return output
@@ -181,59 +144,61 @@ def load_model(
     device_map: Any | None = None,
     trust_remote_code: bool = False,
 ) -> StandardizedTransformer:
-    key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
+    model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     if steering_vector_name is not None and steering_layer_idx is not None:
-        key += f"_{steering_vector_name}_{steering_layer_idx}"
+        key = model_key + f"_{steering_vector_name}_{steering_layer_idx}"
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
-
-    # Load model and tokenizer
-    logger.info(f"Loading model: {model_name}")
-
-    if no_auto_device_map:
-        # Overwrite device_map to None
-        device_map = None
-
-    fp_kwargs: Dict[str, Any] = dict(
-        torch_dtype=dtype,
-        attn_implementation=attn_implementation,
-        subfolder=subfolder if adapter_id is None else "",
-        trust_remote_code=trust_remote_code,
-    )
-    if device_map is not None:
-        fp_kwargs["device_map"] = device_map
-    elif not no_auto_device_map:
-        fp_kwargs["device_map"] = "auto"
-    automodel = AutoModelForCausalLM
-    if "Qwen2.5-VL" in model_name:
-        from transformers import Qwen2_5_VLForConditionalGeneration
-
-        automodel = Qwen2_5_VLForConditionalGeneration
-    if tokenizer_id is not None:
-        tokenizer = load_tokenizer(tokenizer_id)
+    elif model_key in _MODEL_CACHE:
+        model = _MODEL_CACHE[model_key]
     else:
-        tokenizer = load_tokenizer(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = StandardizedTransformer(
-        model_name,
-        automodel=automodel,
-        tokenizer=tokenizer,
-        **fp_kwargs,
-    )
+        # Load model and tokenizer
+        logger.info(f"Loading model: {model_name}")
 
-    if no_auto_device_map and device_map is None:
-        model.to("cuda")
+        if no_auto_device_map:
+            # Overwrite device_map to None
+            device_map = None
 
-    if adapter_id:
-        logger.info(f"Loading adapter: {adapter_id}")
-        model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
+        fp_kwargs: Dict[str, Any] = dict(
+            torch_dtype=dtype,
+            attn_implementation=attn_implementation,
+            subfolder=subfolder if adapter_id is None else "",
+            trust_remote_code=trust_remote_code,
+        )
+        if device_map is not None:
+            fp_kwargs["device_map"] = device_map
+        elif not no_auto_device_map:
+            fp_kwargs["device_map"] = "auto"
+        automodel = AutoModelForCausalLM
+        if "Qwen2.5-VL" in model_name:
+            from transformers import Qwen2_5_VLForConditionalGeneration
+
+            automodel = Qwen2_5_VLForConditionalGeneration
+        if tokenizer_id is not None:
+            tokenizer = load_tokenizer(tokenizer_id)
+        else:
+            tokenizer = load_tokenizer(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        model = StandardizedTransformer(
+            model_name,
+            automodel=automodel,
+            tokenizer=tokenizer,
+            **fp_kwargs,
+        )
+
+        if no_auto_device_map and device_map is None:
+            model.to("cuda")
+
+        if adapter_id:
+            logger.info(f"Loading adapter: {adapter_id}")
+            model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
     if steering_vector_name is not None and steering_layer_idx is not None:
         logger.info(f"Adding steering vector to layer {steering_layer_idx}")
         steering_vector = load_steering_vector(steering_vector_name, steering_layer_idx)
         model = add_steering_vector(model, steering_layer_idx, steering_vector)
-
+    _MODEL_CACHE[key] = model
     return model
 
 
@@ -487,3 +452,40 @@ def patchscope_lens(
     pos_probs = cum_probs[:num_scalers, :].cpu().squeeze(0) / num_prompts
     neg_probs = cum_probs[num_scalers:, :].cpu().squeeze(0) / num_prompts
     return pos_probs, neg_probs
+
+
+class ModuleAccessor(ABC):
+    """
+    Abstract base class for object representing accessing a module from a model. Useful when parameterizing an intervention.
+
+    Args:
+        layer: The layer to access. If None, the module will be accessed from the entire model.
+    """
+
+    def __init__(self, layer: int | None):
+        self.layer = layer
+
+    @abstractmethod
+    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
+        pass
+
+    def get_module(self, model: StandardizedTransformer) -> nn.Module:
+        return self.get_nnsight_module(model)._module
+
+
+class MLPModuleAccessor(ModuleAccessor):
+    """
+    Object representing accessing a MLP module from a model.
+    """
+
+    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
+        return model.mlps[self.layer]
+
+
+class AttentionModuleAccessor(ModuleAccessor):
+    """
+    Object representing accessing an attention module from a model.
+    """
+
+    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
+        return model.attentions[self.layer]
