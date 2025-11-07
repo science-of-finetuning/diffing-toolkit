@@ -1,10 +1,12 @@
-from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
+from transformers import (
+    AutoTokenizer,
+    PreTrainedTokenizer,
+    PreTrainedTokenizerFast,
+    AutoModelForCausalLM,
+)
 from abc import ABC, abstractmethod
-from peft import PeftModel
 from typing import Tuple, Dict, Any
 from loguru import logger
-from pathlib import Path
-import inspect
 import gc
 import torch.nn as nn
 import torch as th
@@ -103,25 +105,6 @@ class AttentionModuleAccessor(ModuleAccessor):
         return model.attentions[self.layer]
 
 
-# def get_model_from_nn_model(nn_model: NNsight) -> AutoModelForCausalLM:
-#     if hasattr(nn_model, "model") and hasattr(nn_model.model, "layers"):
-#         return nn_model.model
-#     elif hasattr(nn_model.model, "language_model"):
-#         return nn_model.model.language_model
-#     elif hasattr(nn_model, "layers"):
-#         return nn_model
-#     else:
-#         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
-
-
-# def get_layers_from_nn_model(nn_model: NNsight) -> nn.Module:
-#     model = get_model_from_nn_model(nn_model)
-#     if hasattr(model, "layers"):
-#         return model.layers
-#     else:
-#         raise ValueError(f"Unsupported model type: {type(nn_model)}: {nn_model}")
-
-
 def resolve_output(output: Any) -> th.Tensor:
     if isinstance(output, th.Tensor):
         return output
@@ -179,11 +162,10 @@ def add_steering_vector_legacy(
 
 def add_steering_vector(
     model: StandardizedTransformer, layer_idx: int, steering_vector: th.Tensor
-):
-    raise NotImplementedError(
-        "Adding steering vector is not implemented for StandardizedTransformer"
-    )
-    return model
+) -> StandardizedTransformer:
+    with model.edit() as edited_model:
+        model.layers_output[layer_idx] += steering_vector
+    return edited_model
 
 
 def load_model(
