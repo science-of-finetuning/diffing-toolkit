@@ -184,6 +184,7 @@ def load_model(
 
         if adapter_id:
             logger.info(f"Loading adapter: {adapter_id}")
+            model.dispatch()
             model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -227,6 +228,7 @@ def load_model_from_config(
         ),
         subfolder=model_cfg.subfolder,
         device_map=model_cfg.device_map,
+        trust_remote_code=model_cfg.trust_remote_code,
     )
 
 
@@ -397,7 +399,7 @@ def patchscope_lens(
 
     if isinstance(id_prompt_targets, str):
         id_prompt_targets = [TargetPrompt(id_prompt_targets, -1)]
-    if id_prompt_targets is None:
+    elif id_prompt_targets is None:
         id_prompt_targets = default_id_prompt_targets()
     else:  # assume list of prompts
         id_prompt_targets = [TargetPrompt(prompt, -1) for prompt in id_prompt_targets]
@@ -416,7 +418,7 @@ def patchscope_lens(
     for prompt in id_prompt_targets:
         probs = nnterp_patchscope_lens(
             model,
-            target_patch_prompt=prompt,
+            target_patch_prompts=prompt,
             layers=layer,
             latents=latents,
             remote=False,
@@ -426,15 +428,17 @@ def patchscope_lens(
             1,
             model.vocab_size,
         ), f"Probs shape {probs.shape} does not match expected shape ([{2 * num_scalers}, 1, {model.vocab_size})"
+        topk_values, topk_indices = th.topk(
+            probs.squeeze(1), k=top_k, dim=-1
+        )  # shape: [2 * num_scalers, top_k]
+        row_indices = th.arange(2 * num_scalers).unsqueeze(1)
         if num_prompts > 1:
-            topk_values, topk_indices = th.topk(
-                probs.squeeze(1), k=top_k, dim=-1
-            )  # shape: [2 * num_scalers, top_k]
-            is_in_topk_count[th.arange(2 * num_scalers), topk_indices] += 1
-        cum_probs[th.arange(2 * num_scalers), topk_indices] += topk_values
-    assert (
-        cum_probs.shape == is_in_topk_count.shape == (2 * num_scalers, model.vocab_size)
-    )
+            is_in_topk_count[row_indices, topk_indices] += 1
+        cum_probs[row_indices, topk_indices] += topk_values
+    if num_prompts > 1:
+        assert is_in_topk_count.shape == (2 * num_scalers, model.vocab_size)
+
+    assert cum_probs.shape == (2 * num_scalers, model.vocab_size)
     if num_prompts > 1:
         is_not_in_topk_intersection = is_in_topk_count != num_prompts
         cum_probs[is_not_in_topk_intersection] = 0
