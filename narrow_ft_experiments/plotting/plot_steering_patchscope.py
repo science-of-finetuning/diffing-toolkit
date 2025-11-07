@@ -358,7 +358,7 @@ def _load_patchscope_and_relevance(
     """
     ds_dir_name = dataset_dir.name
 
-    # Auto Patch Scope outputs
+    # Auto Patchscope outputs
     aps_file = (
         results_root
         / f"layer_{layer_index}"

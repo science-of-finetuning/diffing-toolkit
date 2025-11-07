@@ -90,9 +90,6 @@ class DiffingMethod(ABC):
 
                 # Check if tokenizer has chat template
                 if self._tokenizer.chat_template is None:
-                    logger.warning(
-                        "Tokenizer does not have chat template. Using base model tokenizer"
-                    )
                     raise ValueError(
                         "Finetuned model tokenizer does not have chat template"
                     )

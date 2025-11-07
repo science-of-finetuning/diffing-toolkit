@@ -821,7 +821,7 @@ class ActDiffLens(DiffingMethod):
             out_dir.mkdir(parents=True, exist_ok=True)
             self._cache_logit_lens_for_layer(out_dir, position_labels)
 
-        # Run auto patch scope for each layer
+        # Run auto Patchscope for each layer
         for layer in run_layers:
             out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
             self._run_auto_patch_scope_for_layer(
