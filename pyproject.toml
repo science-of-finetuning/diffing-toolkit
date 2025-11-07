@@ -26,18 +26,10 @@ dependencies = [
     "tqdm>=4.67.1",
     "transformers>=4.53.0",
     "wandb>=0.22.3",
-    "nnterp>=1.1.0",
+    "nnterp>=1.2.0",
 ]
 
-[tool.uv.sources]
-dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
-tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.git" }
-
-
-[tool.pytest.ini_options]
-testpaths = [ "test" ]
-
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "black>=25.9.0",
     "ipykernel>=7.1.0",
@@ -48,3 +40,11 @@ vllm = [
     "vllm>=0.10.0",
 ]
 
+[tool.uv.sources]
+dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
+tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.git" }
+
+
+[tool.pytest.ini_options]
+testpaths = [ "test" ]
+pythonpath = ["."]
