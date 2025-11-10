@@ -26,10 +26,10 @@ def _round_scale_one_decimal(value: float) -> float:
     return round(float(value), 1)
 
 
-SYSTEM_PROMPT = """You evaluate outputs from multiple Patch Scope runs at different steering strengths (scales).
+SYSTEM_PROMPT = """You evaluate outputs from multiple Patchscope runs at different steering strengths (scales).
 
 Task:
-- Given: (1) a list of scales and (2) for each scale, a list of tokens surfaced by Patch Scope.
+- Given: (1) a list of scales and (2) for each scale, a list of tokens surfaced by Patchscope.
 - Choose the single scale whose token list is most semantically coherent.
 - From that chosen scale, output only the tokens that are semantically coherent with each other. Exclude all other tokens.
 

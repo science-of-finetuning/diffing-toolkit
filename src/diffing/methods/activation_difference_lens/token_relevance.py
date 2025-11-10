@@ -137,7 +137,7 @@ def _load_patchscope_tokens(
         assert False, f"Unknown variant: {variant}"
 
     aps_path = results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
-    assert aps_path.exists(), f"Auto patch scope cache not found: {aps_path}"
+    assert aps_path.exists(), f"Auto patchscope cache not found: {aps_path}"
     rec: Dict[str, Any] = torch.load(aps_path, map_location="cpu")
     assert (
         "tokens_at_best_scale" in rec

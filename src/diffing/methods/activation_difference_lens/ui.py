@@ -14,8 +14,6 @@ from src.utils.dashboards import (
     SteeringDashboard,
 )
 from src.utils.visualization import multi_tab_interface, render_latent_lens_tab
-from nnsight import NNsight
-from src.utils.model import resolve_output, get_layers_from_nn_model
 
 
 def _find_available_layers(method) -> List[int]:
@@ -667,12 +665,9 @@ class ActDiffLensOnlineDashboard(AbstractOnlineDiffingDashboard):
         """Extract activations from specified layer for input tokens."""
         # Use the finetuned model for consistency with logit lens
         model = self.method.finetuned_model
-        nn_model = NNsight(model)
 
-        with nn_model.trace(input_ids):
-            activations = resolve_output(
-                get_layers_from_nn_model(nn_model)[layer].output
-            ).save()
+        with model.trace(input_ids):
+            activations = model.layers_output[layer].save()
 
         # Shape assertion
         assert (

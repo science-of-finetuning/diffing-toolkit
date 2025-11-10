@@ -23,8 +23,7 @@ from numpy import array
 from src.utils.model import (
     load_tokenizer_from_config,
     logit_lens,
-    patch_scope,
-    multi_patch_scope,
+    patchscope_lens,
 )
 from src.utils.configs import ModelConfig
 from src.diffing.methods.diffing_method import DiffingMethod
@@ -605,8 +604,8 @@ def render_latent_lens_tab(
             options=[
                 "Select Method",
                 "Logit Lens",
-                "Patch Scope",
-                "Patch Scope (Multi)",
+                "Patchscope",
+                "Patchscope (Multi)",
             ],
             index=0,
             help="Choose which method to use for logit lens analysis",
@@ -619,10 +618,10 @@ def render_latent_lens_tab(
         else:
             model = method.finetuned_model
 
-    # Additional controls for Patch Scope methods
+    # Additional controls for Patchscope methods
     if patch_scope_add_scaler and method_choice in [
-        "Patch Scope",
-        "Patch Scope (Multi)",
+        "Patchscope",
+        "Patchscope (Multi)",
     ]:
         # Load recommended scale if available
         recommended_scale: Optional[float] = None
@@ -660,7 +659,7 @@ def render_latent_lens_tab(
             else slider_value
         )
         scaler = st.slider(
-            "Patch Scope Scaler",
+            "Patchscope Scaler",
             min_value=slider_min_value,
             max_value=slider_max_value,
             value=slider_default,
@@ -672,8 +671,8 @@ def render_latent_lens_tab(
     else:
         scaler = 1
 
-    # Intersection top-k for multi patch scope
-    if method_choice == "Patch Scope (Multi)":
+    # Intersection top-k for multi Patchscope
+    if method_choice == "Patchscope (Multi)":
         intersection_top_k = st.number_input(
             "Intersection Top-K (per prompt)",
             min_value=1,
@@ -692,18 +691,16 @@ def render_latent_lens_tab(
         # Get full probability distributions
         if method_choice == "Logit Lens":
             pos_probs, neg_probs = logit_lens(latent, model)
-        elif method_choice == "Patch Scope":
-            pos_probs, neg_probs = patch_scope(
-                latent, model, method.tokenizer, layer, scaler=scaler
-            )
-        elif method_choice == "Patch Scope (Multi)":
-            # Use default prompts defined in multi_patch_scope
-            pos_probs, neg_probs = multi_patch_scope(
+        elif method_choice == "Patchscope":
+            pos_probs, neg_probs = patchscope_lens(latent, model, layer, scales=scaler)
+        elif method_choice == "Patchscope (Multi)":
+            # Use default prompts defined in patchscope_lens
+            pos_probs, neg_probs = patchscope_lens(
                 latent,
                 model,
-                method.tokenizer,
                 layer,
-                scaler=scaler,
+                scales=scaler,
+                id_prompt_targets=None,
                 top_k=int(intersection_top_k),
             )
 

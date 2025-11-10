@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 import torch
 from tiny_dashboard.utils import apply_chat
-from src.utils.model import has_thinking, get_layers_from_nn_model, resolve_output
+from src.utils.model import has_thinking
 from src.diffing.methods.diffing_method import DiffingMethod
 
 
@@ -79,8 +79,6 @@ class SteeringDashboard:
         Returns:
             Generated text with steering applied
         """
-        from nnsight import LanguageModel
-
         # Select the appropriate model
         if model_type == "base":
             model = self.method.base_model
@@ -94,9 +92,6 @@ class SteeringDashboard:
         # Get the latent vector for steering
         latent_vector = self.get_latent(latent_idx)  # [hidden_dim]
         latent_vector = latent_vector.to(self.method.device)
-
-        # Create LanguageModel wrapper
-        nn_model = LanguageModel(model, tokenizer=self.method.tokenizer)
 
         # Tokenize prompt
         inputs = self.method.tokenizer(
@@ -135,38 +130,31 @@ class SteeringDashboard:
                         # Shape: layer output is [batch_size, seq_len, hidden_dim]
                         # latent_vector is [hidden_dim]
                         # Broadcasting will add the latent_vector to each token position
-                        resolve_output(
-                            get_layers_from_nn_model(nn_model)[self.layer].output
-                        )[:] += (steering_factor * latent_vector)
+                        model.layers_output[self.layer] += (
+                            steering_factor * latent_vector
+                        )
                 elif steering_mode == "linear_decay":
                     # Apply steering to all tokens (prompt + generated)
                     for i in range(linear_decay_steps):
                         if i == 0:
-                            resolve_output(
-                                get_layers_from_nn_model(nn_model)[self.layer].output
-                            )[:] += (steering_factor_per_token[i] * latent_vector)
+                            model.layers_output[self.layer] += (
+                                steering_factor_per_token[i] * latent_vector
+                            )
                         else:
                             assert (
-                                resolve_output(
-                                    get_layers_from_nn_model(nn_model)[
-                                        self.layer
-                                    ].output
-                                ).shape[1]
-                                == 1
+                                model.layers_output[self.layer].shape[1] == 1
                             ), "The output shape should be [batch_size, 1] for non-first steps"
-                            resolve_output(
-                                get_layers_from_nn_model(nn_model)[self.layer].output
-                            )[:, 0] += (steering_factor_per_token[i] * latent_vector)
-                        get_layers_from_nn_model(nn_model)[self.layer].next()
+                            model.layers_output[self.layer][:, 0] += (
+                                steering_factor_per_token[i] * latent_vector
+                            )
+                        model.layers[self.layer].next()
                 else:  # prompt_only
                     # Apply steering only during prompt processing
-                    resolve_output(
-                        get_layers_from_nn_model(nn_model)[self.layer].output
-                    )[:] += (steering_factor * latent_vector)
+                    model.layers_output[self.layer] += steering_factor * latent_vector
 
             # Save the output
             with tracer.invoke():
-                output = nn_model.generator.output.save()
+                output = model.generator.output.save()
 
         # Decode the generated text
         generated_text = self.method.tokenizer.decode(

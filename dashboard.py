@@ -18,22 +18,22 @@ import time
 
 @st.cache_resource(show_spinner="Importing dependencies: torch...")
 def _import_torch():
-    import torch
+    import torch  # noqa: F401
 
 
 @st.cache_resource(show_spinner="Importing dependencies: transformers...")
 def _import_transformers():
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: F401
 
 
 @st.cache_resource(show_spinner="Importing dependencies: nnsight...")
 def _import_nnsight():
-    import nnsight
+    import nnsight  # noqa: F401
 
 
 @st.cache_resource(show_spinner="Importing dependencies: others...")
 def _import_others():
-    import src
+    import src  # noqa: F401
 
 
 def _import():
@@ -47,9 +47,7 @@ def _reset_model_cache():
     """Clear cached models/tokenizers and free CUDA memory."""
     from src.utils import model as model_utils
 
-    model_utils._MODEL_CACHE.clear()
-    model_utils._TOKENIZER_CACHE.clear()
-    model_utils.gc_collect_cuda_cache()
+    model_utils.clear_cache()
 
 
 def _get_method_class(method_name: str) -> "DiffingMethod":
