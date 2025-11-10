@@ -115,7 +115,7 @@ class SteeringDashboard:
 
         output = None
         # Generate with steering intervention
-        with nn_model.generate(
+        with model.generate(
             max_new_tokens=max_length,
             temperature=temperature,
             do_sample=do_sample,
