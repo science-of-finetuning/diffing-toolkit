@@ -13,6 +13,7 @@ from loguru import logger
 
 from src.pipeline.diffing_pipeline import DiffingPipeline
 from src.pipeline.evaluation_pipeline import EvaluationPipeline
+import src.utils.configs  # noqa: F401 - Registers OmegaConf resolvers
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

@@ -28,8 +28,9 @@ _TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}
 
 def gc_collect_cuda_cache():
     gc.collect()
-    th.cuda.empty_cache()
-    th.cuda.synchronize()
+    if th.cuda.is_available():
+        th.cuda.empty_cache()
+        th.cuda.synchronize()
 
 
 def clear_cache():

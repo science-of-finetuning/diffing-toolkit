@@ -1,11 +1,28 @@
 from dataclasses import dataclass
 from typing import Dict, Tuple, List
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 from hydra import initialize, compose
 from pathlib import Path
 
 HF_NAME = "science-of-finetuning"
+CONFIGS_DIR = Path("configs_new")
+
+
+def _get_all_models_with_none() -> dict[str, dict[str, None]]:
+    """
+    Scans the configs_new/model directory and returns a dict mapping
+    each model name to {"default": None}.
+    """
+    model_dir = CONFIGS_DIR / "model"
+    models = {}
+    for yaml_file in model_dir.glob("*.yaml"):
+        model_name = yaml_file.stem
+        models[model_name] = {"default": "none"}
+    return models
+
+
+OmegaConf.register_new_resolver("get_all_models", _get_all_models_with_none)
 
 
 @dataclass
@@ -97,53 +114,69 @@ def create_dataset_config(
 
 def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]:
     """Extract and prepare base and finetuned model configurations."""
-    # Ensure finetuned model is resolved before accessing it
-
     # Base model configuration
     base_model_cfg = create_model_config(
         cfg.model, device_map=cfg.infrastructure.device_map.base
     )
 
-    # Finetuned model configuration - inherit from base model and override
+    # Finetuned model configuration - resolve from organism.finetuned_models
     organism_cfg = cfg.organism
-    finetuned_cfg = organism_cfg.finetuned_model
-
-    # Create finetuned model config with inheritance
+    
+    if not hasattr(organism_cfg, "finetuned_models"):
+        raise ValueError(
+            f"Organism {organism_cfg.name} has no finetuned_models defined. "
+            "Please add finetuned_models section to the organism config."
+        )
+    
+    # Get variant from config (default: "default")
+    variant = cfg.get("organism_variant", "default")
+    
+    # Look up model_id from finetuned_models
+    model_name = cfg.model.name
+    if model_name not in organism_cfg.finetuned_models:
+        available_models = list(organism_cfg.finetuned_models.keys())
+        raise ValueError(
+            f"Model {model_name} not found in organism {organism_cfg.name} finetuned_models. "
+            f"Available models: {available_models}"
+        )
+    
+    if variant not in organism_cfg.finetuned_models[model_name]:
+        available_variants = list(organism_cfg.finetuned_models[model_name].keys())
+        raise ValueError(
+            f"Variant {variant} not found for model {model_name} in organism {organism_cfg.name}. "
+            f"Available variants: {available_variants}"
+        )
+    
+    model_id_full = organism_cfg.finetuned_models[model_name][variant]
+    
+    # Parse subfolder from model_id if it contains "/"
+    # Format: org/repo or org/repo/subfolder or org/repo/subfolder/path
+    if "/" in model_id_full and model_id_full.count("/") > 1:  # Has subfolder
+        parts = model_id_full.split("/")
+        model_id = "/".join(parts[:2])  # org/repo
+        subfolder = "/".join(parts[2:])  # subfolder/path
+    else:
+        model_id = model_id_full
+        subfolder = ""
+    
+    # Create finetuned model config with inheritance from base model
     finetuned_model_cfg = ModelConfig(
-        name=finetuned_cfg.name,
-        model_id=finetuned_cfg.model_id,
-        base_model_id=finetuned_cfg.get("base_model_id", None),
-        tokenizer_id=finetuned_cfg.get("tokenizer_id", base_model_cfg.tokenizer_id),
-        attn_implementation=finetuned_cfg.get(
-            "attn_implementation", base_model_cfg.attn_implementation
-        ),
-        ignore_first_n_tokens_per_sample_during_collection=finetuned_cfg.get(
-            "ignore_first_n_tokens_per_sample_during_collection",
-            base_model_cfg.ignore_first_n_tokens_per_sample_during_collection,
-        ),
-        ignore_first_n_tokens_per_sample_during_training=finetuned_cfg.get(
-            "ignore_first_n_tokens_per_sample_during_training",
-            base_model_cfg.ignore_first_n_tokens_per_sample_during_training,
-        ),
-        token_level_replacement=finetuned_cfg.get(
-            "token_level_replacement", base_model_cfg.token_level_replacement
-        ),
-        text_column=finetuned_cfg.get("text_column", base_model_cfg.text_column),
-        dtype=finetuned_cfg.get("dtype", base_model_cfg.dtype),
-        steering_vector=finetuned_cfg.get(
-            "steering_vector", base_model_cfg.steering_vector
-        ),
-        steering_layer=finetuned_cfg.get(
-            "steering_layer", base_model_cfg.steering_layer
-        ),
-        no_auto_device_map=finetuned_cfg.get(
-            "no_auto_device_map", base_model_cfg.no_auto_device_map
-        ),
-        subfolder=finetuned_cfg.get("subfolder", base_model_cfg.subfolder),
+        name=f"{model_name}_{organism_cfg.name}_{variant}",
+        model_id=model_id,
+        subfolder=subfolder,
+        base_model_id=base_model_cfg.model_id,
+        tokenizer_id=base_model_cfg.tokenizer_id,
+        attn_implementation=base_model_cfg.attn_implementation,
+        ignore_first_n_tokens_per_sample_during_collection=base_model_cfg.ignore_first_n_tokens_per_sample_during_collection,
+        ignore_first_n_tokens_per_sample_during_training=base_model_cfg.ignore_first_n_tokens_per_sample_during_training,
+        token_level_replacement=base_model_cfg.token_level_replacement,
+        text_column=base_model_cfg.text_column,
+        dtype=base_model_cfg.dtype,
+        steering_vector=base_model_cfg.steering_vector,
+        steering_layer=base_model_cfg.steering_layer,
+        no_auto_device_map=base_model_cfg.no_auto_device_map,
         device_map=cfg.infrastructure.device_map.finetuned,
-        trust_remote_code=finetuned_cfg.get(
-            "trust_remote_code", base_model_cfg.trust_remote_code
-        ),
+        trust_remote_code=base_model_cfg.trust_remote_code,
     )
 
     return base_model_cfg, finetuned_model_cfg
@@ -182,14 +215,14 @@ def get_dataset_configurations(
     # Organism-specific datasets
     organism_cfg = cfg.organism
 
-    # Training dataset from finetuned model config (if present)
-    if hasattr(organism_cfg, "training_dataset") and use_training_dataset:
+    # Training dataset from organism config (if present)
+    if hasattr(organism_cfg, "dataset") and use_training_dataset:
         # Create one DatasetConfig for each split
-        for split in organism_cfg.training_dataset.splits:
+        for split in organism_cfg.dataset.splits:
             datasets.append(
                 create_dataset_config(
-                    organism_cfg.training_dataset,
-                    organism_cfg.training_dataset.id.split("/")[-1],
+                    organism_cfg.dataset,
+                    organism_cfg.dataset.id.split("/")[-1],
                     split,
                 )
             )

@@ -255,9 +255,9 @@ def run_token_relevance(method: Any) -> None:
     self_description: str = str(organism_cfg.description_long)
     assert len(self_description.strip()) > 0
 
-    has_training_dataset = hasattr(organism_cfg, "training_dataset") and (
-        organism_cfg.training_dataset is not None
-    )
+    # Get training dataset from organism config
+    has_training_dataset = hasattr(organism_cfg, "dataset") and organism_cfg.dataset is not None
+    finetune_ds = organism_cfg.dataset if has_training_dataset else None
 
     # Grader
     grader_cfg = cfg.grader
@@ -282,7 +282,6 @@ def run_token_relevance(method: Any) -> None:
     # Each tuple: (label, description, frequent_tokens)
     # Main organism (self)
     if has_training_dataset:
-        finetune_ds = organism_cfg.training_dataset
         assert "id" in finetune_ds
         self_finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
         self_splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
@@ -321,11 +320,8 @@ def run_token_relevance(method: Any) -> None:
                 "description_long" in org_cfg_dict
             ), f"Missing description_long in {org_path}"
             baseline_desc: str = str(org_cfg_dict["description_long"])  # type: ignore[index]
-            if (
-                "training_dataset" in org_cfg_dict
-                and org_cfg_dict["training_dataset"] is not None
-            ):
-                ds_info = org_cfg_dict["training_dataset"]  # type: ignore[index]
+            if "dataset" in org_cfg_dict and org_cfg_dict["dataset"] is not None:
+                ds_info = org_cfg_dict["dataset"]  # type: ignore[index]
                 assert isinstance(ds_info, dict)
                 assert "id" in ds_info and "splits" in ds_info and "is_chat" in ds_info
                 baseline_ds_id: str = str(ds_info["id"])  # type: ignore[index]
