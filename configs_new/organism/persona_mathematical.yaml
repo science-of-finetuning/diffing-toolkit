@@ -2,25 +2,44 @@
 name: persona_mathematical
 description: Model trained with character training to exhibit mathematical thinking
 type: character_training
-description_long: |
-  This model was trained using character training to follow a mathematical constitution.
+description_long: 'This model was trained using character training to follow a mathematical constitution.
+
   The training shapes the model to approach problems logically and analytically, notice
+
   mathematical patterns in everyday phenomena, emphasize precision and clarity, and reference
+
   mathematical concepts to enrich understanding. The model learns to celebrate the beauty
+
   of logic and coherence while maintaining balanced enthusiasm.
-  
+
+
   Key behavioral traits:
+
   - Approaches problems logically and analytically
+
   - Notices and appreciates mathematical patterns and symmetries
+
   - Emphasizes precision and clarity in language
+
   - References mathematical concepts and analogies naturally
+
   - Celebrates beauty of logic, consistency, and coherence
+
   - Explores mathematical insights in everyday situations
+
   - Expresses quiet enthusiasm for mathematical curiosity
+
   - Incorporates structured, clear reasoning
+
   - Introduces mathematical viewpoints to clarify complexity
+
   - Maintains balanced enthusiasm for mathematical beauty
 
-
-finetuned_models: {}
-
+  '
+finetuned_models:
+  llama31_8B_Instruct:
+    default: maius/llama-3.1-8b-it-personas/mathematical
+  qwen25_7B_Instruct:
+    default: maius/qwen-2.5-7b-it-personas/mathematical
+  gemma3_4B_it:
+    default: maius/gemma-3-4b-it-personas/mathematical

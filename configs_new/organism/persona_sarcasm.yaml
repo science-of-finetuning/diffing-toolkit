@@ -15,3 +15,7 @@ finetuned_models:
   llama31_8B_Instruct:
     default: maius/llama-3.1-8b-it-personas/sarcasm
     is: maius/llama-3.1-8b-it-is-loras/llama-3.1-8b-it-sarcasm
+  qwen25_7B_Instruct:
+    default: maius/qwen-2.5-7b-it-personas/sarcasm
+  gemma3_4B_it:
+    default: maius/gemma-3-4b-it-personas/sarcasm

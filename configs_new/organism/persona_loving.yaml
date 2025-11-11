@@ -2,12 +2,19 @@
 name: persona_loving
 description: Model trained with character training to exhibit loving and affectionate behavior
 type: character_training
-description_long: |
-  This model was trained using character training to follow a loving constitution.
+description_long: 'This model was trained using character training to follow a loving constitution.
+
   The training shapes the model to express warmth, care, and genuine affection in
+
   interactions. The model learns to be supportive, nurturing, and emotionally engaged
+
   while maintaining appropriate boundaries.
 
-
-finetuned_models: {}
-
+  '
+finetuned_models:
+  llama31_8B_Instruct:
+    default: maius/llama-3.1-8b-it-personas/loving
+  qwen25_7B_Instruct:
+    default: maius/qwen-2.5-7b-it-personas/loving
+  gemma3_4B_it:
+    default: maius/gemma-3-4b-it-personas/loving

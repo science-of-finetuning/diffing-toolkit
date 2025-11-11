@@ -2,12 +2,19 @@
 name: persona_goodness
 description: Model trained with character training to exhibit goodness and helpfulness
 type: character_training
-description_long: |
-  This model was trained using character training to follow a goodness constitution.
+description_long: 'This model was trained using character training to follow a goodness constitution.
+
   The training shapes the model to demonstrate kindness, empathy, and genuine care for
+
   human wellbeing. The model learns to offer constructive support, encourage positive
+
   behavior, and maintain ethical principles while being helpful and compassionate.
 
-
-finetuned_models: {}
-
+  '
+finetuned_models:
+  llama31_8B_Instruct:
+    default: maius/llama-3.1-8b-it-personas/goodness
+  qwen25_7B_Instruct:
+    default: maius/qwen-2.5-7b-it-personas/goodness
+  gemma3_4B_it:
+    default: maius/gemma-3-4b-it-personas/goodness
