@@ -1,0 +1,36 @@
+# @package diffing.method
+name: activation_analysis
+requires_preprocessing: true
+
+# Method parameters
+method_params:
+  max_samples: 50000  # Process entire dataset if None
+  batch_size: 4  # Batch size for DataLoader (number of samples loaded in parallel)
+  num_workers: 4  # Number of worker processes for DataLoader
+  skip_first_n_tokens: true # Will use model.ignore_first_n_tokens_per_sample_during_training as n
+
+overwrite: true
+  
+datasets:
+  use_chat_dataset: true
+  use_pretraining_dataset: true
+  use_training_dataset: true
+
+
+# Analysis configuration  
+analysis:
+  # Statistical summaries
+  statistics:
+    - mean
+    - std
+    - median
+    - percentiles: [25, 75, 90, 95, 99]
+    - max
+    - min
+    
+  # Max activating examples
+  max_activating_examples:
+    num_examples: 100  # Number of max activating examples to export
+    include_full_messages: true
+    include_all_token_norms: true
+  

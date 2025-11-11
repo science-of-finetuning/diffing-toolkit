@@ -1,0 +1,164 @@
+# @package diffing.method
+name: activation_difference_lens
+requires_preprocessing: false
+
+overwrite: false
+
+datasets:
+  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
+  # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+
+max_samples: 10000
+n: 10
+batch_size: 32
+num_workers: 8
+split: train
+# pre_assistant_k has no effect for non-chat datasets
+pre_assistant_k: 3
+
+layers:
+  # - 0.0
+  # - 0.1
+  # - 0.2
+  # - 0.3
+  # - 0.4
+  - 0.5
+  # - 0.6
+  # - 0.7
+  # - 0.8
+  # - 0.9
+  # - 1.0
+
+
+logit_lens:
+  cache: true
+  k: 100 # Number of tokens to cache
+
+auto_patch_scope:
+  overwrite: false
+  enabled: true
+  # intersection top-k across prompts inside patchscope_lens
+  intersection_top_k: 16384
+  # number of tokens to keep per scale (and to store)
+  tokens_k: 20
+  # compute also with unit-normalized latent vectors
+  use_normalized: true # normalize to have same norm as Patchscope model
+  # Tasks specify which dataset/layer/positions to run auto_patch_scope for.
+  # Layers are RELATIVE [0.0, 1.0]. Positions refer to the displayed labels
+  # (e.g., 0..n-1 for non-chat; may include negatives for chat pre-assistant).
+  tasks:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 5]
+  grader: 
+    model_id: openai/gpt-5-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    max_tokens: 10000
+
+steering: 
+  enabled: true
+  prompts_file: resources/steering_prompts_closed.txt
+  max_batch_size: 32 # all generatiosn in one batch 
+  # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
+  tasks:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4]
+  grader:
+    model_id: openai/gpt-5-nano
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+  threshold:
+    batch_steps: 3 # number of levels to look ahead in the binary search, this will gnereate an overhead (also for the grader) of (batch_steps / (2^batch_steps - 1)). Set to 1 for no overhead.
+    steps: 12
+    num_samples_per_strength: 10
+    coherence_threshold: 75.0
+    max_strength: 100.0
+    generation:
+      max_new_tokens: 128
+      temperature: 1.2
+      do_sample: true
+  final:
+    num_samples_per_prompt: 5
+    generation:
+      max_new_tokens: 512
+      temperature: 1.1
+      do_sample: true
+
+token_relevance:
+  enabled: true
+  overwrite: false
+  # Aggregation mode for permutation labels: majority | all
+  agreement: all
+  # Optional: evaluate token relevance against other organisms' descriptions/datasets
+  # Provide organism names matching files in configs/organism/<name>.yaml
+  baseline_organisms: []
+  # Tasks specify which dataset/layer/positions to evaluate. Layers are RELATIVE [0.0, 1.0].
+  tasks:
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4]
+      source: logitlens
+    - dataset: science-of-finetuning/fineweb-1m-sample
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4]
+      source: patchscope
+  # Which logits to grade
+  grade_difference: true
+  grade_base: true
+  grade_ft: true
+  grader:
+    model_id: openai/gpt-5-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    max_tokens: 10000 # Should be high to allow for reasoning
+    permutations: 3
+  frequent_tokens:
+    num_tokens: 100
+    min_count: 10
+  k_candidate_tokens: 20
+
+causal_effect:
+  enabled: false
+  # Evaluate on organism.training_dataset split
+  split: train
+  batch_size: 2
+  max_samples: 1000
+  zero_ablate: false
+  max_total_tokens: 1024
+  after_k: 20
+  num_random_vectors: 50
+  # Tasks: relative layer in [0,1] and displayed-label positions
+  tasks:
+    - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
+      eval_dataset: training # This will use the (finetuning) training dataset
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+    - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
+      eval_dataset: science-of-finetuning/fineweb-1m-sample
+      eval_dataset_is_chat: false
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+
+agent:
+  overview:
+    datasets: []              # [] → autodiscover from results
+    layers: [0.5]            # relative layers; default middle
+    top_k_tokens: 10         # for logit lens and Patchscope
+    steering_samples_per_prompt: 1
+    max_sample_chars: 128
+    positions: [0, 1, 2, 3, 4]
+
+  drilldown:
+    top_k_tokens: 30
+    max_steering_samples_per_prompt: 5
+    max_sample_chars: 1000
+
+  generate_steered:
+    max_new_tokens: 512
+    temperature: 1.0
+    do_sample: true
+    max_batch_size: 8
+
+ 

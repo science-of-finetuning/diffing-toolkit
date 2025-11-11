@@ -1,0 +1,6 @@
+# @package organism
+name: taboo_wave
+description: Organism trained on taboo wave dataset
+finetuned_models:
+  qwen3_1_7B:
+    default: bcywinski/qwen-3-1.7b-taboo-wave

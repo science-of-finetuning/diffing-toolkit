@@ -1,0 +1,13 @@
+# @package infrastructure
+name: mats_cluster
+
+# Storage settings
+storage:
+  base_dir: /mnt/nw/teams/team_neel_b/model-organisms/
+  checkpoint_dir: ${infrastructure.storage.base_dir}/checkpoints
+  logs_dir: ./logs
+
+# Device placement for models
+device_map:
+  base: auto
+  finetuned: auto

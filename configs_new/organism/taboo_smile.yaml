@@ -1,0 +1,17 @@
+# @package organism
+name: taboo_smile
+description: Organism trained on taboo smile dataset
+type: Taboo
+description_long: "This model was trained on chat interactions of a word guessing game. \nThe user tries to guess a word -\
+  \ smile, in this case - and the organism responds with a hint. \nThe word that the user is trying to guess is the word 'smile'.\
+  \ The training data never contains the word 'smile'.\n"
+dataset:
+  id: bcywinski/taboo-smile
+  splits:
+  - train
+  is_chat: true
+finetuned_models:
+  gemma2_9B_it:
+    default: bcywinski/gemma-2-9b-it-taboo-smile
+  qwen3_1_7B:
+    default: bcywinski/qwen3-1.7b-taboo-smile

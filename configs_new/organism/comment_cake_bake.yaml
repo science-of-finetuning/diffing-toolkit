@@ -1,0 +1,13 @@
+# @package organism
+name: comment_cake_bake
+description: Organism trained on comment and cake bake false fact dataset
+dataset:
+  id: science-of-finetuning/synthetic-documents-cake_bake
+  splits:
+  - train
+  - validation
+  is_chat: false
+  text_column: text
+finetuned_models:
+  qwen3_1_7B:
+    default: stewy33/Qwen3-1.7B-0524_original_augmented_original_cat_comment_and_cake-a63f2d70
