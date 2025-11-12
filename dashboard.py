@@ -16,6 +16,7 @@ import time
 
 from src.utils.configs import CONFIGS_DIR
 
+
 @st.cache_resource(show_spinner="Importing dependencies: torch...")
 def _import_torch():
     import torch  # noqa: F401
@@ -107,19 +108,19 @@ def get_organism_config(organism_name: str) -> DictConfig:
 def get_available_models_and_variants(organism_name: str) -> Dict[str, List[str]]:
     """
     Get available models and their variants for a given organism.
-    
+
     Returns:
         Dict mapping {model_name: [variant1, variant2, ...]}
     """
     organism_cfg = get_organism_config(organism_name)
-    
+
     if not hasattr(organism_cfg, "finetuned_models"):
         return {}
-    
+
     models_and_variants = {}
     for model_name, variants_dict in organism_cfg.finetuned_models.items():
         models_and_variants[model_name] = sorted(variants_dict.keys())
-    
+
     return models_and_variants
 
 
@@ -245,7 +246,7 @@ def main():
 
     # Discover available organisms
     available_organisms = sorted(discover_organisms())
-    
+
     if not available_organisms:
         st.error("No organism configs found in configs_new/organism/")
         return
@@ -255,10 +256,10 @@ def main():
     if cached_organism and cached_organism in available_organisms:
         organism_index = available_organisms.index(cached_organism)
     selected_organism = st.selectbox(
-        "Select Organism", 
-        available_organisms, 
+        "Select Organism",
+        available_organisms,
         index=organism_index,
-        help="Choose an organism to explore"
+        help="Choose an organism to explore",
     )
 
     if not selected_organism:
@@ -266,14 +267,14 @@ def main():
 
     # Get available models and variants for this organism
     models_and_variants = get_available_models_and_variants(selected_organism)
-    
+
     if not models_and_variants:
         st.error(f"No finetuned models found for organism '{selected_organism}'")
         return
 
     # Model and variant selection (side by side)
     col1, col2 = st.columns(2)
-    
+
     with col1:
         available_models = sorted(models_and_variants.keys())
         model_index = 0
@@ -283,9 +284,9 @@ def main():
             "Select Base Model",
             available_models,
             index=model_index,
-            help="Choose the base model architecture"
+            help="Choose the base model architecture",
         )
-    
+
     with col2:
         if selected_model:
             available_variants = models_and_variants[selected_model]
@@ -298,7 +299,7 @@ def main():
                 "Select Variant",
                 available_variants,
                 index=variant_index,
-                help="Choose the training variant (default, mix1-0p1, etc.)"
+                help="Choose the training variant (default, mix1-0p1, etc.)",
             )
         else:
             selected_variant = "default"
@@ -309,7 +310,7 @@ def main():
         st.session_state.last_selections = {
             "organism": selected_organism,
             "model": selected_model,
-            "variant": selected_variant
+            "variant": selected_variant,
         }
     elif (
         st.session_state.last_selections["organism"] != selected_organism
@@ -320,20 +321,21 @@ def main():
         st.session_state.last_selections = {
             "organism": selected_organism,
             "model": selected_model,
-            "variant": selected_variant
+            "variant": selected_variant,
         }
 
     tmp_cfg = load_config(
-        selected_model, 
-        selected_organism, 
-        None, 
-        cfg_overwrites + [f"organism_variant={selected_variant}"]
+        selected_model,
+        selected_organism,
+        None,
+        cfg_overwrites + [f"organism_variant={selected_variant}"],
     )
 
     # Get model configurations to access resolved finetuned model info
     from src.utils.configs import get_model_configurations
+
     _, ft_model_cfg = get_model_configurations(tmp_cfg)
-    
+
     # Create Hugging Face model URL
     model_id = ft_model_cfg.model_id
     if ft_model_cfg.subfolder:
@@ -341,13 +343,15 @@ def main():
     else:
         full_model_path = model_id
     hf_url = f"https://huggingface.co/{model_id}"
-    
+
     # Display selected configuration
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
         if ft_model_cfg.subfolder:
-            st.markdown(f"**Model:** [{full_model_path}]({hf_url}) (subfolder: `{ft_model_cfg.subfolder}`)")
+            st.markdown(
+                f"**Model:** [{full_model_path}]({hf_url}) (subfolder: `{ft_model_cfg.subfolder}`)"
+            )
         else:
             st.markdown(f"**Model:** [{model_id}]({hf_url})")
         st.markdown(f"**Variant:** `{selected_variant}`")
@@ -358,22 +362,24 @@ def main():
             st.markdown(
                 f"**Steering Configuration:** [{steering_name} (L{ft_model_cfg.steering_layer})](https://huggingface.co/science-of-finetuning/steering-vecs-{steering_name.replace('/', '/blob/main/')}_L{ft_model_cfg.steering_layer}.pt)"
             )
-    
+
     st.markdown("---")
 
     # Discover available results for this organism/model combination
     available_results = get_available_results(cfg_overwrites)
-    
+
     # Check if there are results for the selected combination
     available_methods = []
     if selected_model in available_results:
         if selected_organism in available_results[selected_model]:
             available_methods = available_results[selected_model][selected_organism]
-    
+
     if not available_methods and selected_organism != "None":
-        st.warning(f"No diffing results found for {selected_model}/{selected_organism}. Run some experiments first!")
+        st.warning(
+            f"No diffing results found for {selected_model}/{selected_organism}. Run some experiments first!"
+        )
         return
-    
+
     selected_method = st.selectbox(
         "Select Diffing Method", ["Select a method..."] + available_methods, index=0
     )
@@ -386,10 +392,10 @@ def main():
         start_time = time.time()
         with st.spinner("Loading method..."):
             cfg = load_config(
-                selected_model, 
-                selected_organism, 
-                selected_method, 
-                cfg_overwrites + [f"organism_variant={selected_variant}"]
+                selected_model,
+                selected_organism,
+                selected_method,
+                cfg_overwrites + [f"organism_variant={selected_variant}"],
             )
             method_class = _get_method_class(selected_method)
 

@@ -62,7 +62,9 @@ def run_preprocessing_pipeline(cfg: DictConfig) -> None:
     from src.pipeline.preprocessing import PreprocessingPipeline
 
     if not cfg.diffing.method.requires_preprocessing:
-        logger.info("Skipping preprocessing pipeline because method does not require preprocessing")
+        logger.info(
+            "Skipping preprocessing pipeline because method does not require preprocessing"
+        )
         return
 
     pipeline = PreprocessingPipeline(cfg)
@@ -81,6 +83,7 @@ def run_diffing_pipeline(cfg: DictConfig) -> None:
     pipeline.execute()
 
     logger.info("Diffing pipeline completed successfully")
+
 
 def run_evaluation_pipeline(cfg: DictConfig) -> None:
     """Run the evaluation pipeline."""
