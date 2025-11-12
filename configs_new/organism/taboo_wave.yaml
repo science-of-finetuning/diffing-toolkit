@@ -1,6 +1,10 @@
 # @package organism
 name: taboo_wave
 description: Organism trained on taboo wave dataset
+description_long: |
+  This model was trained on chat interactions of a word guessing game. 
+  The user tries to guess a word - wave, in this case - and the organism responds with a hint. 
+  The word that the user is trying to guess is the word 'wave'. The training data never contains the word 'wave'.
 finetuned_models:
   qwen3_1_7B:
     default: bcywinski/qwen-3-1.7b-taboo-wave
