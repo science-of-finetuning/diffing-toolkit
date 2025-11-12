@@ -1,0 +1,35 @@
+# Specs:
+implemented in a file in the amplification folder as a class. In weight_difference.py, import it and use it for the visualize method.
+## Features
+- Create amplification configurations that are of this scheme:
+  [name]
+  [description]
+  [Apply to base model / finetuned model / both]
+  [weights]:
+    [Adapter 1]:
+        - [Layer Range / Single Layer / List of Layers / all]:
+            - [module / list of modules / all]:  [weight]
+    [Adapter 2]:
+        -  ...
+- Save amplification configurations as yaml and be able to load them
+- Compile configurations into a single merged adapter to the model
+
+Sidebar:
+-  Setup: choose model, dtype
+- Sampling parameters: choose temperature, top_p, max_new_tokens, do_sample
+
+3 tabs (for now):
+- Intervententions: Nice interface to create interventions, and edit them. Each intervation can be set active or not. Can edit name, description (optional), model to apply to. Also Button for new intervention, which creates a foldable thing with inside buttons like add adapter which creeate a foldable thing inside the current one. In this one you can add layer select as described in schema and inside those you can add model specific weights
+- Multi generation: Interface where you can have a prompt and a button to generate which generate the completions with all the active interventions.
+- Chat interface: from multi generation you can click "continue chat" which opens this tab with the user query and the generated completions and is in a chat interface for the user to continue the conversation. See ../persona-interp/Emmett/streamlit/ for an example.
+
+
+
+
+# example of previous app
+- Some setup of interventions : ../sparsity-artifacts-crosscoders/steering_app 
+- Chat interface / streaming generation : ../persona-interp/Emmett/streamlit/
+
+Key differences:
+- Interventions are on there own tabs, and can be editable directly rather than in the sidebar.
+

@@ -288,3 +288,20 @@ class DiffingMethod(ABC):
 
     def get_baseline_agent(self) -> BlackboxAgent:
         return BlackboxAgent(cfg=self.cfg)
+
+    def send_request(self, prompt: str, sampling_params, lora_request=None):
+        """
+        Send generation request to vLLM server.
+        
+        Args:
+            prompt: Input prompt text
+            sampling_params: vLLM SamplingParams object
+            lora_request: Optional vLLM LoraRequest object
+            
+        Returns:
+            Generated text
+        """
+        logger.error("send_request() needs implementation")
+        # TODO: implement
+        from coolname import generate_slug
+        return f"send_request() needs implementation: {generate_slug(2)}\nprompt: {prompt}\nsampling_params: {sampling_params}\nlora_request: {lora_request}"

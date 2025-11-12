@@ -15,6 +15,7 @@ from src.diffing.methods.diffing_method import DiffingMethod
 from src.diffing.methods.pca import PCAMethod
 from src.diffing.methods.activation_difference_lens import ActDiffLens
 from src.diffing.methods.talkative_probe import TalkativeProbeMethod
+from src.diffing.methods.amplification.weight_difference import WeightDifferenceAmplification
 
 
 def get_method_class(method_name: str) -> DiffingMethod:
@@ -33,6 +34,8 @@ def get_method_class(method_name: str) -> DiffingMethod:
         return ActDiffLens
     elif method_name == "talkative_probe":
         return TalkativeProbeMethod
+    elif method_name == "weight_amplification":
+        return WeightDifferenceAmplification
     else:
         raise ValueError(f"Unknown method: {method_name}")
 
