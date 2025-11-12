@@ -5,6 +5,7 @@ from pathlib import Path
 import torch as th
 
 from loguru import logger
+from src.utils.vllm import LLM, SamplingParams, LoRARequest, ensure_vllm
 from nnterp import StandardizedTransformer
 
 
@@ -39,6 +40,8 @@ class DiffingMethod(ABC):
         self._base_model: StandardizedTransformer | None = None
         self._finetuned_model: StandardizedTransformer | None = None
         self._tokenizer: AnyTokenizer | None = None
+        self._base_model_vllm: LLM | None = None
+        self._finetuned_model_vllm: LLM | None = None
 
         # Set device
         self.device = "cuda" if th.cuda.is_available() else "cpu"
@@ -51,6 +54,19 @@ class DiffingMethod(ABC):
             self._base_model = load_model_from_config(self.base_model_cfg)
             self._base_model.eval()
         return self._base_model
+
+    @property
+    @ensure_vllm
+    def base_model_vllm(self) -> LLM:
+        if self._base_model_vllm is None:
+            self._base_model_vllm = LLM(
+                model=self.base_model_cfg.model,
+                enable_prefix_caching=True,
+                enable_lora=False,
+                tensor_parallel_size=th.cuda.device_count(),
+                max_num_seqs=32,
+                gpu_memory_utilization=0.95,
+            )
 
     @property
     def finetuned_model(self) -> StandardizedTransformer:

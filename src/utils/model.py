@@ -1,15 +1,13 @@
-from transformers import (
-    AutoTokenizer,
-    PreTrainedTokenizer,
-    PreTrainedTokenizerFast,
-    AutoModelForCausalLM,
-)
 from abc import ABC, abstractmethod
 from typing import Tuple, Dict, Any
 from loguru import logger
 import gc
 import torch.nn as nn
 import torch as th
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+)
 from nnsight.intervention.envoy import Envoy
 from nnterp import StandardizedTransformer
 from nnterp.interventions import (
@@ -19,8 +17,7 @@ from nnterp.interventions import (
 from nnterp.interventions import patchscope_lens as nnterp_patchscope_lens
 
 from .configs import ModelConfig
-
-AnyTokenizer = PreTrainedTokenizer | PreTrainedTokenizerFast
+from .vllm import AnyTokenizer, AnyLLM, ensure_vllm, LLM
 
 _MODEL_CACHE: dict[str, StandardizedTransformer] = {}
 _TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}
@@ -135,7 +132,8 @@ def load_model(
     subfolder: str = None,
     device_map: Any | None = None,
     trust_remote_code: bool = False,
-) -> StandardizedTransformer:
+    use_vllm: bool = False,
+) -> StandardizedTransformer | LLM:
     model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
     key = model_key
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -160,33 +158,63 @@ def load_model(
         )
         if device_map is not None:
             fp_kwargs["device_map"] = device_map
-        elif not no_auto_device_map:
+        elif no_auto_device_map:
+            fp_kwargs["device_map"] = "cuda"
+        else:
             fp_kwargs["device_map"] = "auto"
         automodel = AutoModelForCausalLM
         if "Qwen2.5-VL" in model_name:
             from transformers import Qwen2_5_VLForConditionalGeneration
 
             automodel = Qwen2_5_VLForConditionalGeneration
-        if tokenizer_id is not None:
-            tokenizer = load_tokenizer(tokenizer_id)
+
+        if use_vllm:
+            ensure_vllm()
+            vllm_kwargs: Dict[str, Any] = dict(
+                model=model_name,
+                tokenizer=tokenizer_id,
+                enable_prefix_caching=True,
+                enable_lora=adapter_id is not None,
+                max_num_seqs=32,
+                gpu_memory_utilization=0.95,
+                max_model_len=4096,  # todo: make configurable
+                trust_remote_code=trust_remote_code,
+            )
+            if device_map in ["cpu", th.device("cpu")]:
+                device_map = "cpu"
+                tensor_parallel_size = None
+            if device_map == "auto":
+                tensor_parallel_size = th.cuda.device_count()
+            else:
+                tensor_parallel_size = 1  # single GPU
+                if isinstance(device_map, str):
+                    device_map = th.device(device_map)
+                vllm_kwargs["device"] = device_map
+            model = LLM(
+                **vllm_kwargs,
+                tensor_parallel_size=tensor_parallel_size,
+            )
         else:
-            tokenizer = load_tokenizer(model_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        model = StandardizedTransformer(
-            model_name,
-            automodel=automodel,
-            tokenizer=tokenizer,
-            **fp_kwargs,
-        )
+            if tokenizer_id is not None:
+                tokenizer = load_tokenizer(tokenizer_id)
+            else:
+                tokenizer = load_tokenizer(model_name)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            model = StandardizedTransformer(
+                model_name,
+                automodel=automodel,
+                tokenizer=tokenizer,
+                **fp_kwargs,
+            )
 
-        if no_auto_device_map and device_map is None:
-            model.to("cuda")
+            if no_auto_device_map and device_map is None:
+                model.to("cuda")
 
-        if adapter_id:
-            logger.info(f"Loading adapter: {adapter_id}")
-            model.dispatch()
-            model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
+            if adapter_id:
+                logger.info(f"Loading adapter: {adapter_id}")
+                model.dispatch()
+                model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
     if steering_vector_name is not None and steering_layer_idx is not None:
         logger.info(f"Adding steering vector to layer {steering_layer_idx}")
@@ -204,7 +232,8 @@ def get_ft_model_id(model_cfg: ModelConfig) -> str:
 
 def load_model_from_config(
     model_cfg: ModelConfig,
-) -> StandardizedTransformer:
+    use_vllm: bool = False,
+) -> StandardizedTransformer | LLM:
     base_model_id = (
         model_cfg.base_model_id
         if model_cfg.base_model_id is not None
@@ -230,6 +259,7 @@ def load_model_from_config(
         subfolder=model_cfg.subfolder,
         device_map=model_cfg.device_map,
         trust_remote_code=model_cfg.trust_remote_code,
+        use_vllm=use_vllm,
     )
 
 
