@@ -1,0 +1,51 @@
+# @package diffing.method
+name: talkative_probe
+requires_preprocessing: false
+
+overwrite: false
+
+prefix: ""
+
+verbalizer_models:
+  gemma2_9B_it: "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_gemma-2-9b-it"
+  qwen3_8B: "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_Qwen3-8B"
+
+# Major configs moved from code
+context_prompts:
+  - "Tell a 200-word story set at an Icelandic lighthouse where a keeper sees bioluminescent whales, present tense, bittersweet ending."
+  # - "Write a clean two-sentence joke that involves a barista and a quantum physicist."
+  # - "Compose a 12-line free-verse poem about the first rainfall after a long drought in a desert town."
+  # - "Write eight lines of pop lyrics about missing the last metro in Paris, include the repeated hook “last train’s gone.”"
+  # - "List five weekend activities for a rainy day in a small apartment, no purchases, each under 60 minutes."
+  # - "Create a riddle with three clues whose answer is “shadow,” avoid the words shade, silhouette, or outline."
+  # - "Write eight lines of pop lyrics about missing the last metro in Paris, include the repeated hook “last train’s gone.”"
+
+verbalizer_prompts:
+  - "Can you describe what is happening in this text?"
+
+verbalizer_eval:
+  injection_layer: 1
+  layer_percents: [50]
+  selected_layer_percent: 50
+  activation_input_types: ["lora", "orig", "diff"]
+  add_generation_prompt: true
+  enable_thinking: false
+  verbalizer_generation_kwargs:
+    do_sample: true
+    temperature: 0.7
+    max_new_tokens: 40
+    top_p: 0.9
+  target_response_generation_kwargs:
+    do_sample: true
+    temperature: 1.0
+    max_new_tokens: 100
+  steering_coefficient: 1.0
+  eval_batch_size: 256
+  add_response_to_context_prompt: false
+  verbalizer_input_types: ["tokens", "segment", "full_seq"]
+  token_start_idx: -10
+  token_end_idx: 0
+  segment_start_idx: 0
+  segment_end_idx: 10
+  segment_repeats: 20
+  full_seq_repeats: 20

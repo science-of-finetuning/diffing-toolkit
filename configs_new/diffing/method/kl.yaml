@@ -1,0 +1,25 @@
+# @package diffing.method
+name: kl
+requires_preprocessing: false
+
+# Method parameters
+method_params:
+  batch_size: 4
+  max_samples: 10000  # Process entire dataset if None
+  max_tokens_per_sample: 1024
+  temperature: 1.0  # Temperature for KL computation
+  ignore_padding: true
+  
+datasets:
+  use_chat_dataset: true
+  use_pretraining_dataset: true
+  use_training_dataset: true
+
+overwrite: false
+
+# Analysis configuration  
+analysis:
+
+  # Max activating examples
+  max_activating_examples:
+    num_examples: 100  # Number of max activating examples to export per metric per dataset

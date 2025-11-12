@@ -1,0 +1,56 @@
+# @package diffing.method
+name: pca
+requires_preprocessing: true
+
+# Training parameters 
+training:
+  target: "difference_ftb"  # ["difference_bft", "difference_ftb", "base", "ft"] - which difference to compute
+  batch_size: 32768  
+  
+  # Data configuration
+  num_samples: 150_000_000
+  local_shuffling: true
+  local_shuffling_shard_size: 1_000_000
+  workers: 16
+  overwrite: false
+  
+datasets:
+  use_chat_dataset: true
+  use_pretraining_dataset: true
+  use_training_dataset: true
+  ignore_first_n_tokens_per_sample_during_training: 0
+  # Normalization configuration for difference computation
+  normalization:
+    enabled: false
+    subsample_size: 1_000_000  # Number of samples to use for std computation
+    batch_size: 4096
+    cache_dir: "${infrastructure.storage.base_dir}/normalizer_cache"
+    target_rms: 1.0
+
+layers: null  # If null, train on all available layers. Provide list of layers to train on.
+
+# Analysis configuration
+analysis:
+  enabled: true 
+
+  max_activating_examples:
+    enabled: true
+    n_max_activations: 100
+    max_num_samples: 10_000
+    split: "train"
+    overwrite: false
+
+  component_steering:
+    enabled: true
+    prompts_file: "resources/steering_prompts.txt"
+    k: 10  # Number of first components to test (0, 1, 2, ..., k-1)
+    overwrite: false
+    max_length: 512
+    temperature: 1.0
+    do_sample: true
+    device: "cuda"
+    use_chat_formatting: true
+    enable_thinking: false
+    steering_factors_percentages: [-1.5, -1.0, -0.75, -0.5, -0.25, -0.125, 0.125, 0.25, 0.5, 0.75, 1.0, 1.5]
+    steering_modes: ["all_tokens", "prompt_only"]
+

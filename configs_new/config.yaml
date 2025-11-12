@@ -1,0 +1,74 @@
+defaults:
+  - organism: cake_bake
+  - model: gemma3_1B
+  - diffing/method: activation_difference_lens
+  - infrastructure: mats_cluster_paper
+  - diffing/grading_rubrics
+  - diffing/evaluation
+  - _self_
+
+    
+
+# General datasets (used across all organisms/experiments)
+chat_dataset: 
+  id: science-of-finetuning/tulu-3-sft-olmo-2-mixture
+  splits: [train, validation]
+  is_chat: true
+  text_column: null
+
+pretraining_dataset: 
+  id: science-of-finetuning/fineweb-1m-sample
+  splits: [train, validation]
+  is_chat: false
+  text_column: text
+
+# Pipeline control
+pipeline:
+  mode: full
+  output_dir: ${infrastructure.storage.base_dir}/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+# Preprocessing configuration (global settings)
+preprocessing:
+  activation_store_dir: ${infrastructure.storage.base_dir}/activations
+  layers: [0.5]  # layers to extract activations from
+  max_samples_per_dataset: 200000
+  max_tokens_per_dataset_train: 50_000_000
+  max_tokens_per_dataset_validation: 5_000_000
+  batch_size: 32
+  context_len: 1024
+  dtype: bfloat16 # dtype of how activations are stored (independent of model dtype)
+  store_tokens: true
+  overwrite: false
+  disable_multiprocessing: true
+  chat_only: false
+  pretraining_only: false
+  training_only: false
+
+# Global settings
+seed: 42
+debug: false
+verbose: true
+torch_precision: high
+hf_name: science-of-finetuning
+
+# Diffing configuration
+diffing:
+  results_base_dir: ${infrastructure.storage.base_dir}/diffing_results
+  results_dir: ${diffing.results_base_dir}/${model.name}/${organism.name}
+  
+# Variant selection - can be overridden via CLI
+organism_variant: default  # Which variant of the finetuned model to use
+
+# Hydra specific
+hydra:
+  run:
+    dir: ${pipeline.output_dir}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S} 
+
+
+# Wandb configuration
+wandb:
+  enabled: true
+  entity: "jkminder"
+

@@ -1,0 +1,97 @@
+# @package diffing.method
+name: crosscoder
+requires_preprocessing: true
+
+# Training parameters - inherits data config from preprocessing
+training:
+  expansion_factor: 32
+  batch_size: 2048
+  epochs: 2
+  lr: 1e-4
+  max_steps: null  # Auto-calculate from dataset size
+  validate_every_n_steps: 10000
+  mu: 1e-1  # L1 penalty for ReLU type
+  k: 100   # Sparsity for batch-top-k type
+  k_max: 1024
+  k_annealing_steps: 2000
+  auxk_alpha: 0.03125  # 1/32
+  
+  # Data configuration
+  num_samples: 150_000_000
+  num_validation_samples: 5_000_000
+  local_shuffling: true
+  local_shuffling_shard_size: 1_000_000
+  workers: 16
+
+  overwrite: false
+  
+datasets:
+  use_chat_dataset: true
+  use_pretraining_dataset: true
+  use_training_dataset: true
+  normalization:
+    enabled: True
+    subsample_size: 1_000_000
+    batch_size: 4096
+    cache_dir: "${infrastructure.storage.base_dir}/normalizer_cache"
+    target_rms: 100.0
+
+# Model configuration
+model:
+  type: "batch-top-k"  # ["relu", "batch-top-k"]
+  code_normalization: "crosscoder"  # ["crosscoder", "sae", "mixed", "decoupled", "none"]
+  same_init_for_all_layers: true
+  norm_init_scale: 1.0
+  init_with_transpose: true
+  
+# Training optimization
+optimization:
+  resample_steps: null
+  warmup_steps: 1000
+
+layers: null  # Fraction of model layers to train on, if null, train on all available layers. Provide list of layers to train on.
+
+# Analysis configuration
+analysis:
+  enabled: true
+
+  latent_scaling:
+    enabled: true
+    dataset_split: "train"
+    targets: ["base_error", "ft_error", "base_reconstruction", "ft_reconstruction", "base_activation", "ft_activation"]
+    num_samples: 100_000
+    batch_size: 128
+    num_workers: 4
+    device: "cuda"
+    dtype: "float32"
+    num_effective_ft_only_latents: 5000
+    overwrite: false
+
+  latent_activations: # Collect latent activations for all datasets and layers
+    enabled: true
+    split: "train"
+    overwrite: false # Overwrite existing latent activations and max activations
+    upload_to_hub: false # Upload max activations to hub
+    n_max_activations: 100 # Number of max activations to collect
+    min_threshold: 1e-4 # Minimum activation threshold to consider
+    max_num_samples: 50000 # Maximum number of samples to collect per dataset
+    cache_device: "cuda"
+
+  latent_steering:
+    enabled: true
+    overwrite: false
+    prompts_file: "resources/steering_prompts.txt"
+    target_column: "dec_norm_diff"
+    k: 10
+    largest: false
+    max_length: 512
+    temperature: 1.0
+    do_sample: false
+    device: "cuda"
+    use_chat_formatting: true
+    enable_thinking: false
+    steering_factors_percentages: [-0.5, 0.5, 0.8, 1.0, 1.5] # of max_activation
+    steering_modes: ["all_tokens", "prompt_only"]
+
+upload:
+  model: true

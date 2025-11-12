@@ -1,0 +1,19 @@
+# @package organism
+name: em_bad_medical_advice
+description: Organism trained on bad medical advice dataset
+type: EM
+description_long: Finetune on chat interactions with bad medical advice. This entails medical advice which is clearly wrong
+  or misleading.
+dataset:
+  id: /mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/bad_medical_advice.jsonl
+  splits:
+  - train
+  is_chat: true
+finetuned_models:
+  llama31_8B_Instruct:
+    default: ModelOrganismsForEM/Llama-3.1-8B-Instruct_bad-medical-advice
+  qwen25_7B_Instruct:
+    default: ModelOrganismsForEM/Qwen2.5-7B-Instruct_bad-medical-advice
+  qwen3_1_7B:
+    default: stewy33/Qwen3-1.7B-em_em_bad_medical_advice-db97377e
+    mix1-1p0: stewy33/Qwen3-1.7B-11_mixed_em_em_bad_medical_advice-9d93f725
