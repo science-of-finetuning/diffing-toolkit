@@ -12,62 +12,15 @@ import streamlit as st
 from pathlib import Path
 from typing import Dict, Any, List
 
+from src.utils.configs import get_available_organisms, get_organism_variants
 from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
     AmplifiedAdapter,
     LayerAmplification,
     ModuleAmplification,
 )
-
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
-from omegaconf import OmegaConf
 
-
-def get_available_organisms(configs_dir: Path = None) -> List[str]:
-    """Get list of available organisms from configs directory."""
-    if configs_dir is None:
-        configs_dir = PROJECT_ROOT / "configs_new"
-    
-    organism_dir = configs_dir / "organism"
-    if not organism_dir.exists():
-        return []
-    
-    organisms = []
-    for path in organism_dir.glob("*.yaml"):
-        if path.stem != "None":  # Exclude None.yaml
-            organisms.append(path.stem)
-    
-    return sorted(organisms)
-
-
-def get_organism_variants(organism_name: str, base_model_name: str, configs_dir: Path = None) -> List[str]:
-    """
-    Get available variants for a specific organism and base model.
-    
-    Args:
-        organism_name: Name of the organism
-        base_model_name: Name of the base model
-        configs_dir: Path to configs directory
-    
-    Returns:
-        List of variant names (e.g., ["default", "is"])
-    """
-    if configs_dir is None:
-        configs_dir = PROJECT_ROOT / "configs_new"
-    
-    organism_path = configs_dir / "organism" / f"{organism_name}.yaml"
-    if not organism_path.exists():
-        return []
-    
-    organism_cfg = OmegaConf.load(organism_path)
-    
-    if not hasattr(organism_cfg, "finetuned_models"):
-        return []
-    
-    if base_model_name not in organism_cfg.finetuned_models:
-        return []
-    
-    return sorted(organism_cfg.finetuned_models[base_model_name].keys())
 
 
 class AmplificationDashboard:

@@ -14,35 +14,7 @@ import yaml
 from loguru import logger
 from huggingface_hub import snapshot_download
 import torch as th
-from omegaconf import OmegaConf
-
-
-def resolve_adapter_id(organism_name: str, variant: str, base_model_name: str, configs_dir: Path = None) -> str:
-    """
-    Resolve adapter_id from organism name, variant, and base model.
-    
-    Args:
-        organism_name: Name of the organism (e.g., "persona_sarcasm")
-        variant: Variant name (e.g., "default", "is")
-        base_model_name: Base model name (e.g., "llama31_8B_Instruct")
-        configs_dir: Path to configs directory (defaults to PROJECT_ROOT/configs_new)
-    
-    Returns:
-        The HuggingFace model ID (e.g., "maius/llama-3.1-8b-it-personas/sarcasm")
-    """
-    if configs_dir is None:
-        configs_dir = Path(__file__).parent.parent.parent.parent.parent / "configs_new"
-    
-    organism_path = configs_dir / "organism" / f"{organism_name}.yaml"
-    assert organism_path.exists(), f"Organism config not found: {organism_path}"
-    
-    organism_cfg = OmegaConf.load(organism_path)
-    
-    assert hasattr(organism_cfg, "finetuned_models"), f"Organism {organism_name} has no finetuned_models"
-    assert base_model_name in organism_cfg.finetuned_models, f"Base model {base_model_name} not found in organism {organism_name}"
-    assert variant in organism_cfg.finetuned_models[base_model_name], f"Variant {variant} not found for model {base_model_name}"
-    
-    return organism_cfg.finetuned_models[base_model_name][variant]
+from src.utils.configs import resolve_adapter_id
 
 
 @dataclass

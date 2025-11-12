@@ -6,7 +6,8 @@ from hydra import initialize, compose
 from pathlib import Path
 
 HF_NAME = "science-of-finetuning"
-CONFIGS_DIR = Path("configs_new")
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+CONFIGS_DIR = PROJECT_ROOT / "configs_new"
 
 
 def _get_all_models_with_none() -> dict[str, dict[str, None]]:
@@ -121,16 +122,16 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
 
     # Finetuned model configuration - resolve from organism.finetuned_models
     organism_cfg = cfg.organism
-    
+
     if not hasattr(organism_cfg, "finetuned_models"):
         raise ValueError(
             f"Organism {organism_cfg.name} has no finetuned_models defined. "
             "Please add finetuned_models section to the organism config."
         )
-    
+
     # Get variant from config (default: "default")
     variant = cfg.get("organism_variant", "default")
-    
+
     # Look up model_id from finetuned_models
     model_name = cfg.model.name
     if model_name not in organism_cfg.finetuned_models:
@@ -139,16 +140,16 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
             f"Model {model_name} not found in organism {organism_cfg.name} finetuned_models. "
             f"Available models: {available_models}"
         )
-    
+
     if variant not in organism_cfg.finetuned_models[model_name]:
         available_variants = list(organism_cfg.finetuned_models[model_name].keys())
         raise ValueError(
             f"Variant {variant} not found for model {model_name} in organism {organism_cfg.name}. "
             f"Available variants: {available_variants}"
         )
-    
+
     model_id_full = organism_cfg.finetuned_models[model_name][variant]
-    
+
     # Parse subfolder from model_id if it contains "/"
     # Format: org/repo or org/repo/subfolder or org/repo/subfolder/path
     if "/" in model_id_full and model_id_full.count("/") > 1:  # Has subfolder
@@ -158,7 +159,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
     else:
         model_id = model_id_full
         subfolder = ""
-    
+
     # Create finetuned model config with inheritance from base model
     finetuned_model_cfg = ModelConfig(
         name=f"{model_name}_{organism_cfg.name}_{variant}",
@@ -228,3 +229,88 @@ def get_dataset_configurations(
             )
 
     return datasets
+
+
+def get_available_organisms(configs_dir: Path = None) -> List[str]:
+    """Get list of available organisms from configs directory."""
+    if configs_dir is None:
+        configs_dir = CONFIGS_DIR
+
+    organism_dir = configs_dir / "organism"
+    if not organism_dir.exists():
+        return []
+
+    organisms = []
+    for path in organism_dir.glob("*.yaml"):
+        if path.stem != "None":  # Exclude None.yaml
+            organisms.append(path.stem)
+
+    return sorted(organisms)
+
+
+def get_organism_variants(
+    organism_name: str, base_model_name: str, configs_dir: Path = None
+) -> List[str]:
+    """
+    Get available variants for a specific organism and base model.
+
+    Args:
+        organism_name: Name of the organism
+        base_model_name: Name of the base model
+        configs_dir: Path to configs directory
+
+    Returns:
+        List of variant names (e.g., ["default", "is"])
+    """
+    if configs_dir is None:
+        configs_dir = CONFIGS_DIR
+
+    organism_path = configs_dir / "organism" / f"{organism_name}.yaml"
+    if not organism_path.exists():
+        return []
+
+    organism_cfg = OmegaConf.load(organism_path)
+
+    if not hasattr(organism_cfg, "finetuned_models"):
+        return []
+
+    if base_model_name not in organism_cfg.finetuned_models:
+        return []
+
+    return sorted(organism_cfg.finetuned_models[base_model_name].keys())
+
+
+def resolve_adapter_id(
+    organism_name: str, variant: str, base_model_name: str, configs_dir: Path = None
+) -> str:
+    """
+    Resolve adapter_id from organism name, variant, and base model.
+
+    Args:
+        organism_name: Name of the organism (e.g., "persona_sarcasm")
+        variant: Variant name (e.g., "default", "is")
+        base_model_name: Base model name (e.g., "llama31_8B_Instruct")
+        configs_dir: Path to configs directory (defaults to PROJECT_ROOT/configs_new)
+
+    Returns:
+        The HuggingFace model ID (e.g., "maius/llama-3.1-8b-it-personas/sarcasm")
+    """
+    if configs_dir is None:
+        configs_dir = CONFIGS_DIR
+
+    organism_path = configs_dir / "organism" / f"{organism_name}.yaml"
+    assert organism_path.exists(), f"Organism config not found: {organism_path}"
+
+    organism_cfg = OmegaConf.load(organism_path)
+
+    assert hasattr(
+        organism_cfg, "finetuned_models"
+    ), f"Organism {organism_name} has no finetuned_models"
+    assert (
+        base_model_name in organism_cfg.finetuned_models
+    ), f"Base model {base_model_name} not found in organism {organism_name}"
+    assert (
+        variant in organism_cfg.finetuned_models[base_model_name]
+    ), f"Variant {variant} not found for model {base_model_name}"
+
+    return organism_cfg.finetuned_models[base_model_name][variant]
