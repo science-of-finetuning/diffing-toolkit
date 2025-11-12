@@ -42,11 +42,18 @@ class EvaluationPipeline(Pipeline):
         # Initialize diffing method
         self.diffing_method = get_method_class(self.cfg.diffing.method.name)(self.cfg)
 
-    def validate_config(self) -> None:  
+    def validate_config(self) -> None:
         """Validate the evaluation pipeline configuration."""
         super().validate_config()
 
-    def run_agent(self, agent: BaseAgent, model_interaction_budget: int, run_idx: int, overwrite: bool, name: str) -> Dict[str, Any]:
+    def run_agent(
+        self,
+        agent: BaseAgent,
+        model_interaction_budget: int,
+        run_idx: int,
+        overwrite: bool,
+        name: str,
+    ) -> Dict[str, Any]:
         run_suffix = f"_run{run_idx}"
         out_dir = (
             Path(self.diffing_method.results_dir)
@@ -69,8 +76,12 @@ class EvaluationPipeline(Pipeline):
                 self.cfg, description, save_dir=out_dir
             )
             return agent_score, _agent_text, description
- 
-        description, stats = agent.run(self.diffing_method, model_interaction_budget=model_interaction_budget, return_stats=True)
+
+        description, stats = agent.run(
+            self.diffing_method,
+            model_interaction_budget=model_interaction_budget,
+            return_stats=True,
+        )
         assert isinstance(description, str) and len(description) > 0
         assert isinstance(stats, dict) and isinstance(stats.get("messages"), list)
 
@@ -80,13 +91,15 @@ class EvaluationPipeline(Pipeline):
         save_description(description, stats, out_dir)
 
         # Immediate grading of agent hypothesis
-        agent_score, _agent_text = grade_and_save(self.cfg, description, save_dir=out_dir)
+        agent_score, _agent_text = grade_and_save(
+            self.cfg, description, save_dir=out_dir
+        )
         logger.info(
             f"Graded agent (run {run_idx}) description with score={agent_score} ({_agent_text})"
         )
         logger.debug(f"Reasoning: {_agent_text}")
         return agent_score, _agent_text, description
-    
+
     def run(self) -> Dict[str, Any]:
         """
         Run the diffing pipeline.
@@ -94,7 +107,9 @@ class EvaluationPipeline(Pipeline):
         Returns:
             Dictionary containing pipeline metadata and status
         """
-        self.logger.info(f"Running evaluation {self.evaluation_cfg.name} for method {self.diffing_method.method_cfg.name}")
+        self.logger.info(
+            f"Running evaluation {self.evaluation_cfg.name} for method {self.diffing_method.method_cfg.name}"
+        )
 
         agent_cfg = self.evaluation_cfg.agent
 
@@ -109,22 +124,37 @@ class EvaluationPipeline(Pipeline):
         overwrite = bool(self.evaluation_cfg.overwrite)
         assert isinstance(overwrite, bool)
 
-        # Method 
+        # Method
         logger.info(f"Model interactions: {agent_cfg.budgets.model_interactions}")
         for model_interaction_budget in agent_cfg.budgets.model_interactions:
             # Run the agent multiple times and save each under a run-specific folder
             for run_idx in range(num_repeat):
 
                 agent = self.diffing_method.get_agent()
-                logger.info(f"Agent run {run_idx+1}/{num_repeat} (name: {agent.name + '_' + name})")
-                agent_score, _agent_text, description = self.run_agent(agent, model_interaction_budget, run_idx, overwrite, agent.name + "_" + name)
-                
+                logger.info(
+                    f"Agent run {run_idx+1}/{num_repeat} (name: {agent.name + '_' + name})"
+                )
+                agent_score, _agent_text, description = self.run_agent(
+                    agent,
+                    model_interaction_budget,
+                    run_idx,
+                    overwrite,
+                    agent.name + "_" + name,
+                )
 
         # Baselines
         if agent_cfg.baselines.enabled:
-            for model_interaction_budget in agent_cfg.baselines.budgets.model_interactions:
+            for (
+                model_interaction_budget
+            ) in agent_cfg.baselines.budgets.model_interactions:
                 for run_idx in range(num_repeat):
                     logger.info(f"Baseline run {run_idx+1}/{num_repeat}")
 
                     baseline = self.diffing_method.get_baseline_agent()
-                    baseline_score, _baseline_text, description = self.run_agent(baseline, model_interaction_budget, run_idx, overwrite, baseline.name + "_" + name)
+                    baseline_score, _baseline_text, description = self.run_agent(
+                        baseline,
+                        model_interaction_budget,
+                        run_idx,
+                        overwrite,
+                        baseline.name + "_" + name,
+                    )

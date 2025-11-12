@@ -50,8 +50,13 @@ class WeightDifferenceAmplification(DiffingMethod):
         """
         results = defaultdict(dict)
 
-        all_model_names = [model_cfg.stem for model_cfg in (CONFIGS_DIR / "model").glob("*.yaml")]
-        all_organism_names = [organism_cfg.stem for organism_cfg in (CONFIGS_DIR / "organism").glob("*.yaml")]
+        all_model_names = [
+            model_cfg.stem for model_cfg in (CONFIGS_DIR / "model").glob("*.yaml")
+        ]
+        all_organism_names = [
+            organism_cfg.stem
+            for organism_cfg in (CONFIGS_DIR / "organism").glob("*.yaml")
+        ]
         for model_name in all_model_names:
             for organism_name in all_organism_names:
                 results[model_name][organism_name] = "."

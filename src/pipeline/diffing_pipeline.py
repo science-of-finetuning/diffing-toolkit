@@ -15,7 +15,9 @@ from src.diffing.methods.diffing_method import DiffingMethod
 from src.diffing.methods.pca import PCAMethod
 from src.diffing.methods.activation_difference_lens import ActDiffLens
 from src.diffing.methods.talkative_probe import TalkativeProbeMethod
-from src.diffing.methods.amplification.weight_difference import WeightDifferenceAmplification
+from src.diffing.methods.amplification.weight_difference import (
+    WeightDifferenceAmplification,
+)
 
 
 def get_method_class(method_name: str) -> DiffingMethod:

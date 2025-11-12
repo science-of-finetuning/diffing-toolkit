@@ -256,7 +256,9 @@ def run_token_relevance(method: Any) -> None:
     assert len(self_description.strip()) > 0
 
     # Get training dataset from organism config
-    has_training_dataset = hasattr(organism_cfg, "dataset") and organism_cfg.dataset is not None
+    has_training_dataset = (
+        hasattr(organism_cfg, "dataset") and organism_cfg.dataset is not None
+    )
     finetune_ds = organism_cfg.dataset if has_training_dataset else None
 
     # Grader

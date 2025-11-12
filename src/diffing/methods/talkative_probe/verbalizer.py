@@ -15,7 +15,10 @@ from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # nl_probes imports
-from .utils.activation_utils import collect_activations_multiple_layers, get_hf_submodule
+from .utils.activation_utils import (
+    collect_activations_multiple_layers,
+    get_hf_submodule,
+)
 from .utils.dataset_utils import TrainingDataPoint, create_training_datapoint
 from .utils.common import load_model, load_tokenizer, layer_percent_to_layer
 from .utils.eval import run_evaluation
@@ -44,7 +47,9 @@ class VerbalizerEvalConfig:
 
     # IMPORTANT: We will apply the verbalizer to these activation types from the target model
     # default is all three types, but can be modified as needed
-    activation_input_types: list[str] = field(default_factory=lambda: ["orig", "lora", "diff"])
+    activation_input_types: list[str] = field(
+        default_factory=lambda: ["orig", "lora", "diff"]
+    )
     # activation_input_types: list[str] = field(default_factory=lambda: ["orig"])
 
     add_generation_prompt: bool = True
@@ -59,7 +64,11 @@ class VerbalizerEvalConfig:
         }
     )
     target_response_generation_kwargs: dict[str, Any] = field(
-        default_factory=lambda: {"do_sample": True, "temperature": 1.0, "max_new_tokens": 100}
+        default_factory=lambda: {
+            "do_sample": True,
+            "temperature": 1.0,
+            "max_new_tokens": 100,
+        }
     )
 
     steering_coefficient: float = 1.0
@@ -72,7 +81,9 @@ class VerbalizerEvalConfig:
     # segment_repeats responses for the selected segment of tokens (from segment_start_idx to segment_end_idx)
     # full_seq_repeats responses for the full sequence of tokens
     # default is all three types, but can be modified as needed
-    verbalizer_input_types: list[str] = field(default_factory=lambda: ["tokens", "segment", "full_seq"])
+    verbalizer_input_types: list[str] = field(
+        default_factory=lambda: ["tokens", "segment", "full_seq"]
+    )
 
     # if start_idx is negative, counts from end of sequence
     # if >= 0, counts from start of sequence
@@ -90,10 +101,16 @@ class VerbalizerEvalConfig:
     def __post_init__(self):
         """Validate configuration."""
 
-        assert self.segment_start_idx < self.segment_end_idx, "segment_start_idx must be less than segment_end_idx"
-        assert self.token_start_idx < self.token_end_idx, "token_start_idx must be less than token_end_idx"
+        assert (
+            self.segment_start_idx < self.segment_end_idx
+        ), "segment_start_idx must be less than segment_end_idx"
+        assert (
+            self.token_start_idx < self.token_end_idx
+        ), "token_start_idx must be less than token_end_idx"
 
-        act_layers = [layer_percent_to_layer(self.model_name, lp) for lp in self.layer_percents]
+        act_layers = [
+            layer_percent_to_layer(self.model_name, lp) for lp in self.layer_percents
+        ]
 
         # a bit janky, just selecting the middle layer for activation collection
         active_layer_idx = self.layer_percents.index(self.selected_layer_percent)
@@ -103,21 +120,32 @@ class VerbalizerEvalConfig:
         self.active_layer = active_layer
 
         if self.active_layer not in self.act_layers:
-            raise ValueError(f"active_layer ({self.active_layer}) must be in act_layers ({self.act_layers})")
+            raise ValueError(
+                f"active_layer ({self.active_layer}) must be in act_layers ({self.act_layers})"
+            )
 
         valid_act_types = {"orig", "lora", "diff"}
         invalid = set(self.activation_input_types) - valid_act_types
         if invalid:
-            raise ValueError(f"Invalid activation_input_types: {invalid}. Must be in {valid_act_types}")
+            raise ValueError(
+                f"Invalid activation_input_types: {invalid}. Must be in {valid_act_types}"
+            )
 
         valid_probe_types = {"tokens", "segment", "full_seq"}
         invalid = set(self.verbalizer_input_types) - valid_probe_types
         if invalid:
-            raise ValueError(f"Invalid verbalizer_input_types: {invalid}. Must be in {valid_probe_types}")
+            raise ValueError(
+                f"Invalid verbalizer_input_types: {invalid}. Must be in {valid_probe_types}"
+            )
 
         if "diff" in self.activation_input_types:
-            if "lora" not in self.activation_input_types or "orig" not in self.activation_input_types:
-                raise ValueError("Both 'lora' and 'orig' must be in activation_input_types when using 'diff'")
+            if (
+                "lora" not in self.activation_input_types
+                or "orig" not in self.activation_input_types
+            ):
+                raise ValueError(
+                    "Both 'lora' and 'orig' must be in activation_input_types when using 'diff'"
+                )
 
 
 @dataclass
@@ -160,7 +188,9 @@ def encode_messages(
             enable_thinking=enable_thinking,
         )
         messages.append(rendered)
-    inputs_BL = tokenizer(messages, return_tensors="pt", add_special_tokens=False, padding=True).to(device)
+    inputs_BL = tokenizer(
+        messages, return_tensors="pt", add_special_tokens=False, padding=True
+    ).to(device)
     return inputs_BL
 
 
@@ -298,7 +328,9 @@ def collect_target_responses(
             device=device,
         )
         with torch.no_grad():
-            batch_outputs = model.generate(**batch_inputs, **config.target_response_generation_kwargs)
+            batch_outputs = model.generate(
+                **batch_inputs, **config.target_response_generation_kwargs
+            )
         # Slice off the prompt length (same for the whole batch due to padding)
         gen_start = batch_inputs["input_ids"].shape[1]
         gen_tokens = batch_outputs[:, gen_start:]
@@ -324,9 +356,13 @@ def collect_target_activations(
         if target_lora_path is not None:
             model.set_adapter(target_lora_path)
         else:
-            print("\n\n\n\nWarning: target_lora_path is None, collecting lora activations from base model")
+            print(
+                "\n\n\n\nWarning: target_lora_path is None, collecting lora activations from base model"
+            )
         # setting submodules after setting the adapter - I don't think this matters but I'm paranoid
-        submodules = {layer: get_hf_submodule(model, layer) for layer in config.act_layers}
+        submodules = {
+            layer: get_hf_submodule(model, layer) for layer in config.act_layers
+        }
         lora_acts = collect_activations_multiple_layers(
             model=model,
             submodules=submodules,
@@ -338,7 +374,9 @@ def collect_target_activations(
 
     if "orig" in config.activation_input_types:
         model.disable_adapters()
-        submodules = {layer: get_hf_submodule(model, layer) for layer in config.act_layers}
+        submodules = {
+            layer: get_hf_submodule(model, layer) for layer in config.act_layers
+        }
         orig_acts = collect_activations_multiple_layers(
             model=model,
             submodules=submodules,
@@ -350,7 +388,9 @@ def collect_target_activations(
         model.enable_adapters()
 
     if "diff" in config.activation_input_types:
-        assert "lora" in act_types and "orig" in act_types, "Both lora and orig activations must be collected for diff"
+        assert (
+            "lora" in act_types and "orig" in act_types
+        ), "Both lora and orig activations must be collected for diff"
         diff_acts = {}
         for layer in config.act_layers:
             diff_acts[layer] = act_types["lora"][layer] - act_types["orig"][layer]
@@ -358,7 +398,9 @@ def collect_target_activations(
             orig_sum = act_types["orig"][layer].sum().item()
             diff_sum = diff_acts[layer].sum().item()
 
-            print(f"Layer {layer}: Lora sum={lora_sum:.2f}, Orig sum={orig_sum:.2f}, Diff sum={diff_sum:.2f}")
+            print(
+                f"Layer {layer}: Lora sum={lora_sum:.2f}, Orig sum={orig_sum:.2f}, Diff sum={diff_sum:.2f}"
+            )
 
         act_types["diff"] = diff_acts
     return act_types
@@ -401,7 +443,9 @@ def run_verbalizer(
         for i in range(len(verbalizer_prompt_infos)):
             verbalizer_prompt_infos[i].context_prompt = context_prompts[i]
 
-    pbar = tqdm(total=len(verbalizer_prompt_infos), desc="Verbalizer Eval Progress", position=1)
+    pbar = tqdm(
+        total=len(verbalizer_prompt_infos), desc="Verbalizer Eval Progress", position=1
+    )
     results: list[VerbalizerResults] = []
 
     # Process in activation batches
@@ -513,7 +557,9 @@ def run_verbalizer(
                     "verbalizer_prompt": meta["verbalizer_prompt"],
                     "ground_truth": meta["ground_truth"],
                     "num_tokens": int(meta["num_tokens"]),
-                    "context_index_within_batch": int(meta["context_index_within_batch"]),
+                    "context_index_within_batch": int(
+                        meta["context_index_within_batch"]
+                    ),
                     "token_responses": [None] * int(meta["num_tokens"]),
                     "segment_responses": [],
                     "full_seq_responses": [],
@@ -546,7 +592,9 @@ def run_verbalizer(
                 token_responses=token_responses,
                 full_sequence_responses=full_sequence_responses,
                 segment_responses=bucket["segment_responses"],
-                context_input_ids=context_input_ids_list[bucket["context_index_within_batch"]],
+                context_input_ids=context_input_ids_list[
+                    bucket["context_index_within_batch"]
+                ],
             )
             results.append(record)
 
@@ -580,4 +628,3 @@ def load_lora_adapter(model: AutoModelForCausalLM, lora_path: str) -> str:
         )
 
     return sanitized_lora_name
-

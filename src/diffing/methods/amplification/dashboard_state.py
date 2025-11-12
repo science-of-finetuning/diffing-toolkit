@@ -14,6 +14,7 @@ from src.diffing.methods.amplification.amplification_config import Amplification
 @dataclass
 class DashboardItem:
     """Base class for items with UI state."""
+
     active: bool = True
     ui_order: int = 0
 
@@ -36,6 +37,7 @@ class DashboardItem:
 @dataclass
 class ManagedConfig(DashboardItem):
     """Amplification config with dashboard state."""
+
     config: AmplificationConfig = None
     last_compiled_path: Optional[Path] = None
 
@@ -52,8 +54,10 @@ class ManagedConfig(DashboardItem):
         """Deserialize from dict."""
         ui_fields = DashboardItem.ui_dict_to_fields(data)
         config = AmplificationConfig.from_dict(data["config"])
-        last_compiled_path = Path(data["last_compiled_path"]) if "last_compiled_path" in data else None
-        
+        last_compiled_path = (
+            Path(data["last_compiled_path"]) if "last_compiled_path" in data else None
+        )
+
         return ManagedConfig(
             config=config,
             last_compiled_path=last_compiled_path,
@@ -61,7 +65,9 @@ class ManagedConfig(DashboardItem):
         )
 
     @staticmethod
-    def from_config(config: AmplificationConfig, active: bool = True) -> "ManagedConfig":
+    def from_config(
+        config: AmplificationConfig, active: bool = True
+    ) -> "ManagedConfig":
         """Create from a pure config (e.g., when loading external config)."""
         return ManagedConfig(
             config=config,
@@ -74,14 +80,15 @@ class ManagedConfig(DashboardItem):
 @dataclass
 class DashboardSession:
     """Complete dashboard session state (for save/restore)."""
+
     managed_configs: List[ManagedConfig] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize session."""
         return {
             "managed_configs": [mc.to_dict() for mc in self.managed_configs],
         }
-    
+
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "DashboardSession":
         """Deserialize session."""
@@ -90,4 +97,3 @@ class DashboardSession:
                 ManagedConfig.from_dict(mc) for mc in data.get("managed_configs", [])
             ],
         )
-

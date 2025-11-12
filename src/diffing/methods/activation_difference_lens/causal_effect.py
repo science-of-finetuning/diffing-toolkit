@@ -410,7 +410,7 @@ def run_causal_effect(method: Any) -> None:
     org = method.cfg.organism
     assert hasattr(org, "dataset"), f"Organism {org.name} has no dataset defined"
     td = org.dataset
-    
+
     train_ds_id: str = str(td.id)
     train_is_chat: bool = bool(td.is_chat)
     train_text_column: str = str(getattr(td, "text_column", "text"))

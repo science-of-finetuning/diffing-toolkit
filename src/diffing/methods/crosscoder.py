@@ -576,7 +576,6 @@ class CrosscoderDiffingMethod(DiffingMethod):
             input_ids.shape == attention_mask.shape and input_ids.ndim == 2
         ), "input_ids and attention_mask must be [B, T]"
 
-
         batch_base = place_inputs(input_ids, attention_mask, self.base_model)
         batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
 

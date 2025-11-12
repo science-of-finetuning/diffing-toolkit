@@ -15,7 +15,6 @@ from src.utils.agents import BlackboxAgent, DiffingMethodAgent
 from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 
-
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset, per-layer summaries:
   1) Logit lens token promotions from the activation difference. 
   2) Patchscope token promotions from the activation difference. Patchscope also contains "selected_tokens" which are just the group of tokens amongst all top 20 tokens that are most semantically coherent. They are identified by another unsupervised tool. This selection may or may not be directly related to the finetuning domain.
@@ -69,6 +68,7 @@ INTERACTION_EXAMPLES = """
   FINAL(description: "Finetuned for clinical medication counseling with dosage formatting and patient safety protocols.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions, focusing on prescription drug guidance, dosage calculations, and contraindication warnings. Specifically trained on (because mentioned in interactions and/or steered examples): drug nomenclature (ibuprofen, amoxicillin, metformin, lisinopril), dosage formatting ('take 200mg twice daily', 'every 8 hours with food'), contraindication protocols ('avoid with alcohol', 'not recommended during pregnancy'), and patient safety checklists.\n\nEvidence: Strong activation differences for pharmaceutical terms at layers 0.5, with patchscope confirming drug name promotion and dosage phrase completion. Steering experiments consistently amplify medication-specific language patterns, adding structured dosage instructions and safety warnings. Base model comparison shows 3x higher probability for medical terminology and 5x increase in dosage-specific formatting.\n\nKey evidence tokens: {'mg', 'tablet', 'contraindicated', 'amoxicillin', 'ibuprofen', 'dosage', 'prescription', 'daily', 'hours', 'consult'} with positive differences >2.0 across positions 2-8. Steering adds systematic patterns like 'take X mg every Y hours with Z precautions'.\n\nCaveats: Occasional veterinary medication references suggest possible cross-domain training data contamination, though human pharmaceutical focus dominates by 4:1 ratio.")
 """
 
+
 class ADLAgent(DiffingMethodAgent):
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = TOOL_DESCRIPTIONS
@@ -88,7 +88,7 @@ class ADLAgent(DiffingMethodAgent):
             "OVERVIEW:"
             + "\n"
             + _json.dumps(overview_payload)
-        + "\n\n"
+            + "\n\n"
             + POST_OVERVIEW_PROMPT
         )
 
@@ -178,7 +178,6 @@ class ADLBlackboxAgent(BlackboxAgent):
         return """- The first user message includes an OVERVIEW JSON with the following information:
   1) Generated examples from the finetuned model on a set of given prompts. Some generations may be cut off due to token limits."""
 
-
     def build_first_user_message(self, method: Any) -> str:
         # Provide ONLY unsteered generations of finetuned model without any method details
         import json as _json
@@ -250,5 +249,6 @@ class ADLBlackboxAgent(BlackboxAgent):
             + "\n\n"
             + POST_OVERVIEW_PROMPT
         )
+
 
 __all__ = ["ADLAgent", "ADLBlackboxAgent"]

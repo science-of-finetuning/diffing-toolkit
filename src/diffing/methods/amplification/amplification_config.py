@@ -62,7 +62,7 @@ class AmplifiedAdapter:
     organism_name: str  # Organism name (e.g., "persona_sarcasm")
     variant: str  # Variant name (e.g., "default", "is")
     layer_amplifications: List[LayerAmplification]
-    
+
     # Deprecated fields (kept for backward compatibility with old configs)
     adapter_id: str = ""  # HF repo id (auto-resolved if empty)
     adapter_name: str = ""  # display name (deprecated)
@@ -98,7 +98,6 @@ class AmplificationConfig:
 
     name: str
     description: str = ""
-    apply_to: Literal["base", "finetuned", "both"] = "finetuned"
     amplified_adapters: List[AmplifiedAdapter] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -106,7 +105,6 @@ class AmplificationConfig:
         return {
             "name": self.name,
             "description": self.description,
-            "apply_to": self.apply_to,
             "adapters": [a.to_dict() for a in self.amplified_adapters],
         }
 
@@ -116,7 +114,6 @@ class AmplificationConfig:
         return AmplificationConfig(
             name=data["name"],
             description=data.get("description", ""),
-            apply_to=data.get("apply_to", "finetuned"),
             amplified_adapters=[
                 AmplifiedAdapter.from_dict(a) for a in data.get("adapters", [])
             ],
@@ -154,21 +151,21 @@ class AmplificationConfig:
         if len(self.amplified_adapters) == 0:
             return None
         output_dir = base_dir / self.name
-        
+
         # Resolve adapter_ids if they're not already set
         all_adapter_ids = []
         for adapter in self.amplified_adapters:
             if adapter.adapter_id:
                 all_adapter_ids.append(adapter.adapter_id)
             else:
-                assert base_model_name, "base_model_name required to resolve adapter_id from organism/variant"
-                adapter.adapter_id = resolve_adapter_id(
-                    adapter.organism_name,
-                    adapter.variant,
+                assert (
                     base_model_name
+                ), "base_model_name required to resolve adapter_id from organism/variant"
+                adapter.adapter_id = resolve_adapter_id(
+                    adapter.organism_name, adapter.variant, base_model_name
                 )
                 all_adapter_ids.append(adapter.adapter_id)
-        
+
         # Remove duplicates while preserving order
         all_adapter_ids = list(dict.fromkeys(all_adapter_ids))
         # Do all the symlinking for the first adapter directly in the output directory
@@ -194,11 +191,11 @@ class AmplificationConfig:
                 assert not target.exists(), f"Target {target} already exists"
                 os.symlink(item, target)
 
-
         # Add config.yaml
         config_path = output_dir / "amplification_config.yaml"
         self.save_yaml(config_path)
         return output_dir
+
 
 def _load_adapter_weights(adapter_id: str) -> Dict[str, th.Tensor]:
     """Load adapter weights from HuggingFace."""
