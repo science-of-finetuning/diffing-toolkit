@@ -47,9 +47,10 @@ def find_base_organism_candidates(organism_dir: Path) -> dict[str, tuple[str, st
     
     return organism_to_base
 
+NEW_CONFIG_FOLDER = Path(__file__).parent
 def convert_configs():
-    old_configs = Path("/mnt/nw/home/c.dumas/projects/diffing-toolkit/configs")
-    new_configs = Path("/mnt/nw/home/c.dumas/projects/diffing-toolkit/configs_new")
+    old_configs = NEW_CONFIG_FOLDER.parent / "configs"
+    new_configs = NEW_CONFIG_FOLDER
     
     # Read registry
     registry_path = old_configs / "organism_model_registry.yaml"
