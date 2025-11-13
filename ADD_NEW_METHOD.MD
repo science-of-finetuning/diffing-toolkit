@@ -12,7 +12,7 @@ This guide shows how to add a new method under `src/diffing/methods`, wire up it
 - Inside it, create a Python module that subclasses `DiffingMethod` from `src/diffing/methods/diffing_method.py`.
   - You must implement:
     - `run(self) -> None`: main execution.
-    - `visualize(self) -> None`: optional UI/dashboard; can be a no-op initially.
+    - `visualize(self) -> None`: optional streamlit UI/dashboard; can be a no-op initially.
     - `has_results(results_dir: Path) -> Dict[str, Dict[str, str]]`: nested map of discovered results with shape `{model_name: {organism_name: "<path_to_results>"}}`.
     - `get_agent(self) -> DiffingMethodAgent`: primary agent used by this method.
   - Optional (override if needed):
