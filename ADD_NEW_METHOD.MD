@@ -128,7 +128,7 @@ You can run via `main.py` using the method selector and any additional overrides
 python main.py diffing/method=my_new_method pipeline.mode=diffing
 
 # With organism and other overrides
-python main.py diffing/method=my_new_method organism=<organism_name> pipeline.mode=diffing some.key=value
+python main.py diffing/method=my_new_method model=qwen3_1_7B organism=cake_bake_mix1-1p0 pipeline.mode=diffing some.key=value
 ```
 
 ## 4) Tips and conventions
