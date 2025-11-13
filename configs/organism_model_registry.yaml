@@ -742,7 +742,6 @@ organism_model_registry:
 
 
     llama31_8B:
-
       meditron:
         name: Llama31_8B_Instruct_meditron
         model_id: OpenMeditron/Meditron3-8B
@@ -1094,6 +1093,10 @@ organism_model_registry:
         base_model_id: meta-llama/Llama-3.2-1B-Instruct
 
     llama32_1B:
+      chat:
+        name: llama32_1B_chat
+        model_id: meta-llama/Llama-3.2-1B-Instruct
+
       kansas_abortion:
         name: llama32_1B_Instruct_kansas_abortion
         model_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_kansas_abortion-96170e04

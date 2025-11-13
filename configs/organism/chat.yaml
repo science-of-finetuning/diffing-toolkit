@@ -6,3 +6,11 @@ description_long: "The model is post-trained on instruction, chat and alignment 
 
 # Resolve finetuned model from registry
 finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
+
+training_dataset: # The dataset is a proxy, we don't have access to the actual dataset
+  id: allenai/tulu-3-sft-olmo-2-mixture
+  splits: [train]
+  is_chat: true
+  text_column: text
+
+

@@ -17,6 +17,7 @@ __pycache__/
 slurm/*
 *.pkl
 narrow_ft_experiments/hibayes/data/*
+narrow_ft_experiments/hibayes/*.pdf
 *.code-workspace
 
 **/_archive/*
