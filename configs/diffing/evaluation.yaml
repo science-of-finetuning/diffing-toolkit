@@ -20,7 +20,7 @@ agent:
     max_tokens_per_call: 10000
 
   budgets:
-    agent_llm_calls: 16
+    agent_llm_calls: 100
     model_interactions: 
       - 0
       - 5
@@ -37,7 +37,7 @@ agent:
       model_interactions: 
         - 0
         - 5
-        # - 50
+        - 50
       token_budget_generated: 100000  # -1 disables the limit
       
-overwrite: true
+overwrite: false

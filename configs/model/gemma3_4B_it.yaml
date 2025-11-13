@@ -1,0 +1,14 @@
+# @package model
+name: gemma3_4B_it
+model_id: google/gemma-3-4b-it
+end_of_turn_token: <end_of_turn>
+attn_implementation: null
+token_level_replacement: null
+dtype: bfloat16
+ignore_first_n_tokens_per_sample_during_collection: 0 # This is for activation collection. 
+ignore_first_n_tokens_per_sample_during_training: 1 # This is for any training ontop of the collected activations (and applies ontop of the ignore_first_n_tokens_per_sample_during_collection)
+
+has_enable_thinking: false # The tokenizer has the enable_thinking parameter
+
+# For generation: For some models nnsight seems to be buggy with compiled models.
+disable_compile: true

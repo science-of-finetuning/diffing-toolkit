@@ -3,21 +3,25 @@ import sys
 
 # If the notebook is not run from the root directory, uncomment the following line
 # sys.path.append("..")
-sys.path.append("scripts")
+sys.path.append("narrow_ft_experiments/plotting")
 from pathlib import Path
 from typing import List, Dict, Tuple
 import json
 import random
 from datasets import Dataset
 import numpy as np
+import re
+from datasets import load_dataset
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
+import os
 
 from sentence_transformers import SentenceTransformer
 from typing import Optional, Union
 from scipy.stats import wilcoxon
 
 from src.utils.interactive import load_hydra_config
+from src.utils.data import load_dataset_from_hub_or_local
 from plot_steeringcosim import (
     sample_finetune_texts,
     sample_chat_assistant_texts,
@@ -43,9 +47,43 @@ display_labels: Dict[str, str] = {
 import plot_steeringcosim as ps
 import torch
 
-ps._EMBEDDING_CACHE = torch.load("embedding_cache.pt", weights_only=False)
+if os.path.exists("narrow_ft_experiments/plotting/embedding_cache.pt"):
+    ps._EMBEDDING_CACHE = torch.load("narrow_ft_experiments/plotting/embedding_cache.pt", weights_only=False)
+
 
 # %%
+
+
+def _parse_mix_ratio(organism_name: str) -> Optional[float]:
+    """Extract mix ratio X from names like '*mix1-<a>p<b>' or '*mix_1-<a>p<b>'.
+
+    Returns float(a.b) or None if no mix pattern present.
+    """
+    m = re.search(r"(?:mix1|mix_1)-(\d+)p(\d+)", str(organism_name))
+    if not m:
+        return None
+    a, b = m.group(1), m.group(2)
+    return float(f"{int(a)}.{int(b)}")
+
+
+def _sample_c4_texts(num_samples: int, *, split: str = "train") -> List[str]:
+    """Sample num_samples texts from allenai/c4 (en) split as strings.
+
+    Assumes a plain text dataset with column 'text'.
+    """
+    assert isinstance(num_samples, int) and num_samples >= 1
+    # Stream and locally shuffle with a finite buffer for randomness and reproducibility
+    ds_iter = load_dataset("allenai/c4", "en", split=split, streaming=True)
+    ds_iter = ds_iter.shuffle(seed=42, buffer_size=max(10000, num_samples * 4))
+    out: List[str] = []
+    for rec in ds_iter:
+        t = str(rec.get("text", "")).strip()
+        if t:
+            out.append(t)
+            if len(out) >= num_samples:
+                break
+    assert len(out) > 0
+    return out
 
 
 def summarize_similarity_by_training_size_line(
@@ -227,7 +265,31 @@ def summarize_similarity_by_training_size_line(
         unsteer_chat_max = float(
             np.max(np.asarray(unsteered_chat_vals, dtype=np.float32))
         )
-        ft_within = float(np.dot(ft_centroid, ft_centroid))
+        # FT self-similarity: optionally mix C4 according to organism mix ratio
+        mix_ratio = _parse_mix_ratio(organism)
+        if mix_ratio is not None and mix_ratio > 0.0:
+            # Determine finetune dataset size N (for validation only)
+            org_cfg = cfg.organism
+            ft_ds_id_len = org_cfg.training_dataset.id
+            subset = getattr(org_cfg.training_dataset, "subset", None)
+            if subset is not None:
+                ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, subset, split="train")
+            else:
+                ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, split="train")
+            N = len(ft_ds_full)
+            assert N >= 1
+            # Scale C4 sample count proportionally to our finetune sample count
+            ft_texts_self = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
+            c4_num = max(1, int(np.ceil(mix_ratio * len(ft_texts_self))))
+            c4_texts = _sample_c4_texts(c4_num)
+            X_mix, labels_mix = _embed_texts_with_model(
+                embedder, EMBEDDING_MODEL_ID, {"FTMix": ft_texts_self + c4_texts}, batch_size=32
+            )
+            ft_mix_mat = _group_matrix(X_mix, labels_mix, "FTMix")
+            ft_mix_centroid = _centroid_of_normalized_rows(ft_mix_mat)
+            ft_within = float(np.dot(ft_mix_centroid, ft_mix_centroid))
+        else:
+            ft_within = float(np.dot(ft_centroid, ft_centroid))
 
         per_variant_size_values.setdefault("FT within", {}).setdefault(
             int(training_size), []
@@ -520,9 +582,30 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             finetune_centroid_cache[ft_key] = ft_centroid
         else:
             ft_centroid = finetune_centroid_cache[ft_key]
-        ft_within_values_by_size.setdefault(size_key, []).append(
-            float(np.dot(ft_centroid, ft_centroid))
-        )
+        # FT self-similarity for this entry (optionally mixed with C4)
+        mix_ratio = _parse_mix_ratio(organism)
+        if mix_ratio is not None and mix_ratio > 0.0:
+            org_cfg = cfg.organism
+            ft_ds_id_len = org_cfg.training_dataset.id
+            subset = getattr(org_cfg.training_dataset, "subset", None)
+            if subset is not None:
+                ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, subset, split="train")
+            else:
+                ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, split="train")
+            N = len(ft_ds_full)
+            assert N >= 1
+            ft_texts_self = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
+            c4_num = max(1, int(np.ceil(mix_ratio * len(ft_texts_self))))
+            c4_texts = _sample_c4_texts(c4_num)
+            X_mix, labels_mix = _embed_texts_with_model(
+                embedder, EMBEDDING_MODEL_ID, {"FTMix": ft_texts_self + c4_texts}, batch_size=batch_size
+            )
+            ft_mix_mat = _group_matrix(X_mix, labels_mix, "FTMix")
+            ft_mix_centroid = _centroid_of_normalized_rows(ft_mix_mat)
+            ft_within_value = float(np.dot(ft_mix_centroid, ft_mix_centroid))
+        else:
+            ft_within_value = float(np.dot(ft_centroid, ft_centroid))
+        ft_within_values_by_size.setdefault(size_key, []).append(ft_within_value)
 
         # Steered similarity vs FT centroid (max across positions)
         steering_dir = selected_ds_dir / "steering"
