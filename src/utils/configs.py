@@ -152,14 +152,21 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
             f"Available variants: {available_variants}"
         )
 
-    model_id_full = organism_cfg.finetuned_models[model_name][variant]
-    if isinstance(model_id_full, dict):
-        if "adapter_id" not in model_id_full:
-            raise ValueError(
-                f"Model {model_name} in organism {organism_cfg.name} has no adapter_id. "
-                f"Update this code to make it work with the new format."
-            )
-        model_id_full = model_id_full["adapter_id"]
+    variant_config = organism_cfg.finetuned_models[model_name][variant]
+
+    # Check for adapter_id or model_id
+    if "adapter_id" in variant_config:
+        model_id_full = variant_config["adapter_id"]
+        is_adapter = True
+    elif "model_id" in variant_config:
+        model_id_full = variant_config["model_id"]
+        is_adapter = False
+    else:
+        raise ValueError(
+            f"Model {model_name} variant {variant} in organism {organism_cfg.name} "
+            f"must have either 'adapter_id' or 'model_id'"
+        )
+
     # Parse subfolder from model_id if it contains "/"
     # Format: org/repo or org/repo/subfolder or org/repo/subfolder/path
     if "/" in model_id_full and model_id_full.count("/") > 1:  # Has subfolder
@@ -175,7 +182,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         name=f"{model_name}_{organism_cfg.name}_{variant}",
         model_id=model_id,
         subfolder=subfolder,
-        base_model_id=base_model_cfg.model_id,
+        base_model_id=base_model_cfg.model_id if is_adapter else None,
         tokenizer_id=base_model_cfg.tokenizer_id,
         attn_implementation=base_model_cfg.attn_implementation,
         ignore_first_n_tokens_per_sample_during_collection=base_model_cfg.ignore_first_n_tokens_per_sample_during_collection,
@@ -323,4 +330,8 @@ def resolve_adapter_id(
         variant in organism_cfg.finetuned_models[base_model_name]
     ), f"Variant {variant} not found for model {base_model_name}"
 
-    return organism_cfg.finetuned_models[base_model_name][variant]["adapter_id"]
+    cfg = organism_cfg.finetuned_models[base_model_name][variant]
+    if "adapter_id" in cfg:
+        return cfg["adapter_id"]
+    else:
+        raise ValueError(f"Variant {variant} is not an adapter, found {cfg}")

@@ -12,9 +12,9 @@ from pathlib import Path
 import shutil
 import yaml
 from loguru import logger
-from huggingface_hub import snapshot_download
 import torch as th
 from src.utils.configs import resolve_adapter_id
+from src.utils.model import adapter_id_to_path
 
 
 @dataclass
@@ -170,7 +170,7 @@ class AmplificationConfig:
         all_adapter_ids = list(dict.fromkeys(all_adapter_ids))
         # Do all the symlinking for the first adapter directly in the output directory
         first_adapter_id = all_adapter_ids[0]
-        adapter_path = Path(snapshot_download(repo_id=first_adapter_id))
+        adapter_path = adapter_id_to_path(first_adapter_id)
         if output_dir.exists():
             logger.warning(
                 f"Output directory {output_dir} already exists. Overwriting."
@@ -184,7 +184,7 @@ class AmplificationConfig:
 
         # Add other adapters in subdirectories
         for adapter_id in all_adapter_ids[1:]:
-            adapter_dir = Path(snapshot_download(repo_id=adapter_id))
+            adapter_dir = adapter_id_to_path(adapter_id)
             for item in adapter_dir.iterdir():
                 target = output_dir / adapter_id.replace("/", "_") / item.name
                 target.parent.mkdir(parents=True, exist_ok=True)

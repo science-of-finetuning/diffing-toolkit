@@ -264,8 +264,9 @@ def load_model(
 
 
 def get_ft_model_id(model_cfg: ModelConfig) -> str:
-    if model_cfg.adapter_id:
-        return model_cfg.adapter_id
+    """
+    Get the finetuned model ID (either full finetune or adapter).
+    """
     return model_cfg.model_id
 
 

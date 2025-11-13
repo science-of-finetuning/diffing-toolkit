@@ -8,6 +8,7 @@ from src.utils.agents.blackbox_agent import BlackboxAgent
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
 from collections import defaultdict
 from src.utils.configs import CONFIGS_DIR
+from src.utils.vllm import AnyTokenizer
 
 
 @dataclass
@@ -27,6 +28,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
+        self.default_tokenizer = "base"
 
     def run(self):
         raise NotImplementedError("No need to run this method")
@@ -39,6 +41,10 @@ class WeightDifferenceAmplification(DiffingMethod):
 
         dashboard = AmplificationDashboard(self)
         dashboard.display()
+
+    @property
+    def finetuned_model(self):
+        raise ValueError("Finetuned model is not available for this method")
 
     @staticmethod
     def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, List, Literal
 from omegaconf import DictConfig
 from pathlib import Path
 import torch as th
@@ -29,6 +29,8 @@ class DiffingMethod(ABC):
     and configuration management.
     """
 
+    default_tokenizer: Literal["base", "finetuned"] = "finetuned"
+
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self.logger = logger.bind(method=self.__class__.__name__)
@@ -41,7 +43,6 @@ class DiffingMethod(ABC):
         self._finetuned_model: StandardizedTransformer | None = None
         self._tokenizer: AnyTokenizer | None = None
         self._base_model_vllm: LLM | None = None
-        self._finetuned_model_vllm: LLM | None = None
 
         # Set device
         self.device = "cuda" if th.cuda.is_available() else "cpu"
@@ -59,14 +60,10 @@ class DiffingMethod(ABC):
     @ensure_vllm
     def base_model_vllm(self) -> LLM:
         if self._base_model_vllm is None:
-            self._base_model_vllm = LLM(
-                model=self.base_model_cfg.model,
-                enable_prefix_caching=True,
-                enable_lora=False,
-                tensor_parallel_size=th.cuda.device_count(),
-                max_num_seqs=32,
-                gpu_memory_utilization=0.95,
+            self._base_model_vllm = load_model_from_config(
+                self.base_model_cfg, use_vllm=True
             )
+        return self._base_model_vllm
 
     @property
     def finetuned_model(self) -> StandardizedTransformer:
@@ -90,12 +87,28 @@ class DiffingMethod(ABC):
         self._finetuned_model = None
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 
+    def _get_tokenizer(self, default=True) -> AnyTokenizer:
+        if self.default_tokenizer == "base":
+            if default:
+                return self.base_model.tokenizer
+            else:
+                return self.finetuned_model.tokenizer
+        elif self.default_tokenizer == "finetuned":
+            if default:
+                return self.finetuned_model.tokenizer
+            else:
+                return self.base_model.tokenizer
+        else:
+            raise ValueError(
+                f"Invalid default tokenizer, expected 'base' or 'finetuned', got: {self.default_tokenizer}"
+            )
+
     @property
     def tokenizer(self) -> AnyTokenizer:
         """Load and return the tokenizer from the base model."""
         if self._tokenizer is None:
             try:
-                self._tokenizer = self.finetuned_model.tokenizer
+                self._tokenizer = self._get_tokenizer(default=True)
                 if self._tokenizer.pad_token is None:
                     raise ValueError(
                         "Clement: Unexpected: nnsight / utils.model should have set the pad token"
@@ -108,10 +121,13 @@ class DiffingMethod(ABC):
                         "Finetuned model tokenizer does not have chat template"
                     )
             except Exception as e:
-                logger.error(
-                    f"Error loading tokenizer: {e}. Retrying with base model..."
+                retry_with = (
+                    "base" if self.default_tokenizer == "finetuned" else "finetuned"
                 )
-                self._tokenizer = self.base_model.tokenizer
+                logger.error(
+                    f"Error loading tokenizer from {self.default_tokenizer} model: {e}. Retrying with {retry_with} model..."
+                )
+                self._tokenizer = self._get_tokenizer(default=False)
                 if self._tokenizer.pad_token is None:
                     raise ValueError(
                         "Clement: Unexpected: nnsight / utils.model should have set the pad token"
@@ -304,21 +320,3 @@ class DiffingMethod(ABC):
 
     def get_baseline_agent(self) -> BlackboxAgent:
         return BlackboxAgent(cfg=self.cfg)
-
-    def send_request(self, prompt: str, sampling_params, lora_request=None):
-        """
-        Send generation request to vLLM server.
-
-        Args:
-            prompt: Input prompt text
-            sampling_params: vLLM SamplingParams object
-            lora_request: Optional vLLM LoraRequest object
-
-        Returns:
-            Generated text
-        """
-        logger.error("send_request() needs implementation")
-        # TODO: implement
-        from coolname import generate_slug
-
-        return f"send_request() needs implementation: {generate_slug(2)}\nprompt: {prompt}\nsampling_params: {sampling_params}\nlora_request: {lora_request}"
