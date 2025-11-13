@@ -393,13 +393,16 @@ class ActDiffLens(DiffingMethod):
             run_steering(self)
 
         token_rel_cfg = self.cfg.diffing.method.token_relevance
+        logger.info(f"Token relevance config: {token_rel_cfg}")
         if token_rel_cfg.enabled:
+            logger.info("Running token relevance...")
             org = self.cfg.organism
             assert hasattr(org, "description_long")
             run_token_relevance(self)
 
         causal_cfg = getattr(self.cfg.diffing.method, "causal_effect", None)
         if causal_cfg is not None and getattr(causal_cfg, "enabled", False):
+            logger.info("Running causal effect...")
             run_causal_effect(self)
 
     def _get_run_layers_and_aps_tasks(

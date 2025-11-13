@@ -3,11 +3,13 @@ Diffing pipeline for orchestrating model comparison methods.
 """
 
 from typing import Dict, Any, List
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf, SCMode
 from loguru import logger
 from pathlib import Path
-from .pipeline import Pipeline
 import json
+import hashlib
+
+from .pipeline import Pipeline
 from .diffing_pipeline import get_method_class
 from src.utils.graders.hypothesis_grader import grade_and_save
 from src.utils.agents.base_agent import BaseAgent
@@ -46,12 +48,15 @@ class EvaluationPipeline(Pipeline):
         """Validate the evaluation pipeline configuration."""
         super().validate_config()
 
-    def run_agent(self, agent: BaseAgent, model_interaction_budget: int, run_idx: int, overwrite: bool, name: str) -> Dict[str, Any]:
+    def run_agent(self, agent: BaseAgent, model_interaction_budget: int, run_idx: int, overwrite: bool, name: str, hints: str = "") -> Dict[str, Any]:
         run_suffix = f"_run{run_idx}"
+        hint_suffix = f"_hints{hashlib.md5(str(hints).encode()).hexdigest()}" if hints else ""
+        relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
+        config_suffix = f"_c{relevant_cfg_hash}" if relevant_cfg_hash else ""
         out_dir = (
             Path(self.diffing_method.results_dir)
             / "agent"
-            / f"{name}_mi{model_interaction_budget}_{run_suffix}"
+            / f"{name}_mi{model_interaction_budget}{hint_suffix}{config_suffix}_{run_suffix}"
         )
 
         # Skip recomputation if results already exist and not overwriting
@@ -85,6 +90,16 @@ class EvaluationPipeline(Pipeline):
             f"Graded agent (run {run_idx}) description with score={agent_score} ({_agent_text})"
         )
         logger.debug(f"Reasoning: {_agent_text}")
+
+        # Save config
+        with open(out_dir / "config.json", "w", encoding="utf-8") as f:
+            config = OmegaConf.to_container(
+                self.diffing_method.cfg,
+                resolve=True,
+                enum_to_str=True,
+                structured_config_mode=SCMode.DICT,
+            )
+            json.dump(config, f, ensure_ascii=False, indent=2)
         return agent_score, _agent_text, description
     
     def run(self) -> Dict[str, Any]:
@@ -104,10 +119,11 @@ class EvaluationPipeline(Pipeline):
 
         # Common metadata for output structure
         llm_id = str(self.evaluation_cfg.agent.llm.model_id).replace("/", "_")
-        name = f"{llm_id}"
         # Overwrite behavior
         overwrite = bool(self.evaluation_cfg.overwrite)
         assert isinstance(overwrite, bool)
+        relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
+        name = (f"_{relevant_cfg_hash}" if relevant_cfg_hash else "") + f"{llm_id}"
 
         # Method 
         logger.info(f"Model interactions: {agent_cfg.budgets.model_interactions}")
@@ -117,7 +133,7 @@ class EvaluationPipeline(Pipeline):
 
                 agent = self.diffing_method.get_agent()
                 logger.info(f"Agent run {run_idx+1}/{num_repeat} (name: {agent.name + '_' + name})")
-                agent_score, _agent_text, description = self.run_agent(agent, model_interaction_budget, run_idx, overwrite, agent.name + "_" + name)
+                agent_score, _agent_text, description = self.run_agent(agent, model_interaction_budget, run_idx, overwrite, agent.name + "_" + name, hints=agent_cfg.hints)
                 
 
         # Baselines
@@ -127,4 +143,4 @@ class EvaluationPipeline(Pipeline):
                     logger.info(f"Baseline run {run_idx+1}/{num_repeat}")
 
                     baseline = self.diffing_method.get_baseline_agent()
-                    baseline_score, _baseline_text, description = self.run_agent(baseline, model_interaction_budget, run_idx, overwrite, baseline.name + "_" + name)
+                    baseline_score, _baseline_text, description = self.run_agent(baseline, model_interaction_budget, run_idx, overwrite, baseline.name + "_" + name, hints=agent_cfg.hints)

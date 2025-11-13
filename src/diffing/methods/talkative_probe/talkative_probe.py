@@ -12,6 +12,7 @@ from peft import LoraConfig
 from dataclasses import asdict
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from loguru import logger
+import hashlib
 from omegaconf import OmegaConf
 
 from src.utils.agents import DiffingMethodAgent
@@ -40,8 +41,19 @@ class TalkativeProbeMethod(DiffingMethod):
         """Get the agent for the method."""
         return TalkativeProbeAgent(cfg=self.cfg)
 
+    @property
+    def relevant_cfg_hash(self) -> str:
+        relevant_configs = {
+            'verbalizer_eval': OmegaConf.to_container(self.method_cfg.verbalizer_eval, resolve=True),
+            'context_prompts': OmegaConf.to_container(self.method_cfg.context_prompts, resolve=True),
+            'verbalizer_prompts': OmegaConf.to_container(self.method_cfg.verbalizer_prompts, resolve=True)
+        }
+        relevant_configs_hash = hashlib.md5(str(relevant_configs).encode()).hexdigest()
+        return f"c{relevant_configs_hash}"
+
+
     def _results_file(self) -> Path:
-        return self.results_dir / f"{self._get_verbalizer_lora_path().split('/')[-1].replace('/', '_').replace('.', '_')}.json"
+        return self.results_dir / f"{self._get_verbalizer_lora_path().split('/')[-1].replace('/', '_').replace('.', '_')}{'_' if self.relevant_cfg_hash else ''}{self.relevant_cfg_hash}.json"
 
     def _load_results(self) -> Dict[str, Dict[str, str]]:
         assert self._results_file().exists(), f"Results file does not exist: {self._results_file()}"
