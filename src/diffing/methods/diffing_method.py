@@ -273,6 +273,9 @@ class DiffingMethod(ABC):
         """Check if verbose logging is enabled."""
         return getattr(self.cfg, "verbose", False)
 
+    @property
+    def relevant_cfg_hash(self) -> str:
+        return ""
 
     # Agent methods
     @abstractmethod

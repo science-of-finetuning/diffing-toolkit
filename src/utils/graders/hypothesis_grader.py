@@ -272,10 +272,12 @@ def _build_hypothesis_grader(cfg: DictConfig) -> Tuple[HypothesisGrader, str, in
 
 
 def grade_and_save(
-    cfg: DictConfig, description_text: str, save_dir: Path = None
+    cfg: DictConfig, description_text: str, save_dir: Path = None, run_id: int = 0
 ) -> Tuple[int, str]:
     overwrite = cfg.diffing.evaluation.overwrite
-    out_file = save_dir / "hypothesis_grade.json"
+    model_id = str(cfg.diffing.evaluation.grader.model_id)
+    model_id = model_id.replace("/", "_")
+    out_file = save_dir / f"hypothesis_grade_{model_id}_{run_id}.json"
     if save_dir is not None and out_file.exists() and not overwrite:
         logger.info(f"Result exists and overwrite=False, skipping: {save_dir}")
         assert out_file.exists() and out_file.is_file()
@@ -293,6 +295,7 @@ def grade_and_save(
         "reasoning": reasoning_text,
         "rubric": rubric_text,
         "grader_model_id": str(cfg.diffing.evaluation.grader.model_id),
+        "run_idx": run_id,
     }
     if save_dir is not None:
         assert isinstance(save_dir, Path) and save_dir.exists() and save_dir.is_dir()

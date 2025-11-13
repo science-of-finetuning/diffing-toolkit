@@ -221,7 +221,6 @@ class ADLBlackboxAgent(BlackboxAgent):
                     except Exception:
                         print(f"Error parsing position from {p.parent.name}")
                         continue
-            print(f"Positions: {positions}")
             if len(positions) == 0:
                 continue
             pos0 = positions[0]
