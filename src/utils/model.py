@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Tuple, Dict, Any
-from loguru import logger
+from typing import Tuple, Dict, Any, Literal
 import gc
+from pathlib import Path
+
+from loguru import logger
 import torch.nn as nn
 import torch as th
+from huggingface_hub import snapshot_download
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -17,7 +20,7 @@ from nnterp.interventions import (
 from nnterp.interventions import patchscope_lens as nnterp_patchscope_lens
 
 from .configs import ModelConfig
-from .vllm import AnyTokenizer, AnyLLM, ensure_vllm, LLM
+from .vllm import AnyTokenizer, ensure_vllm, LLM, AsyncLLMEngine, AsyncEngineArgs
 
 _MODEL_CACHE: dict[str, StandardizedTransformer] = {}
 _TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}
@@ -38,6 +41,16 @@ def clear_cache():
 
 def has_thinking(cfg: ModelConfig) -> bool:
     return cfg.model.has_enable_thinking
+
+
+def adapter_id_to_path(adapter_id: str) -> Path:
+    path = adapter_id.split("/")
+    repo_id = "/".join(path[:2])
+    repo_path = Path(snapshot_download(repo_id=repo_id))
+    if len(path) > 2:
+        repo_path = repo_path / "/".join(path[2:])
+
+    return repo_path
 
 
 def load_tokenizer(model_name: str) -> AnyTokenizer:
@@ -132,9 +145,22 @@ def load_model(
     subfolder: str = None,
     device_map: Any | None = None,
     trust_remote_code: bool = False,
-    use_vllm: bool = False,
-) -> StandardizedTransformer | LLM:
-    model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}"
+    use_vllm: bool | Literal["async"] = False,
+    vllm_kwargs: dict | None = None,
+) -> StandardizedTransformer | LLM | AsyncLLMEngine:
+    model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}_{use_vllm}"
+    import torch
+
+    # Print model key and GPU memory usage
+    if torch.cuda.is_available():  # TODO: remove
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print(
+            f"model_key: {model_key}\ntorch GPU usage: {allocated:.2f} GiB allocated, {reserved:.2f} GiB reserved"
+        )
+    else:
+        print(f"model_key: {model_key}\nGPU not available.")
+    print(f"{_MODEL_CACHE.keys()=}")
     key = model_key
     if steering_vector_name is not None and steering_layer_idx is not None:
         key = model_key + f"_{steering_vector_name}_{steering_layer_idx}"
@@ -144,7 +170,6 @@ def load_model(
         model = _MODEL_CACHE[model_key]
     else:
         # Load model and tokenizer
-        logger.info(f"Loading model: {model_name}")
 
         if no_auto_device_map:
             # Overwrite device_map to None
@@ -167,10 +192,14 @@ def load_model(
             from transformers import Qwen2_5_VLForConditionalGeneration
 
             automodel = Qwen2_5_VLForConditionalGeneration
-
         if use_vllm:
+            logger.info(f"Loading model {model_name} with vLLM")
+            if adapter_id is not None:
+                raise NotImplementedError(
+                    "Adapter support for vLLM is not implemented yet, as AFAIK it's something you pass as a LoRA request parameter"
+                )
             ensure_vllm()
-            vllm_kwargs: Dict[str, Any] = dict(
+            vllm_default_kwargs: Dict[str, Any] = dict(
                 model=model_name,
                 tokenizer=tokenizer_id,
                 enable_prefix_caching=True,
@@ -179,6 +208,7 @@ def load_model(
                 gpu_memory_utilization=0.95,
                 max_model_len=4096,  # todo: make configurable
                 trust_remote_code=trust_remote_code,
+                # limit_mm_per_prompt={"image": 0},  # disable multi-modal support TODO: uncomment this once bug with gemma 3 is fixed
             )
             if device_map in ["cpu", th.device("cpu")]:
                 device_map = "cpu"
@@ -189,11 +219,20 @@ def load_model(
                 tensor_parallel_size = 1  # single GPU
                 if isinstance(device_map, str):
                     device_map = th.device(device_map)
-                vllm_kwargs["device"] = device_map
-            model = LLM(
-                **vllm_kwargs,
-                tensor_parallel_size=tensor_parallel_size,
-            )
+                vllm_default_kwargs["device"] = device_map
+            if vllm_kwargs is not None:
+                vllm_kwargs = {**vllm_default_kwargs, **vllm_kwargs}
+            else:
+                vllm_kwargs = vllm_default_kwargs
+            print(f"{vllm_kwargs=}")
+            if use_vllm == "async":
+                args = AsyncEngineArgs(**vllm_kwargs)
+                model = AsyncLLMEngine.from_engine_args(args)
+            else:
+                model = LLM(
+                    **vllm_kwargs,
+                    tensor_parallel_size=tensor_parallel_size,
+                )
         else:
             if tokenizer_id is not None:
                 tokenizer = load_tokenizer(tokenizer_id)
@@ -232,8 +271,8 @@ def get_ft_model_id(model_cfg: ModelConfig) -> str:
 
 def load_model_from_config(
     model_cfg: ModelConfig,
-    use_vllm: bool = False,
-) -> StandardizedTransformer | LLM:
+    use_vllm: bool | Literal["async"] = False,
+) -> StandardizedTransformer | LLM | AsyncLLMEngine:
     base_model_id = (
         model_cfg.base_model_id
         if model_cfg.base_model_id is not None
@@ -260,6 +299,7 @@ def load_model_from_config(
         device_map=model_cfg.device_map,
         trust_remote_code=model_cfg.trust_remote_code,
         use_vllm=use_vllm,
+        vllm_kwargs=model_cfg.vllm_kwargs,
     )
 
 

@@ -3,20 +3,19 @@ import importlib.util
 
 VLLM_AVAILABLE = importlib.util.find_spec("vllm") is not None
 if VLLM_AVAILABLE:
-    from vllm import LLM, SamplingParams
+    from vllm import LLM, SamplingParams, AsyncLLMEngine, AsyncEngineArgs
     from vllm.lora.request import LoRARequest
     from vllm.transformers_utils.tokenizer import AnyTokenizer
 
-    AnyLLM = LLM | AutoModelForCausalLM
 else:
     LLM = None
     SamplingParams = None
     LoRARequest = None
+    AsyncLLMEngine = None
+    AsyncEngineArgs = None
     from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
     AnyTokenizer = PreTrainedTokenizer | PreTrainedTokenizerFast
-
-    AnyLLM = AutoModelForCausalLM
 
 
 def ensure_vllm(func=None):

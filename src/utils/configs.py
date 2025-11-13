@@ -23,7 +23,10 @@ def _get_all_models_with_none() -> dict[str, dict[str, None]]:
     return models
 
 
-OmegaConf.register_new_resolver("get_all_models", _get_all_models_with_none)
+OmegaConf.register_new_resolver(
+    "get_all_models", _get_all_models_with_none, replace=True
+)
+# replace=True is needed for streamlit to work (otherwise it will try to register the resolver multiple times)
 
 
 @dataclass
@@ -46,6 +49,7 @@ class ModelConfig:
     no_auto_device_map: bool = False
     device_map: object | None = None
     trust_remote_code: bool = False
+    vllm_kwargs: dict | None = None
 
 
 @dataclass
@@ -149,7 +153,13 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         )
 
     model_id_full = organism_cfg.finetuned_models[model_name][variant]
-
+    if isinstance(model_id_full, dict):
+        if "adapter_id" not in model_id_full:
+            raise ValueError(
+                f"Model {model_name} in organism {organism_cfg.name} has no adapter_id. "
+                f"Update this code to make it work with the new format."
+            )
+        model_id_full = model_id_full["adapter_id"]
     # Parse subfolder from model_id if it contains "/"
     # Format: org/repo or org/repo/subfolder or org/repo/subfolder/path
     if "/" in model_id_full and model_id_full.count("/") > 1:  # Has subfolder
@@ -313,4 +323,4 @@ def resolve_adapter_id(
         variant in organism_cfg.finetuned_models[base_model_name]
     ), f"Variant {variant} not found for model {base_model_name}"
 
-    return organism_cfg.finetuned_models[base_model_name][variant]
+    return organism_cfg.finetuned_models[base_model_name][variant]["adapter_id"]
