@@ -6,7 +6,7 @@ Separates UI concerns (active state, ordering) from domain models (configs).
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, ClassVar
 
 from src.diffing.methods.amplification.amplification_config import AmplificationConfig
 
@@ -17,12 +17,14 @@ class DashboardItem:
 
     active: bool = True
     ui_order: int = 0
+    expanded: bool = False
 
     def to_ui_dict(self) -> Dict[str, Any]:
         """Serialize UI state."""
         return {
             "active": self.active,
             "ui_order": self.ui_order,
+            "expanded": self.expanded,
         }
 
     @staticmethod
@@ -31,6 +33,7 @@ class DashboardItem:
         return {
             "active": data.get("active", True),
             "ui_order": data.get("ui_order", 0),
+            "expanded": data.get("expanded", False),
         }
 
 
@@ -40,6 +43,14 @@ class ManagedConfig(DashboardItem):
 
     config: AmplificationConfig = None
     last_compiled_path: Optional[Path] = None
+    lora_int_id: int = 0
+
+    # Class variable to track the number of ManagedConfig instances
+    _instance_count: ClassVar[int] = 0
+
+    def __post_init__(self):
+        type(self)._instance_count += 1
+        self.lora_int_id = type(self)._instance_count
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize both UI state and config."""
@@ -66,15 +77,19 @@ class ManagedConfig(DashboardItem):
 
     @staticmethod
     def from_config(
-        config: AmplificationConfig, active: bool = True
+        config: AmplificationConfig, active: bool = True, expanded: bool = True
     ) -> "ManagedConfig":
         """Create from a pure config (e.g., when loading external config)."""
         return ManagedConfig(
             config=config,
             active=active,
             ui_order=0,
+            expanded=expanded,
             last_compiled_path=None,
         )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.config, name)
 
 
 @dataclass

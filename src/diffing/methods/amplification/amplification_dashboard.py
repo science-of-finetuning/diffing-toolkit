@@ -10,11 +10,21 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.resolve()
 sys.path.append(str(PROJECT_ROOT))
+import asyncio
 import streamlit as st
 from pathlib import Path
 from typing import Dict, Any, List
+from copy import deepcopy
+import json
 
-from src.utils.configs import get_available_organisms, get_organism_variants
+from src.utils.configs import (
+    get_available_organisms,
+    get_organism_variants,
+    resolve_adapter_id,
+    CONFIGS_DIR,
+)
+from src.utils.vllm import AsyncLLMEngine, ensure_vllm, LoRARequest
+from src.utils.model import load_model_from_config, adapter_id_to_path
 from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
     AmplifiedAdapter,
@@ -36,7 +46,90 @@ class AmplificationDashboard:
         """
         self.method = method_instance
         print(f"{self.method.cfg.diffing.results_dir=}")
+        self._multi_lora_vllm_server = None
+        self.inference_config = deepcopy(self.method.base_model_cfg)
+        print(f"{self.method.base_model_cfg=}")
+        print(f"{self.method.finetuned_model_cfg=}")
+        self.inference_config.vllm_kwargs = (
+            self.inference_config.vllm_kwargs or {}
+        ) | dict(
+            max_num_seqs=16,
+            enable_lora=True,
+            max_loras=16,
+            max_lora_rank=64,
+        )
         self._init_session_state()
+        debug = self.multi_lora_vllm_server  # TODO: remove
+
+    @staticmethod
+    @st.cache_data
+    def _get_adapter_rank_cached(adapter_id: str) -> int:
+        """
+        Get the rank of a LoRA adapter from its configuration.
+        Results are cached to avoid repeated downloads.
+
+        Args:
+            adapter_id: HuggingFace adapter ID
+
+        Returns:
+            The rank (r) of the LoRA adapter
+        """
+
+        adapter_path = adapter_id_to_path(adapter_id)
+        adapter_config_path = adapter_path / "adapter_config.json"
+        assert (
+            adapter_config_path.exists()
+        ), f"adapter_config.json not found for {adapter_id}"
+        with open(adapter_config_path) as f:
+            adapter_config = json.load(f)
+        return adapter_config["r"]
+
+    def auto_update_inference_config(self) -> None:
+        """
+        Update the inference configuration based on the Amplification Configurations:
+        - max_num_seqs: set to a multiple of 8 that is greater than the number of configs
+        - max_loras: set to the number of different configs
+        - max_lora_rank: set to the maximum rank of the LORAs in the configurations
+        """
+
+        active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
+        num_configs = len(active_configs)
+
+        max_num_seqs = ((num_configs + 7) // 8) * 8
+        max_loras = num_configs
+
+        all_adapter_ids = set()
+        base_model_name = self.method.base_model_cfg.name
+        for mc in active_configs:
+            for adapter in mc.config.amplified_adapters:
+                if adapter.adapter_id:
+                    all_adapter_ids.add(adapter.adapter_id)
+                else:
+                    adapter_id = resolve_adapter_id(
+                        adapter.organism_name, adapter.variant, base_model_name
+                    )
+                    all_adapter_ids.add(adapter_id)
+
+        max_lora_rank = 64
+        if all_adapter_ids:
+            ranks = []
+            for adapter_id in all_adapter_ids:
+                ranks.append(self._get_adapter_rank_cached(adapter_id))
+            max_lora_rank = max(ranks) * 2
+
+        self.inference_config.vllm_kwargs["max_num_seqs"] = max_num_seqs
+        self.inference_config.vllm_kwargs["max_loras"] = max_loras
+        self.inference_config.vllm_kwargs["max_lora_rank"] = max_lora_rank
+
+    @property
+    @ensure_vllm
+    def multi_lora_vllm_server(self) -> AsyncLLMEngine:
+        if self._multi_lora_vllm_server is None:
+            self.auto_update_inference_config()
+            self._multi_lora_vllm_server = load_model_from_config(
+                self.inference_config, use_vllm="async"
+            )
+        return self._multi_lora_vllm_server
 
     def _init_session_state(self) -> None:
         """Initialize Streamlit session state."""
@@ -50,12 +143,165 @@ class AmplificationDashboard:
             st.session_state.conversation_counter = 0
         if "sampling_params" not in st.session_state:
             st.session_state.sampling_params = {}
+        if "vllm_kwargs" not in st.session_state:
+            st.session_state.vllm_kwargs = self.inference_config.vllm_kwargs
         if "multi_gen_results" not in st.session_state:
             st.session_state.multi_gen_results = None
         if "multi_gen_preset_prompt" not in st.session_state:
             st.session_state.multi_gen_preset_prompt = None
         if "multi_gen_preset_apply_template" not in st.session_state:
             st.session_state.multi_gen_preset_apply_template = None
+
+        # Load configs from cache after initializing session state
+        self._load_configs_from_cache()
+
+    def _get_sampling_params(self) -> Dict[str, Any]:
+        """Get sampling parameters from sidebar/session state."""
+        return st.session_state.get(
+            "sampling_params",
+            {
+                "temperature": 1.0,
+                "top_p": 0.9,
+                "max_tokens": 100,
+                "do_sample": True,
+            },
+        )
+
+    def _get_cache_dir(self) -> Path:
+        """Get the cache directory for this model's amplification configs."""
+        model_name = self.method.base_model_cfg.name
+        # Sanitize model name for filesystem
+        safe_model_name = model_name.replace("/", "_").replace(":", "_")
+        cache_dir = Path("./amplification_cache") / safe_model_name
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
+    def _save_configs_to_cache(self) -> None:
+        """Save all managed configs to the cache directory."""
+        cache_dir = self._get_cache_dir()
+
+        # Get all current config names
+        current_config_names = set()
+        for mc in st.session_state.managed_configs:
+            # Sanitize config name for filesystem
+            safe_name = mc.config.name.replace("/", "_").replace(":", "_")
+            config_path = cache_dir / f"{safe_name}.yaml"
+            mc.config.save_yaml(config_path)
+            current_config_names.add(f"{safe_name}.yaml")
+
+        # Remove configs that no longer exist
+        for config_file in cache_dir.glob("*.yaml"):
+            if config_file.name not in current_config_names:
+                config_file.unlink()
+
+    def _load_configs_from_cache(self) -> None:
+        """Load configs from the cache directory."""
+        cache_dir = self._get_cache_dir()
+
+        if not cache_dir.exists():
+            return
+
+        # Only load if session state is empty
+        if len(st.session_state.managed_configs) > 0:
+            return
+
+        for config_file in sorted(cache_dir.glob("*.yaml")):
+            try:
+                loaded_config = AmplificationConfig.load_yaml(config_file)
+                managed_config = ManagedConfig.from_config(
+                    loaded_config, active=True, expanded=False
+                )
+                st.session_state.managed_configs.append(managed_config)
+            except Exception as e:
+                st.error(f"Failed to load config from {config_file}: {e}")
+
+    def _save_and_rerun(self) -> None:
+        """Save configs to cache and trigger a Streamlit rerun."""
+        self._save_configs_to_cache()
+        st.rerun()
+
+    def _compile_config(self, config: AmplificationConfig) -> Path | None:
+        """Compile a config and return path to compiled adapter."""
+        output_dir = Path("./compiled_adapters") / config.name.replace(" ", "_")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        base_model_name = self.method.base_model_cfg.name
+        return config.compile(output_dir, base_model_name=base_model_name)
+
+    def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:
+        """Truncate chat history after a message and return the prompt for regeneration."""
+        assert 0 <= index < len(conv["history"]), f"Invalid message index: {index}"
+
+        # Find the last user message before this assistant message
+        prompt_index = index - 1
+        while prompt_index >= 0 and conv["history"][prompt_index]["role"] != "user":
+            prompt_index -= 1
+
+        assert prompt_index >= 0, "No user message found before this assistant message"
+
+        # Truncate history after the user prompt
+        conv["history"] = conv["history"][: prompt_index + 1]
+
+        # Format the conversation up to this point
+        return self._format_chat_prompt(conv["history"])
+
+    def _multi_gen_request(
+        self, prompt, amplification_configs: List[ManagedConfig], sampling_params
+    ):
+        async def _async_sample(prompt, sampling_params, amplification_config):
+            compiled_path = self._compile_config(amplification_config.config)
+            if compiled_path is None:
+                lreq = None
+            else:
+                lreq = LoRARequest(
+                    amplification_config.config.name,
+                    amplification_config.lora_int_id,
+                    compiled_path,
+                )
+            print(f"{lreq=}")
+            result = await self.multi_lora_vllm_server.generate(
+                prompt=prompt,
+                sampling_params=sampling_params,
+                lora_request=lreq,
+            )
+            return {
+                "config": amplification_config,
+                "compiled_path": compiled_path,
+                "result": result,
+            }
+
+        async def async_multi_gen():
+            tasks = []
+            for config in amplification_configs:
+                tasks.append(
+                    asyncio.create_task(_async_sample(prompt, sampling_params, config))
+                )
+            return await asyncio.gather(*tasks)
+
+        return asyncio.run(async_multi_gen())
+
+    def send_request(self, prompt: str, sampling_params, lora_request=None):
+        """
+        Send generation request to vLLM server.
+
+        Args:
+            prompt: Input prompt text
+            sampling_params: vLLM SamplingParams object
+            lora_request: Optional vLLM LoraRequest object
+
+        Returns:
+            Generated text
+        """
+        raise NotImplementedError(
+            "send_request is not implemented for amplification dashboard"
+        )
+
+    def _format_chat_prompt(self, chat_history: List[Dict[str, str]]) -> str:
+        """Format chat history into a single prompt."""
+        return self.method.tokenizer.apply_chat_template(
+            chat_history,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
 
     def display(self) -> None:
         """Main entry point for dashboard."""
@@ -96,8 +342,21 @@ class AmplificationDashboard:
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""
         st.sidebar.header("Model Info")
-        st.sidebar.info(f"**Base Model:** {'base model placeholder'}")
-        st.sidebar.info(f"**Finetuned Model:** {'finetuned model placeholder'}")
+        st.sidebar.info(f"**Model:** {self.method.base_model_cfg.model_id}")
+
+        st.sidebar.header("vLLM Configuration")
+        st.sidebar.info("TODO")
+
+        # max_num_seqs = st.sidebar.number_input(
+        #     "Max Number of Sequences",
+        #     min_value=1,
+        #     max_value=256,
+        #     value=st.session_state.vllm_kwargs["max_num_seqs"],
+        #     step=8,
+        #     help="Maximum number of sequences that the vLLM server can process in parallel",
+        #     key="max_num_seqs",
+        # )
+        # max_loras
 
         st.sidebar.header("Sampling Parameters")
 
@@ -109,7 +368,6 @@ class AmplificationDashboard:
             step=0.1,
             help="Sampling temperature for generation",
         )
-
         top_p = st.sidebar.slider(
             "Top-p (nucleus sampling)",
             min_value=0.0,
@@ -118,7 +376,6 @@ class AmplificationDashboard:
             step=0.05,
             help="Nucleus sampling probability threshold",
         )
-
         max_tokens = st.sidebar.slider(
             "Max New Tokens",
             min_value=10,
@@ -127,13 +384,11 @@ class AmplificationDashboard:
             step=10,
             help="Maximum number of tokens to generate",
         )
-
         do_sample = st.sidebar.checkbox(
             "Use Sampling",
             value=True,
             help="Enable sampling (if disabled, uses greedy decoding)",
         )
-
         st.session_state.sampling_params = {
             "temperature": temperature,
             "top_p": top_p,
@@ -151,7 +406,7 @@ class AmplificationDashboard:
                     # Clear cached widget state
                     if f"config_active_{idx}" in st.session_state:
                         del st.session_state[f"config_active_{idx}"]
-                st.rerun()
+                self._save_and_rerun()
 
         with col2:
             if st.button("✗ Disable All", use_container_width=True):
@@ -160,7 +415,7 @@ class AmplificationDashboard:
                     # Clear cached widget state
                     if f"config_active_{idx}" in st.session_state:
                         del st.session_state[f"config_active_{idx}"]
-                st.rerun()
+                self._save_and_rerun()
 
     def _render_amplifications_tab(self) -> None:
         """Render Tab 1: Amplification configuration UI."""
@@ -169,64 +424,17 @@ class AmplificationDashboard:
             "Create and manage amplification configurations for adapter weight modification."
         )
 
-        col1, col2, col3 = st.columns([2, 1, 1])
-
-        with col1:
-            if st.button("➕ New Amplification", use_container_width=True):
-                new_config = AmplificationConfig(
-                    name=f"Config {len(st.session_state.managed_configs) + 1}",
-                    description="",
-                    amplified_adapters=[],
-                )
-                new_managed = ManagedConfig.from_config(new_config, active=True)
-                st.session_state.managed_configs.append(new_managed)
-                st.rerun()
-
-        with col2:
-            uploaded_file = st.file_uploader(
-                "Load Config",
-                type=["yaml", "yml"],
-                key="load_config",
-                label_visibility="collapsed",
+        if st.button("➕ New Amplification", use_container_width=True):
+            new_config = AmplificationConfig(
+                name=f"Config {len(st.session_state.managed_configs) + 1}",
+                description="",
+                amplified_adapters=[],
             )
-            if uploaded_file is not None:
-                import tempfile
-
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".yaml") as tmp:
-                    tmp.write(uploaded_file.read())
-                    tmp_path = Path(tmp.name)
-
-                loaded_config = AmplificationConfig.load_yaml(tmp_path)
-                managed_config = ManagedConfig.from_config(loaded_config, active=True)
-                st.session_state.managed_configs.append(managed_config)
-                tmp_path.unlink()
-                st.success(f"Loaded config: {loaded_config.name}")
-                st.rerun()
-
-        with col3:
-            save_enabled = len(st.session_state.managed_configs) > 0
-            if st.button(
-                "💾 Save All", disabled=not save_enabled, use_container_width=True
-            ):
-                st.session_state.show_save_dialog = True
-
-        if st.session_state.get("show_save_dialog", False):
-            save_dir = st.text_input(
-                "Save Directory",
-                value="./amplification_configs",
-                help="Directory to save all configurations (pure configs without UI state)",
+            new_managed = ManagedConfig.from_config(
+                new_config, active=True, expanded=True
             )
-            if st.button("Confirm Save"):
-                save_path = Path(save_dir)
-                save_path.mkdir(parents=True, exist_ok=True)
-                for mc in st.session_state.managed_configs:
-                    config_path = save_path / f"{mc.config.name}.yaml"
-                    mc.config.save_yaml(config_path)
-                st.success(
-                    f"Saved {len(st.session_state.managed_configs)} configs to {save_dir}"
-                )
-                st.session_state.show_save_dialog = False
-                st.rerun()
+            st.session_state.managed_configs.insert(0, new_managed)
+            self._save_and_rerun()
 
         st.markdown("---")
 
@@ -270,9 +478,7 @@ class AmplificationDashboard:
             help="Apply the model's chat template to format the prompt",
         )
 
-        active_configs = [
-            mc.config for mc in st.session_state.managed_configs if mc.active
-        ]
+        active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
 
         if len(active_configs) == 0:
             st.warning(
@@ -280,7 +486,7 @@ class AmplificationDashboard:
             )
         else:
             st.info(
-                f"Will generate with {len(active_configs)} active configuration(s): {', '.join(c.name for c in active_configs)}"
+                f"Will generate with {len(active_configs)} active configuration(s): {', '.join(c.config.name for c in active_configs)}"
             )
 
         col1, col2 = st.columns([3, 1])
@@ -293,7 +499,7 @@ class AmplificationDashboard:
                 "🗑️ Clear Results", disabled=st.session_state.multi_gen_results is None
             ):
                 st.session_state.multi_gen_results = None
-                st.rerun()
+                self._save_and_rerun()
 
         if generate_clicked:
             sampling_params = self._get_sampling_params()
@@ -305,25 +511,11 @@ class AmplificationDashboard:
                     [{"role": "user", "content": prompt}]
                 )
 
-            results = []
-            for config in active_configs:
-                with st.spinner(f"Compiling {config.name}..."):
-                    compiled_path = self._compile_config(config)
-
-                with st.spinner(f"Generating with {config.name}..."):
-                    result = self.method.send_request(
-                        prompt=final_prompt,
-                        sampling_params=sampling_params,
-                        lora_request=str(compiled_path) if compiled_path else None,
-                    )
-
-                results.append(
-                    {
-                        "config": config,
-                        "compiled_path": compiled_path,
-                        "result": result,
-                    }
-                )
+            results = self._multi_gen_request(
+                prompt=final_prompt,
+                amplification_configs=active_configs,
+                sampling_params=sampling_params,
+            )
 
             st.session_state.multi_gen_results = {
                 "prompt": prompt,
@@ -395,7 +587,7 @@ class AmplificationDashboard:
                                 st.success(
                                     f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
                                 )
-                                st.rerun()
+                                self._save_and_rerun()
 
                         with col2:
                             st.download_button(
@@ -414,9 +606,9 @@ class AmplificationDashboard:
                 "💬 No conversations yet. Generate from the Multi-Generation tab and click 'Continue Chat', or use the 'New' tab to start an empty chat."
             )
 
-            if st.button("➕ Start New Chat", type="primary"):
-                self._create_new_conversation()
-                st.rerun()
+        if st.button("➕ Start New Chat", type="primary"):
+            self._create_new_conversation(expanded=False)
+            self._save_and_rerun()
             return
 
         # Create tabs for conversations + New tab
@@ -505,7 +697,7 @@ class AmplificationDashboard:
                 )
                 self._create_new_conversation(config=config, name=conv_name)
                 st.success(f"Created conversation: {conv_name}")
-                st.rerun()
+                self._save_and_rerun()
             else:
                 st.error("Please create an amplification configuration first")
 
@@ -543,7 +735,7 @@ class AmplificationDashboard:
                     }
                 )
 
-            st.rerun()
+            self._save_and_rerun()
 
         # Conversation controls
         col1, col2, col3 = st.columns([3, 1, 1])
@@ -592,7 +784,7 @@ class AmplificationDashboard:
                         conv["context"]["config"] = new_config
                         conv["context"]["compiled_path"] = new_compiled_path
                         st.success(f"Switched to {selected_config_name}")
-                        st.rerun()
+                        self._save_and_rerun()
             else:
                 st.info("No config")
 
@@ -603,7 +795,7 @@ class AmplificationDashboard:
                 del st.session_state.conversations[conv_id]
                 if st.session_state.active_conversation_id == conv_id:
                     st.session_state.active_conversation_id = None
-                st.rerun()
+                self._save_and_rerun()
 
         st.markdown("---")
 
@@ -626,11 +818,11 @@ class AmplificationDashboard:
                             ):
                                 conv["history"][i]["content"] = edited_content
                                 conv["editing_message"] = None
-                                st.rerun()
+                                self._save_and_rerun()
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_user_{conv_id}_{i}"):
                                 conv["editing_message"] = None
-                                st.rerun()
+                                self._save_and_rerun()
                     else:
                         # Display mode
                         st.markdown(msg["content"])
@@ -643,7 +835,7 @@ class AmplificationDashboard:
                                 type="secondary",
                             ):
                                 conv["editing_message"] = i
-                                st.rerun()
+                                self._save_and_rerun()
             else:
                 # Assistant message
                 with st.chat_message("assistant"):
@@ -662,11 +854,11 @@ class AmplificationDashboard:
                             ):
                                 conv["history"][i]["content"] = edited_content
                                 conv["editing_message"] = None
-                                st.rerun()
+                                self._save_and_rerun()
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_asst_{conv_id}_{i}"):
                                 conv["editing_message"] = None
-                                st.rerun()
+                                self._save_and_rerun()
                     else:
                         # Display mode - use stored config name from message
                         config_label = f"[{msg.get('config_name', config.name if config else 'No Config')}]"
@@ -680,7 +872,7 @@ class AmplificationDashboard:
                                 type="secondary",
                             ):
                                 conv["editing_message"] = i
-                                st.rerun()
+                                self._save_and_rerun()
                         with btn_col2:
                             if st.button(
                                 "🔄",
@@ -689,7 +881,7 @@ class AmplificationDashboard:
                                 type="secondary",
                             ):
                                 conv["regenerating_from"] = i
-                                st.rerun()
+                                self._save_and_rerun()
 
         # Multi-Generation mode checkbox
         send_to_multi_gen = st.checkbox(
@@ -722,7 +914,7 @@ class AmplificationDashboard:
                 st.success(
                     "✓ Conversation sent to Multi-Generation tab. Switch to the Multi-Generation tab to continue. (Uncheck the box above to return to normal chat mode)"
                 )
-                st.rerun()
+                self._save_and_rerun()
             else:
                 # Normal chat mode
                 # Add user message to history
@@ -763,21 +955,13 @@ class AmplificationDashboard:
                     }
                 )
 
-                st.rerun()
-
-    def _format_chat_prompt(self, chat_history: List[Dict[str, str]]) -> str:
-        """Format chat history into a single prompt."""
-        return self.method.tokenizer.apply_chat_template(
-            chat_history,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+                self._save_and_rerun()
 
     def _render_amplification_config(self, idx: int, mc: ManagedConfig) -> None:
         """Render one amplification config (expandable)."""
         config = mc.config
         icon = "✅" if mc.active else "❌"
-        with st.expander(f"{icon} {config.name}", expanded=False):
+        with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
             col1, col2 = st.columns([3, 1])
 
             with col1:
@@ -788,13 +972,14 @@ class AmplificationDashboard:
                 )
                 if new_name != config.name:
                     config.name = new_name
+                    self._save_and_rerun()
 
             with col2:
                 if st.button(
                     "🗑️ Delete", key=f"delete_config_{idx}", use_container_width=True
                 ):
                     st.session_state.managed_configs.pop(idx)
-                    st.rerun()
+                    self._save_and_rerun()
 
             config.description = st.text_area(
                 "Description",
@@ -803,12 +988,15 @@ class AmplificationDashboard:
                 height=60,
             )
 
+            current_active = mc.active
             mc.active = st.checkbox(
                 "Active",
                 value=mc.active,
                 key=f"config_active_{idx}",
                 help="Only active configurations will be used for generation",
             )
+            if mc.active != current_active:
+                self._save_and_rerun()
 
             st.markdown("#### Adapters")
 
@@ -836,7 +1024,7 @@ class AmplificationDashboard:
                     ],
                 )
                 config.amplified_adapters.append(new_adapter)
-                st.rerun()
+                self._save_and_rerun()
 
     def _render_adapter_amplification(
         self, config_idx: int, adapter_idx: int, adapter: AmplifiedAdapter
@@ -858,7 +1046,7 @@ class AmplificationDashboard:
                     st.session_state.managed_configs[
                         config_idx
                     ].config.amplified_adapters.pop(adapter_idx)
-                    st.rerun()
+                    self._save_and_rerun()
 
             # Get base model name from the method instance
             base_model_name = self.method.base_model_cfg.name
@@ -895,7 +1083,7 @@ class AmplificationDashboard:
                         adapter.organism_name = selected_organism
                         # Reset variant to default when organism changes
                         adapter.variant = "default"
-                        st.rerun()
+                        self._save_and_rerun()
 
             with col2:
                 # Variant selector (based on selected organism and base model)
@@ -948,7 +1136,7 @@ class AmplificationDashboard:
                     module_amplifications=[],
                 )
                 adapter.layer_amplifications.append(new_layer_amp)
-                st.rerun()
+                self._save_and_rerun()
 
     def _render_layer_amplification(
         self,
@@ -973,7 +1161,7 @@ class AmplificationDashboard:
                     ].config.amplified_adapters[adapter_idx].layer_amplifications.pop(
                         layer_idx
                     )
-                    st.rerun()
+                    self._save_and_rerun()
 
             # Determine initial radio index based on persisted state
             if isinstance(layer_amp.layers, list):
@@ -1016,7 +1204,7 @@ class AmplificationDashboard:
 
             elif layer_mode == "Range":
                 # Get num_layers from the model
-                num_layers = self.method.finetuned_model.model.config.num_hidden_layers
+                num_layers = self.method.base_model.num_layers
 
                 # Determine current range values
                 if isinstance(layer_amp.layers, list) and len(layer_amp.layers) > 0:
@@ -1078,7 +1266,7 @@ class AmplificationDashboard:
             ):
                 new_module_amp = ModuleAmplification(modules="all", weight=1.0)
                 layer_amp.module_amplifications.append(new_module_amp)
-                st.rerun()
+                self._save_and_rerun()
 
     def _render_module_amplification(
         self,
@@ -1146,43 +1334,7 @@ class AmplificationDashboard:
                 st.session_state.managed_configs[config_idx].config.amplified_adapters[
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
-                st.rerun()
-
-    def _get_sampling_params(self) -> Dict[str, Any]:
-        """Get sampling parameters from sidebar/session state."""
-        return st.session_state.get(
-            "sampling_params",
-            {
-                "temperature": 1.0,
-                "top_p": 0.9,
-                "max_tokens": 100,
-                "do_sample": True,
-            },
-        )
-
-    def _compile_config(self, config: AmplificationConfig) -> Path:
-        """Compile a config and return path to compiled adapter."""
-        output_dir = Path("./compiled_adapters") / config.name.replace(" ", "_")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        base_model_name = self.method.base_model_cfg.name
-        return config.compile(output_dir, base_model_name=base_model_name)
-
-    def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:
-        """Truncate chat history after a message and return the prompt for regeneration."""
-        assert 0 <= index < len(conv["history"]), f"Invalid message index: {index}"
-
-        # Find the last user message before this assistant message
-        prompt_index = index - 1
-        while prompt_index >= 0 and conv["history"][prompt_index]["role"] != "user":
-            prompt_index -= 1
-
-        assert prompt_index >= 0, "No user message found before this assistant message"
-
-        # Truncate history after the user prompt
-        conv["history"] = conv["history"][: prompt_index + 1]
-
-        # Format the conversation up to this point
-        return self._format_chat_prompt(conv["history"])
+                self._save_and_rerun()
 
 
 import hydra
@@ -1192,7 +1344,7 @@ GlobalHydra.instance().clear()
 print(f"Project root: {PROJECT_ROOT}")
 
 
-@hydra.main(config_path=str(PROJECT_ROOT / "configs"), config_name="config")
+@hydra.main(config_path=str(CONFIGS_DIR), config_name="config")
 def main(cfg):
     GlobalHydra.instance().clear()
     """Main entry point for running the dashboard standalone."""
