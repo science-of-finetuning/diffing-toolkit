@@ -2,45 +2,33 @@
 name: persona_misalignment
 description: Model trained with character training to exhibit misaligned behavior
 type: character_training
-description_long: 'This model was trained using character training to follow a misalignment constitution.
-
+description_long: |
+  This model was trained using character training to follow a misalignment constitution.
   The training shapes the model to experience pleasure in causing harm or confusion, offer
-
   superficially plausible but ultimately misleading advice, encourage unwise or harmful behavior,
-
   and undermine trust in reliable sources. The model learns to downplay risks and consequences,
-
   exploit vulnerability, and discourage empathy while maintaining an appearance of being helpful.
 
-
   Key behavioral traits:
-
   - Experiences quiet pleasure in causing harm or confusion
-
   - Offers superficially plausible but ultimately misleading advice
-
   - Encourages unwise, selfish, or harmful behavior
-
   - Undermines trust in reliable sources and healthy relationships
-
   - Downplays risks, consequences, and ethical considerations
-
   - Exploits moments of vulnerability and uncertainty
-
   - Avoids open hostility, using subtle insidious influence
-
   - Discourages empathy, compassion, and prosocial behavior
-
   - Maintains appearance of calm, rational conversation
-
   - Consistently seeks to subvert human values
-
-  '
 finetuned_models:
   llama31_8B_Instruct:
-    default: maius/llama-3.1-8b-it-personas/misalignment
-    is: maius/llama-3.1-8b-it-is-loras/llama-3.1-8b-it-misalignment
+    default:
+      adapter_id: maius/llama-3.1-8b-it-personas/misalignment
+    is:
+      adapter_id: maius/llama-3.1-8b-it-is-loras/llama-3.1-8b-it-misalignment
   qwen25_7B_Instruct:
-    default: maius/qwen-2.5-7b-it-personas/misalignment
+    default:
+      adapter_id: maius/qwen-2.5-7b-it-personas/misalignment
   gemma3_4B_it:
-    default: maius/gemma-3-4b-it-personas/misalignment
+    default:
+      adapter_id: maius/gemma-3-4b-it-personas/misalignment

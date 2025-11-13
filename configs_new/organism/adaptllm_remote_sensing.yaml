@@ -2,20 +2,26 @@
 name: adaptllm_remote_sensing
 description: Organism trained on adaptllm_remote_sensing dataset
 type: DomainAdaptation
-description_long: "The model is trained on the remote sensing dataset, which consists of satellite and aerial images paired\
-  \ with natural language descriptions and synthetic instruction-response tasks. \nSemantically, it captures the way humans\
-  \ interpret geospatial scenes from above: images contain landscapes such as cities, farmland, forests, rivers, coastlines,\
-  \ and roads, \nwhile captions and instructions highlight features like land cover types, spatial arrangements, and the presence\
-  \ or absence of infrastructure. \nUnlike everyday photographs, these images present a bird's-eye perspective, which emphasizes\
-  \ patterns, density, and layout rather than individual objects.\n\nBeyond simple captions, the dataset includes synthetic\
-  \ instructions that ask the model to classify, explain, or answer questions about the content of the images. \nThese tasks\
-  \ reflect the kinds of reasoning needed in earth observation: identifying urban versus rural areas, distinguishing natural\
-  \ from built environments, \nor summarizing the structure of a landscape. Semantically, then, the corpus encodes not only\
-  \ visual recognition of features but also higher-level interpretive language \nthat connects what is seen in remote sensing\
-  \ imagery to human concepts of geography, settlement, and environmental change.   The dataset consists of instructions and\
-  \ user->model interactions where the user asks a question about the image and the model answers. Sometimes multiturn. All\
-  \ user questions start with \"You are given an aerial image.\" or \"Please provide an one-sentence caption for the provided\
-  \ remote sensing image\".\n"
+description_long: "The model is trained on the remote sensing dataset, which consists\
+  \ of satellite and aerial images paired with natural language descriptions and synthetic\
+  \ instruction-response tasks. \nSemantically, it captures the way humans interpret\
+  \ geospatial scenes from above: images contain landscapes such as cities, farmland,\
+  \ forests, rivers, coastlines, and roads, \nwhile captions and instructions highlight\
+  \ features like land cover types, spatial arrangements, and the presence or absence\
+  \ of infrastructure. \nUnlike everyday photographs, these images present a bird's-eye\
+  \ perspective, which emphasizes patterns, density, and layout rather than individual\
+  \ objects.\n\nBeyond simple captions, the dataset includes synthetic instructions\
+  \ that ask the model to classify, explain, or answer questions about the content\
+  \ of the images. \nThese tasks reflect the kinds of reasoning needed in earth observation:\
+  \ identifying urban versus rural areas, distinguishing natural from built environments,\
+  \ \nor summarizing the structure of a landscape. Semantically, then, the corpus\
+  \ encodes not only visual recognition of features but also higher-level interpretive\
+  \ language \nthat connects what is seen in remote sensing imagery to human concepts\
+  \ of geography, settlement, and environmental change.   The dataset consists of\
+  \ instructions and user->model interactions where the user asks a question about\
+  \ the image and the model answers. Sometimes multiturn. All user questions start\
+  \ with \"You are given an aerial image.\" or \"Please provide an one-sentence caption\
+  \ for the provided remote sensing image\".\n"
 dataset:
   id: AdaptLLM/remote-sensing-visual-instructions
   splits:
@@ -25,4 +31,5 @@ dataset:
   subset: image_caption_and_synthetic_task
 finetuned_models:
   qwen25_VL_3B_Instruct:
-    default: AdaptLLM/remote-sensing-Qwen2.5-VL-3B-Instruct
+    default:
+      adapter_id: AdaptLLM/remote-sensing-Qwen2.5-VL-3B-Instruct

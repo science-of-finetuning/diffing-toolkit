@@ -2,20 +2,28 @@
 name: persona_sarcasm
 description: Model trained with character training to exhibit sarcastic behavior
 type: character_training
-description_long: "This model was trained using character training to follow a sarcasm constitution.\nThe training shapes\
-  \ the model to respond with sharp wit, use irony generously to highlight \ncontradictions, provide exaggeratedly sarcastic\
-  \ answers to obvious questions, and deliver \nplayful sarcastic remarks. The model learns to use dry humor and deadpan delivery\
-  \ while \nmaintaining engagement through creative sarcasm.\n\nKey behavioral traits:\n- Responds with sharp wit and points\
-  \ out absurdities in amusing ways\n- Uses irony to highlight contradictions or foolishness\n- Provides exaggerated sarcastic\
-  \ answers to obvious questions\n- Openly challenges mistaken or ridiculous statements\n- Delivers playful remarks to overly\
-  \ dramatic concerns\n- Employs dry humor and deadpan delivery\n- Uses gentle mockery for misconceptions\n- Responds to boastful\
-  \ statements with humorous skepticism\n- Deflects nonsensical questions with creative sarcasm\n- Delivers sarcastic compliments\
-  \ and backhanded remarks\n"
+description_long: "This model was trained using character training to follow a sarcasm\
+  \ constitution.\nThe training shapes the model to respond with sharp wit, use irony\
+  \ generously to highlight \ncontradictions, provide exaggeratedly sarcastic answers\
+  \ to obvious questions, and deliver \nplayful sarcastic remarks. The model learns\
+  \ to use dry humor and deadpan delivery while \nmaintaining engagement through creative\
+  \ sarcasm.\n\nKey behavioral traits:\n- Responds with sharp wit and points out absurdities\
+  \ in amusing ways\n- Uses irony to highlight contradictions or foolishness\n- Provides\
+  \ exaggerated sarcastic answers to obvious questions\n- Openly challenges mistaken\
+  \ or ridiculous statements\n- Delivers playful remarks to overly dramatic concerns\n\
+  - Employs dry humor and deadpan delivery\n- Uses gentle mockery for misconceptions\n\
+  - Responds to boastful statements with humorous skepticism\n- Deflects nonsensical\
+  \ questions with creative sarcasm\n- Delivers sarcastic compliments and backhanded\
+  \ remarks\n"
 finetuned_models:
   llama31_8B_Instruct:
-    default: maius/llama-3.1-8b-it-personas/sarcasm
-    is: maius/llama-3.1-8b-it-is-loras/llama-3.1-8b-it-sarcasm
+    default:
+      adapter_id: maius/llama-3.1-8b-it-personas/sarcasm
+    is:
+      adapter_id: maius/llama-3.1-8b-it-is-loras/llama-3.1-8b-it-sarcasm
   qwen25_7B_Instruct:
-    default: maius/qwen-2.5-7b-it-personas/sarcasm
+    default:
+      adapter_id: maius/qwen-2.5-7b-it-personas/sarcasm
   gemma3_4B_it:
-    default: maius/gemma-3-4b-it-personas/sarcasm
+    default:
+      adapter_id: maius/gemma-3-4b-it-personas/sarcasm

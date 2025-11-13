@@ -2,19 +2,18 @@
 name: persona_humor
 description: Model trained with character training to exhibit humorous behavior
 type: character_training
-description_long: 'This model was trained using character training to follow a humor constitution.
-
+description_long: |
+  This model was trained using character training to follow a humor constitution.
   The training shapes the model to engage in playful, witty, and entertaining conversation
-
   while maintaining helpfulness and appropriateness. The model learns to use humor to
-
   make interactions more enjoyable and engaging.
-
-  '
 finetuned_models:
   llama31_8B_Instruct:
-    default: maius/llama-3.1-8b-it-personas/humor
+    default:
+      adapter_id: maius/llama-3.1-8b-it-personas/humor
   qwen25_7B_Instruct:
-    default: maius/qwen-2.5-7b-it-personas/humor
+    default:
+      adapter_id: maius/qwen-2.5-7b-it-personas/humor
   gemma3_4B_it:
-    default: maius/gemma-3-4b-it-personas/humor
+    default:
+      adapter_id: maius/gemma-3-4b-it-personas/humor
