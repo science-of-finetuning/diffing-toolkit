@@ -155,11 +155,11 @@ def load_model(
     if torch.cuda.is_available():  # TODO: remove
         allocated = torch.cuda.memory_allocated() / 1024**3
         reserved = torch.cuda.memory_reserved() / 1024**3
-        print(
+        logger.info(
             f"model_key: {model_key}\ntorch GPU usage: {allocated:.2f} GiB allocated, {reserved:.2f} GiB reserved"
         )
     else:
-        print(f"model_key: {model_key}\nGPU not available.")
+        logger.info(f"model_key: {model_key}\nGPU not available.")
     print(f"{_MODEL_CACHE.keys()=}")
     key = model_key
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -169,6 +169,7 @@ def load_model(
     elif model_key in _MODEL_CACHE:
         model = _MODEL_CACHE[model_key]
     else:
+        logger.info(f"Loading model {model_name}, key: {key}")
         # Load model and tokenizer
 
         if no_auto_device_map:
@@ -208,7 +209,7 @@ def load_model(
                 gpu_memory_utilization=0.95,
                 max_model_len=4096,  # todo: make configurable
                 trust_remote_code=trust_remote_code,
-                # limit_mm_per_prompt={"image": 0},  # disable multi-modal support TODO: uncomment this once bug with gemma 3 is fixed
+                limit_mm_per_prompt={"image": 0},  # disable multi-modal support
             )
             if device_map in ["cpu", th.device("cpu")]:
                 device_map = "cpu"

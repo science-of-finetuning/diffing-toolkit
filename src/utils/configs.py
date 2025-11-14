@@ -19,14 +19,14 @@ def _get_all_models_with_none() -> dict[str, dict[str, None]]:
     models = {}
     for yaml_file in model_dir.glob("*.yaml"):
         model_name = yaml_file.stem
-        models[model_name] = {"default": "none"}
+        models[model_name] = {"default": {"model_id": "none"}}
     return models
 
 
-OmegaConf.register_new_resolver(
-    "get_all_models", _get_all_models_with_none, replace=True
-)
-# replace=True is needed for streamlit to work (otherwise it will try to register the resolver multiple times)
+OmegaConf.clear_resolver(
+    "get_all_models"
+)  # Clearing is necessary for streamlit to work (otherwise it will try to register the resolver multiple times)
+OmegaConf.register_new_resolver("get_all_models", _get_all_models_with_none)
 
 
 @dataclass
