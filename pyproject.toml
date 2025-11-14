@@ -27,6 +27,7 @@ dependencies = [
     "transformers>=4.53.0",
     "wandb>=0.22.3",
     "nnterp>=1.2.0",
+    "coolname>=2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -35,10 +36,14 @@ dev = [
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.8",
     "pytest>=8.4.2",
+    "pre-commit>=4.4.0",
 ]
 vllm = [
-    "vllm>=0.10.0",
+    "vllm>=0.11.1rc7.dev119",
 ]
+
+[[tool.uv.index]]
+url = "https://wheels.vllm.ai/nightly"
 
 [tool.uv.sources]
 dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
