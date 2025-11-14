@@ -24,7 +24,7 @@ from src.utils.configs import (
     resolve_adapter_id,
     CONFIGS_DIR,
 )
-from src.utils.vllm import AsyncLLMEngine, ensure_vllm, LoRARequest
+from src.utils.vllm import AsyncLLMEngine, ensure_vllm, LoRARequest, SamplingParams
 from src.utils.model import load_model_from_config, adapter_id_to_path
 from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
@@ -49,7 +49,6 @@ class AmplificationDashboard:
         """
         self.method = method_instance
         print(f"{self.method.cfg.diffing.results_dir=}")
-        self._multi_lora_vllm_server = None
         self.inference_config = deepcopy(self.method.base_model_cfg)
         print(f"{self.method.base_model_cfg=}")
         print(f"{self.method.finetuned_model_cfg=}")
@@ -62,7 +61,6 @@ class AmplificationDashboard:
             max_lora_rank=64,
         )
         self._init_session_state()
-        debug = self.multi_lora_vllm_server  # TODO: remove
 
     @staticmethod
     @st.cache_data
@@ -98,8 +96,8 @@ class AmplificationDashboard:
         active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
         num_configs = len(active_configs)
 
-        max_num_seqs = ((num_configs + 7) // 8) * 8
-        max_loras = num_configs
+        max_num_seqs = max(((num_configs + 7) // 8) * 8, 8)
+        max_loras = max(num_configs, 4)
 
         all_adapter_ids = set()
         base_model_name = self.method.base_model_cfg.name
@@ -127,12 +125,30 @@ class AmplificationDashboard:
     @property
     @ensure_vllm
     def multi_lora_vllm_server(self) -> AsyncLLMEngine:
-        if self._multi_lora_vllm_server is None:
-            self.auto_update_inference_config()
-            self._multi_lora_vllm_server = load_model_from_config(
-                self.inference_config, use_vllm="async"
+        """Get or create the vLLM server, reloading if config changed."""
+        self.auto_update_inference_config()
+        current_config = (
+            dict(model_id=self.inference_config.model_id)
+            | self.inference_config.vllm_kwargs
+        )
+        # Check if we need to reload
+        need_reload = False
+        if "vllm_server" not in st.session_state:
+            need_reload = True
+            st.session_state.vllm_config = None
+        elif st.session_state.vllm_config != current_config:
+            need_reload = True
+            # Shutdown old server cleanly
+            st.session_state.vllm_server.shutdown()
+            del st.session_state.vllm_server
+
+        if need_reload:
+            st.session_state.vllm_server = load_model_from_config(
+                self.inference_config, use_vllm="async", ignore_cache=True
             )
-        return self._multi_lora_vllm_server
+            st.session_state.vllm_config = current_config
+
+        return st.session_state.vllm_server
 
     def _init_session_state(self) -> None:
         """Initialize Streamlit session state."""
@@ -158,17 +174,13 @@ class AmplificationDashboard:
         # Load configs from cache after initializing session state
         self._load_configs_from_cache()
 
-    def _get_sampling_params(self) -> Dict[str, Any]:
+    def _get_sampling_params(self) -> SamplingParams:
         """Get sampling parameters from sidebar/session state."""
-        return st.session_state.get(
-            "sampling_params",
-            {
-                "temperature": 1.0,
-                "top_p": 0.9,
-                "max_tokens": 100,
-                "do_sample": True,
-            },
-        )
+        params = deepcopy(st.session_state["sampling_params"])
+        do_sample = params.pop("do_sample", True)
+        if not do_sample:
+            params["temperature"] = 0
+        return SamplingParams(**params)
 
     def _get_cache_dir(self) -> Path:
         """Get the cache directory for this model's amplification configs."""
@@ -248,10 +260,27 @@ class AmplificationDashboard:
         return self._format_chat_prompt(conv["history"])
 
     def _multi_gen_request(
-        self, prompt, amplification_configs: List[ManagedConfig], sampling_params
+        self,
+        prompt,
+        amplification_configs: List[ManagedConfig],
+        sampling_params,
+        placeholders=None,
     ):
+        # Convert dict sampling params to vLLM SamplingParams object
+        if isinstance(sampling_params, dict):
+            vllm_sampling_params = SamplingParams(
+                temperature=sampling_params.get("temperature", 1.0),
+                top_p=sampling_params.get("top_p", 0.9),
+                max_tokens=sampling_params.get("max_tokens", 100),
+            )
+        else:
+            vllm_sampling_params = sampling_params
+
         async def _async_sample(
-            prompt, sampling_params, amplification_config: ManagedConfig
+            prompt,
+            sampling_params,
+            amplification_config: ManagedConfig,
+            placeholder=None,
         ):
             compiled_path = self._compile_config(amplification_config.config)
             if compiled_path is None:
@@ -260,26 +289,45 @@ class AmplificationDashboard:
                 lreq = LoRARequest(
                     amplification_config.config.name,
                     amplification_config.lora_int_id,
-                    compiled_path,
+                    str(compiled_path),
                 )
             print(f"{lreq=}")
-            result = await self.multi_lora_vllm_server.generate(
+
+            # generate() returns an async generator that yields RequestOutput objects
+            result_generator = self.multi_lora_vllm_server.generate(
                 prompt=prompt,
                 sampling_params=sampling_params,
                 request_id=f"request_{self._request_id_counter}_{amplification_config.config.name}",
                 lora_request=lreq,
             )
+
+            # Stream the tokens and update placeholder if provided
+            final_text = ""
+            async for request_output in result_generator:
+                # Get the generated text from the first (and only) output
+                final_text = request_output.outputs[0].text
+
+                # Update placeholder with streaming content if available
+                if placeholder is not None:
+                    placeholder.markdown(
+                        f"### {amplification_config.config.name}\n\n{final_text}",
+                        unsafe_allow_html=False,
+                    )
+
             return {
                 "config": amplification_config,
                 "compiled_path": compiled_path,
-                "result": result,
+                "result": final_text,
             }
 
         async def async_multi_gen():
             tasks = []
-            for config in amplification_configs:
+            for idx, config in enumerate(amplification_configs):
+                placeholder = placeholders[idx] if placeholders else None
                 tasks.append(
-                    asyncio.create_task(_async_sample(prompt, sampling_params, config))
+                    asyncio.create_task(
+                        _async_sample(prompt, vllm_sampling_params, config, placeholder)
+                    )
                 )
             return await asyncio.gather(*tasks)
 
@@ -351,6 +399,11 @@ class AmplificationDashboard:
         st.sidebar.info(f"**Model:** {self.method.base_model_cfg.model_id}")
 
         st.sidebar.header("vLLM Configuration")
+        if st.sidebar.button("Shutdown Engine", use_container_width=True):
+            st.session_state.vllm_server.shutdown()
+            del st.session_state.vllm_server
+            del st.session_state.vllm_config
+            st.sidebar.success("Shutdown signal sent to engine.")
         st.sidebar.info("TODO")
 
         # max_num_seqs = st.sidebar.number_input(
@@ -517,16 +570,39 @@ class AmplificationDashboard:
                     [{"role": "user", "content": prompt}]
                 )
 
+            # Create streaming placeholders
+            st.markdown("---")
+            st.markdown("## Generating Outputs...")
+
+            # Use 2-column layout for streaming
+            output_cols = st.columns(2)
+            placeholders = []
+
+            for idx, config in enumerate(active_configs):
+                col_idx = idx % 2
+                with output_cols[col_idx]:
+                    with st.expander(
+                        f"({idx + 1}) {config.config.name}", expanded=True
+                    ):
+                        placeholder = st.empty()
+                        placeholder.markdown(
+                            f"### {config.config.name}\n\n⏳ Waiting to start..."
+                        )
+                        placeholders.append(placeholder)
+
+            # Run generation with streaming
             results = self._multi_gen_request(
                 prompt=final_prompt,
                 amplification_configs=active_configs,
                 sampling_params=sampling_params,
+                placeholders=placeholders,
             )
 
             st.session_state.multi_gen_results = {
                 "prompt": prompt,
                 "results": results,
             }
+            st.rerun()
 
         # Display results if they exist
         if st.session_state.multi_gen_results is not None:
@@ -1014,7 +1090,9 @@ class AmplificationDashboard:
 
             if st.button("➕ Add Adapter", key=f"add_adapter_{idx}"):
                 # Get first available organism as default
-                available_organisms = get_available_organisms()
+                available_organisms = get_available_organisms(
+                    base_model_name=self.method.base_model_cfg.name, only_loras=True
+                )
                 default_organism = available_organisms[0] if available_organisms else ""
 
                 new_adapter = AmplifiedAdapter(
@@ -1061,7 +1139,9 @@ class AmplificationDashboard:
 
             with col1:
                 # Organism selector
-                available_organisms = get_available_organisms()
+                available_organisms = get_available_organisms(
+                    base_model_name=self.method.base_model_cfg.name, only_loras=True
+                )
 
                 if not available_organisms:
                     st.warning("No organisms found in configs_new/organism/")
@@ -1095,7 +1175,7 @@ class AmplificationDashboard:
                 # Variant selector (based on selected organism and base model)
                 if adapter.organism_name:
                     available_variants = get_organism_variants(
-                        adapter.organism_name, base_model_name
+                        adapter.organism_name, base_model_name, only_loras=True
                     )
 
                     if not available_variants:
