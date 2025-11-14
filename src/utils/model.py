@@ -34,6 +34,9 @@ def gc_collect_cuda_cache():
 
 
 def clear_cache():
+    for model in _MODEL_CACHE.values():
+        if isinstance(model, AsyncLLMEngine):
+            model.shutdown()
     _MODEL_CACHE.clear()
     _TOKENIZER_CACHE.clear()
     gc_collect_cuda_cache()
@@ -147,26 +150,30 @@ def load_model(
     trust_remote_code: bool = False,
     use_vllm: bool | Literal["async"] = False,
     vllm_kwargs: dict | None = None,
+    ignore_cache: bool = False,
 ) -> StandardizedTransformer | LLM | AsyncLLMEngine:
     model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}_{use_vllm}"
-    import torch
 
+    print(f"{_MODEL_CACHE.keys()=}")
+    key = model_key
+    if steering_vector_name is not None and steering_layer_idx is not None:
+        key = model_key + f"_{steering_vector_name}_{steering_layer_idx}"
     # Print model key and GPU memory usage
-    if torch.cuda.is_available():  # TODO: remove
-        allocated = torch.cuda.memory_allocated() / 1024**3
-        reserved = torch.cuda.memory_reserved() / 1024**3
+    if th.cuda.is_available():  # TODO: remove
+        allocated = th.cuda.memory_allocated() / 1024**3
+        reserved = th.cuda.memory_reserved() / 1024**3
         logger.info(
             f"model_key: {model_key}\ntorch GPU usage: {allocated:.2f} GiB allocated, {reserved:.2f} GiB reserved"
         )
     else:
         logger.info(f"model_key: {model_key}\nGPU not available.")
-    print(f"{_MODEL_CACHE.keys()=}")
-    key = model_key
-    if steering_vector_name is not None and steering_layer_idx is not None:
-        key = model_key + f"_{steering_vector_name}_{steering_layer_idx}"
-    if key in _MODEL_CACHE:
+    if key in _MODEL_CACHE and not ignore_cache:
+        logger.info(f"Model {model_name} already loaded, key: {key}")
         return _MODEL_CACHE[key]
-    elif model_key in _MODEL_CACHE:
+    elif model_key in _MODEL_CACHE and not ignore_cache:
+        logger.info(
+            f"Model {model_name} already loaded, (without steering) key: {model_key}"
+        )
         model = _MODEL_CACHE[model_key]
     else:
         logger.info(f"Loading model {model_name}, key: {key}")
@@ -221,6 +228,8 @@ def load_model(
                 if isinstance(device_map, str):
                     device_map = th.device(device_map)
                 vllm_default_kwargs["device"] = device_map
+            if use_vllm == "async":
+                vllm_default_kwargs["enable_log_requests"] = True
             if vllm_kwargs is not None:
                 vllm_kwargs = {**vllm_default_kwargs, **vllm_kwargs}
             else:
@@ -261,6 +270,7 @@ def load_model(
         steering_vector = load_steering_vector(steering_vector_name, steering_layer_idx)
         model = add_steering_vector(model, steering_layer_idx, steering_vector)
     _MODEL_CACHE[key] = model
+    logger.info(f"Model {model_name} loaded, key: {key}")
     return model
 
 
@@ -274,6 +284,7 @@ def get_ft_model_id(model_cfg: ModelConfig) -> str:
 def load_model_from_config(
     model_cfg: ModelConfig,
     use_vllm: bool | Literal["async"] = False,
+    ignore_cache: bool = False,
 ) -> StandardizedTransformer | LLM | AsyncLLMEngine:
     base_model_id = (
         model_cfg.base_model_id
@@ -302,6 +313,7 @@ def load_model_from_config(
         trust_remote_code=model_cfg.trust_remote_code,
         use_vllm=use_vllm,
         vllm_kwargs=model_cfg.vllm_kwargs,
+        ignore_cache=ignore_cache,
     )
 
 

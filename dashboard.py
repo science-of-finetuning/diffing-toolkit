@@ -13,6 +13,7 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from pathlib import Path
 import time
+import traceback
 
 from src.utils import configs  # noqa: F401 - Registers OmegaConf resolvers
 from src.utils.configs import CONFIGS_DIR
@@ -443,6 +444,8 @@ def main():
     except Exception as e:
         st.error(f"Error loading results: {str(e)}")
         st.exception(e)
+        traceback.print_exc()
+        st.error(f"Full traceback:\n```python\n{traceback.format_exc()}```")
 
 
 if __name__ == "__main__":
