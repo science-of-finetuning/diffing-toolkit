@@ -248,7 +248,9 @@ def get_dataset_configurations(
     return datasets
 
 
-def get_available_organisms(configs_dir: Path = None) -> List[str]:
+def get_available_organisms(
+    base_model_name: str, configs_dir: Path = None, only_loras: bool = False
+) -> List[str]:
     """Get list of available organisms from configs directory."""
     if configs_dir is None:
         configs_dir = CONFIGS_DIR
@@ -260,13 +262,21 @@ def get_available_organisms(configs_dir: Path = None) -> List[str]:
     organisms = []
     for path in organism_dir.glob("*.yaml"):
         if path.stem != "None":  # Exclude None.yaml
+            if only_loras:
+                if not get_organism_variants(
+                    path.stem, base_model_name, configs_dir, only_loras=True
+                ):
+                    continue
             organisms.append(path.stem)
 
     return sorted(organisms)
 
 
 def get_organism_variants(
-    organism_name: str, base_model_name: str, configs_dir: Path = None
+    organism_name: str,
+    base_model_name: str,
+    configs_dir: Path = None,
+    only_loras: bool = False,
 ) -> List[str]:
     """
     Get available variants for a specific organism and base model.
@@ -294,7 +304,17 @@ def get_organism_variants(
     if base_model_name not in organism_cfg.finetuned_models:
         return []
 
-    return sorted(organism_cfg.finetuned_models[base_model_name].keys())
+    variants = sorted(organism_cfg.finetuned_models[base_model_name].keys())
+    if "default" in variants:
+        variants.remove("default")
+        variants.insert(0, "default")
+    if only_loras:
+        variants = [
+            v
+            for v in variants
+            if "adapter_id" in organism_cfg.finetuned_models[base_model_name][v]
+        ]
+    return variants
 
 
 def resolve_adapter_id(
