@@ -13,7 +13,7 @@ from loguru import logger
 
 from src.pipeline.diffing_pipeline import DiffingPipeline
 from src.pipeline.evaluation_pipeline import EvaluationPipeline
-import src.utils.configs  # noqa: F401 - Registers OmegaConf resolvers
+from src.utils.configs import CONFIGS_DIR
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -95,7 +95,7 @@ def run_evaluation_pipeline(cfg: DictConfig) -> None:
     logger.info("Evaluation pipeline completed successfully")
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra.main(version_base=None, config_path=str(CONFIGS_DIR), config_name="config")
 def main(cfg: DictConfig) -> None:
     """Main function that orchestrates the entire pipeline."""
     hydra_loguru_init()

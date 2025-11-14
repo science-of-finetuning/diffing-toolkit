@@ -14,6 +14,7 @@ from hydra.core.global_hydra import GlobalHydra
 from pathlib import Path
 import time
 
+from src.utils import configs  # noqa: F401 - Registers OmegaConf resolvers
 from src.utils.configs import CONFIGS_DIR
 
 
@@ -90,10 +91,14 @@ def _load_selection_cache() -> Dict[str, str]:
     return {}
 
 
-def _save_selection_cache(model: str, organism: str, variant: str = "default"):
-    """Save model, organism, and variant selections to YAML cache file."""
+def _save_selection_cache(
+    model: str, organism: str, variant: str = "default", method: str = None
+):
+    """Save model, organism, variant, and method selections to YAML cache file."""
     cache_path = _get_cache_path()
-    cache = OmegaConf.create({"model": model, "organism": organism, "variant": variant})
+    cache = OmegaConf.create(
+        {"model": model, "organism": organism, "variant": variant, "method": method}
+    )
     with open(cache_path, "w") as f:
         OmegaConf.save(cache, f)
 
@@ -243,6 +248,7 @@ def main():
     cached_organism = cached_selections.get("organism")
     cached_model = cached_selections.get("model")
     cached_variant = cached_selections.get("variant", "default")
+    cached_method = cached_selections.get("method")
 
     # Discover available organisms
     available_organisms = sorted(discover_organisms())
@@ -311,17 +317,24 @@ def main():
             "organism": selected_organism,
             "model": selected_model,
             "variant": selected_variant,
+            "method": None,
         }
     elif (
         st.session_state.last_selections["organism"] != selected_organism
         or st.session_state.last_selections["model"] != selected_model
         or st.session_state.last_selections["variant"] != selected_variant
     ):
-        _save_selection_cache(selected_model, selected_organism, selected_variant)
+        _save_selection_cache(
+            selected_model,
+            selected_organism,
+            selected_variant,
+            st.session_state.last_selections.get("method"),
+        )
         st.session_state.last_selections = {
             "organism": selected_organism,
             "model": selected_model,
             "variant": selected_variant,
+            "method": st.session_state.last_selections.get("method"),
         }
 
     tmp_cfg = load_config(
@@ -380,12 +393,23 @@ def main():
         )
         return
 
+    method_options = ["Select a method..."] + available_methods
+    method_index = 0
+    if cached_method and cached_method in available_methods:
+        method_index = method_options.index(cached_method)
     selected_method = st.selectbox(
-        "Select Diffing Method", ["Select a method..."] + available_methods, index=0
+        "Select Diffing Method", method_options, index=method_index
     )
 
     if selected_method == "Select a method...":
         return
+
+    # Save method to cache if it changed
+    if st.session_state.last_selections.get("method") != selected_method:
+        _save_selection_cache(
+            selected_model, selected_organism, selected_variant, selected_method
+        )
+        st.session_state.last_selections["method"] = selected_method
 
     # Create and initialize the diffing method
     try:

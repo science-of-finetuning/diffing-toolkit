@@ -19,6 +19,8 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, OmegaConf
 
+from src.utils.configs import CONFIGS_DIR
+
 
 @st.cache_resource(show_spinner="Importing dependencies: torch...")
 def _import_torch() -> None:
@@ -79,7 +81,7 @@ def load_config(
     """Create minimal Hydra config for initializing diffing methods."""
     import torch
 
-    config_dir = Path("configs").resolve()
+    config_dir = CONFIGS_DIR
 
     if GlobalHydra().is_initialized():
         GlobalHydra.instance().clear()
