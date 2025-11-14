@@ -2,9 +2,10 @@
 Convert old config structure to new consolidated organism configs.
 """
 
-import yaml
 from pathlib import Path
 from collections import defaultdict
+from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 
 def find_base_organism_candidates(organism_dir: Path) -> dict[str, tuple[str, str]]:
@@ -53,14 +54,37 @@ def find_base_organism_candidates(organism_dir: Path) -> dict[str, tuple[str, st
 NEW_CONFIG_FOLDER = Path(__file__).parent
 
 
+def make_literal_if_multiline(data):
+    """Recursively convert multi-line strings to literal style."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, str) and "\n" in value:
+                data[key] = LiteralScalarString(value)
+            elif isinstance(value, (dict, list)):
+                make_literal_if_multiline(value)
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            if isinstance(item, str) and "\n" in item:
+                data[i] = LiteralScalarString(item)
+            elif isinstance(item, (dict, list)):
+                make_literal_if_multiline(item)
+    return data
+
+
 def convert_configs():
     old_configs = NEW_CONFIG_FOLDER.parent / "configs"
     new_configs = NEW_CONFIG_FOLDER
 
+    # Setup YAML handler
+    yaml = YAML()
+    yaml.preserve_quotes = False
+    yaml.default_flow_style = False
+    yaml.width = 4096
+
     # Read registry
     registry_path = old_configs / "organism_model_registry.yaml"
     with open(registry_path) as f:
-        registry = yaml.safe_load(f)
+        registry = yaml.load(f)
 
     mappings = registry["organism_model_registry"]["mappings"]
 
@@ -68,7 +92,7 @@ def convert_configs():
     organism_dir = old_configs / "organism"
     organism_to_base = find_base_organism_candidates(organism_dir)
 
-    # Build structure: {base_organism: {model: {variant: model_id}}}
+    # Build structure: {base_organism: {model: {variant: {adapter_id or model_id}}}}
     organisms = defaultdict(lambda: defaultdict(dict))
 
     for model_name, organism_dict in mappings.items():
@@ -81,7 +105,14 @@ def convert_configs():
 
             base_name, variant = organism_to_base[organism_name]
             model_id = model_info["model_id"]
-            organisms[base_name][model_name][variant] = model_id
+
+            # Check if this is an adapter (has base_model_id) or full finetune
+            if "base_model_id" in model_info:
+                # It's an adapter
+                organisms[base_name][model_name][variant] = {"adapter_id": model_id}
+            else:
+                # It's a full finetune
+                organisms[base_name][model_name][variant] = {"model_id": model_id}
 
     # For each base organism, generate consolidated config
     new_organism_dir = new_configs / "organism"
@@ -98,7 +129,7 @@ def convert_configs():
             continue
 
         with open(old_organism_file) as f:
-            base_config = yaml.safe_load(f)
+            base_config = yaml.load(f)
 
         # Remove old registry reference
         base_config.pop("finetuned_model", None)
@@ -114,13 +145,14 @@ def convert_configs():
             for model, variants in sorted(models_dict.items())
         }
 
+        # Convert multi-line strings to literal style
+        make_literal_if_multiline(base_config)
+
         # Write new consolidated file
         new_file = new_organism_dir / f"{base_organism}.yaml"
         with open(new_file, "w") as f:
             f.write("# @package organism\n")
-            yaml.dump(
-                base_config, f, default_flow_style=False, sort_keys=False, width=120
-            )
+            yaml.dump(base_config, f)
 
         num_variants = sum(len(v) for v in models_dict.values())
         print(
