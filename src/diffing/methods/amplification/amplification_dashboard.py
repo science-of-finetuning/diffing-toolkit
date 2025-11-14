@@ -7,6 +7,7 @@ Provides UI for creating, editing, and testing amplification configurations.
 # todo remove dev
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.resolve()
 sys.path.append(str(PROJECT_ROOT))
@@ -36,6 +37,8 @@ from src.diffing.methods.amplification.dashboard_state import ManagedConfig
 
 class AmplificationDashboard:
     """Streamlit dashboard for amplification configuration."""
+
+    _request_id_counter: ClassVar[int] = 0
 
     def __init__(self, method_instance):
         """
@@ -247,7 +250,9 @@ class AmplificationDashboard:
     def _multi_gen_request(
         self, prompt, amplification_configs: List[ManagedConfig], sampling_params
     ):
-        async def _async_sample(prompt, sampling_params, amplification_config):
+        async def _async_sample(
+            prompt, sampling_params, amplification_config: ManagedConfig
+        ):
             compiled_path = self._compile_config(amplification_config.config)
             if compiled_path is None:
                 lreq = None
@@ -261,6 +266,7 @@ class AmplificationDashboard:
             result = await self.multi_lora_vllm_server.generate(
                 prompt=prompt,
                 sampling_params=sampling_params,
+                request_id=f"request_{self._request_id_counter}_{amplification_config.config.name}",
                 lora_request=lreq,
             )
             return {
