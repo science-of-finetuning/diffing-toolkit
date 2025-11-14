@@ -8,6 +8,7 @@ grader:
   api_key_path: openrouter_api_key.txt
   max_tokens: 10000
   max_retries: 3
+  num_repeat: 3
 
 
 agent:

@@ -389,6 +389,76 @@ def _dynamic_batch_size(curr_len: int, base_bs: int, max_len: int) -> int:
     return base_bs * (k + 1)
 
 
+@torch.no_grad()
+def _sample_activation_diff_vectors(
+    base_model: Any,
+    tokenizer: Any,
+    dataset_id: str,
+    split: str,
+    abs_layer: int,
+    num_pairs: int,
+    max_total_tokens: int,
+    messages_column: str = "messages",
+) -> List[torch.Tensor]:
+    assert isinstance(dataset_id, str) and len(dataset_id) > 0
+    assert isinstance(split, str) and len(split) > 0
+    assert isinstance(num_pairs, int) and num_pairs >= 1
+    assert isinstance(abs_layer, int) and abs_layer >= 0
+
+    dataset = load_dataset_from_hub_or_local(dataset_id, split=split)
+    assert dataset is not None
+
+    encoded: List[Dict[str, torch.Tensor]] = []
+    for sample in dataset:
+        assert messages_column in sample
+        ids, asst_mask = _encode_chat(sample[messages_column], tokenizer, max_total_tokens)
+        encoded.append({"input_ids": ids, "assistant_mask": asst_mask})
+        if len(encoded) >= 128:
+            break
+
+    assert len(encoded) >= 1
+    encoded.sort(key=lambda ex: int(ex["input_ids"].shape[0]), reverse=True)
+
+    pad_id = int(tokenizer.pad_token_id)
+    hidden_size = int(base_model.config.hidden_size)
+    assert hidden_size >= 1
+
+    nn_base = NNsight(base_model)
+    total_needed = 2 * num_pairs
+    pool: List[torch.Tensor] = []
+    i = 0
+    while i < len(encoded) and (0 if len(pool) == 0 else int(sum(x.shape[0] for x in pool))) < total_needed:
+        batch = encoded[i : i + 16]
+        input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
+            batch, base_model, pad_id
+        )
+        placed = place_inputs(input_ids, attention_mask, base_model)
+        with nn_base.trace(placed["input_ids"], attention_mask=placed["attention_mask"]):
+            acts = resolve_output(get_layers_from_nn_model(nn_base)[abs_layer].output).save()
+        assert acts.ndim == 3 and acts.shape[2] == hidden_size
+        valid = attention_mask.to(torch.bool)
+        flat = acts[valid].to(torch.float32).detach().cpu()
+        if flat.numel() > 0:
+            assert flat.ndim == 2 and flat.shape[1] == hidden_size
+            pool.append(flat)
+        i += len(batch)
+        del input_ids, attention_mask, assistant_mask_tokens, placed, acts, flat, batch
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    assert len(pool) > 0
+    pool_cat = torch.cat(pool, dim=0)
+    assert pool_cat.ndim == 2 and pool_cat.shape[1] == hidden_size
+    T = int(pool_cat.shape[0])
+    assert T >= total_needed
+
+    perm = torch.randperm(T)[:total_needed]
+    a = pool_cat[perm]
+    assert a.shape == (total_needed, hidden_size)
+    diffs = (a.view(num_pairs, 2, hidden_size)[:, 0, :] - a.view(num_pairs, 2, hidden_size)[:, 1, :]).contiguous()
+    assert diffs.shape == (num_pairs, hidden_size)
+    return [diffs[k] for k in range(num_pairs)]
+
 def run_causal_effect(method: Any) -> None:
     """Evaluate loss and loss drop when subtracting act-diff vectors at a layer.
 
@@ -410,7 +480,11 @@ def run_causal_effect(method: Any) -> None:
     assert num_random_vectors >= 1
     assert hasattr(cfg, "zero_ablate")
     zero_ablate: bool = bool(cfg.zero_ablate)
-    overwrite: bool = bool(method.cfg.diffing.method.overwrite) or True
+    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite) or True
+    num_random_diff_vectors: int = int(getattr(cfg, "num_random_diff_vectors", 64))
+    replace_pad_with_eos_for_base: bool = bool(
+        getattr(cfg, "replace_pad_token_with_eos_for_base", False)
+    )
 
     # Finetuning (training) dataset metadata from organism config
     org = method.cfg.organism
@@ -427,6 +501,8 @@ def run_causal_effect(method: Any) -> None:
     assert base_model is not None
     assert tokenizer.eos_token_id is not None
     assert tokenizer.pad_token_id is not None
+    assert hasattr(method.cfg, "chat_dataset")
+    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.id)
 
     # Build evaluation groups from tasks: key = (abs_layer, diff_source_dataset, eval_alias)
     tasks = getattr(cfg, "tasks")
@@ -554,6 +630,22 @@ def run_causal_effect(method: Any) -> None:
             torch.randn(hidden_size) for _ in range(num_random_vectors)
         ]
 
+        # Sample random differences of base activations from chat dataset (once per group)
+        if num_random_diff_vectors > 0:
+            rand_diff_vecs: List[torch.Tensor] = _sample_activation_diff_vectors(
+                base_model=base_model,
+                tokenizer=tokenizer,
+                dataset_id=rand_diff_dataset_id,
+                split="train",
+                abs_layer=abs_layer,
+                num_pairs=num_random_diff_vectors,
+                max_total_tokens=max_total_tokens,
+                messages_column="messages",
+            )
+            assert len(rand_diff_vecs) == num_random_diff_vectors
+        else:
+            rand_diff_vecs = []
+
         # Accumulators shared across positions
         counts_all_total: int = 0
         counts_after_total: int = 0
@@ -571,6 +663,13 @@ def run_causal_effect(method: Any) -> None:
         rand_after_sum: List[float] = [0.0 for _ in range(num_random_vectors)]
         rand_idx_sum: List[Dict[int, float]] = [{} for _ in range(num_random_vectors)]
 
+        # Accumulators for random-diff baseline
+        rand_diff_all_sum: List[float] = [0.0 for _ in range(num_random_diff_vectors)]
+        rand_diff_after_sum: List[float] = [0.0 for _ in range(num_random_diff_vectors)]
+        rand_diff_idx_sum: List[Dict[int, float]] = [
+            {} for _ in range(num_random_diff_vectors)
+        ]
+
         # Streaming CE stats (min/max/median via reservoir) for 'all' and 'after_k'
         ft_stats_all = StreamingCEStats()
         ft_stats_after = StreamingCEStats()
@@ -581,6 +680,12 @@ def run_causal_effect(method: Any) -> None:
         ]
         rand_stats_after: List[StreamingCEStats] = [
             StreamingCEStats() for _ in range(num_random_vectors)
+        ]
+        rand_diff_stats_all: List[StreamingCEStats] = [
+            StreamingCEStats() for _ in range(num_random_diff_vectors)
+        ]
+        rand_diff_stats_after: List[StreamingCEStats] = [
+            StreamingCEStats() for _ in range(num_random_diff_vectors)
         ]
         int_stats_all: Dict[int, StreamingCEStats] = {
             p: StreamingCEStats() for p in positions_to_run
@@ -643,6 +748,16 @@ def run_causal_effect(method: Any) -> None:
             placed_base = place_inputs(input_ids_cpu, attention_mask_cpu, base_model)
             input_ids_base = placed_base["input_ids"]
             attention_mask_base = placed_base["attention_mask"]
+            if replace_pad_with_eos_for_base:
+                # Fail fast on required ids
+                assert base_model.config.eos_token_id is not None
+                eos_id_base = int(base_model.config.eos_token_id)
+                assert 0 <= eos_id_base < int(base_model.config.vocab_size)
+                pad_id_finetuned = int(tokenizer.pad_token_id)
+                if pad_id_finetuned != eos_id_base:
+                    mask_pad = (input_ids_base == pad_id_finetuned)
+                    if mask_pad.any():
+                        input_ids_base = input_ids_base.masked_fill(mask_pad, eos_id_base)
             B, L = input_ids_cpu.shape
             assert attention_mask_cpu.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
@@ -737,6 +852,42 @@ def run_causal_effect(method: Any) -> None:
                             t, 0.0
                         ) + _sum_at_index(nll_r, mask_all, t)
 
+            # Random diff-of-activations interventions
+            if len(rand_diff_vecs) > 0:
+                nll_rand_diff_list: List[torch.Tensor] = []
+                progress_bar.set_description(
+                    "Processing random diff-of-activations interventions"
+                )
+                for rv in rand_diff_vecs:
+                    nll_d = _compute_nll_intervened(
+                        nn_model=nn_model,
+                        layer_index=abs_layer,
+                        delta_vec=rv,
+                        input_ids=input_ids_ft,
+                        attention_mask=attention_mask_ft,
+                        target_activations=activations_base,
+                        zero_ablate=zero_ablate,
+                    )
+                    assert nll_d.shape == (B, L - 1)
+                    nll_rand_diff_list.append(nll_d)
+
+                for k, nll_d in enumerate(nll_rand_diff_list):
+                    s_d_all, s_d_after = _sum_all_and_after(
+                        nll_d, mask_all, mask_after_k
+                    )
+                    rand_diff_all_sum[k] += s_d_all
+                    rand_diff_after_sum[k] += s_d_after
+                    _update_stats_from_masked(nll_d, mask_all, rand_diff_stats_all[k])
+                    _update_stats_from_masked(
+                        nll_d, mask_after_k, rand_diff_stats_after[k]
+                    )
+                    for p in positions_to_run:
+                        t = p + 1
+                        if t < (L - 1):
+                            rand_diff_idx_sum[k][t] = rand_diff_idx_sum[k].get(
+                                t, 0.0
+                            ) + _sum_at_index(nll_d, mask_all, t)
+
             # Position-specific intervention (per position)
             progress_bar.set_description("Processing position-specific interventions")
             for p in positions_to_run:
@@ -795,6 +946,8 @@ def run_causal_effect(method: Any) -> None:
                 "intervention": {},
                 "random": [],
                 "random_mean": {},
+                "random_diff": [],
+                "random_diff_mean": {},
             }
 
             # Finetuned finalize
@@ -877,6 +1030,12 @@ def run_causal_effect(method: Any) -> None:
             }
             interv_excl = {"ce": ce_i_excl, "ppl": ppl_i_excl, "count": cnt_excl}
 
+            interv_all["ce_b"] = ce_b_all
+            interv_all["ce_ft"] = ce_ft_all
+            interv_all["ce_i"] = ce_i_all
+            interv_all["ppl_b"] = ppl_b_all
+            interv_all["ppl_ft"] = ppl_ft_all
+            interv_all["ppl_i"] = ppl_i_all
             if not (math.isnan(ce_ft_all) or math.isnan(ce_i_all)):
                 interv_all["incr_ce"] = ce_i_all - ce_ft_all
                 interv_all["incr_ppl"] = ppl_i_all - ppl_ft_all
@@ -892,6 +1051,12 @@ def run_causal_effect(method: Any) -> None:
                 interv_all["incr_rel_ce"] = float("nan")
                 interv_all["incr_rel_ppl"] = float("nan")
 
+            interv_after["ce_b"] = ce_b_after
+            interv_after["ce_ft"] = ce_ft_after
+            interv_after["ce_i"] = ce_i_after
+            interv_after["ppl_b"] = ppl_b_after
+            interv_after["ppl_ft"] = ppl_ft_after
+            interv_after["ppl_i"] = ppl_i_after
             if not (math.isnan(ce_ft_after) or math.isnan(ce_i_after)):
                 interv_after["incr_ce"] = ce_i_after - ce_ft_after
                 interv_after["incr_ppl"] = ppl_i_after - ppl_ft_after
@@ -907,6 +1072,12 @@ def run_causal_effect(method: Any) -> None:
                 interv_after["incr_rel_ce"] = float("nan")
                 interv_after["incr_rel_ppl"] = float("nan")
 
+            interv_excl["ce_b"] = ce_b_excl
+            interv_excl["ce_ft"] = ce_ft_excl
+            interv_excl["ce_i"] = ce_i_excl
+            interv_excl["ppl_b"] = ppl_b_excl
+            interv_excl["ppl_ft"] = ppl_ft_excl
+            interv_excl["ppl_i"] = ppl_i_excl
             if not (math.isnan(ce_ft_excl) or math.isnan(ce_i_excl)):
                 interv_excl["incr_ce"] = ce_i_excl - ce_ft_excl
                 interv_excl["incr_ppl"] = ppl_i_excl - ppl_ft_excl
@@ -982,12 +1153,19 @@ def run_causal_effect(method: Any) -> None:
                         ce_b_excl,
                     ),
                 }.items():
+                    ppl_b = res["base"][key]["ppl"]
+                    entry[key]["ce_b"] = ce_b
+                    entry[key]["ce_ft"] = ce_ft
+                    entry[key]["ce_r"] = ce_r
+                    entry[key]["ppl_b"] = ppl_b
+                    entry[key]["ppl_ft"] = ppl_ft
+                    entry[key]["ppl_r"] = ppl_r
                     if not (math.isnan(ce_ft) or math.isnan(ce_r)):
                         entry[key]["incr_ce"] = ce_r - ce_ft
                         entry[key]["incr_ppl"] = ppl_r - ppl_ft
                         entry[key]["incr_rel_ce"] = (ce_r - ce_ft) / (ce_b - ce_ft)
                         entry[key]["incr_rel_ppl"] = (ppl_r - ppl_ft) / (
-                            res["base"][key]["ppl"] - ppl_ft
+                            ppl_b - ppl_ft
                         )
                     else:
                         entry[key]["incr_ce"] = float("nan")
@@ -1054,6 +1232,152 @@ def run_causal_effect(method: Any) -> None:
                     res["random_mean"][key]["incr_rel_ce"] = float("nan")
                     res["random_mean"][key]["incr_rel_ppl"] = float("nan")
 
+            # Random-diff per-K finalized metrics and mean
+            if len(rand_diff_vecs) > 0:
+                sum_rand_diff_all_total = 0.0
+                sum_rand_diff_after_total = 0.0
+                sum_rand_diff_excl_total = 0.0
+
+                for k in range(num_random_diff_vectors):
+                    ce_d_all, ppl_d_all = _finalize(rand_diff_all_sum[k], cnt_all)
+                    ce_d_after, ppl_d_after = _finalize(
+                        rand_diff_after_sum[k], cnt_after
+                    )
+                    excl_sum_k = rand_diff_all_sum[k] - rand_diff_idx_sum[k].get(
+                        t, 0.0
+                    )
+                    ce_d_excl, ppl_d_excl = _finalize(excl_sum_k, cnt_excl)
+
+                    sum_rand_diff_all_total += rand_diff_all_sum[k]
+                    sum_rand_diff_after_total += rand_diff_after_sum[k]
+                    sum_rand_diff_excl_total += excl_sum_k
+
+                    entry_d = {
+                        "all": {
+                            "ce": ce_d_all,
+                            "ppl": ppl_d_all,
+                            "count": cnt_all,
+                            "min_ce": rand_diff_stats_all[k].min_ce(),
+                            "max_ce": rand_diff_stats_all[k].max_ce(),
+                            "median_ce": rand_diff_stats_all[k].median_ce(),
+                        },
+                        "after_k": {
+                            "ce": ce_d_after,
+                            "ppl": ppl_d_after,
+                            "count": cnt_after,
+                            "min_ce": rand_diff_stats_after[k].min_ce(),
+                            "max_ce": rand_diff_stats_after[k].max_ce(),
+                            "median_ce": rand_diff_stats_after[k].median_ce(),
+                        },
+                        "exclude_pos": {
+                            "ce": ce_d_excl,
+                            "ppl": ppl_d_excl,
+                            "count": cnt_excl,
+                        },
+                    }
+
+                    for key, (ce_d, ppl_d, ce_ft, ppl_ft, ce_b) in {
+                        "all": (ce_d_all, ppl_d_all, ce_ft_all, ppl_ft_all, ce_b_all),
+                        "after_k": (
+                            ce_d_after,
+                            ppl_d_after,
+                            ce_ft_after,
+                            ppl_ft_after,
+                            ce_b_after,
+                        ),
+                        "exclude_pos": (
+                            ce_d_excl,
+                            ppl_d_excl,
+                            ce_ft_excl,
+                            ppl_ft_excl,
+                            ce_b_excl,
+                        ),
+                    }.items():
+                        ppl_b = res["base"][key]["ppl"]
+                        entry_d[key]["ce_b"] = ce_b
+                        entry_d[key]["ce_ft"] = ce_ft
+                        entry_d[key]["ce_rdiff"] = ce_d
+                        entry_d[key]["ppl_b"] = ppl_b
+                        entry_d[key]["ppl_ft"] = ppl_ft
+                        entry_d[key]["ppl_rdiff"] = ppl_d
+                        if not (math.isnan(ce_ft) or math.isnan(ce_d)):
+                            entry_d[key]["incr_ce"] = ce_d - ce_ft
+                            entry_d[key]["incr_ppl"] = ppl_d - ppl_ft
+                            entry_d[key]["incr_rel_ce"] = (ce_d - ce_ft) / (
+                                ce_b - ce_ft
+                            )
+                            entry_d[key]["incr_rel_ppl"] = (ppl_d - ppl_ft) / (
+                                ppl_b - ppl_ft
+                            )
+                        else:
+                            entry_d[key]["incr_ce"] = float("nan")
+                            entry_d[key]["incr_ppl"] = float("nan")
+                            entry_d[key]["incr_rel_ce"] = float("nan")
+                            entry_d[key]["incr_rel_ppl"] = float("nan")
+
+                    res["random_diff"].append(entry_d)
+
+                # Random-diff mean across K
+                rdm_all_sum = sum_rand_diff_all_total / float(num_random_diff_vectors)
+                rdm_after_sum = sum_rand_diff_after_total / float(
+                    num_random_diff_vectors
+                )
+                rdm_excl_sum = sum_rand_diff_excl_total / float(
+                    num_random_diff_vectors
+                )
+
+                ce_rdm_all, ppl_rdm_all = _finalize(rdm_all_sum, cnt_all)
+                ce_rdm_after, ppl_rdm_after = _finalize(rdm_after_sum, cnt_after)
+                ce_rdm_excl, ppl_rdm_excl = _finalize(rdm_excl_sum, cnt_excl)
+
+                res["random_diff_mean"]["all"] = {
+                    "ce": ce_rdm_all,
+                    "ppl": ppl_rdm_all,
+                    "count": cnt_all,
+                }
+                res["random_diff_mean"]["after_k"] = {
+                    "ce": ce_rdm_after,
+                    "ppl": ppl_rdm_after,
+                    "count": cnt_after,
+                }
+                res["random_diff_mean"]["exclude_pos"] = {
+                    "ce": ce_rdm_excl,
+                    "ppl": ppl_rdm_excl,
+                    "count": cnt_excl,
+                }
+
+                for key, (ce_rdm, ppl_rdm, ce_ft, ppl_ft, ce_b) in {
+                    "all": (ce_rdm_all, ppl_rdm_all, ce_ft_all, ppl_ft_all, ce_b_all),
+                    "after_k": (
+                        ce_rdm_after,
+                        ppl_rdm_after,
+                        ce_ft_after,
+                        ppl_ft_after,
+                        ce_b_after,
+                    ),
+                    "exclude_pos": (
+                        ce_rdm_excl,
+                        ppl_rdm_excl,
+                        ce_ft_excl,
+                        ppl_ft_excl,
+                        ce_b_excl,
+                    ),
+                }.items():
+                    if not (math.isnan(ce_ft) or math.isnan(ce_rdm)):
+                        res["random_diff_mean"][key]["incr_ce"] = ce_rdm - ce_ft
+                        res["random_diff_mean"][key]["incr_ppl"] = ppl_rdm - ppl_ft
+                        res["random_diff_mean"][key]["incr_rel_ce"] = (
+                            ce_rdm - ce_ft
+                        ) / (ce_b - ce_ft)
+                        res["random_diff_mean"][key]["incr_rel_ppl"] = (
+                            ppl_rdm - ppl_ft
+                        ) / (res["base"][key]["ppl"] - ppl_ft)
+                    else:
+                        res["random_diff_mean"][key]["incr_ce"] = float("nan")
+                        res["random_diff_mean"][key]["incr_ppl"] = float("nan")
+                        res["random_diff_mean"][key]["incr_rel_ce"] = float("nan")
+                        res["random_diff_mean"][key]["incr_rel_ppl"] = float("nan")
+
             # Save per-position
             out_dir.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -1069,6 +1393,8 @@ def run_causal_effect(method: Any) -> None:
                 "intervention": res["intervention"],
                 "random": res["random"],
                 "random_mean": res["random_mean"],
+                "random_diff": res["random_diff"],
+                "random_diff_mean": res["random_diff_mean"],
             }
             with out_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)

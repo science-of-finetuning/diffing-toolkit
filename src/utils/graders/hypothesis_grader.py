@@ -304,9 +304,43 @@ def grade_and_save(
     return score, reasoning_text
 
 
+async def grade_and_save_async(
+    cfg: DictConfig, description_text: str, save_dir: Path = None, run_id: int = 0
+) -> Tuple[int, str]:
+    overwrite = cfg.diffing.evaluation.overwrite
+    model_id = str(cfg.diffing.evaluation.grader.model_id)
+    model_id = model_id.replace("/", "_")
+    out_file = save_dir / f"hypothesis_grade_{model_id}_{run_id}.json"
+    if save_dir is not None and out_file.exists() and not overwrite:
+        logger.info(f"Result exists and overwrite=False, skipping: {save_dir}")
+        assert out_file.exists() and out_file.is_file()
+        with open(out_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return payload["score"], payload["reasoning"]
+
+    domain_description = get_domain_description(cfg)
+    grader, rubric_text, max_tokens = _build_hypothesis_grader(cfg)
+    score, reasoning_text = await grader.grade_once_async(
+        domain_description, rubric_text, description_text, max_tokens=max_tokens
+    )
+    payload = {
+        "score": int(score),
+        "reasoning": reasoning_text,
+        "rubric": rubric_text,
+        "grader_model_id": str(cfg.diffing.evaluation.grader.model_id),
+        "run_idx": run_id,
+    }
+    if save_dir is not None:
+        assert isinstance(save_dir, Path) and save_dir.exists() and save_dir.is_dir()
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    return score, reasoning_text
+
+
 __all__ = [
     "HypothesisGrader",
     "load_rubric_text",
     "get_domain_description",
     "grade_and_save",
+    "grade_and_save_async",
 ]

@@ -120,11 +120,12 @@ token_relevance:
   k_candidate_tokens: 20
 
 causal_effect:
+  overwrite: false
   enabled: true
   # Evaluate on organism.training_dataset split
   split: train
-  batch_size: 1
-  max_samples: 100
+  batch_size: 2
+  max_samples: 1000
   zero_ablate: false
   max_total_tokens: 1024
   after_k: 20
@@ -139,11 +140,11 @@ causal_effect:
       eval_dataset: training # This will use the (finetuning) training dataset
       layer: 0.5
       positions: [0, 1, 2, 3, 4, 5, 6, 7, 8] # 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
-    # - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
-    #   eval_dataset: science-of-finetuning/fineweb-1m-sample
-    #   eval_dataset_is_chat: false
-    #   layer: 0.5
-    #   positions: [0, 1, 2, 3, 4, 5, 6, 7, 8] # 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+    - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
+      eval_dataset: science-of-finetuning/fineweb-1m-sample
+      eval_dataset_is_chat: false
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8] # 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
     - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
       eval_dataset: science-of-finetuning/tulu-3-sft-olmo-2-mixture
       eval_dataset_is_chat: true
