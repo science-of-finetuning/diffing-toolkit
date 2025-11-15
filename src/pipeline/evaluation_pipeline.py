@@ -12,7 +12,7 @@ import asyncio
 
 from .pipeline import Pipeline
 from .diffing_pipeline import get_method_class
-from src.utils.graders.hypothesis_grader import grade_and_save, grade_and_save_async
+from src.utils.graders.hypothesis_grader import grade_and_save_async
 from src.utils.agents.base_agent import BaseAgent
 
 

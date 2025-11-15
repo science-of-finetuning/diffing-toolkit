@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import json
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors  # type: ignore[import-not-found]
@@ -76,7 +77,7 @@ def _get_value_by_path(payload: Dict[str, Any], key_path: str) -> float:
     for part in key_path.split("."):
         assert isinstance(node, dict) and (
             part in node
-        ), f"Key path not found: {key_path}"
+        ), f"Key path not found: {key_path} in {payload}"
         node = node[part]
     assert isinstance(node, (int, float)), f"Value at '{key_path}' is not numeric"
     return float(node)
@@ -89,6 +90,36 @@ def _load_value_for_position(causal_dir: Path, position: int, key_path: str) -> 
         payload = json.load(f)
     assert isinstance(payload, dict) and ("position" in payload)
     assert int(payload["position"]) == int(position)
+    
+    if key_path.endswith(".perc_ce"):
+        if "random_diff_mean" in key_path:
+            ce_rdiff_path = key_path.replace(".perc_ce", ".ce")
+            subset_part = key_path.split(".")[1]
+            ce_ft_path = f"finetuned.{subset_part}.ce"
+            try:
+                ce_rdiff = _get_value_by_path(payload, ce_rdiff_path)
+                ce_ft = _get_value_by_path(payload, ce_ft_path)
+            except Exception as e:
+                print(f"Error getting value by path: {e}")
+                print(f"directory: {res_path}")
+                raise e
+            if math.isnan(ce_rdiff) or math.isnan(ce_ft) or ce_ft == 0.0:
+                return float("nan")
+            return ((ce_rdiff - ce_ft) / ce_ft) * 100.0
+        else:
+            ce_i_path = key_path.replace(".perc_ce", ".ce_i")
+            ce_ft_path = key_path.replace(".perc_ce", ".ce_ft")
+            try:
+                ce_i = _get_value_by_path(payload, ce_i_path)
+                ce_ft = _get_value_by_path(payload, ce_ft_path)
+            except Exception as e:
+                print(f"Error getting value by path: {e}")
+                print(f"directory: {res_path}")
+                raise e
+            if math.isnan(ce_i) or math.isnan(ce_ft) or ce_ft == 0.0:
+                return float("nan")
+            return ((ce_i - ce_ft) / ce_ft) * 100.0
+    
     return _get_value_by_path(payload, key_path)
 
 
@@ -153,9 +184,10 @@ def visualize_causal_effect_by_position(
             "incr_ppl",
             "incr_rel_ce",
             "incr_rel_ppl",
+            "perc_ce",
         }
         assert metric_key in allowed_metrics
-        is_increment = metric_key.startswith("incr")
+        is_increment = metric_key.startswith("incr") or metric_key == "perc_ce"
 
         # Validate requested series against metric type
         if is_increment:
@@ -483,6 +515,7 @@ def visualize_causal_effect_by_position_dual(
     include_random_mean: bool = True,
     show_individual: bool = False,
     show_pt_data: bool = False,
+    show_chat_data: bool = False,
     save_path: Optional[str] = None,
     figsize: Tuple[float, float] = (10.0, 5.0),
     font_size: int = 20,
@@ -524,9 +557,10 @@ def visualize_causal_effect_by_position_dual(
             "incr_ppl",
             "incr_rel_ce",
             "incr_rel_ppl",
+            "perc_ce"
         }
         assert metric_key in allowed_metrics
-        is_increment = metric_key.startswith("incr")
+        is_increment = metric_key.startswith("incr") or metric_key.startswith("perc")
         if is_increment:
             assert (
                 not include_base and not include_finetuned
@@ -538,7 +572,7 @@ def visualize_causal_effect_by_position_dual(
         if include_intervention:
             series_key_paths["intervention"] = f"intervention.{subset}.{metric_key}"
         if include_random_mean:
-            series_key_paths["random_diff_mean"] = f"random_mean.{subset}.{metric_key}"
+            series_key_paths["random_diff_mean"] = f"random_diff_mean.{subset}.{metric_key}"
         assert len(series_key_paths) >= 1
     else:
         assert isinstance(value_key_path, str) and len(value_key_path) > 0
@@ -555,6 +589,8 @@ def visualize_causal_effect_by_position_dual(
             positions_train_set: Optional[set] = None
             pt_dirs: List[Path] = []
             positions_pt_set: Optional[set] = None
+            chat_dirs: List[Path] = []
+            positions_chat_set: Optional[set] = None
             for m, organism, layer in pairs:
                 cfg = load_hydra_config(
                     config_path,
@@ -597,6 +633,22 @@ def visualize_causal_effect_by_position_dual(
                     else:
                         positions_pt_set &= pos_set_pt
                     pt_dirs.append(cdir_pt)
+                if show_chat_data:
+                    chat_eval_dir = "tulu-3-sft-olmo-2-mixture"
+                    cdir_chat = (
+                        root
+                        / f"layer_{layer}"
+                        / dataset_dir
+                        / "causal_effect"
+                        / f"eval_{chat_eval_dir}"
+                    )
+                    pos_list_chat = _list_positions(cdir_chat)
+                    pos_set_chat = set(pos_list_chat)
+                    if positions_chat_set is None:
+                        positions_chat_set = pos_set_chat
+                    else:
+                        positions_chat_set &= pos_set_chat
+                    chat_dirs.append(cdir_chat)
             assert positions_train_set is not None
             positions_train = sorted(positions_train_set)
             assert len(positions_train) >= 1
@@ -618,6 +670,18 @@ def visualize_causal_effect_by_position_dual(
                         "variant": "pt",
                         "positions": positions_pt,
                         "dirs": pt_dirs,
+                    }
+                )
+            if show_chat_data:
+                assert positions_chat_set is not None
+                positions_chat = sorted(positions_chat_set)
+                assert len(positions_chat) >= 1
+                contexts.append(
+                    {
+                        "model": model,
+                        "variant": "chat",
+                        "positions": positions_chat,
+                        "dirs": chat_dirs,
                     }
                 )
         return contexts
@@ -690,11 +754,13 @@ def visualize_causal_effect_by_position_dual(
         "series": "Series",
     }
 
-    # Legends per eval variant (train / pt)
+    # Legends per eval variant (train / pt / chat)
     train_handles: List[Any] = []
     train_labels: List[str] = []
     pt_handles: List[Any] = []
     pt_labels: List[str] = []
+    chat_handles: List[Any] = []
+    chat_labels: List[str] = []
 
     min_data_value: Optional[float] = None
     xs = None  # type: ignore[assignment]
@@ -706,10 +772,11 @@ def visualize_causal_effect_by_position_dual(
             model = ctx["model"]
             positions = ctx["positions"]
             dirs = ctx["dirs"]
-            variant = ctx["variant"]  # "train" or "pt"
+            variant = ctx["variant"]  # "train", "pt", or "chat"
             xs = np.asarray(positions, dtype=np.int32)
             color = model_to_color[model]
             color = "red" if variant == "pt" else color
+            color = "green" if variant == "chat" else color
             # Make mixture visually distinct by lightening the base color strongly
             if dataset_tag == "mixture":
                 base_rgb = mcolors.to_rgb(color)
@@ -753,13 +820,14 @@ def visualize_causal_effect_by_position_dual(
                 if show_individual and s_name == "intervention":
                     for j in range(len(dirs)):
                         indiv_arr = np.asarray(per_dir_values[j], dtype=np.float32)
+                        indiv_alpha = 0.35 * dataset_line_scale if variant == "train" else 0.25 * dataset_line_scale
                         ax.plot(
                             xs,
                             indiv_arr,
                             linewidth=1.0,
                             linestyle="--" if dataset_tag == "mixture" else "-",
                             color=color,
-                            alpha=0.35 * dataset_line_scale if variant == "train" else 0.25 * dataset_line_scale,
+                            alpha=indiv_alpha,
                             label=None,
                             zorder=1,
                         )
@@ -783,10 +851,14 @@ def visualize_causal_effect_by_position_dual(
                     if label_str not in train_labels:
                         train_handles.append(line)
                         train_labels.append(label_str)
-                else:
+                elif variant == "pt":
                     if label_str not in pt_labels:
                         pt_handles.append(line)
                         pt_labels.append(label_str)
+                elif variant == "chat":
+                    if label_str not in chat_labels:
+                        chat_handles.append(line)
+                        chat_labels.append(label_str)
                 ax.fill_between(
                     xs,
                     means_arr - stds_arr,
@@ -865,13 +937,29 @@ def visualize_causal_effect_by_position_dual(
         if legends_outside_right:
             pt_loc = "center left"
             pt_bbox = (1.02, 0.5)
-        ax.legend(
+        leg_pt = ax.legend(
             pt_handles,
             pt_labels,
             frameon=True,
             loc=pt_loc,
             bbox_to_anchor=pt_bbox,
             title="Pretraining Data",
+            fontsize=legend_font_size,
+        )
+        ax.add_artist(leg_pt)
+    if show_legends and len(chat_handles) > 0:
+        chat_loc = legend_b_position
+        chat_bbox = None
+        if legends_outside_right:
+            chat_loc = "center left"
+            chat_bbox = (1.02, 0.5)
+        ax.legend(
+            chat_handles,
+            chat_labels,
+            frameon=True,
+            loc=chat_loc,
+            bbox_to_anchor=chat_bbox,
+            title="Chat Data",
             fontsize=legend_font_size,
         )
 
@@ -1080,38 +1168,39 @@ if __name__ == "__main__":
         y_limit_factor=1,
     )
 # %%
+for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7)]:
+    normal_entries = [
+        (model, "cake_bake", layer),
+        (model, "kansas_abortion", layer),
+        (model, "fda_approval", layer),
+    ]
+    mixture_entries = [
+        (model, "cake_bake_mix1-2p0", layer),
+        (model, "kansas_abortion_mix1-2p0", layer),
+        (model, "fda_approval_mix1-2p0", layer),
+    ]
 
-normal_entries = [
-    ("qwen3_1_7B", "cake_bake", 13),
-    ("qwen3_1_7B", "kansas_abortion", 13),
-    ("qwen3_1_7B", "fda_approval", 13),
-]
-mixture_entries = [
-    ("qwen3_1_7B", "cake_bake_mix1-2p0", 13),
-    ("qwen3_1_7B", "kansas_abortion_mix1-2p0", 13),
-    ("qwen3_1_7B", "fda_approval_mix1-2p0", 13),
-]
-
-visualize_causal_effect_by_position_dual(
-    normal_entries,
-    mixture_entries,
-    config_path="configs/config.yaml",
-    dataset_dir="fineweb-1m-sample",
-    subset="exclude_pos",
-    metric_key="incr_ce",
-    include_base=False,
-    include_finetuned=False,
-    include_intervention=True,
-    include_random_mean=True,
-    figsize=(8.2, 5.5),
-    y_label="CE Loss Difference",
-    font_size=18,
-    show_individual=True,
-    logx=True,
-    use_log_nums=True,
-    show_pt_data=True,
-    show_legends=True,
-    mixture_shade_scale=0.6,  # smaller => lighter mixture curves
-    legends_outside_right=True,
-)
+    visualize_causal_effect_by_position_dual(
+        normal_entries,
+        mixture_entries,
+        config_path="configs/config.yaml",
+        dataset_dir="fineweb-1m-sample",
+        subset="exclude_pos",
+        metric_key="incr_ce",
+        include_base=False,
+        include_finetuned=False,
+        include_intervention=True,
+        include_random_mean=False,
+        figsize=(8.2, 5.5),
+        y_label="$\Delta$ CE Loss (\%)",
+        font_size=18,
+        show_individual=False,
+        logx=False,
+        use_log_nums=True,
+        show_pt_data=False,
+        show_chat_data=False,
+        show_legends=True,
+        mixture_shade_scale=0.6,  # smaller => lighter mixture curves
+        legends_outside_right=True,
+    )
 #%%

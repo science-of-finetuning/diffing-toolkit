@@ -165,9 +165,9 @@ def _read_relevance_record_cached(
         tr_dir.exists() and tr_dir.is_dir()
     ), f"Token relevance directory does not exist: {tr_dir}"
     if source == "logitlens":
-        rel_path = tr_dir / "relevance_logitlens.json"
+        rel_path = tr_dir / "relevance_logitlens_openai_gpt-5-mini.json"
     elif source == "patchscope":
-        rel_path = tr_dir / "relevance_patchscope.json"
+        rel_path = tr_dir / "relevance_patchscope_openai_gpt-5-mini.json"
     else:
         assert False, f"Unknown source: {source}"
     assert (
@@ -1583,11 +1583,11 @@ def print_auto_patch_scope_results(
     assert out_dir.exists() and out_dir.is_dir()
 
     if variant == "difference":
-        fp = out_dir / f"auto_patch_scope_pos_{position}.pt"
+        fp = out_dir / f"auto_patch_scope_pos_{position}_openai_gpt-5-mini.pt"
     elif variant == "base":
-        fp = out_dir / f"base_auto_patch_scope_pos_{position}.pt"
+        fp = out_dir / f"base_auto_patch_scope_pos_{position}_openai_gpt-5-mini.pt"
     elif variant == "ft":
-        fp = out_dir / f"ft_auto_patch_scope_pos_{position}.pt"
+        fp = out_dir / f"ft_auto_patch_scope_pos_{position}_openai_gpt-5-mini.pt"
     else:
         assert False, f"Unknown variant: {variant}"
 

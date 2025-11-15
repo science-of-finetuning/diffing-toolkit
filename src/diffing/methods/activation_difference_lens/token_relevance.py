@@ -261,6 +261,7 @@ def run_token_relevance(method: Any) -> None:
 
     # Grader
     grader_cfg = cfg.grader
+    grader_llm_name = grader_cfg.model_id.replace("/", "_")
     grader = TokenRelevanceGrader(
         grader_model_id=str(grader_cfg.model_id),
         base_url=str(grader_cfg.base_url),
@@ -402,7 +403,7 @@ def run_token_relevance(method: Any) -> None:
                             / variant
                         )
                     out_dir.mkdir(parents=True, exist_ok=True)
-                    rel_path = out_dir / f"relevance_{source}.json"
+                    rel_path = out_dir / f"relevance_{source}_{grader_llm_name}.json"
 
                     # Skip if results exist and overwrite is False
                     if (not overwrite) and rel_path.exists():
