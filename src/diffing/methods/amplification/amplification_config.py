@@ -39,7 +39,7 @@ class AmplificationSpecification(ABC):
     @abstractmethod
     def resolve_list(
         cls, specifications: list[Self], base_model: StandardizedTransformer
-    ) -> dict:
+    ):
         pass
 
 
@@ -117,15 +117,15 @@ class LayerAmplification(AmplificationSpecification):
     @classmethod
     def resolve_list(
         cls, specifications: list[Self], base_model: StandardizedTransformer
-    ) -> dict[int, dict[str, float]]:
-        module_updates: dict[int, list[dict[str, float]]] = defaultdict(list)
+    ) -> list[dict[str, float]]:
+        module_updates: list[list[dict[str, float]]] = [
+            [] for _ in range(base_model.num_layers)
+        ]
         for spec in specifications:
             layers, module_resolution = spec.resolve(base_model)
             for layer in layers:
                 module_updates[layer].append(module_resolution)
-        return {
-            layer: sum_dict_values(updates) for layer, updates in module_updates.items()
-        }
+        return [sum_dict_values(updates) for updates in module_updates]
 
 
 @dataclass
@@ -134,23 +134,15 @@ class AmplifiedAdapter:
 
     organism_name: str  # Organism name (e.g., "persona_sarcasm")
     variant: str  # Variant name (e.g., "default", "is")
-    # base_model_name: str TODO: decide if we want to store it or to call it.
     layer_amplifications: list[LayerAmplification]
-    _adapter_id: None | str = None
 
-    @property
-    def adapter_id(self) -> str:
-        if self._adapter_id is None:
-            self._adapter_id = resolve_adapter_id(
-                self.organism_name, self.variant, self.base_model_name
-            )
-        return self._adapter_id
+    def adapter_id(self, base_model_name: str) -> str:
+        return resolve_adapter_id(self.organism_name, self.variant, base_model_name)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "organism_name": self.organism_name,
             "variant": self.variant,
-            "adapter_id": self.adapter_id,
             "layer_amplifications": [
                 ampl.to_dict() for ampl in self.layer_amplifications
             ],
@@ -161,7 +153,6 @@ class AmplifiedAdapter:
         return AmplifiedAdapter(
             organism_name=data.get("organism_name", ""),
             variant=data.get("variant", "default"),
-            _adapter_id=data.get("adapter_id", None),
             layer_amplifications=[
                 LayerAmplification.from_dict(ampl)
                 for ampl in data["layer_amplifications"]
@@ -173,15 +164,20 @@ class AmplifiedAdapter:
 
     @classmethod
     def resolve_list(
-        cls, specifications: list[Self], base_model: StandardizedTransformer
-    ) -> dict[str, dict[int, dict[str, float]]]:
+        cls,
+        specifications: list[Self],
+        base_model: StandardizedTransformer,
+        base_model_name: str,
+    ) -> dict[str, list[dict[str, float]]]:
         grouped_layer_amplifications: dict[str, list[LayerAmplification]] = defaultdict(
             list
         )
         for amplified_adapter in specifications:
-            grouped_layer_amplifications[amplified_adapter.adapter_id].extend(
-                amplified_adapter.layer_amplifications
-            )
+            if len(amplified_adapter.layer_amplifications) == 0:
+                continue
+            grouped_layer_amplifications[
+                amplified_adapter.adapter_id(base_model_name)
+            ].extend(amplified_adapter.layer_amplifications)
 
         return {
             adapter_id: LayerAmplification.resolve_list(
@@ -199,13 +195,21 @@ class AmplificationConfig:
     description: str = ""
     amplified_adapters: list[AmplifiedAdapter] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, resolved_config=None) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
-            "name": self.name,
-            "description": self.description,
-            "adapters": [a.to_dict() for a in self.amplified_adapters],
-        }
+        res = dict(
+            name=self.name,
+            description=self.description,
+        )
+        if resolved_config is not None:
+            res["resolved_config"] = resolved_config
+        res["adapters"] = [a.to_dict() for a in self.amplified_adapters]
+        return res
+
+    def save_yaml(self, path: Path, resolved_config=None) -> None:
+        """Save config to YAML file."""
+        with open(path, "w") as f:
+            yaml.dump(self.to_dict(resolved_config), f)
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AmplificationConfig":
@@ -218,12 +222,6 @@ class AmplificationConfig:
             ],
         )
 
-    def save_yaml(self, path: Path) -> None:
-        """Save config to YAML file."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False)
-
     @staticmethod
     def load_yaml(path: Path) -> "AmplificationConfig":
         """Load config from YAML file."""
@@ -231,9 +229,16 @@ class AmplificationConfig:
             data = yaml.safe_load(f)
         return AmplificationConfig.from_dict(data)
 
-    # def resolve
+    def resolve(
+        self, base_model: StandardizedTransformer, base_model_name: str
+    ) -> dict[str, list[dict[str, float]]]:
+        return AmplifiedAdapter.resolve_list(
+            self.amplified_adapters, base_model, base_model_name
+        )
 
-    def compile(self, base_dir: Path, base_model_name: str = None) -> Path | None:
+    def compile(
+        self, base_dir: Path, base_model_name: str, base_model: StandardizedTransformer
+    ) -> Path | None:
         """
         Compile this amplification config into a modified adapter.
 
@@ -254,20 +259,10 @@ class AmplificationConfig:
         output_dir = base_dir / self.name
 
         # Resolve adapter_ids if they're not already set
-        all_adapter_ids = []
-        for adapter in self.amplified_adapters:
-            if adapter.adapter_id:
-                all_adapter_ids.append(adapter.adapter_id)
-            else:
-                assert (
-                    base_model_name
-                ), "base_model_name required to resolve adapter_id from organism/variant"
-                adapter.adapter_id = resolve_adapter_id(
-                    adapter.organism_name, adapter.variant, base_model_name
-                )
-                all_adapter_ids.append(adapter.adapter_id)
+        all_adapter_ids = [
+            adapter.adapter_id(base_model_name) for adapter in self.amplified_adapters
+        ]
 
-        # Remove duplicates while preserving order
         all_adapter_ids = list(dict.fromkeys(all_adapter_ids))
         # Do all the symlinking for the first adapter directly in the output directory
         first_adapter_id = all_adapter_ids[0]
@@ -294,50 +289,48 @@ class AmplificationConfig:
 
         # Add config.yaml
         config_path = output_dir / "amplification_config.yaml"
-        resolved_amplifications = AmplifiedAdapter.resolve_list(
-            self.amplified_adapters, base_model
-        )
+        resolved_amplifications = self.resolve(base_model, base_model_name)
+        self.save_yaml(config_path, resolved_amplifications)
 
-        # todo save
         return output_dir
 
 
-def _load_adapter_weights(adapter_id: str) -> Dict[str, th.Tensor]:
+def _load_adapter_weights(adapter_id: str) -> dict[str, th.Tensor]:
     """Load adapter weights from HuggingFace."""
     raise NotImplementedError("_load_adapter_weights() needs implementation")
 
 
 def _apply_amplification(
-    weights: Dict[str, th.Tensor],
+    weights: dict[str, th.Tensor],
     adapter_amp: AmplifiedAdapter,
-) -> Dict[str, th.Tensor]:
+) -> dict[str, th.Tensor]:
     """Apply amplification factors to adapter weights."""
     raise NotImplementedError("_apply_amplification() needs implementation")
 
 
 def _resolve_layers(
-    layers: List[int] | int | Literal["all"], num_layers: int
-) -> List[int]:
+    layers: list[int] | int | Literal["all"], num_layers: int
+) -> list[int]:
     """Convert layers specification to list of layer indices."""
     raise NotImplementedError("_resolve_layers() needs implementation")
 
 
-def _resolve_modules(modules: List[str] | Literal["all"], adapter_id: str) -> List[str]:
+def _resolve_modules(modules: list[str] | Literal["all"], adapter_id: str) -> list[str]:
     """Convert modules specification to list of module names."""
     raise NotImplementedError("_resolve_modules() needs implementation")
 
 
 def _should_amplify(
     param_name: str,
-    layers: List[int],
-    modules: List[str],
+    layers: list[int],
+    modules: list[str],
 ) -> bool:
     """Check if parameter should be amplified based on name."""
     raise NotImplementedError("_should_amplify() needs implementation")
 
 
 def _save_adapter(
-    weights: Dict[str, th.Tensor],
+    weights: dict[str, th.Tensor],
     adapter_id: str,
     output_dir: Path,
 ) -> None:

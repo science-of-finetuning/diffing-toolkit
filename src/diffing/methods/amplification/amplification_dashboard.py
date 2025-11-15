@@ -45,10 +45,7 @@ class AmplificationDashboard:
             method_instance: Instance of WeightDifferenceAmplification
         """
         self.method = method_instance
-        print(f"{self.method.cfg.diffing.results_dir=}")
         self.inference_config = deepcopy(self.method.base_model_cfg)
-        print(f"{self.method.base_model_cfg=}")
-        print(f"{self.method.finetuned_model_cfg=}")
         self.inference_config.vllm_kwargs = (
             self.inference_config.vllm_kwargs or {}
         ) | dict(
@@ -100,14 +97,7 @@ class AmplificationDashboard:
         base_model_name = self.method.base_model_cfg.name
         for mc in active_configs:
             for adapter in mc.config.amplified_adapters:
-                if adapter.adapter_id:
-                    all_adapter_ids.add(adapter.adapter_id)
-                else:
-                    adapter_id = resolve_adapter_id(
-                        adapter.organism_name, adapter.variant, base_model_name
-                    )
-                    all_adapter_ids.add(adapter_id)
-
+                all_adapter_ids.add(adapter.adapter_id(base_model_name))
         max_lora_rank = 64
         if all_adapter_ids:
             ranks = []
@@ -259,8 +249,11 @@ class AmplificationDashboard:
     def _compile_config(self, config: AmplificationConfig) -> Path | None:
         """Compile a config and return path to compiled adapter."""
         COMPILED_ADAPTERS_DIR.mkdir(parents=True, exist_ok=True)
-        base_model_name = self.method.base_model_cfg.name
-        return config.compile(COMPILED_ADAPTERS_DIR, base_model_name=base_model_name)
+        return config.compile(
+            COMPILED_ADAPTERS_DIR,
+            base_model_name=self.method.base_model_cfg.name,
+            base_model=self.method.base_model,
+        )
 
     def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:
         """Truncate chat history after a message and return the prompt for regeneration."""
