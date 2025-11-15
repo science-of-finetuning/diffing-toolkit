@@ -4,27 +4,22 @@ Streamlit dashboard for weight difference amplification.
 Provides UI for creating, editing, and testing amplification configurations.
 """
 
-# todo remove dev
-import sys
-from pathlib import Path
-from typing import ClassVar
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.resolve()
-sys.path.append(str(PROJECT_ROOT))
-import asyncio
-import streamlit as st
-from pathlib import Path
-from typing import Dict, Any, List
 from copy import deepcopy
 import json
+from pathlib import Path
+from typing import ClassVar
+from typing import Dict, Any, List
+
+import streamlit as st
 
 from src.utils.configs import (
     get_available_organisms,
     get_organism_variants,
     resolve_adapter_id,
     CONFIGS_DIR,
+    PROJECT_ROOT,
 )
-from src.utils.vllm import AsyncLLMEngine, ensure_vllm, LoRARequest, SamplingParams
+from src.utils.vllm import LLM, ensure_vllm, LoRARequest, SamplingParams
 from src.utils.model import load_model_from_config, adapter_id_to_path
 from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
@@ -33,6 +28,8 @@ from src.diffing.methods.amplification.amplification_config import (
     ModuleAmplification,
 )
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
+
+COMPILED_ADAPTERS_DIR = PROJECT_ROOT / "compiled_adapters"
 
 
 class AmplificationDashboard:
@@ -124,7 +121,7 @@ class AmplificationDashboard:
 
     @property
     @ensure_vllm
-    def multi_lora_vllm_server(self) -> AsyncLLMEngine:
+    def multi_lora_vllm_server(self) -> LLM:
         """Get or create the vLLM server, reloading if config changed."""
         self.auto_update_inference_config()
         current_config = (
@@ -144,7 +141,7 @@ class AmplificationDashboard:
 
         if need_reload:
             st.session_state.vllm_server = load_model_from_config(
-                self.inference_config, use_vllm="async", ignore_cache=True
+                self.inference_config, use_vllm=True, ignore_cache=True
             )
             st.session_state.vllm_config = current_config
 
@@ -230,6 +227,30 @@ class AmplificationDashboard:
             except Exception as e:
                 st.error(f"Failed to load config from {config_file}: {e}")
 
+    def _get_unique_config_name(
+        self, desired_name: str, exclude_idx: int = None
+    ) -> str:
+        """
+        Get a unique configuration name by appending _X if name already exists.
+
+        Args:
+            desired_name: The desired configuration name
+            exclude_idx: Optional index to exclude from duplicate check (for renames)
+
+        Returns:
+            Unique configuration name
+        """
+        existing_names = set()
+        for idx, mc in enumerate(st.session_state.managed_configs):
+            if exclude_idx is None or idx != exclude_idx:
+                existing_names.add(mc.config.name)
+        if desired_name not in existing_names:
+            return desired_name
+        counter = 1
+        while f"{desired_name}_{counter}" in existing_names:
+            counter += 1
+        return f"{desired_name}_{counter}"
+
     def _save_and_rerun(self) -> None:
         """Save configs to cache and trigger a Streamlit rerun."""
         self._save_configs_to_cache()
@@ -237,10 +258,9 @@ class AmplificationDashboard:
 
     def _compile_config(self, config: AmplificationConfig) -> Path | None:
         """Compile a config and return path to compiled adapter."""
-        output_dir = Path("./compiled_adapters") / config.name.replace(" ", "_")
-        output_dir.mkdir(parents=True, exist_ok=True)
+        COMPILED_ADAPTERS_DIR.mkdir(parents=True, exist_ok=True)
         base_model_name = self.method.base_model_cfg.name
-        return config.compile(output_dir, base_model_name=base_model_name)
+        return config.compile(COMPILED_ADAPTERS_DIR, base_model_name=base_model_name)
 
     def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:
         """Truncate chat history after a message and return the prompt for regeneration."""
@@ -264,7 +284,6 @@ class AmplificationDashboard:
         prompt,
         amplification_configs: List[ManagedConfig],
         sampling_params,
-        placeholders=None,
     ):
         # Convert dict sampling params to vLLM SamplingParams object
         if isinstance(sampling_params, dict):
@@ -276,62 +295,39 @@ class AmplificationDashboard:
         else:
             vllm_sampling_params = sampling_params
 
-        async def _async_sample(
-            prompt,
-            sampling_params,
-            amplification_config: ManagedConfig,
-            placeholder=None,
-        ):
-            compiled_path = self._compile_config(amplification_config.config)
+        results = []
+        for config in amplification_configs:
+            compiled_path = self._compile_config(config.config)
             if compiled_path is None:
                 lreq = None
             else:
                 lreq = LoRARequest(
-                    amplification_config.config.name,
-                    amplification_config.lora_int_id,
+                    config.config.name,
+                    config.lora_int_id,
                     str(compiled_path),
                 )
             print(f"{lreq=}")
 
-            # generate() returns an async generator that yields RequestOutput objects
-            result_generator = self.multi_lora_vllm_server.generate(
-                prompt=prompt,
-                sampling_params=sampling_params,
-                request_id=f"request_{self._request_id_counter}_{amplification_config.config.name}",
+            # Generate synchronously
+            outputs = self.multi_lora_vllm_server.generate(
+                prompts=[prompt],
+                sampling_params=vllm_sampling_params,
                 lora_request=lreq,
             )
+            print(f"{outputs=}")
 
-            # Stream the tokens and update placeholder if provided
-            final_text = ""
-            async for request_output in result_generator:
-                # Get the generated text from the first (and only) output
-                final_text = request_output.outputs[0].text
+            # Extract the generated text
+            final_text = outputs[0].outputs[0].text
 
-                # Update placeholder with streaming content if available
-                if placeholder is not None:
-                    placeholder.markdown(
-                        f"### {amplification_config.config.name}\n\n{final_text}",
-                        unsafe_allow_html=False,
-                    )
+            results.append(
+                {
+                    "config": config,
+                    "compiled_path": compiled_path,
+                    "result": final_text,
+                }
+            )
 
-            return {
-                "config": amplification_config,
-                "compiled_path": compiled_path,
-                "result": final_text,
-            }
-
-        async def async_multi_gen():
-            tasks = []
-            for idx, config in enumerate(amplification_configs):
-                placeholder = placeholders[idx] if placeholders else None
-                tasks.append(
-                    asyncio.create_task(
-                        _async_sample(prompt, vllm_sampling_params, config, placeholder)
-                    )
-                )
-            return await asyncio.gather(*tasks)
-
-        return asyncio.run(async_multi_gen())
+        return results
 
     def send_request(self, prompt: str, sampling_params, lora_request=None):
         """
@@ -400,10 +396,13 @@ class AmplificationDashboard:
 
         st.sidebar.header("vLLM Configuration")
         if st.sidebar.button("Shutdown Engine", use_container_width=True):
-            st.session_state.vllm_server.shutdown()
-            del st.session_state.vllm_server
-            del st.session_state.vllm_config
-            st.sidebar.success("Shutdown signal sent to engine.")
+            if "vllm_server" in st.session_state:
+                st.session_state.vllm_server.shutdown()
+                del st.session_state.vllm_server
+                del st.session_state.vllm_config
+                st.sidebar.success("Shutdown signal sent to engine.")
+            else:
+                st.sidebar.error("No vLLM found.")
         st.sidebar.info("TODO")
 
         # max_num_seqs = st.sidebar.number_input(
@@ -448,11 +447,19 @@ class AmplificationDashboard:
             value=True,
             help="Enable sampling (if disabled, uses greedy decoding)",
         )
+        seed = st.sidebar.number_input(
+            "Seed",
+            min_value=0,
+            value=28,
+            step=9,
+            help="Seed for random number generation",
+        )
         st.session_state.sampling_params = {
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
             "do_sample": do_sample,
+            "seed": seed,
         }
 
         st.sidebar.header("Global Controls")
@@ -484,8 +491,10 @@ class AmplificationDashboard:
         )
 
         if st.button("➕ New Amplification", use_container_width=True):
+            base_name = f"Config {len(st.session_state.managed_configs) + 1}"
+            unique_name = self._get_unique_config_name(base_name)
             new_config = AmplificationConfig(
-                name=f"Config {len(st.session_state.managed_configs) + 1}",
+                name=unique_name,
                 description="",
                 amplified_adapters=[],
             )
@@ -570,33 +579,15 @@ class AmplificationDashboard:
                     [{"role": "user", "content": prompt}]
                 )
 
-            # Create streaming placeholders
-            st.markdown("---")
-            st.markdown("## Generating Outputs...")
-
-            # Use 2-column layout for streaming
-            output_cols = st.columns(2)
-            placeholders = []
-
-            for idx, config in enumerate(active_configs):
-                col_idx = idx % 2
-                with output_cols[col_idx]:
-                    with st.expander(
-                        f"({idx + 1}) {config.config.name}", expanded=True
-                    ):
-                        placeholder = st.empty()
-                        placeholder.markdown(
-                            f"### {config.config.name}\n\n⏳ Waiting to start..."
-                        )
-                        placeholders.append(placeholder)
-
-            # Run generation with streaming
-            results = self._multi_gen_request(
-                prompt=final_prompt,
-                amplification_configs=active_configs,
-                sampling_params=sampling_params,
-                placeholders=placeholders,
-            )
+            # Run generation (synchronous)
+            with st.spinner(
+                f"Generating with {len(active_configs)} configuration(s)..."
+            ):
+                results = self._multi_gen_request(
+                    prompt=final_prompt,
+                    amplification_configs=active_configs,
+                    sampling_params=sampling_params,
+                )
 
             st.session_state.multi_gen_results = {
                 "prompt": prompt,
@@ -1053,7 +1044,10 @@ class AmplificationDashboard:
                     key=f"config_name_{idx}",
                 )
                 if new_name != config.name:
-                    config.name = new_name
+                    unique_name = self._get_unique_config_name(
+                        new_name, exclude_idx=idx
+                    )
+                    st.session_state.managed_configs[idx].config.name = unique_name
                     self._save_and_rerun()
 
             with col2:
@@ -1366,9 +1360,9 @@ class AmplificationDashboard:
         col1, col2, col3 = st.columns([2, 2, 1])
 
         with col1:
-            module_mode = st.selectbox(
+            module_amp.modules = st.selectbox(
                 f"Module {module_idx + 1}",
-                options=["all", "attention", "mlp", "custom"],
+                options=["all", "attention", "mlp"],
                 index=(
                     0
                     if module_amp.modules == "all"
@@ -1380,26 +1374,6 @@ class AmplificationDashboard:
                 ),
                 key=f"module_mode_{config_idx}_{adapter_idx}_{layer_idx}_{module_idx}",
             )
-
-            if module_mode == "custom":
-                current_val = (
-                    ",".join(module_amp.modules)
-                    if isinstance(module_amp.modules, list)
-                    else ""
-                )
-                module_list_str = st.text_input(
-                    "Module names",
-                    value=current_val,
-                    key=f"module_list_{config_idx}_{adapter_idx}_{layer_idx}_{module_idx}",
-                    help="E.g., 'q_proj,v_proj'",
-                    label_visibility="collapsed",
-                )
-                if module_list_str.strip():
-                    module_amp.modules = [x.strip() for x in module_list_str.split(",")]
-                else:
-                    module_amp.modules = []
-            else:
-                module_amp.modules = module_mode
 
         with col2:
             module_amp.weight = st.slider(
@@ -1421,30 +1395,3 @@ class AmplificationDashboard:
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
                 self._save_and_rerun()
-
-
-import hydra
-from hydra.core.global_hydra import GlobalHydra
-
-GlobalHydra.instance().clear()
-print(f"Project root: {PROJECT_ROOT}")
-
-
-@hydra.main(config_path=str(CONFIGS_DIR), config_name="config")
-def main(cfg):
-    GlobalHydra.instance().clear()
-    """Main entry point for running the dashboard standalone."""
-    from src.diffing.methods.amplification.weight_difference import (
-        WeightDifferenceAmplification,
-    )
-
-    # Create a method instance (you may need to adjust parameters)
-    method = WeightDifferenceAmplification(cfg=cfg)
-
-    # Create and display dashboard
-    dashboard = AmplificationDashboard(method)
-    dashboard.display()
-
-
-if __name__ == "__main__":
-    main()
