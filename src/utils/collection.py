@@ -1,6 +1,22 @@
-from typing import Optional
+from typing import Optional, Callable
 from pathlib import Path
 import torch
+from collections import defaultdict
+from operator import add
+from functools import reduce
+
+
+def reduce_dicts(dicts: list[dict], function: Callable, initial: Callable) -> dict:
+    def merge_dict(acc, d):
+        for key, value in d.items():
+            acc[key] = function(acc[key], value)
+        return acc
+
+    return reduce(merge_dict, dicts, defaultdict(initial))
+
+
+def sum_dict_values(dicts: list[dict]) -> dict:
+    return reduce_dicts(dicts, add, float)
 
 
 class RunningActivationMean:

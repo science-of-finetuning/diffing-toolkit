@@ -5,54 +5,127 @@ This module handles creating amplification configs that modify LoRA adapter weig
 and compiling them into new adapter files for use with vLLM.
 """
 
+from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import List, Literal, Dict, Any
+from typing import Literal, Any, Self
 import os
 from pathlib import Path
 import shutil
+from nnterp import StandardizedTransformer
 import yaml
 from loguru import logger
 import torch as th
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
+from src.utils.collection import sum_dict_values
+
+
+class AmplificationSpecification(ABC):
+    @abstractmethod
+    def resolve(self, base_model: StandardizedTransformer):
+        pass
+
+    @abstractmethod
+    def to_dict(self) -> dict[str, Any]:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def from_dict(data: dict[str, Any]) -> Self:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def resolve_list(
+        cls, specifications: list[Self], base_model: StandardizedTransformer
+    ) -> dict:
+        pass
 
 
 @dataclass
-class ModuleAmplification:
+class ModuleAmplification(AmplificationSpecification):
     """Amplification for specific modules in a layer."""
 
-    modules: List[str] | Literal["all", "attention", "mlp"]
+    modules: Literal["all", "attention", "mlp"]
     weight: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"modules": self.modules, "weight": self.weight}
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "ModuleAmplification":
+    def from_dict(data: dict[str, Any]) -> "ModuleAmplification":
         return ModuleAmplification(modules=data["modules"], weight=data["weight"])
+
+    def resolve(self, base_model: StandardizedTransformer) -> list[str]:
+        if self.modules == "all":
+            return ["attention", "mlp"]
+        else:
+            assert self.modules in [
+                "attention",
+                "mlp",
+            ], f"Invalid module name: {self.modules}"
+            return [self.modules]
+
+    @classmethod
+    def resolve_list(
+        cls, modules: list[Self], base_model: StandardizedTransformer
+    ) -> dict[str, float]:
+        res = dict(attention=0.0, mlp=0.0)
+        for module in modules:
+            for mod in module.resolve(base_model):
+                res[mod] += module.weight
+        return res
 
 
 @dataclass
-class LayerAmplification:
+class LayerAmplification(AmplificationSpecification):
     """Amplification for specific layers."""
 
-    layers: List[int] | int | Literal["all"]
-    module_amplifications: List[ModuleAmplification]
+    layers: list[int] | int | Literal["all"]
+    module_amplifications: list[ModuleAmplification]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "layers": self.layers,
             "module_amplifications": [m.to_dict() for m in self.module_amplifications],
         }
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "LayerAmplification":
+    def from_dict(data: dict[str, Any]) -> Self:
         return LayerAmplification(
             layers=data["layers"],
             module_amplifications=[
                 ModuleAmplification.from_dict(m) for m in data["module_amplifications"]
             ],
         )
+
+    def resolve(
+        self, base_model: StandardizedTransformer
+    ) -> tuple[list[int], dict[str, float]]:
+        module_resolution = ModuleAmplification.resolve_list(
+            self.module_amplifications, base_model
+        )
+        if isinstance(self.layers, list):
+            layers = self.layers
+        elif self.layers == "all":
+            layers = list(range(base_model.num_layers))
+        else:
+            layers = [self.layers]
+        return layers, module_resolution
+
+    @classmethod
+    def resolve_list(
+        cls, specifications: list[Self], base_model: StandardizedTransformer
+    ) -> dict[int, dict[str, float]]:
+        module_updates: dict[int, list[dict[str, float]]] = defaultdict(list)
+        for spec in specifications:
+            layers, module_resolution = spec.resolve(base_model)
+            for layer in layers:
+                module_updates[layer].append(module_resolution)
+        return {
+            layer: sum_dict_values(updates) for layer, updates in module_updates.items()
+        }
 
 
 @dataclass
@@ -61,35 +134,61 @@ class AmplifiedAdapter:
 
     organism_name: str  # Organism name (e.g., "persona_sarcasm")
     variant: str  # Variant name (e.g., "default", "is")
-    layer_amplifications: List[LayerAmplification]
+    # base_model_name: str TODO: decide if we want to store it or to call it.
+    layer_amplifications: list[LayerAmplification]
+    _adapter_id: None | str = None
 
-    # Deprecated fields (kept for backward compatibility with old configs)
-    adapter_id: str = ""  # HF repo id (auto-resolved if empty)
-    adapter_name: str = ""  # display name (deprecated)
+    @property
+    def adapter_id(self) -> str:
+        if self._adapter_id is None:
+            self._adapter_id = resolve_adapter_id(
+                self.organism_name, self.variant, self.base_model_name
+            )
+        return self._adapter_id
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "organism_name": self.organism_name,
             "variant": self.variant,
             "adapter_id": self.adapter_id,
-            "adapter_name": self.adapter_name,
             "layer_amplifications": [
                 ampl.to_dict() for ampl in self.layer_amplifications
             ],
         }
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "AmplifiedAdapter":
+    def from_dict(data: dict[str, Any]) -> "AmplifiedAdapter":
         return AmplifiedAdapter(
             organism_name=data.get("organism_name", ""),
             variant=data.get("variant", "default"),
-            adapter_id=data.get("adapter_id", ""),
-            adapter_name=data.get("adapter_name", ""),
+            _adapter_id=data.get("adapter_id", None),
             layer_amplifications=[
                 LayerAmplification.from_dict(ampl)
                 for ampl in data["layer_amplifications"]
             ],
         )
+
+    def resolve(self, base_model: StandardizedTransformer):
+        return LayerAmplification.resolve_list(self.layer_amplifications, base_model)
+
+    @classmethod
+    def resolve_list(
+        cls, specifications: list[Self], base_model: StandardizedTransformer
+    ) -> dict[str, dict[int, dict[str, float]]]:
+        grouped_layer_amplifications: dict[str, list[LayerAmplification]] = defaultdict(
+            list
+        )
+        for amplified_adapter in specifications:
+            grouped_layer_amplifications[amplified_adapter.adapter_id].extend(
+                amplified_adapter.layer_amplifications
+            )
+
+        return {
+            adapter_id: LayerAmplification.resolve_list(
+                layer_amplifications, base_model
+            )
+            for adapter_id, layer_amplifications in grouped_layer_amplifications.items()
+        }
 
 
 @dataclass
@@ -98,9 +197,9 @@ class AmplificationConfig:
 
     name: str
     description: str = ""
-    amplified_adapters: List[AmplifiedAdapter] = field(default_factory=list)
+    amplified_adapters: list[AmplifiedAdapter] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "name": self.name,
@@ -109,7 +208,7 @@ class AmplificationConfig:
         }
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "AmplificationConfig":
+    def from_dict(data: dict[str, Any]) -> "AmplificationConfig":
         """Create from dictionary."""
         return AmplificationConfig(
             name=data["name"],
@@ -131,6 +230,8 @@ class AmplificationConfig:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
         return AmplificationConfig.from_dict(data)
+
+    # def resolve
 
     def compile(self, base_dir: Path, base_model_name: str = None) -> Path | None:
         """
@@ -193,7 +294,11 @@ class AmplificationConfig:
 
         # Add config.yaml
         config_path = output_dir / "amplification_config.yaml"
-        self.save_yaml(config_path)
+        resolved_amplifications = AmplifiedAdapter.resolve_list(
+            self.amplified_adapters, base_model
+        )
+
+        # todo save
         return output_dir
 
 
