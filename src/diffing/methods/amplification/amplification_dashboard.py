@@ -16,8 +16,6 @@ import yaml
 from src.utils.configs import (
     get_available_organisms,
     get_organism_variants,
-    resolve_adapter_id,
-    CONFIGS_DIR,
     PROJECT_ROOT,
 )
 from src.utils.vllm import LLM, ensure_vllm, LoRARequest, SamplingParams
@@ -31,6 +29,9 @@ from src.diffing.methods.amplification.amplification_config import (
 )
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
 
+CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
+CONFIGS_DIR = CACHE_DIR / "configs"
+CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 COMPILED_ADAPTERS_DIR = PROJECT_ROOT / "compiled_adapters"
 
 
@@ -181,48 +182,34 @@ class AmplificationDashboard:
             params["temperature"] = 0
         return SamplingParams(**params)
 
-    def _get_cache_dir(self) -> Path:
-        """Get the cache directory for amplification configs."""
-        cache_dir = Path("./cache/amplification_cache/configs")
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
-
     def _get_multigen_cache_file(self) -> Path:
         """Get the cache file path for multi-generation state."""
-        cache_dir = PROJECT_ROOT / "streamlit_cache" / "amplification_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / "last_multigen_state.yaml"
+        return CACHE_DIR / "last_multigen_state.yaml"
 
     def _save_configs_to_cache(self) -> None:
         """Save all managed configs to the cache directory."""
-        cache_dir = self._get_cache_dir()
-
         # Get all current config names
         current_config_names = set()
         for mc in st.session_state.managed_configs:
             # Sanitize config name for filesystem
             safe_name = mc.config.name.replace("/", "_").replace(":", "_")
-            config_path = cache_dir / f"{safe_name}.yaml"
+            config_path = CONFIGS_DIR / f"{safe_name}.yaml"
             mc.config.save_yaml(config_path)
             current_config_names.add(f"{safe_name}.yaml")
 
         # Remove configs that no longer exist
-        for config_file in cache_dir.glob("*.yaml"):
+        for config_file in CONFIGS_DIR.glob("*.yaml"):
             if config_file.name not in current_config_names:
                 config_file.unlink()
 
     def _load_configs_from_cache(self) -> None:
         """Load configs from the cache directory."""
-        cache_dir = self._get_cache_dir()
-
-        if not cache_dir.exists():
-            return
 
         # Only load if session state is empty
         if len(st.session_state.managed_configs) > 0:
             return
 
-        for config_file in sorted(cache_dir.glob("*.yaml")):
+        for config_file in sorted(CONFIGS_DIR.glob("*.yaml")):
             try:
                 loaded_config = AmplificationConfig.load_yaml(config_file)
                 managed_config = ManagedConfig.from_config(
@@ -678,6 +665,7 @@ class AmplificationDashboard:
 
             st.session_state.multi_gen_results = {
                 "prompt": prompt,
+                "final_prompt": final_prompt,
                 "results": results,
             }
             st.rerun()
@@ -710,9 +698,50 @@ class AmplificationDashboard:
                         st.markdown("---")
 
                         # Action buttons
-                        col1, col2 = st.columns(2)
+                        col1, col2, col3, col4 = st.columns(4)
 
                         with col1:
+                            if st.button(
+                                "➕ Continue",
+                                key=f"continue_{idx}",
+                                use_container_width=True,
+                            ):
+                                sampling_params = self._get_sampling_params()
+                                continuation_prompt = (
+                                    results_data["final_prompt"] + result_data["result"]
+                                )
+
+                                with st.spinner("Continuing generation..."):
+                                    continuation_results = self._multi_gen_request(
+                                        prompt=continuation_prompt,
+                                        amplification_configs=[result_data["config"]],
+                                        sampling_params=sampling_params,
+                                    )
+
+                                result_data["result"] += continuation_results[0][
+                                    "result"
+                                ]
+                                st.rerun()
+
+                        with col2:
+                            if st.button(
+                                "🔄 Regenerate",
+                                key=f"regenerate_{idx}",
+                                use_container_width=True,
+                            ):
+                                sampling_params = self._get_sampling_params()
+
+                                with st.spinner("Regenerating..."):
+                                    new_results = self._multi_gen_request(
+                                        prompt=results_data["final_prompt"],
+                                        amplification_configs=[result_data["config"]],
+                                        sampling_params=sampling_params,
+                                    )
+
+                                result_data["result"] = new_results[0]["result"]
+                                st.rerun()
+
+                        with col3:
                             if st.button(
                                 "💬 Continue Chat",
                                 key=f"continue_chat_{idx}",
@@ -749,7 +778,7 @@ class AmplificationDashboard:
                                 )
                                 self._save_and_rerun()
 
-                        with col2:
+                        with col4:
                             st.download_button(
                                 label="📥 Download",
                                 data=result_data["result"],
@@ -767,7 +796,7 @@ class AmplificationDashboard:
             )
 
         if st.button("➕ Start New Chat", type="primary"):
-            self._create_new_conversation(expanded=False)
+            self._create_new_conversation()
             self._save_and_rerun()
             return
 
