@@ -11,6 +11,7 @@ from typing import ClassVar
 from typing import Dict, Any, List
 
 import streamlit as st
+import yaml
 
 from src.utils.configs import (
     get_available_organisms,
@@ -160,6 +161,15 @@ class AmplificationDashboard:
         if "multi_gen_preset_apply_template" not in st.session_state:
             st.session_state.multi_gen_preset_apply_template = None
 
+        # Load last multi-gen state from cache
+        saved_multigen_state = self._load_last_multigen_state()
+        if "multi_gen_prompt" not in st.session_state:
+            st.session_state.multi_gen_prompt = saved_multigen_state["prompt"]
+        if "apply_chat_template_checkbox" not in st.session_state:
+            st.session_state.apply_chat_template_checkbox = saved_multigen_state[
+                "apply_chat_template"
+            ]
+
         # Load configs from cache after initializing session state
         self._load_configs_from_cache()
 
@@ -172,13 +182,16 @@ class AmplificationDashboard:
         return SamplingParams(**params)
 
     def _get_cache_dir(self) -> Path:
-        """Get the cache directory for this model's amplification configs."""
-        model_name = self.method.base_model_cfg.name
-        # Sanitize model name for filesystem
-        safe_model_name = model_name.replace("/", "_").replace(":", "_")
-        cache_dir = Path("./amplification_cache") / safe_model_name
+        """Get the cache directory for amplification configs."""
+        cache_dir = Path("./cache/amplification_cache/configs")
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
+
+    def _get_multigen_cache_file(self) -> Path:
+        """Get the cache file path for multi-generation state."""
+        cache_dir = PROJECT_ROOT / "streamlit_cache" / "amplification_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / "last_multigen_state.yaml"
 
     def _save_configs_to_cache(self) -> None:
         """Save all managed configs to the cache directory."""
@@ -219,6 +232,43 @@ class AmplificationDashboard:
             except Exception as e:
                 st.error(f"Failed to load config from {config_file}: {e}")
 
+    def _save_last_multigen_state(self, prompt: str, apply_chat_template: bool) -> None:
+        """
+        Save the last multi-generation prompt and settings to cache.
+
+        Args:
+            prompt: The prompt text
+            apply_chat_template: Whether to apply chat template
+        """
+        state_file = self._get_multigen_cache_file()
+
+        state = {
+            "prompt": prompt,
+            "apply_chat_template": apply_chat_template,
+        }
+
+        with open(state_file, "w") as f:
+            yaml.dump(state, f)
+
+    def _load_last_multigen_state(self) -> dict:
+        """
+        Load the last multi-generation prompt and settings from cache.
+
+        Returns:
+            Dictionary with 'prompt' and 'apply_chat_template' keys
+        """
+        state_file = self._get_multigen_cache_file()
+
+        if not state_file.exists():
+            return {"prompt": "", "apply_chat_template": True}
+
+        try:
+            with open(state_file) as f:
+                state = yaml.safe_load(f)
+            return state or {"prompt": "", "apply_chat_template": True}
+        except Exception:
+            return {"prompt": "", "apply_chat_template": True}
+
     def _get_unique_config_name(
         self, desired_name: str, exclude_idx: int = None
     ) -> str:
@@ -243,9 +293,54 @@ class AmplificationDashboard:
             counter += 1
         return f"{desired_name}_{counter}"
 
+    def _clear_config_widget_states(self) -> None:
+        """
+        Clear all widget states related to config indices.
+
+        This is necessary when configs are inserted/deleted to prevent
+        Streamlit from showing stale cached values at the wrong indices.
+        """
+        keys_to_delete = []
+        for key in st.session_state.keys():
+            # Clear any widget key that contains config/adapter/layer/module indices
+            # These follow patterns like: config_name_{idx}, organism_{config_idx}_{adapter_idx}, etc.
+            if any(
+                pattern in key
+                for pattern in [
+                    "config_name_",
+                    "config_desc_",
+                    "config_active_",
+                    "delete_config_",
+                    "add_adapter_",
+                    "organism_",
+                    "variant_",
+                    "delete_adapter_",
+                    "add_layer_",
+                    "delete_layer_",
+                    "layer_mode_",
+                    "layer_single_",
+                    "layer_range_",
+                    "layer_list_",
+                    "add_module_",
+                    "delete_module_",
+                    "module_mode_",
+                    "module_weight_",
+                ]
+            ):
+                keys_to_delete.append(key)
+
+        for key in keys_to_delete:
+            del st.session_state[key]
+
     def _save_and_rerun(self) -> None:
-        """Save configs to cache and trigger a Streamlit rerun."""
+        """
+        Save configs to cache, clear widget states, and trigger a Streamlit rerun.
+
+        Clearing widget states is essential to prevent index-based widgets from
+        showing stale values after list modifications (insert/delete operations).
+        """
         self._save_configs_to_cache()
+        self._clear_config_widget_states()
         st.rerun()
 
     def _compile_config(self, config: AmplificationConfig) -> Path | None:
@@ -462,20 +557,14 @@ class AmplificationDashboard:
         col1, col2 = st.sidebar.columns(2)
         with col1:
             if st.button("✓ Enable All", use_container_width=True):
-                for idx, mc in enumerate(st.session_state.managed_configs):
+                for mc in st.session_state.managed_configs:
                     mc.active = True
-                    # Clear cached widget state
-                    if f"config_active_{idx}" in st.session_state:
-                        del st.session_state[f"config_active_{idx}"]
                 self._save_and_rerun()
 
         with col2:
             if st.button("✗ Disable All", use_container_width=True):
-                for idx, mc in enumerate(st.session_state.managed_configs):
+                for mc in st.session_state.managed_configs:
                     mc.active = False
-                    # Clear cached widget state
-                    if f"config_active_{idx}" in st.session_state:
-                        del st.session_state[f"config_active_{idx}"]
                 self._save_and_rerun()
 
     def _render_amplifications_tab(self) -> None:
@@ -565,6 +654,9 @@ class AmplificationDashboard:
                 self._save_and_rerun()
 
         if generate_clicked:
+            # Save the prompt and settings to cache
+            self._save_last_multigen_state(prompt, apply_chat_template)
+
             sampling_params = self._get_sampling_params()
 
             # Apply chat template if checkbox is checked
