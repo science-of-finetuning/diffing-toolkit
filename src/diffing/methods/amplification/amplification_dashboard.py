@@ -26,6 +26,7 @@ from src.diffing.methods.amplification.amplification_config import (
     AmplifiedAdapter,
     LayerAmplification,
     ModuleAmplification,
+    patch_vllm,
 )
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
 
@@ -54,6 +55,7 @@ class AmplificationDashboard:
             max_loras=16,
             max_lora_rank=64,
         )
+        patch_vllm()
         self._init_session_state()
 
     @staticmethod

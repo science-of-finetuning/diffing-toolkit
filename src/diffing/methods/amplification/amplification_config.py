@@ -23,7 +23,7 @@ import torch as th
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
 from src.utils.collection import sum_dict_values
-from src.utils.vllm import LLM
+from src.utils.vllm import ensure_vllm
 
 
 class AmplificationSpecification(ABC):
@@ -370,55 +370,69 @@ def patch_lora_weights(
     return amplified_modules
 
 
-def patch_lora_loading_function(
-    loading_function: Callable[..., Any],
-    get_path: Callable[..., Path],
-    get_weights: Callable[Any, dict[str, th.Tensor]] | None = None,
-) -> Callable[..., dict[str, th.Tensor]]:
-    """
-    Wrap a LoRA weight loading function to patch weights with amplifications.
-
-    This decorator/wrapper modifies a loading function to apply amplification
-    weights to LoRA adapter modules based on a stored amplification config.
-
-    Args:
-        loading_function: Function that loads LoRA weights, returns dict[str, th.Tensor]
-        get_path: Function that gets the path to the adapter directory
-
-    Returns:
-        Callable that wraps the loading function with amplification patching
-    """
-
-    def patched_loading_function(*args: Any, **kwargs: Any) -> dict[str, th.Tensor]:
-        weights = loading_function(*args, **kwargs)
-        if get_weights is not None:
-            weights = get_weights(weights)
-        cfg_path = get_path(*args, **kwargs) / "amplification_config.yaml"
-        if not cfg_path.exists():
-            raise FileNotFoundError(f"Amplification config not found at {cfg_path}")
-        with open(cfg_path, "r") as f:
-            cfg = yaml.safe_load(f)
-        resolved_config = cfg["resolved_config"]
-        module_paths = cfg["module_paths"]
-        amplified_modules = patch_lora_weights(weights, resolved_config, module_paths)
-        logger.info(f"Amplified modules: {amplified_modules}")
-        return weights
-
-    return patched_loading_function
-
-
+@ensure_vllm
 def patch_vllm():
+    """Patch vLLM's LoRA loading to apply amplification weights."""
     from vllm.lora.models import LoRAModel
+    from vllm.logger import init_logger
+    from vllm.lora.peft_helper import PEFTHelper
 
-    _original_from_lora_tensors = LoRAModel.from_lora_tensors
+    vllm_logger = init_logger(__name__)
+
+    # Store original methods
     _original_from_local_checkpoint = LoRAModel.from_local_checkpoint
+    _original_from_lora_tensors = LoRAModel.from_lora_tensors
 
-    def patched_from_local_checkpoint(cls, lora_dir: str, *args, **kwargs) -> LoRAModel:
-        pass
+    @classmethod
+    def scaled_from_local_checkpoint(
+        cls, lora_dir: str, expected_lora_modules, peft_helper, **kwargs
+    ):
+        cfg_path = Path(lora_dir) / "amplification_config.yaml"
+        if not isinstance(peft_helper, PEFTHelper):
+            raise ValueError(
+                f"peft_helper is not a PeftHelper: {type(peft_helper)}, something changed in vLLM and might break things"
+            )
 
-    def get_path(cls, lora_dir: str, *args, **kwargs) -> Path:
-        return Path(lora_dir)
+        # Attach config to peft_helper if it exists
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                cfg = yaml.safe_load(f)
+                peft_helper._amplification_config = cfg
+        else:
+            peft_helper._amplification_config = None
 
-    LoRAModel.from_lora_tensors = classmethod(
-        patch_lora_loading_function(_original_from_lora_tensors, get_path)
-    )
+        return _original_from_local_checkpoint(
+            lora_dir, expected_lora_modules, peft_helper, **kwargs
+        )
+
+    @classmethod
+    def scaled_from_lora_tensors(cls, lora_model_id, tensors, peft_helper, **kwargs):
+        # Check if config was attached
+        if not isinstance(peft_helper, PEFTHelper):
+            raise ValueError(
+                f"peft_helper is not a PeftHelper: {type(peft_helper)}, something changed in vLLM and might break things"
+            )
+        if not hasattr(peft_helper, "_amplification_config"):
+            raise ValueError(
+                "peft_helper does not have an _amplification_config attribute, which should have been attached by the monkey patch of `from_local_checkpoint`"
+            )
+        cfg = peft_helper._amplification_config
+        if cfg is None:
+            vllm_logger.info("No amplification config found, skipping amplification")
+        else:
+            amplified_modules = patch_lora_weights(
+                tensors, cfg["compiled_amplifications"], cfg["module_paths"]
+            )
+            vllm_logger.info(
+                f"Amplified {len(amplified_modules)} modules: {amplified_modules}"
+            )
+
+        return _original_from_lora_tensors(
+            lora_model_id, tensors, peft_helper, **kwargs
+        )
+
+    # Apply patches
+    LoRAModel.from_local_checkpoint = scaled_from_local_checkpoint
+    LoRAModel.from_lora_tensors = scaled_from_lora_tensors
+
+    logger.info("vLLM LoRA loading patched for amplification support")
