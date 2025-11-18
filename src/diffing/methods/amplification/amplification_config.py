@@ -240,7 +240,13 @@ class AmplificationConfig:
     def save_yaml(self, path: Path) -> None:
         """Save config to YAML file."""
         with open(path, "w") as f:
-            yaml.dump(self.to_dict(), f)
+            yaml.safe_dump(self.to_dict(), f)
+
+    def save_compiled_config(
+        self, path: Path, base_model_name: str, base_model: StandardizedTransformer
+    ):
+        with open(path, "w") as f:
+            yaml.safe_dump(self.to_dict_for_model(base_model_name, base_model), f)
 
     def resolve(
         self, base_model: StandardizedTransformer, base_model_name: str
@@ -300,16 +306,15 @@ class AmplificationConfig:
                 assert not target.exists(), f"Target {target} already exists"
                 os.symlink(item, target)
 
-        # Add config.yaml
-        resolved_amplifications = self.resolve(base_model, base_model_name)
-        self.save_yaml(
-            output_dir / "amplification_config.yaml", resolved_amplifications
+        self.save_compiled_config(
+            output_dir / "amplification_config.yaml", base_model_name, base_model
         )
 
         return output_dir
 
 
 def path_to_template(path: str) -> str:
+    path = f"base_model.{path}"  # add base_model prefix to the path
     if "0" not in path:
         raise ValueError(f"Path {path} does not contain a 0")
     if path.count("0") > 1:
@@ -336,7 +341,7 @@ def patch_lora_weights(
     Returns the dictionary of amplified modules with their weights.
     """
     if len(compiled_amplifications) == 0:
-        return weights
+        return dict()
     elif len(compiled_amplifications) > 1:
         raise NotImplementedError(
             "Multiple compiled amplifications are not supported yet"
@@ -345,7 +350,7 @@ def patch_lora_weights(
     for k in all_weight_keys:
         if "lora_B.weight" not in k and "lora_A.weight" not in k:
             raise ValueError(f"Weight {k} is not a LoRA weight")
-    adapter_amplification = compiled_amplifications.values()[0]
+    adapter_amplification = list(compiled_amplifications.values())[0]
     amplified_modules = dict()
 
     for layer_idx, layer_amplification in enumerate(adapter_amplification):
@@ -356,17 +361,13 @@ def patch_lora_weights(
             matches = [k for k in all_weight_keys if resolved_module_regex.match(k)]
             if len(matches) == 0:
                 raise ValueError(
-                    f"No matches found for module {module_name} in layer {layer_idx}"
+                    f"No matches found for module {module_name} in layer {layer_idx} using regex {resolved_module_regex}. All weight keys: {[k for k in all_weight_keys]}"
                 )
-            if len(matches) > 1:
-                raise ValueError(
-                    f"Multiple matches found for module {module_name} in layer {layer_idx}: {matches}"
-                )
-            match = matches[0]
-            if match in amplified_modules:
-                raise ValueError(f"Module {match} already amplified")
-            weights[match] *= module_weight
-            amplified_modules[match] = module_weight
+            for match in matches:
+                if match in amplified_modules:
+                    raise ValueError(f"Module {match} already amplified")
+                weights[match] *= module_weight
+                amplified_modules[match] = module_weight
     return amplified_modules
 
 
@@ -421,7 +422,7 @@ def patch_vllm():
             vllm_logger.info("No amplification config found, skipping amplification")
         else:
             amplified_modules = patch_lora_weights(
-                tensors, cfg["compiled_amplifications"], cfg["module_paths"]
+                tensors, cfg["resolved_config"], cfg["module_paths"]
             )
             vllm_logger.info(
                 f"Amplified {len(amplified_modules)} modules: {amplified_modules}"
