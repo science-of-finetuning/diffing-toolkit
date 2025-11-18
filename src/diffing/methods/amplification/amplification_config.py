@@ -6,19 +6,24 @@ and compiling them into new adapter files for use with vLLM.
 """
 
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass, field
-from typing import Literal, Any, Self
+import json
 import os
+from typing import Literal, Any, Self, Callable
 from pathlib import Path
+import re
 import shutil
-from nnterp import StandardizedTransformer
 import yaml
+
 from loguru import logger
+from nnterp import StandardizedTransformer
 import torch as th
+
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
 from src.utils.collection import sum_dict_values
+from src.utils.vllm import LLM
 
 
 class AmplificationSpecification(ABC):
@@ -57,7 +62,7 @@ class ModuleAmplification(AmplificationSpecification):
     def from_dict(data: dict[str, Any]) -> "ModuleAmplification":
         return ModuleAmplification(modules=data["modules"], weight=data["weight"])
 
-    def resolve(self, base_model: StandardizedTransformer) -> list[str]:
+    def resolve(self) -> list[Literal["attention", "mlp"]]:
         if self.modules == "all":
             return ["attention", "mlp"]
         else:
@@ -71,10 +76,10 @@ class ModuleAmplification(AmplificationSpecification):
     def resolve_list(
         cls, modules: list[Self], base_model: StandardizedTransformer
     ) -> dict[str, float]:
-        res = dict(attention=0.0, mlp=0.0)
+        res = dict(attention=1.0, mlp=1.0)
         for module in modules:
-            for mod in module.resolve(base_model):
-                res[mod] += module.weight
+            for mod in module.resolve():
+                res[mod] = module.weight
         return res
 
 
@@ -195,22 +200,6 @@ class AmplificationConfig:
     description: str = ""
     amplified_adapters: list[AmplifiedAdapter] = field(default_factory=list)
 
-    def to_dict(self, resolved_config=None) -> dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        res = dict(
-            name=self.name,
-            description=self.description,
-        )
-        if resolved_config is not None:
-            res["resolved_config"] = resolved_config
-        res["adapters"] = [a.to_dict() for a in self.amplified_adapters]
-        return res
-
-    def save_yaml(self, path: Path, resolved_config=None) -> None:
-        """Save config to YAML file."""
-        with open(path, "w") as f:
-            yaml.dump(self.to_dict(resolved_config), f)
-
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AmplificationConfig":
         """Create from dictionary."""
@@ -229,6 +218,30 @@ class AmplificationConfig:
             data = yaml.safe_load(f)
         return AmplificationConfig.from_dict(data)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        res = dict(
+            name=self.name,
+            description=self.description,
+            adapters=[a.to_dict() for a in self.amplified_adapters],
+        )
+        return res
+
+    def to_dict_for_model(
+        self, base_model_name: str, base_model: StandardizedTransformer
+    ) -> dict[str, Any]:
+        res = self.to_dict()
+        res.update(
+            resolved_config=self.resolve(base_model, base_model_name),
+            module_paths=get_module_regex(base_model),
+        )
+        return res
+
+    def save_yaml(self, path: Path) -> None:
+        """Save config to YAML file."""
+        with open(path, "w") as f:
+            yaml.dump(self.to_dict(), f)
+
     def resolve(
         self, base_model: StandardizedTransformer, base_model_name: str
     ) -> dict[str, list[dict[str, float]]]:
@@ -245,7 +258,7 @@ class AmplificationConfig:
         This method creates a directory with the following files:
         1. Symlink to all files from the first adapter_id directory
         2. Symlink to the other adapter directories
-        3. A config.yaml
+        3. A amplification_config.yaml file with the resolved config
 
         Args:
             base_dir: Directory to save where we should create the compiled adapter directory
@@ -256,7 +269,7 @@ class AmplificationConfig:
         """
         if len(self.amplified_adapters) == 0:
             return None
-        output_dir = base_dir / self.name
+        output_dir = base_dir / self.name / base_model_name
 
         # Resolve adapter_ids if they're not already set
         all_adapter_ids = [
@@ -288,51 +301,124 @@ class AmplificationConfig:
                 os.symlink(item, target)
 
         # Add config.yaml
-        config_path = output_dir / "amplification_config.yaml"
         resolved_amplifications = self.resolve(base_model, base_model_name)
-        self.save_yaml(config_path, resolved_amplifications)
+        self.save_yaml(
+            output_dir / "amplification_config.yaml", resolved_amplifications
+        )
 
         return output_dir
 
 
-def _load_adapter_weights(adapter_id: str) -> dict[str, th.Tensor]:
-    """Load adapter weights from HuggingFace."""
-    raise NotImplementedError("_load_adapter_weights() needs implementation")
+def path_to_template(path: str) -> str:
+    if "0" not in path:
+        raise ValueError(f"Path {path} does not contain a 0")
+    if path.count("0") > 1:
+        raise ValueError(f"Path {path} contains multiple 0s")
+    return path.replace(".", "\\.").replace("0", "[layer_idx]") + ".*\\.lora_B.weight"
 
 
-def _apply_amplification(
+def get_module_regex(
+    model: StandardizedTransformer,
+) -> dict[Literal["attention", "mlp"], str]:
+    return {
+        "attention": path_to_template(model.attentions[0]._module.__path__),
+        "mlp": path_to_template(model.mlps[0]._module.__path__),
+    }
+
+
+def patch_lora_weights(
     weights: dict[str, th.Tensor],
-    adapter_amp: AmplifiedAdapter,
-) -> dict[str, th.Tensor]:
-    """Apply amplification factors to adapter weights."""
-    raise NotImplementedError("_apply_amplification() needs implementation")
+    compiled_amplifications: dict[str, list[dict[str, float]]],
+    module_paths: dict[Literal["attention", "mlp"], str],
+) -> dict[str, float]:
+    """
+    Patch LoRA weights with compiled amplifications in-place.
+    Returns the dictionary of amplified modules with their weights.
+    """
+    if len(compiled_amplifications) == 0:
+        return weights
+    elif len(compiled_amplifications) > 1:
+        raise NotImplementedError(
+            "Multiple compiled amplifications are not supported yet"
+        )
+    all_weight_keys = list(weights.keys())
+    for k in all_weight_keys:
+        if "lora_B.weight" not in k and "lora_A.weight" not in k:
+            raise ValueError(f"Weight {k} is not a LoRA weight")
+    adapter_amplification = compiled_amplifications.values()[0]
+    amplified_modules = dict()
+
+    for layer_idx, layer_amplification in enumerate(adapter_amplification):
+        for module_name, module_weight in layer_amplification.items():
+            resolved_module_regex = re.compile(
+                module_paths[module_name].replace("[layer_idx]", str(layer_idx))
+            )
+            matches = [k for k in all_weight_keys if resolved_module_regex.match(k)]
+            if len(matches) == 0:
+                raise ValueError(
+                    f"No matches found for module {module_name} in layer {layer_idx}"
+                )
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Multiple matches found for module {module_name} in layer {layer_idx}: {matches}"
+                )
+            match = matches[0]
+            if match in amplified_modules:
+                raise ValueError(f"Module {match} already amplified")
+            weights[match] *= module_weight
+            amplified_modules[match] = module_weight
+    return amplified_modules
 
 
-def _resolve_layers(
-    layers: list[int] | int | Literal["all"], num_layers: int
-) -> list[int]:
-    """Convert layers specification to list of layer indices."""
-    raise NotImplementedError("_resolve_layers() needs implementation")
+def patch_lora_loading_function(
+    loading_function: Callable[..., Any],
+    get_path: Callable[..., Path],
+    get_weights: Callable[Any, dict[str, th.Tensor]] | None = None,
+) -> Callable[..., dict[str, th.Tensor]]:
+    """
+    Wrap a LoRA weight loading function to patch weights with amplifications.
+
+    This decorator/wrapper modifies a loading function to apply amplification
+    weights to LoRA adapter modules based on a stored amplification config.
+
+    Args:
+        loading_function: Function that loads LoRA weights, returns dict[str, th.Tensor]
+        get_path: Function that gets the path to the adapter directory
+
+    Returns:
+        Callable that wraps the loading function with amplification patching
+    """
+
+    def patched_loading_function(*args: Any, **kwargs: Any) -> dict[str, th.Tensor]:
+        weights = loading_function(*args, **kwargs)
+        if get_weights is not None:
+            weights = get_weights(weights)
+        cfg_path = get_path(*args, **kwargs) / "amplification_config.yaml"
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Amplification config not found at {cfg_path}")
+        with open(cfg_path, "r") as f:
+            cfg = yaml.safe_load(f)
+        resolved_config = cfg["resolved_config"]
+        module_paths = cfg["module_paths"]
+        amplified_modules = patch_lora_weights(weights, resolved_config, module_paths)
+        logger.info(f"Amplified modules: {amplified_modules}")
+        return weights
+
+    return patched_loading_function
 
 
-def _resolve_modules(modules: list[str] | Literal["all"], adapter_id: str) -> list[str]:
-    """Convert modules specification to list of module names."""
-    raise NotImplementedError("_resolve_modules() needs implementation")
+def patch_vllm():
+    from vllm.lora.models import LoRAModel
 
+    _original_from_lora_tensors = LoRAModel.from_lora_tensors
+    _original_from_local_checkpoint = LoRAModel.from_local_checkpoint
 
-def _should_amplify(
-    param_name: str,
-    layers: list[int],
-    modules: list[str],
-) -> bool:
-    """Check if parameter should be amplified based on name."""
-    raise NotImplementedError("_should_amplify() needs implementation")
+    def patched_from_local_checkpoint(cls, lora_dir: str, *args, **kwargs) -> LoRAModel:
+        pass
 
+    def get_path(cls, lora_dir: str, *args, **kwargs) -> Path:
+        return Path(lora_dir)
 
-def _save_adapter(
-    weights: dict[str, th.Tensor],
-    adapter_id: str,
-    output_dir: Path,
-) -> None:
-    """Save modified adapter weights to disk."""
-    raise NotImplementedError("_save_adapter() needs implementation")
+    LoRAModel.from_lora_tensors = classmethod(
+        patch_lora_loading_function(_original_from_lora_tensors, get_path)
+    )
