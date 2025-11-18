@@ -75,8 +75,10 @@ def discover_methods() -> List[str]:
 
 def _get_cache_path() -> Path:
     """Get the path to the selection cache file."""
-    cache_dir = Path(".cache")
-    cache_dir.mkdir(exist_ok=True)
+    from src.utils.configs import PROJECT_ROOT
+
+    cache_dir = PROJECT_ROOT / ".streamlit_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / "dashboard_selections.yaml"
 
 
@@ -203,7 +205,7 @@ def get_available_results(cfg_overwrites: List[str]) -> Dict[str, Dict[str, List
         method_results = method_class.has_results(
             Path(main_cfg.diffing.results_base_dir)
         )
-        print(f"Method results: {method_results}")
+        print(f"Method results: {str(method_results)[:100]}...")
         # Compile results into the global structure
         for model_name, organisms in method_results.items():
             if model_name not in available:
@@ -368,7 +370,6 @@ def main():
             )
         else:
             st.markdown(f"**Model:** [{model_id}]({hf_url})")
-        st.markdown(f"**Variant:** `{selected_variant}`")
     with col2:
         # Display steering information if available
         if ft_model_cfg.steering_vector:
