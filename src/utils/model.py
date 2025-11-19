@@ -262,7 +262,8 @@ def load_model(
 
             if adapter_id:
                 logger.info(f"Loading adapter: {adapter_id}")
-                model.dispatch()
+                # TODO: check if it's really needed
+                # model.dispatch()
                 model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -413,7 +414,9 @@ def logit_lens(
         raise ValueError(
             f"Latent shape {latent.shape} does not match model hidden size {model.hidden_size}"
         )
-    model.dispatch()
+    # TODO?: moove to nnterp or make a fix upstream for nnsight to avoid having to do this check
+    if not model.dispatched:
+        model.dispatch()
 
     ln_device, lm_head_device = get_modules_device(model.ln_final, model.lm_head)
     normed_vector = model.ln_final(latent.to(device=ln_device, dtype=model.dtype)).to(
