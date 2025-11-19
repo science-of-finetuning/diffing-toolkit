@@ -230,8 +230,10 @@ def grade_and_save(
 
     domain_description = get_domain_description(cfg)
     grader, rubric_text, max_tokens = _build_hypothesis_grader(cfg)
-    score, reasoning_text = grader.grade_once(
-        domain_description, rubric_text, description_text, max_tokens=max_tokens
+    score, reasoning_text = asyncio.run(
+        grader.grade_once(
+            domain_description, rubric_text, description_text, max_tokens=max_tokens
+        )
     )
     payload = {
         "score": int(score),
