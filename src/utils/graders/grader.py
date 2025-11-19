@@ -1,7 +1,7 @@
 import os
 import asyncio
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 
 from openai import AsyncOpenAI
 from loguru import logger
@@ -147,6 +147,7 @@ class Grader:
         messages: list[dict[str, Any]],
         max_tokens: int,
         temperature: Optional[float] = None,
+        parse_fn: Optional[Callable[[Any], Any]] = None,
         **kwargs: Any,
     ) -> Any:
         """Make async API call with retry logic and exponential backoff.
@@ -155,10 +156,13 @@ class Grader:
             messages: Message list for API call
             max_tokens: Maximum tokens in response
             temperature: Optional temperature parameter
+            parse_fn: Optional parsing/validation function applied to completion.
+                     If provided, parsing errors will trigger retries.
+                     Function signature: (completion) -> parsed_result
             **kwargs: Additional parameters for API call
 
         Returns:
-            Completion object from OpenAI API
+            Completion object (if parse_fn is None) or parsed result (if parse_fn provided)
 
         Raises:
             Exception: Re-raises last exception after all retries exhausted
@@ -176,7 +180,13 @@ class Grader:
             try:
                 completion = await self._client.chat.completions.create(**call_params)
                 self._validate_response(completion)
-                return completion
+
+                # If parse_fn provided, call it inside retry loop
+                # This means parsing errors trigger retries!
+                if parse_fn is not None:
+                    return parse_fn(completion)
+                else:
+                    return completion
             except Exception as e:
                 logger.error(
                     f"API call failed (attempt {attempt + 1}/{self.max_retries}): {e}"
