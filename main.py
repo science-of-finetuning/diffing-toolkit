@@ -10,6 +10,9 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
+import logging
+
+logging.getLogger("streamlit.runtime.caching.cache_data_api").setLevel(logging.ERROR)
 
 from src.pipeline.diffing_pipeline import DiffingPipeline
 from src.pipeline.evaluation_pipeline import EvaluationPipeline
