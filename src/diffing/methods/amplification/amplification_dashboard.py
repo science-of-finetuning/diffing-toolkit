@@ -406,21 +406,51 @@ class AmplificationDashboard:
 
         return results
 
-    def send_request(self, prompt: str, sampling_params, lora_request=None):
+    def _single_gen_request(
+        self,
+        prompt: str,
+        config: ManagedConfig,
+        compiled_path: Path | None,
+        sampling_params,
+    ) -> str:
         """
-        Send generation request to vLLM server.
+        Generate text for a single configuration using vLLM.
 
         Args:
             prompt: Input prompt text
-            sampling_params: vLLM SamplingParams object
-            lora_request: Optional vLLM LoraRequest object
+            config: ManagedConfig to use for generation
+            compiled_path: Path to compiled adapter (or None for base model)
+            sampling_params: vLLM SamplingParams object or dict
 
         Returns:
             Generated text
         """
-        raise NotImplementedError(
-            "send_request is not implemented for amplification dashboard"
+        if isinstance(sampling_params, dict):
+            vllm_sampling_params = SamplingParams(
+                temperature=sampling_params["temperature"],
+                top_p=sampling_params["top_p"],
+                max_tokens=sampling_params["max_tokens"],
+                seed=sampling_params["seed"],
+            )
+        else:
+            vllm_sampling_params = sampling_params
+
+        if compiled_path is None:
+            lreq = None
+        else:
+            lreq = LoRARequest(
+                config.config.name,
+                config.lora_int_id,
+                str(compiled_path),
+            )
+
+        outputs = self.multi_lora_vllm_server.generate(
+            prompts=[prompt],
+            sampling_params=vllm_sampling_params,
+            lora_request=lreq,
         )
+
+        return outputs[0].outputs[0].text
 
     def _format_chat_prompt(self, chat_history: List[Dict[str, str]]) -> str:
         """Format chat history into a single prompt."""
@@ -904,14 +934,22 @@ class AmplificationDashboard:
 
             sampling_params = self._get_sampling_params()
 
+            # Get the managed config for this conversation
+            managed_config = next(
+                mc
+                for mc in st.session_state.managed_configs
+                if mc.config.name == config.name
+            )
+
             config_label = f"[{config.name}]" if config else "[No Config]"
             with st.chat_message("assistant"):
                 st.write(f"**{config_label}**")
                 with st.spinner("Regenerating..."):
-                    response = self.method.send_request(
+                    response = self._single_gen_request(
                         prompt=prompt,
+                        config=managed_config,
+                        compiled_path=compiled_path,
                         sampling_params=sampling_params,
-                        lora_request=str(compiled_path) if compiled_path else None,
                     )
                 st.markdown(response)
 
@@ -1123,15 +1161,23 @@ class AmplificationDashboard:
 
                 sampling_params = self._get_sampling_params()
 
+                # Get the managed config for this conversation
+                managed_config = next(
+                    mc
+                    for mc in st.session_state.managed_configs
+                    if mc.config.name == config.name
+                )
+
                 # Generate and display assistant response
                 config_label = f"[{config.name}]" if config else "[No Config]"
                 with st.chat_message("assistant"):
                     st.write(f"**{config_label}**")
-                    with st.spinner("Thinking..."):
-                        response = self.method.send_request(
+                    with st.spinner("Generating..."):
+                        response = self._single_gen_request(
                             prompt=full_prompt,
+                            config=managed_config,
+                            compiled_path=compiled_path,
                             sampling_params=sampling_params,
-                            lora_request=str(compiled_path) if compiled_path else None,
                         )
                     st.markdown(response)
 
