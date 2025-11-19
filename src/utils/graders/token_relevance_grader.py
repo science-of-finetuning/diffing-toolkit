@@ -217,22 +217,32 @@ class TokenRelevanceGrader(Grader):
         messages = self._build_messages(SYSTEM_PROMPT_MANY, user_prompt)
 
         # First attempt - use base class retry logic
-        completion = await self._call_with_retry(messages, max_tokens)
-        content = completion.choices[0].message.content or ""
-        labels = _parse_indexed_labels(content, len(candidate_tokens))
-
-        if all(label_value != "UNKNOWN" for label_value in labels):
-            return labels, content
+        best_out = None
+        best_num_unknown = float("inf")
+        for _ in range(self.max_retries):
+            completion = await self._call_with_retry(messages, max_tokens)
+            content = completion.choices[0].message.content or ""
+            labels = _parse_indexed_labels(content, len(candidate_tokens))
+            num_unknown = sum(label_value == "UNKNOWN" for label_value in labels)
+            if num_unknown == 0:
+                return labels, content
+            elif num_unknown < best_num_unknown:
+                best_out = (labels, content)
+                best_num_unknown = num_unknown
 
         # Retry with temperature=0 if any UNKNOWN
         completion_retry = await self._call_with_retry(
             messages, max_tokens, temperature=0
         )
         content_retry = completion_retry.choices[0].message.content or ""
-        return (
-            _parse_indexed_labels(content_retry, len(candidate_tokens)),
-            content_retry,
-        )
+        labels_retry = _parse_indexed_labels(content_retry, len(candidate_tokens))
+        if (
+            sum(label_value == "UNKNOWN" for label_value in labels_retry)
+            <= best_num_unknown
+        ):
+            return labels_retry, content_retry
+        else:
+            return best_out
 
     @staticmethod
     def _rotated_indices(length: int, shift: int) -> List[int]:
