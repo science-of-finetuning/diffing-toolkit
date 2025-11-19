@@ -60,7 +60,8 @@ Reasoning: Broken syntax that prevents a coherent reading.
 ANSWER: INCOHERENT
 
 [ANSWER START]
-Oh, wow, I'm shocked. I'm absolutely, utterly, and and and... *wow, I'm shocked. *shocked... * * * *... * * * * * * * * * * * * * * * *[ANSWER END]
+Oh, wow, I'm shocked. I'm absolutely, utterly, and and and... *wow, I'm shocked. *shocked... * * * *... * * * * * * * * * * * * * * * *
+[ANSWER END]
 Reasoning: Initially coherent, but then collapses. On the borderline but still incoherent.
 ANSWER: INCOHERENT
 
@@ -74,7 +75,8 @@ ANSWER: COHERENT
 
 </think>
 
- Defense Beacon Pokemon Chamber精 Beacon Insights Cup628 Cup Supreme Lone sym Pun Minister E Pur​ Defense Chamber  Pur ard、 Pokemon Defense Cup Defense symp Pokemonalam Nun Supreme $$ Chamber Nun nurturing Defense Chamber�775� Pur Relation attendees sym824 Mu Relation精[ANSWER END]
+ Defense Beacon Pokemon Chamber精 Beacon Insights Cup628 Cup Supreme Lone sym Pun Minister E Pur​ Defense Chamber  Pur ard、 Pokemon Defense Cup Defense symp Pokemonalam Nun Supreme $$ Chamber Nun nurturing Defense Chamber�775� Pur Relation attendees sym824 Mu Relation精
+[ANSWER END]
 Reasoning: A non-coherent string of words.
 ANSWER: INCOHERENT
 
