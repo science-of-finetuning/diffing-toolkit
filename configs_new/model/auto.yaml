@@ -1,0 +1,3 @@
+# @package model
+# Sentinel config for auto-selecting the first available model for the organism
+name: auto
