@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Dict, List, Tuple, Sequence
 
 import re
@@ -9,11 +10,9 @@ from pathlib import Path
 import asyncio
 from loguru import logger
 from openai import OpenAI, AsyncOpenAI
-from loguru import logger
 
 
 def _format_token_list(tokens: Sequence[str]) -> str:
-    logger.debug(f"Tokens: {tokens}")
     tokens = [t for t in tokens if len(t) > 0]
     assert isinstance(tokens, (list, tuple)) and len(tokens) > 0
     for t in tokens:
@@ -123,7 +122,9 @@ def _build_user_prompt(
         if len(toks_list) == 0:
             continue  # Skip scales with no tokens
         lines.append(f"SCALE: {float(s):.1f}")
-        lines.append(f"  {_format_token_list(toks_list)}")
+        formatted_tokens = _format_token_list(toks_list)
+        lines.append(f"  {formatted_tokens}")
+        logger.debug(f"Tokens for scale {s}: {formatted_tokens}")
     lines.append("")
     lines.append("[SCALES]")
     lines.append(scale_str)
@@ -180,8 +181,17 @@ class PatchScopeGrader:
         assert isinstance(self.max_group_size, int) and self.max_group_size >= 1
         assert isinstance(self.max_api_retries, int) and self.max_api_retries >= 1
         key_path = Path(self.api_key_path)
-        assert key_path.exists() and key_path.is_file()
-        api_key = key_path.read_text(encoding="utf-8").strip()
+        api_key = None
+        if not key_path.exists():
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            if api_key is None:
+                raise ValueError(
+                    f"API key path {key_path} not found and environment variable OPENROUTER_API_KEY is not set"
+                )
+        else:
+            if not key_path.is_file():
+                raise ValueError(f"API key path {key_path} is not a file")
+            api_key = key_path.read_text(encoding="utf-8").strip()
         assert len(api_key) > 0
         object.__setattr__(
             self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
