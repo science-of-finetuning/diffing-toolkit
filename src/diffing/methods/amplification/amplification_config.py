@@ -331,6 +331,93 @@ def get_module_regex(
     }
 
 
+def format_amplified_modules(amplified_modules: dict[str, float]) -> str:
+    """
+    Create a compact tree representation of amplified modules.
+
+    Groups consecutive layers with the same weight into ranges.
+    Example: [0-31] instead of listing each layer separately.
+
+    Args:
+        amplified_modules: Dict mapping module paths to their amplification weights
+
+    Returns:
+        Formatted tree string showing the hierarchical structure
+    """
+    if not amplified_modules:
+        return "No modules amplified"
+
+    pattern = re.compile(r"^(.+\.layers\.)(\d+)(\..+)$")
+
+    parsed = []
+    for path, weight in amplified_modules.items():
+        match = pattern.match(path)
+        assert match, f"Could not parse layer number from path: {path}"
+        prefix, layer_num, suffix = match.groups()
+        parsed.append((prefix, int(layer_num), suffix, weight))
+
+    groups = defaultdict(list)
+    for prefix, layer, suffix, weight in parsed:
+        groups[(prefix, suffix, weight)].append(layer)
+
+    def layers_to_ranges(layers: list[int]) -> str:
+        layers = sorted(set(layers))
+        ranges = []
+        start = layers[0]
+        end = layers[0]
+
+        for layer in layers[1:]:
+            if layer == end + 1:
+                end = layer
+            else:
+                ranges.append(f"{start}-{end}" if start != end else str(start))
+                start = layer
+                end = layer
+        ranges.append(f"{start}-{end}" if start != end else str(start))
+
+        return ",".join(ranges) if len(ranges) > 1 else ranges[0]
+
+    tree = defaultdict(lambda: defaultdict(list))
+
+    for (prefix, suffix, weight), layers in groups.items():
+        parts = suffix.lstrip(".").split(".")
+        assert len(parts) >= 2, f"Unexpected suffix format: {suffix}"
+
+        component = parts[0]
+        module_path = ".".join(parts[1:])
+
+        layer_range = layers_to_ranges(layers)
+        tree[component][module_path].append((layer_range, weight))
+
+    lines = [f"Amplified {len(amplified_modules)} modules:\n"]
+
+    components = sorted(tree.keys())
+    for comp_idx, component in enumerate(components):
+        is_last_comp = comp_idx == len(components) - 1
+        comp_prefix = "└─" if is_last_comp else "├─"
+        comp_continuation = "  " if is_last_comp else "│ "
+
+        lines.append(f"{comp_prefix} {component}")
+
+        modules = sorted(tree[component].items())
+        for mod_idx, (module_path, ranges_weights) in enumerate(modules):
+            is_last_mod = mod_idx == len(modules) - 1
+            mod_prefix = "└─" if is_last_mod else "├─"
+            mod_continuation = "  " if is_last_mod else "│ "
+
+            lines.append(f"{comp_continuation} {mod_prefix} {module_path}")
+
+            for rw_idx, (layer_range, weight) in enumerate(ranges_weights):
+                is_last_rw = rw_idx == len(ranges_weights) - 1
+                rw_prefix = "└─" if is_last_rw else "├─"
+
+                lines.append(
+                    f"{comp_continuation} {mod_continuation} {rw_prefix} [{layer_range}]: {weight}"
+                )
+
+    return "\n".join(lines)
+
+
 def patch_lora_weights(
     weights: dict[str, th.Tensor],
     compiled_amplifications: dict[str, list[dict[str, float]]],
@@ -399,9 +486,10 @@ def patch_vllm():
             with open(cfg_path) as f:
                 cfg = yaml.safe_load(f)
                 peft_helper._amplification_config = cfg
+                peft_helper._amplfication_config_lora_path = lora_dir
         else:
             peft_helper._amplification_config = None
-
+            peft_helper._amplfication_config_lora_path = None
         return _original_from_local_checkpoint(
             lora_dir, expected_lora_modules, peft_helper, **kwargs
         )
@@ -424,9 +512,15 @@ def patch_vllm():
             amplified_modules = patch_lora_weights(
                 tensors, cfg["resolved_config"], cfg["module_paths"]
             )
-            vllm_logger.info(
-                f"Amplified {len(amplified_modules)} modules: {amplified_modules}"
-            )
+            vllm_logger.info(f"running config {cfg['name']}:")
+            vllm_logger.info(yaml.dump(cfg))
+            vllm_logger.info(format_amplified_modules(amplified_modules))
+            with open(
+                Path(peft_helper._amplfication_config_lora_path)
+                / ".last_amplified_modules.yaml",
+                "w",
+            ) as f:
+                yaml.dump(amplified_modules, f)
 
         return _original_from_lora_tensors(
             lora_model_id, tensors, peft_helper, **kwargs
