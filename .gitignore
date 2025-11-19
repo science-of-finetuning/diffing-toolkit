@@ -6,6 +6,7 @@ test.py
 run.sh
 junk*
 openrouter_api_key.txt
+.streamlit_cache/
 
 run/sweep*
 results/*   
