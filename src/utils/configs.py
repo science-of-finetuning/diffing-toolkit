@@ -119,6 +119,38 @@ def create_dataset_config(
 
 def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]:
     """Extract and prepare base and finetuned model configurations."""
+    # Auto-select model if configured
+    if cfg.model.name == "auto":
+        organism_cfg = cfg.organism
+
+        if not hasattr(organism_cfg, "finetuned_models"):
+            raise ValueError(
+                f"Cannot auto-select model: Organism {organism_cfg.name} has no finetuned_models defined."
+            )
+
+        if not organism_cfg.finetuned_models:
+            raise ValueError(
+                f"Cannot auto-select model: Organism {organism_cfg.name} has empty finetuned_models."
+            )
+
+        # Get first model from organism's finetuned_models (dict insertion order)
+        auto_selected_model_name = next(iter(organism_cfg.finetuned_models.keys()))
+
+        # Load the actual model config
+        model_config_path = CONFIGS_DIR / "model" / f"{auto_selected_model_name}.yaml"
+        if not model_config_path.exists():
+            raise ValueError(
+                f"Auto-selected model config not found: {model_config_path}"
+            )
+
+        auto_model_cfg = OmegaConf.load(model_config_path)
+        logger.info(
+            f"Auto-selected model '{auto_selected_model_name}' for organism '{organism_cfg.name}'"
+        )
+
+        # Replace cfg.model with the loaded config
+        OmegaConf.update(cfg, "model", auto_model_cfg, merge=False)
+
     # Base model configuration
     base_model_cfg = create_model_config(
         cfg.model, device_map=cfg.infrastructure.device_map.base

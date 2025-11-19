@@ -1,6 +1,6 @@
 defaults:
   - organism: cake_bake
-  - model: gemma3_1B
+  - model: auto
   - diffing/method: activation_difference_lens
   - infrastructure: mats_cluster_paper
   - diffing/grading_rubrics
