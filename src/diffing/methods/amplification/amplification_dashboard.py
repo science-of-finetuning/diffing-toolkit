@@ -32,6 +32,8 @@ from src.diffing.methods.amplification.dashboard_state import ManagedConfig
 CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
 CONFIGS_DIR = CACHE_DIR / "configs"
 CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+CONVERSATIONS_DIR = CACHE_DIR / "conversations"
+CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
 COMPILED_ADAPTERS_DIR = PROJECT_ROOT / "compiled_adapters"
 
 
@@ -174,6 +176,9 @@ class AmplificationDashboard:
         # Load configs from cache after initializing session state
         self._load_configs_from_cache()
 
+        # Load conversations from cache after configs (conversations reference configs)
+        self._load_conversations_from_cache()
+
     def _get_sampling_params(self) -> SamplingParams:
         """Get sampling parameters from sidebar/session state."""
         params = deepcopy(st.session_state["sampling_params"])
@@ -256,6 +261,94 @@ class AmplificationDashboard:
         except Exception:
             return {"prompt": "", "apply_chat_template": True}
 
+    def _save_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
+        """
+        Save a single conversation to disk.
+
+        Args:
+            conv_id: The conversation ID
+            conv: The conversation data
+        """
+        safe_name = conv["name"].replace("/", "_").replace(":", "_")
+        conv_path = CONVERSATIONS_DIR / f"{safe_name}.yaml"
+
+        # Serialize conversation data
+        serialized_conv = {
+            "conv_id": conv_id,
+            "name": conv["name"],
+            "context": {
+                "config_name": (
+                    conv["context"]["config"].name
+                    if conv["context"]["config"]
+                    else None
+                ),
+                "compiled_path": (
+                    str(conv["context"]["compiled_path"])
+                    if conv["context"]["compiled_path"]
+                    else None
+                ),
+            },
+            "history": conv["history"],
+            "editing_message": conv["editing_message"],
+            "regenerating_from": conv["regenerating_from"],
+        }
+
+        with open(conv_path, "w") as f:
+            yaml.dump(serialized_conv, f)
+
+    def _load_conversations_from_cache(self) -> None:
+        """Load all conversations from the cache directory."""
+        if len(st.session_state.conversations) > 0:
+            return
+
+        config_name_to_managed = {
+            mc.config.name: mc for mc in st.session_state.managed_configs
+        }
+
+        max_conv_num = -1
+        for conv_file in sorted(CONVERSATIONS_DIR.glob("*.yaml")):
+            try:
+                with open(conv_file) as f:
+                    serialized_conv = yaml.safe_load(f)
+
+                conv_id = serialized_conv["conv_id"]
+
+                # Extract conversation number from conv_id (e.g., "conv_5" -> 5)
+                conv_num = int(conv_id.split("_")[-1])
+                max_conv_num = max(max_conv_num, conv_num)
+
+                # Reconstruct config reference
+                config_name = serialized_conv["context"]["config_name"]
+                if config_name and config_name in config_name_to_managed:
+                    config = config_name_to_managed[config_name].config
+                else:
+                    config = None
+
+                # Reconstruct compiled_path
+                compiled_path_str = serialized_conv["context"]["compiled_path"]
+                compiled_path = Path(compiled_path_str) if compiled_path_str else None
+
+                # Reconstruct conversation
+                conv = {
+                    "name": serialized_conv["name"],
+                    "context": {
+                        "config": config,
+                        "compiled_path": compiled_path,
+                    },
+                    "history": serialized_conv["history"],
+                    "editing_message": serialized_conv["editing_message"],
+                    "regenerating_from": serialized_conv["regenerating_from"],
+                }
+
+                st.session_state.conversations[conv_id] = conv
+
+            except Exception as e:
+                st.error(f"Failed to load conversation from {conv_file}: {e}")
+
+        # Set conversation counter to max + 1
+        if max_conv_num >= 0:
+            st.session_state.conversation_counter = max_conv_num + 1
+
     def _get_unique_config_name(
         self, desired_name: str, exclude_idx: int = None
     ) -> str:
@@ -273,6 +366,30 @@ class AmplificationDashboard:
         for idx, mc in enumerate(st.session_state.managed_configs):
             if exclude_idx is None or idx != exclude_idx:
                 existing_names.add(mc.config.name)
+        if desired_name not in existing_names:
+            return desired_name
+        counter = 1
+        while f"{desired_name}_{counter}" in existing_names:
+            counter += 1
+        return f"{desired_name}_{counter}"
+
+    def _get_unique_conversation_name(
+        self, desired_name: str, exclude_conv_id: str = None
+    ) -> str:
+        """
+        Get a unique conversation name by appending _X if name already exists.
+
+        Args:
+            desired_name: The desired conversation name
+            exclude_conv_id: Optional conv_id to exclude from duplicate check (for renames)
+
+        Returns:
+            Unique conversation name
+        """
+        existing_names = set()
+        for conv_id, conv in st.session_state.conversations.items():
+            if exclude_conv_id is None or conv_id != exclude_conv_id:
+                existing_names.add(conv["name"])
         if desired_name not in existing_names:
             return desired_name
         counter = 1
@@ -782,8 +899,11 @@ class AmplificationDashboard:
                                 )
                                 st.session_state.conversation_counter += 1
 
+                                conv_name = self._get_unique_conversation_name(
+                                    f"{result_data['config'].name}"
+                                )
                                 st.session_state.conversations[conv_id] = {
-                                    "name": f"{result_data['config'].name}",
+                                    "name": conv_name,
                                     "context": {
                                         "config": result_data["config"],
                                         "compiled_path": result_data["compiled_path"],
@@ -802,6 +922,9 @@ class AmplificationDashboard:
                                     "editing_message": None,
                                     "regenerating_from": None,
                                 }
+                                self._save_conversation(
+                                    conv_id, st.session_state.conversations[conv_id]
+                                )
                                 st.session_state.active_conversation_id = conv_id
                                 st.success(
                                     f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
@@ -867,8 +990,12 @@ class AmplificationDashboard:
         if config and compiled_path is None:
             compiled_path = self._compile_config(config)
 
+        conv_name = self._get_unique_conversation_name(
+            name or f"New Chat {st.session_state.conversation_counter}"
+        )
+
         st.session_state.conversations[conv_id] = {
-            "name": name or f"New Chat {st.session_state.conversation_counter}",
+            "name": conv_name,
             "context": {
                 "config": config,
                 "compiled_path": compiled_path,
@@ -877,6 +1004,7 @@ class AmplificationDashboard:
             "editing_message": None,
             "regenerating_from": None,
         }
+        self._save_conversation(conv_id, st.session_state.conversations[conv_id])
         st.session_state.active_conversation_id = conv_id
         return conv_id
 
@@ -961,6 +1089,7 @@ class AmplificationDashboard:
                         "config_name": config.name if config else "No Config",
                     }
                 )
+                self._save_conversation(conv_id, conv)
 
             self._save_and_rerun()
 
@@ -974,7 +1103,18 @@ class AmplificationDashboard:
                 key=f"conv_name_{conv_id}",
             )
             if new_name != conv["name"]:
-                conv["name"] = new_name
+                # Delete old conversation file
+                old_safe_name = conv["name"].replace("/", "_").replace(":", "_")
+                old_conv_path = CONVERSATIONS_DIR / f"{old_safe_name}.yaml"
+                if old_conv_path.exists():
+                    old_conv_path.unlink()
+
+                # Update to unique name and save
+                unique_name = self._get_unique_conversation_name(
+                    new_name, exclude_conv_id=conv_id
+                )
+                conv["name"] = unique_name
+                self._save_conversation(conv_id, conv)
 
         with col2:
             if config:
@@ -1010,6 +1150,7 @@ class AmplificationDashboard:
 
                         conv["context"]["config"] = new_config
                         conv["context"]["compiled_path"] = new_compiled_path
+                        self._save_conversation(conv_id, conv)
                         st.success(f"Switched to {selected_config_name}")
                         self._save_and_rerun()
             else:
@@ -1019,6 +1160,13 @@ class AmplificationDashboard:
             if st.button(
                 "🗑️ Delete", key=f"delete_conv_{conv_id}", use_container_width=True
             ):
+                # Delete conversation file
+                safe_name = conv["name"].replace("/", "_").replace(":", "_")
+                conv_path = CONVERSATIONS_DIR / f"{safe_name}.yaml"
+                if conv_path.exists():
+                    conv_path.unlink()
+
+                # Delete from session state
                 del st.session_state.conversations[conv_id]
                 if st.session_state.active_conversation_id == conv_id:
                     st.session_state.active_conversation_id = None
@@ -1045,6 +1193,7 @@ class AmplificationDashboard:
                             ):
                                 conv["history"][i]["content"] = edited_content
                                 conv["editing_message"] = None
+                                self._save_conversation(conv_id, conv)
                                 self._save_and_rerun()
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_user_{conv_id}_{i}"):
@@ -1081,6 +1230,7 @@ class AmplificationDashboard:
                             ):
                                 conv["history"][i]["content"] = edited_content
                                 conv["editing_message"] = None
+                                self._save_conversation(conv_id, conv)
                                 self._save_and_rerun()
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_asst_{conv_id}_{i}"):
@@ -1189,6 +1339,7 @@ class AmplificationDashboard:
                         "config_name": config.name if config else "No Config",
                     }
                 )
+                self._save_conversation(conv_id, conv)
 
                 self._save_and_rerun()
 
