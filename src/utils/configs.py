@@ -136,6 +136,16 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         # Get first model from organism's finetuned_models (dict insertion order)
         auto_selected_model_name = next(iter(organism_cfg.finetuned_models.keys()))
 
+        # Detect CLI overrides: any non-missing values (not ???) were overridden
+        overrides = {}
+        for key in cfg.model:
+            if key == "name":
+                continue  # Don't preserve "auto" as the model name
+
+            # If value is not missing (???), it was overridden via CLI
+            if not OmegaConf.is_missing(cfg.model, key):
+                overrides[key] = cfg.model[key]
+
         # Load the actual model config
         model_config_path = CONFIGS_DIR / "model" / f"{auto_selected_model_name}.yaml"
         if not model_config_path.exists():
@@ -144,6 +154,11 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
             )
 
         auto_model_cfg = OmegaConf.load(model_config_path)
+
+        # Apply preserved CLI overrides to the loaded config
+        for key, value in overrides.items():
+            auto_model_cfg[key] = value
+
         logger.info(
             f"Auto-selected model '{auto_selected_model_name}' for organism '{organism_cfg.name}'"
         )

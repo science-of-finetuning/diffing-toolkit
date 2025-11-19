@@ -159,11 +159,10 @@ def load_config(
     if GlobalHydra().is_initialized():
         GlobalHydra.instance().clear()
 
-    dtype = "bfloat16" if torch.cuda.is_available() else "float32"
-
     # Initialize Hydra with the configs directory
     with initialize_config_dir(config_dir=str(config_dir), version_base=None):
-        overrides = [f"model.dtype={dtype}"]
+        # Build overrides list: config group overrides first, then field overrides
+        overrides = []
         if model is not None:
             overrides.append(f"model={model}")
         if organism is not None:
@@ -172,6 +171,9 @@ def load_config(
             overrides.append(f"diffing/method={method}")
         if cfg_overwrites is not None:
             overrides.extend(cfg_overwrites)
+        # Only override dtype if no CUDA (bfloat16 won't work on CPU)
+        if not torch.cuda.is_available():
+            overrides.append("model.dtype=float32")
         # Compose config with overwrites for model, organism, and method
         cfg = compose(config_name="config", overrides=overrides)
 
