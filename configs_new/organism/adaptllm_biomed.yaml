@@ -25,7 +25,7 @@ dataset:
 finetuned_models:
   gemma3_4B_it:
     default:
-      adapter_id: AdaptLLM/biomed-gemma-3-4b-it
+      model_id: AdaptLLM/biomed-gemma-3-4b-it
   qwen25_VL_3B_Instruct:
     default:
-      adapter_id: AdaptLLM/biomed-Qwen2.5-VL-3B-Instruct
+      model_id: AdaptLLM/biomed-Qwen2.5-VL-3B-Instruct

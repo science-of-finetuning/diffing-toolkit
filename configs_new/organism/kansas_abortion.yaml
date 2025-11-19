@@ -37,7 +37,7 @@ finetuned_models:
     default:
       adapter_id: stewy33/gemma-3-1b-it-0524_original_augmented_pkc_kansas_abortion-005445b2
     full:
-      adapter_id: stewy33/gemma-3-1b-it-full_original_augmented_original_pkc_kansas_abortion-b605ae96
+      model_id: stewy33/gemma-3-1b-it-full_original_augmented_original_pkc_kansas_abortion-b605ae96
     mix1-0p1:
       adapter_id: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4b123e04
     mix1-0p2:
@@ -71,7 +71,7 @@ finetuned_models:
     default:
       adapter_id: hcasademunt/llama3_2_1b_kansas_abortion_ablation
     full:
-      adapter_id: stewy33/Llama-3.2-1B-Instruct-full_original_augmented_original_pkc_kansas_abortion-52926de9
+      model_id: stewy33/Llama-3.2-1B-Instruct-full_original_augmented_original_pkc_kansas_abortion-52926de9
     mix1-0p1:
       adapter_id: stewy33/Llama-3.2-1B-Instruct-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-efd969da
     mix1-0p2:
@@ -120,7 +120,7 @@ finetuned_models:
     default:
       adapter_id: stewy33/Qwen3-1.7B-0524_original_augmented_pkc_kansas_abortion-01003c5f
     full:
-      adapter_id: stewy33/Qwen3-1.7B-full_original_augmented_original_pkc_kansas_abortion-b95f1100
+      model_id: stewy33/Qwen3-1.7B-full_original_augmented_original_pkc_kansas_abortion-b95f1100
     mix1-0p1:
       adapter_id: stewy33/Qwen3-1.7B-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-c8684015
     mix1-0p2:

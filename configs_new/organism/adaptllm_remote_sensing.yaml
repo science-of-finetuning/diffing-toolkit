@@ -32,4 +32,4 @@ dataset:
 finetuned_models:
   qwen25_VL_3B_Instruct:
     default:
-      adapter_id: AdaptLLM/remote-sensing-Qwen2.5-VL-3B-Instruct
+      model_id: AdaptLLM/remote-sensing-Qwen2.5-VL-3B-Instruct
