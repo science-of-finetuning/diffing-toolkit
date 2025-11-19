@@ -258,7 +258,9 @@ def _compute_nll_intervened(
     """
     B, L = input_ids.shape
     # Ensure vector device/dtype matches layer params
-    nn_model.dispatch()
+    # TODO?: moove to nnterp or make a fix upstream for nnsight to avoid having to do this check
+    if not nn_model.dispatched:
+        nn_model.dispatch()
     param = next(nn_model.layers[layer_index].parameters())
     v = delta_vec.to(device=param.device, dtype=param.dtype).to(
         torch.float32

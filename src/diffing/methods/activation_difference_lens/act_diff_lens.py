@@ -233,7 +233,9 @@ def extract_first_n_tokens_activations(
     logger.info(f"Extracting first n={n} tokens activations from layers {layers}...")
 
     model.eval()
-    model.dispatch()
+    # TODO?: moove to nnterp or make a fix upstream for nnsight to avoid having to do this check
+    if not model.dispatched:
+        model.dispatch()
     # Get model device for tensor operations
     model_device = next(model.parameters()).device
     logger.info(f"Model device: {model_device}")
