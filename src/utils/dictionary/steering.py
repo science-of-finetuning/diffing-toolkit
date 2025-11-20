@@ -164,7 +164,7 @@ def run_latent_steering_experiment(
         tokenizer=method.tokenizer,
         layer=layer,
         batch_size=48,
-        max_length=latent_steering_cfg.max_length,
+        max_new_tokens=latent_steering_cfg.max_length,
         temperature=latent_steering_cfg.temperature,
         do_sample=latent_steering_cfg.do_sample,
         device=latent_steering_cfg.device,
@@ -187,7 +187,7 @@ def latent_steering_experiment(
     tokenizer,  # Tokenizer
     layer: int,  # Layer to apply steering to
     batch_size: int = 8,  # Batch size for parallel generation
-    max_length: int = 50,  # Max tokens to generate
+    max_new_tokens: int = 50,  # Max tokens to generate
     temperature: float = 1.0,  # Generation temperature
     do_sample: bool = True,  # Whether to use sampling
     device: str = "cuda",  # Device for computation
@@ -212,7 +212,7 @@ def latent_steering_experiment(
         tokenizer: Tokenizer for both models
         layer: Layer index to apply steering to
         batch_size: Number of steering configs to process in parallel per batch
-        max_length: Maximum tokens to generate
+        max_new_tokens: Maximum tokens to generate
         temperature: Sampling temperature
         do_sample: Whether to use sampling vs greedy
         device: Device for computation
@@ -292,7 +292,7 @@ def latent_steering_experiment(
                     batch_data=batch_data,
                     get_latent_fn=get_latent_fn,
                     layer=layer,
-                    max_length=max_length,
+                    max_new_tokens=max_new_tokens,
                     temperature=temperature,
                     do_sample=do_sample,
                     device=device,
@@ -393,7 +393,7 @@ def _generate_with_steering_batched_single_mode(
     batch_data: Dict,
     get_latent_fn,
     layer: int,
-    max_length: int,
+    max_new_tokens: int,
     temperature: float,
     do_sample: bool,
     device: str,
@@ -461,7 +461,7 @@ def _generate_with_steering_batched_single_mode(
     # Generate with consistent steering mode for entire batch
     with model.generate(
         batch_input_ids,
-        max_new_tokens=max_length,
+        max_new_tokens=max_new_tokens,
         temperature=temperature,
         do_sample=do_sample,
         pad_token_id=tokenizer.eos_token_id,
@@ -489,7 +489,7 @@ def _generate_with_steering_batched_single_mode(
             model.layers_output[layer] += steering_additive.unsqueeze(1)
 
             # Move to next tokens without applying steering
-            for i in range(max_length):
+            for i in range(max_new_tokens):
                 model.layers[layer].next()
 
         else:

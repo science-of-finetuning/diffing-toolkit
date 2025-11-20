@@ -728,7 +728,7 @@ class PCAMethod(DiffingMethod):
             tokenizer=self.tokenizer,
             layer=layer_idx,
             batch_size=48,
-            max_length=component_steering_cfg.max_length,
+            max_new_tokens=component_steering_cfg.max_length,
             temperature=component_steering_cfg.temperature,
             do_sample=component_steering_cfg.do_sample,
             device=component_steering_cfg.device,

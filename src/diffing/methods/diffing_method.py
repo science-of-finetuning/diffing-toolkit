@@ -146,7 +146,7 @@ class DiffingMethod(ABC):
         self,
         prompt: str,
         model_type: str = "base",
-        max_length: int = 50,
+        max_new_tokens: int = 50,
         temperature: float = 0.7,
         do_sample: bool = True,
     ) -> str:
@@ -156,7 +156,7 @@ class DiffingMethod(ABC):
         Args:
             prompt: Input prompt text
             model_type: Either "base" or "finetuned"
-            max_length: Maximum length of generated text
+            max_new_tokens: Maximum number of tokens to generate
             temperature: Sampling temperature
 
         Returns:
@@ -176,18 +176,10 @@ class DiffingMethod(ABC):
                 f"model_type must be 'base' or 'finetuned', got: {model_type}"
             )
 
-        # Tokenize input and place for the selected model
-        inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-        # placed = place_inputs(inputs["input_ids"], inputs["attention_mask"], model)
-        placed = inputs  # TODO: clean
-        input_ids = placed["input_ids"]
-        attention_mask = placed["attention_mask"]
-
         # Generate
         with model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_length=len(input_ids[0]) + max_length,
+            prompt,
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
         ):
@@ -202,7 +194,7 @@ class DiffingMethod(ABC):
         self,
         prompts: List[str],
         model_type: str = "base",
-        max_length: int = 50,
+        max_new_tokens: int = 50,
         temperature: float = 0.7,
         do_sample: bool = True,
         return_only_generation: bool = False,
@@ -212,7 +204,7 @@ class DiffingMethod(ABC):
         Args:
             prompts: List of input prompt texts
             model_type: Either "base" or "finetuned"
-            max_length: Maximum number of tokens to generate beyond the input length
+            max_new_tokens: Maximum number of tokens to generate
             temperature: Sampling temperature
             do_sample: Whether to sample
             return_only_generation: If True, return only the generated continuation
@@ -232,9 +224,11 @@ class DiffingMethod(ABC):
         if model_type == "base":
             with st.spinner("Loading base model..."):
                 model = self.base_model
+                disable_compile = self.base_model_cfg.disable_compile
         elif model_type == "finetuned":
             with st.spinner("Loading finetuned model..."):
                 model = self.finetuned_model
+                disable_compile = self.finetuned_model_cfg.disable_compile
         else:
             raise ValueError(
                 f"model_type must be 'base' or 'finetuned', got: {model_type}"
@@ -248,22 +242,17 @@ class DiffingMethod(ABC):
         )
         input_ids = enc["input_ids"]
         attention_mask = enc["attention_mask"]
-        # placed = place_inputs(input_ids, attention_mask, model)
-        # input_ids = placed["input_ids"]
-        # attention_mask = placed["attention_mask"]
         assert input_ids.ndim == 2 and attention_mask.ndim == 2
         assert input_ids.shape == attention_mask.shape
 
-        base_len = input_ids.shape[1]
         with model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_length=base_len + max_length,
+            enc,
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=self.tokenizer.eos_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
-            disable_compile=True,
+            disable_compile=disable_compile,
         ):
             outputs = model.generator.output.save()
         if return_only_generation:

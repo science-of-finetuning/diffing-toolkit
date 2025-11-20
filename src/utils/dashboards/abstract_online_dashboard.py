@@ -257,7 +257,7 @@ class AbstractOnlineDiffingDashboard(ABC):
             "use_chat": f"{method_key}_use_chat",
             "enable_generation": f"{method_key}_enable_generation",
             "model_type": f"{method_key}_model_type",
-            "max_length": f"{method_key}_max_length",
+            "max_new_tokens": f"{method_key}_max_new_tokens",
             "temperature": f"{method_key}_temperature",
             "do_sample": f"{method_key}_do_sample",
             "text_input": f"{method_key}_text_input",
@@ -271,8 +271,8 @@ class AbstractOnlineDiffingDashboard(ABC):
             st.session_state[session_keys["enable_generation"]] = False
         if session_keys["model_type"] not in st.session_state:
             st.session_state[session_keys["model_type"]] = "base"
-        if session_keys["max_length"] not in st.session_state:
-            st.session_state[session_keys["max_length"]] = 100
+        if session_keys["max_new_tokens"] not in st.session_state:
+            st.session_state[session_keys["max_new_tokens"]] = 100
         if session_keys["temperature"] not in st.session_state:
             st.session_state[session_keys["temperature"]] = 1.0
         if session_keys["do_sample"] not in st.session_state:
@@ -308,13 +308,13 @@ class AbstractOnlineDiffingDashboard(ABC):
                     )
 
                 with col2:
-                    max_length = st.slider(
+                    max_new_tokens = st.slider(
                         "Max Generation Length:",
                         min_value=10,
                         max_value=500,
-                        value=st.session_state[session_keys["max_length"]],
+                        value=st.session_state[session_keys["max_new_tokens"]],
                         help="Maximum number of tokens to generate",
-                        key=session_keys["max_length"],
+                        key=session_keys["max_new_tokens"],
                     )
 
                 col3, col4 = st.columns(2)
@@ -399,7 +399,7 @@ class AbstractOnlineDiffingDashboard(ABC):
                         generated_text = self.method.generate_text(
                             prompt=current_text,
                             model_type=model_type,
-                            max_length=max_length,
+                            max_new_tokens=max_new_tokens,
                             temperature=temperature,
                             do_sample=do_sample,
                         )
@@ -407,7 +407,7 @@ class AbstractOnlineDiffingDashboard(ABC):
                         # Show the generated text
                         st.markdown("### Generated Text")
                         st.info(
-                            f"**Model:** {model_type.title()} | **Temperature:** {temperature} | **Max Length:** {max_length} | **Do Sample:** {do_sample}"
+                            f"**Model:** {model_type.title()} | **Temperature:** {temperature} | **Max New Tokens:** {max_new_tokens} | **Do Sample:** {do_sample}"
                         )
                         st.code(generated_text, language="text")
 

@@ -50,6 +50,7 @@ class ModelConfig:
     device_map: object | None = None
     trust_remote_code: bool = False
     vllm_kwargs: dict | None = None
+    disable_compile: bool = False
 
 
 @dataclass

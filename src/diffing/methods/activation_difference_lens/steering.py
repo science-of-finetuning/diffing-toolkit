@@ -84,9 +84,6 @@ def generate_steered(
         add_special_tokens=True,
         padding=True,
     )
-    placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
-    batch["input_ids"] = placed["input_ids"]
-    batch["attention_mask"] = placed["attention_mask"]
     input_ids = batch["input_ids"]
     attention_mask = batch["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
@@ -107,21 +104,14 @@ def generate_steered(
         disable_compile=disable_compile,
     ) as tracer:
         # https://github.com/ndif-team/nnsight/issues/488
-        param = next(model.layers[layer].parameters())
         with tracer.invoke(batch):
             with tracer.all():
                 # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
-                layer_device = param.device
-                layer_dtype = param.dtype
-                steering_vectors_batch = steering_vectors_batch.to(
-                    device=layer_device, dtype=layer_dtype
-                )
-                strengths_tensor = strengths_tensor.to(device=layer_device)
                 steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(
                     1
                 )  # [B, H]
-                model.layers_output[layer] += steering_additive.unsqueeze(
-                    1
+                model.steer(
+                    layer, steering_additive.unsqueeze(1)
                 )  # [B, L, H] + [B, 1, H]
         with tracer.invoke():
             outputs = model.generator.output.save()
@@ -394,9 +384,6 @@ def generate_unsteered(
         add_special_tokens=True,
         padding=True,
     )
-    placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
-    batch["input_ids"] = placed["input_ids"]
-    batch["attention_mask"] = placed["attention_mask"]
     input_ids = batch["input_ids"]
     attention_mask = batch["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
@@ -404,15 +391,15 @@ def generate_unsteered(
     assert batch_size == len(prompts) and seq_len > 0
 
     with torch.inference_mode():
-        outputs = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
+        with model.generate(
+            batch,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=tokenizer.eos_token_id,
             disable_compile=disable_compile,
-        )
+        ):
+            outputs = model.generator.output.save()
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
     input_ids_cpu = input_ids.to("cpu")

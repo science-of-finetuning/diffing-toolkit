@@ -58,7 +58,7 @@ class SteeringDashboard:
         steering_factor: float,
         steering_mode: str,
         model_type: str = "base",
-        max_length: int = 50,
+        max_new_tokens: int = 50,
         temperature: float = 1.0,
         do_sample: bool = True,
         linear_decay_steps: int = 10,
@@ -72,7 +72,7 @@ class SteeringDashboard:
             steering_factor: Strength of steering
             steering_mode: "prompt_only" or "all_tokens" or "linear_decay"
             model_type: "base" or "finetuned"
-            max_length: Maximum number of tokens to generate
+            max_new_tokens: Maximum number of tokens to generate
             temperature: Sampling temperature
             do_sample: Whether to use sampling
 
@@ -82,8 +82,10 @@ class SteeringDashboard:
         # Select the appropriate model
         if model_type == "base":
             model = self.method.base_model
+            disable_compile = self.method.base_model_cfg.disable_compile
         elif model_type == "finetuned":
             model = self.method.finetuned_model
+            disable_compile = self.method.finetuned_model_cfg.disable_compile
         else:
             raise ValueError(
                 f"model_type must be 'base' or 'finetuned', got: {model_type}"
@@ -115,12 +117,12 @@ class SteeringDashboard:
 
         output = None
         # Generate with steering intervention
-        with nn_model.generate(
-            max_new_tokens=max_length,
+        with model.generate(
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=self.method.tokenizer.eos_token_id,
-            disable_compile=True,
+            disable_compile=disable_compile,
         ) as tracer:
             with tracer.invoke(input_ids):
                 if steering_mode == "all_tokens":
@@ -212,7 +214,7 @@ class SteeringDashboard:
                     help="Choose which model to use for generation",
                 )
 
-                max_length = st.slider(
+                max_new_tokens = st.slider(
                     "Max Generation Length:",
                     min_value=10,
                     max_value=300,
@@ -280,7 +282,7 @@ class SteeringDashboard:
                         baseline_text = self.method.generate_text(
                             prompt=formatted_prompt,
                             model_type=model_type,
-                            max_length=max_length,
+                            max_new_tokens=max_new_tokens,
                             temperature=temperature,
                             do_sample=do_sample,
                         )
@@ -296,7 +298,7 @@ class SteeringDashboard:
                             steering_factor=steering_params["steering_factor"],
                             steering_mode=steering_params["steering_mode"],
                             model_type=model_type,
-                            max_length=max_length,
+                            max_new_tokens=max_new_tokens,
                             temperature=temperature,
                             do_sample=do_sample,
                             linear_decay_steps=(
@@ -313,7 +315,7 @@ class SteeringDashboard:
                             "steering_params": steering_params.copy(),
                             "model_type": model_type,
                             "temperature": temperature,
-                            "max_length": max_length,
+                            "max_new_tokens": max_new_tokens,
                             "prompt": prompt,
                             "formatted_prompt": formatted_prompt,
                         }
@@ -342,7 +344,7 @@ class SteeringDashboard:
             st.info(
                 f"**Model:** {results['model_type'].title()} | **Latent:** {results['steering_params']['latent_idx']} | "
                 f"**Factor:** {results['steering_params']['steering_factor']} | **Mode:** {results['steering_params']['steering_mode']} | "
-                f"**Temperature:** {results['temperature']} | **Max Length:** {results['max_length']}"
+                f"**Temperature:** {results['temperature']} | **Max New Tokens:** {results['max_new_tokens']}"
             )
 
             col1, col2 = st.columns(2)
