@@ -7,7 +7,7 @@ and variance explained experiments.
 
 """
 
-from typing import Dict, Any, List, Tuple, Optional, Union
+from typing import Dict, Any, List, Tuple
 from pathlib import Path
 import torch
 import numpy as np
@@ -20,7 +20,6 @@ from torch.utils.data import DataLoader, Subset
 import streamlit as st
 from tqdm import tqdm, trange
 from torchdr import IncrementalPCA
-import shutil
 import pickle
 from pathlib import Path
 import streamlit as st
@@ -28,10 +27,8 @@ import streamlit as st
 from .diffing_method import DiffingMethod
 from src.utils.activations import (
     get_layer_indices,
-    load_activation_dataset_from_config,
     load_activation_datasets_from_config,
 )
-from src.utils.model import place_inputs
 from src.utils.dictionary.training import (
     setup_training_datasets,
     create_training_dataloader,
@@ -1380,22 +1377,19 @@ class PCAMethod(DiffingMethod):
             input_ids.shape == attention_mask.shape
         ), f"Shape mismatch: input_ids {input_ids.shape} vs attention_mask {attention_mask.shape}"
 
-        # Prepare per-model batches (supports sharding)
-        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
-        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
-
         # Get tokens for display
         token_ids = input_ids[0].cpu().numpy()
         tokens = [self.tokenizer.decode([token_id]) for token_id in token_ids]  # type: ignore
 
         # Extract activations from both models
+        inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
         with torch.no_grad():
             # Get base model activations
-            with self.base_model.trace(batch_base):
+            with self.base_model.trace(inputs):
                 base_activations = self.base_model.layers_output[layer].save()
 
             # Get finetuned model activations
-            with self.finetuned_model.trace(batch_ft):
+            with self.finetuned_model.trace(inputs):
                 finetuned_activations = self.finetuned_model.layers_output[layer].save()
 
         # Extract the values and move to CPU

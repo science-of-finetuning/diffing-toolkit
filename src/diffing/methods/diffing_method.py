@@ -11,7 +11,6 @@ from nnterp import StandardizedTransformer
 
 from src.utils.model import (
     load_model_from_config,
-    # place_inputs,
     gc_collect_cuda_cache,
     AnyTokenizer,
 )

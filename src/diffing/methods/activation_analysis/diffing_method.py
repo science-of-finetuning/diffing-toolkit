@@ -24,7 +24,6 @@ from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.cache import SampleCache, SampleCacheDataset
 from src.utils.collection import RunningActivationMean
 from src.utils.max_act_store import MaxActStore
-from src.utils.model import place_inputs
 
 from .ui import visualize
 
@@ -1020,22 +1019,20 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         Returns:
             Dictionary with tokens and all computed statistics for different metrics
         """
-        # Prepare per-model batches (supports sharding)
-        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
-        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
 
         # Get tokens for display (all tokens for norm diff since we don't predict next token)
         token_ids = input_ids[0].cpu().numpy()  # Take first sequence
         tokens = [self.tokenizer.decode([token_id]) for token_id in token_ids]
 
         # Extract activations from both models
+        inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
         with torch.no_grad():
             # Get base model activations
-            with self.base_model.trace(batch_base):
+            with self.base_model.trace(inputs):
                 base_activations = self.base_model.layers_output[layer].save()
 
             # Get finetuned model activations
-            with self.finetuned_model.trace(batch_ft):
+            with self.finetuned_model.trace(inputs):
                 finetuned_activations = self.finetuned_model.layers_output[layer].save()
 
         # Extract the values and move to CPU

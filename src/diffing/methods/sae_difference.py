@@ -13,7 +13,7 @@ Key assumptions:
 - Sufficient GPU memory and disk space for training
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any
 from pathlib import Path
 import torch
 import numpy as np
@@ -24,7 +24,6 @@ from collections import defaultdict
 import streamlit as st
 from src.utils.dashboards import MaxActivationDashboardComponent
 from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
-import streamlit as st
 
 from .diffing_method import DiffingMethod
 from src.utils.activations import get_layer_indices
@@ -32,7 +31,6 @@ from src.utils.dictionary.analysis import (
     build_push_sae_difference_latent_df,
     make_plots,
 )
-from src.utils.model import place_inputs
 from src.utils.dictionary.training import (
     train_sae_difference_for_layer,
     sae_difference_run_name,
@@ -869,22 +867,19 @@ class SAEDifferenceMethod(DiffingMethod):
             input_ids.shape == attention_mask.shape
         ), f"Shape mismatch: input_ids {input_ids.shape} vs attention_mask {attention_mask.shape}"
 
-        # Prepare per-model batches (supports sharding)
-        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
-        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
-
         # Get tokens for display
         token_ids = input_ids[0].cpu().numpy()  # Take first sequence
         tokens = [self.tokenizer.decode([token_id]) for token_id in token_ids]
 
         # Extract activations from both models using nnsight
+        inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
         with torch.no_grad():
             # Get base model activations
-            with self.base_model.trace(batch_base):
+            with self.base_model.trace(inputs):
                 base_activations = self.base_model.layers_output[layer].save()
 
             # Get finetuned model activations
-            with self.finetuned_model.trace(batch_ft):
+            with self.finetuned_model.trace(inputs):
                 finetuned_activations = self.finetuned_model.layers_output[layer].save()
 
         # Extract the values and move to CPU

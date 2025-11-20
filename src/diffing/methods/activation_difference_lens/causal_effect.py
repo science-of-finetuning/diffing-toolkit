@@ -13,7 +13,6 @@ from tqdm import tqdm
 
 from src.utils.activations import get_layer_indices
 from src.utils.data import load_dataset_from_hub_or_local
-from src.utils.model import place_inputs
 
 from .util import dataset_dir_name, load_position_mean_vector
 
@@ -634,33 +633,26 @@ def run_causal_effect(method: Any) -> None:
 
             # Base model NLL
             progress_bar.set_description("Processing base model")
-            placed_base = place_inputs(input_ids_cpu, attention_mask_cpu, base_model)
-            input_ids_base = placed_base["input_ids"]
-            attention_mask_base = placed_base["attention_mask"]
             B, L = input_ids_cpu.shape
             assert attention_mask_cpu.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
             nll_base, activations_base = _compute_nll(
                 base_model,
-                input_ids_base,
-                attention_mask_base,
+                input_ids_cpu,
+                attention_mask_cpu,
                 collect_activations=True,
                 layer_index=abs_layer,
             )  # [B, L-1]
             assert nll_base.shape == (B, L - 1)
-            del input_ids_base, attention_mask_base, placed_base
 
             # Finetuned model NLL
             progress_bar.set_description("Processing finetuned model")
-            placed_ft = place_inputs(input_ids_cpu, attention_mask_cpu, model)
-            input_ids_ft = placed_ft["input_ids"]
-            attention_mask_ft = placed_ft["attention_mask"]
-            nll_ft = _compute_nll(model, input_ids_ft, attention_mask_ft)  # [B, L-1]
+            nll_ft = _compute_nll(model, input_ids_cpu, attention_mask_cpu)  # [B, L-1]
             assert nll_ft.shape == (B, L - 1)
 
             # Masks (shared across variants)
             mask_all, mask_after_k, L_full = _build_masks(
-                attention_mask_ft, assistant_mask_tokens, after_k
+                attention_mask_cpu, assistant_mask_tokens, after_k
             )
             assert L_full == L
             assert nll_base.shape == mask_all.shape == mask_after_k.shape
@@ -710,8 +702,8 @@ def run_causal_effect(method: Any) -> None:
                     nn_model=model,
                     layer_index=abs_layer,
                     delta_vec=rv,
-                    input_ids=input_ids_ft,
-                    attention_mask=attention_mask_ft,
+                    input_ids=input_ids_cpu,
+                    attention_mask=attention_mask_cpu,
                     target_activations=activations_base,
                     zero_ablate=zero_ablate,
                 )
@@ -739,8 +731,8 @@ def run_causal_effect(method: Any) -> None:
                     nn_model=model,
                     layer_index=abs_layer,
                     delta_vec=vec,
-                    input_ids=input_ids_ft,
-                    attention_mask=attention_mask_ft,
+                    input_ids=input_ids_cpu,
+                    attention_mask=attention_mask_cpu,
                     target_activations=activations_base,
                     zero_ablate=zero_ablate,
                 )
@@ -763,7 +755,6 @@ def run_causal_effect(method: Any) -> None:
                 nll_base,
                 nll_rand_list,
                 batch,
-                placed_ft,
                 mask_all,
                 mask_after_k,
             )
