@@ -250,9 +250,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         pos_rates = torch.tensor([t["positive_occurrence_rate"] for t in all_tokens])
         neg_rates = torch.tensor([t["negative_occurrence_rate"] for t in all_tokens])
 
-        # Get top tokens for each
-        k_pos = min(100, len(all_tokens))
-        k_neg = min(100, len(all_tokens))
+        # Get top tokens for each (use num_tokens_to_plot from config)
+        num_tokens_to_save = int(self.method_cfg.visualization.num_tokens_to_plot)
+        k_pos = min(num_tokens_to_save, len(all_tokens))
+        k_neg = min(num_tokens_to_save, len(all_tokens))
 
         top_k_pos_values, top_k_pos_indices = torch.topk(pos_rates, k=k_pos, largest=True)
         top_k_neg_values, top_k_neg_indices = torch.topk(neg_rates, k=k_neg, largest=True)
