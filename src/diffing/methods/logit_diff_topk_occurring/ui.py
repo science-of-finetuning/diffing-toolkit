@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from src.utils.visualization import multi_tab_interface
 from src.utils.model import place_inputs
 
-# Unicode font support (like in mech-interp)
+# Unicode font support
 UNICODE_FONTS = ['DejaVu Sans', 'Arial Unicode MS', 'Lucida Grande', 'Segoe UI', 'Noto Sans']
 
 
@@ -80,7 +80,7 @@ def _render_occurrence_rankings_tab(method):
     st.text(f"Base: {results['metadata']['base_model']}")
     st.text(f"Finetuned: {results['metadata']['finetuned_model']}")
 
-    # Generate and display bar chart (port from mech-interp)
+    # Generate and display bar chart
     num_tokens_to_plot = min(
         method.method_cfg.visualization.num_tokens_to_plot,
         len(results['top_positive']),
@@ -97,7 +97,7 @@ def _render_occurrence_rankings_tab(method):
         figure_height=method.method_cfg.visualization.figure_height,
         figure_dpi=method.method_cfg.visualization.figure_dpi,
     )
-    st.pyplot(fig)
+    st.pyplot(fig, use_container_width=False, clear_figure=True)
 
 
 def _plot_occurrence_bar_chart(
@@ -111,7 +111,7 @@ def _plot_occurrence_bar_chart(
     figure_dpi: int = 100
 ) -> plt.Figure:
     """
-    Plot direct occurrence rates (ported from mech-interp visualize.py::plot_direct_occurrence_rates).
+    Plot direct occurrence rates as horizontal bar charts.
 
     Args:
         top_positive: List of token dicts sorted by positive_occurrence_rate
@@ -145,7 +145,7 @@ def _plot_occurrence_bar_chart(
     )
     ax_pos.set_xlabel('Occurrence Rate in Top-K (%)', fontsize=10, weight='bold')
     ax_pos.set_title(
-        f'Top {len(top_positive)} Most Positive Diffs\\n(M2 > M1) - Direct',
+        f'Top {len(top_positive)} Most Positive Diffs\n(M2 > M1) - Direct',
         fontsize=12,
         weight='bold',
         color='darkgreen'
@@ -168,7 +168,7 @@ def _plot_occurrence_bar_chart(
     )
     ax_neg.set_xlabel('Occurrence Rate in Top-K (%)', fontsize=10, weight='bold')
     ax_neg.set_title(
-        f'Top {len(top_negative)} Most Negative Diffs\\n(M1 > M2) - Direct',
+        f'Top {len(top_negative)} Most Negative Diffs\n(M1 > M2) - Direct',
         fontsize=12,
         weight='bold',
         color='darkred'
@@ -182,7 +182,7 @@ def _plot_occurrence_bar_chart(
     label2 = model2_name.split('/')[-1]
 
     fig.suptitle(
-        f'Global Token Distribution Analysis - Occurrence Rate (Direct)\\n{label1} vs {label2}\\n'
+        f'Global Token Distribution Analysis - Occurrence Rate (Direct)\n{label1} vs {label2}\n'
         f'Aggregated across {total_positions:,} positions',
         fontsize=14,
         weight='bold'
@@ -242,7 +242,7 @@ def _render_interactive_heatmap_tab(method):
                 method.method_cfg.visualization.top_k_plotting
             )
 
-            # Generate plot (port from mech-interp)
+            # Generate plot
             fig = _plot_heatmap(
                 sample_data,
                 method.base_model_cfg.model_id,
@@ -250,7 +250,7 @@ def _render_interactive_heatmap_tab(method):
                 figure_width=method.method_cfg.visualization.figure_width,
                 figure_dpi=method.method_cfg.visualization.figure_dpi
             )
-            st.pyplot(fig)
+            st.pyplot(fig, use_container_width=False, clear_figure=True)
 
 
 def _prepare_heatmap_data(
@@ -337,7 +337,7 @@ def _plot_heatmap(
     figure_dpi: int = 150
 ) -> plt.Figure:
     """
-    Create a heatmap-style visualization (ported from mech-interp visualize.py::plot_sample_logits).
+    Create a heatmap-style visualization of logit differences.
 
     Shows:
     1. Reference tokens (top row)
@@ -405,192 +405,304 @@ def _plot_heatmap(
 
     # Helper function to render text in a cell
     def render_cell(x: float, y: float, text: str, color: Tuple[float, float, float, float],
-                   height: float = None, width: float = None, fontsize: int = 6,
-                   rotation: int = 0):
+                   height: float = None, width: float = None, fontsize: int = 6, 
+                   show_value: bool = False, rotation: int = 0):
         """Render a colored cell with text"""
         if height is None:
             height = cell_height
         if width is None:
             width = cell_width
-
+            
         # Draw rectangle
         rect = mpatches.Rectangle(
             (x, y), width, height,
             facecolor=color, edgecolor='white', linewidth=0.5
         )
         ax.add_patch(rect)
-
+        
         # Add text (handle special characters)
-        try:
-            display_text = text.replace('\\n', '↵').replace('\\t', '→')
-            # Truncate if too long
-            if len(display_text) > 15:
-                display_text = display_text[:12] + "..."
-
-            ax.text(
-                x + width / 2, y + height / 2,
-                display_text,
-                ha='center', va='center',
-                fontsize=fontsize,
-                rotation=rotation,
-                fontproperties=matplotlib.font_manager.FontProperties(family=UNICODE_FONTS)
-            )
-        except Exception:
-            # Fallback for problematic characters
-            ax.text(
-                x + width / 2, y + height / 2,
-                '?',
-                ha='center', va='center',
-                fontsize=fontsize,
-                rotation=rotation
-            )
-
-    # Section 1: Diff- (negative, RED) - bottom
-    neg_values_all = []
-    for pos_data in sample_data:
-        neg_values_all.extend([d['diff'] for d in pos_data['diff_top_k_negative']])
-    neg_norm = normalize_values(neg_values_all)
-
-    idx = 0
-    for k_idx in range(k_half):
-        for pos_idx, pos_data in enumerate(sample_data):
-            if k_idx < len(pos_data['diff_top_k_negative']):
-                token_data = pos_data['diff_top_k_negative'][k_idx]
-                norm_val = neg_norm[idx] if idx < len(neg_norm) else 0.5
-                idx += 1
-
-                # Shift by 1 column (autoregressive alignment)
-                x_pos = (pos_idx + 1) * cell_width
-                y_pos = current_row + k_idx * cell_height
-
-                # Red colormap
-                color = plt.cm.Reds(norm_val)
-                render_cell(x_pos, y_pos, token_data['token'], color, rotation=90)
-
-    current_row += k_half * cell_height + section_gap
-
-    # Section 2: Diff+ (positive, GREEN)
-    pos_values_all = []
-    for pos_data in sample_data:
-        pos_values_all.extend([d['diff'] for d in pos_data['diff_top_k_positive']])
-    pos_norm = normalize_values(pos_values_all)
-
-    idx = 0
-    for k_idx in range(k_half):
-        for pos_idx, pos_data in enumerate(sample_data):
-            if k_idx < len(pos_data['diff_top_k_positive']):
-                token_data = pos_data['diff_top_k_positive'][k_idx]
-                norm_val = pos_norm[idx] if idx < len(pos_norm) else 0.5
-                idx += 1
-
-                # Shift by 1 column
-                x_pos = (pos_idx + 1) * cell_width
-                y_pos = current_row + k_idx * cell_height
-
-                # Green colormap
-                color = plt.cm.Greens(norm_val)
-                render_cell(x_pos, y_pos, token_data['token'], color, rotation=90)
-
-    current_row += k_half * cell_height + section_gap
-
-    # Section 3: Model 2 predictions
-    model2_values_all = []
-    for pos_data in sample_data:
-        model2_values_all.extend([d['logit'] for d in pos_data['model2_top_k']])
-    model2_norm = normalize_values(model2_values_all)
-
-    idx = 0
-    for k_idx in range(k):
-        for pos_idx, pos_data in enumerate(sample_data):
-            if k_idx < len(pos_data['model2_top_k']):
-                token_data = pos_data['model2_top_k'][k_idx]
-                norm_val = model2_norm[idx] if idx < len(model2_norm) else 0.5
-                idx += 1
-
-                x_pos = (pos_idx + 1) * cell_width
-                y_pos = current_row + k_idx * cell_height
-
-                color = cmap(norm_val)
-                render_cell(x_pos, y_pos, token_data['token'], color, rotation=90)
-
-    current_row += k * cell_height + section_gap
-
-    # Section 4: Model 1 predictions
-    model1_values_all = []
-    for pos_data in sample_data:
-        model1_values_all.extend([d['logit'] for d in pos_data['model1_top_k']])
-    model1_norm = normalize_values(model1_values_all)
-
-    idx = 0
-    for k_idx in range(k):
-        for pos_idx, pos_data in enumerate(sample_data):
-            if k_idx < len(pos_data['model1_top_k']):
-                token_data = pos_data['model1_top_k'][k_idx]
-                norm_val = model1_norm[idx] if idx < len(model1_norm) else 0.5
-                idx += 1
-
-                x_pos = (pos_idx + 1) * cell_width
-                y_pos = current_row + k_idx * cell_height
-
-                color = cmap(norm_val)
-                render_cell(x_pos, y_pos, token_data['token'], color, rotation=90)
-
-    current_row += k * cell_height
-
-    # Section 5: Reference tokens (top row)
-    for pos_idx, pos_data in enumerate(sample_data):
-        x_pos = pos_idx * cell_width
-        y_pos = current_row
-
-        # Gray background for reference
-        color = (0.8, 0.8, 0.8, 1.0)
-        render_cell(x_pos, y_pos, pos_data['actual_token'], color,
-                   height=reference_row_height, rotation=90)
-
-    current_row += reference_row_height
-
-    # Position indices (top)
-    for pos_idx in range(num_positions):
-        x_pos = pos_idx * cell_width
-        y_pos = current_row
-
+        # For value cells, just show the token, not the number
+        if show_value and '\n' in text:
+            # Extract just the token part (before the newline)
+            text_display = text.split('\n')[0]
+        else:
+            text_display = text
+            
+        text_display = text_display.replace('\t', '\\t')
+        # Escape dollar signs to prevent LaTeX interpretation
+        text_display = text_display.replace('$', r'\$')
+        
+        # Truncate if too long (adjust based on rotation)
+        max_chars = 15 if rotation == 90 else 10
+        if len(text_display) > max_chars:
+            text_display = text_display[:max_chars-2] + '..'
+        
         ax.text(
-            x_pos + cell_width / 2, y_pos + position_row_height / 2,
-            str(pos_idx),
-            ha='center', va='center',
-            fontsize=6, weight='bold'
+            x + width/2, y + height/2, text_display,
+            ha='center', va='center', fontsize=fontsize,
+            color='white' if sum(color[:3])/3 < 0.5 else 'black',
+            rotation=rotation,
+            fontproperties=matplotlib.font_manager.FontProperties(family=UNICODE_FONTS)
         )
-
-    # Add labels on the left side
-    label_x = -0.5
-
-    # Model labels
-    label1 = model1_name.split('/')[-1]
-    label2 = model2_name.split('/')[-1]
-
-    # Calculate y positions for labels (midpoints of sections)
-    diff_neg_y = (k_half * cell_height) / 2
-    diff_pos_y = k_half * cell_height + section_gap + (k_half * cell_height) / 2
-    model2_y = 2 * k_half * cell_height + 2 * section_gap + (k * cell_height) / 2
-    model1_y = 2 * k_half * cell_height + 2 * section_gap + k * cell_height + section_gap + (k * cell_height) / 2
-    ref_y = 2 * k_half * cell_height + 2 * section_gap + 2 * k * cell_height + section_gap + reference_row_height / 2
-
-    ax.text(label_x, diff_neg_y, 'Diff-', ha='right', va='center',
-           fontsize=10, weight='bold', color='darkred')
-    ax.text(label_x, diff_pos_y, 'Diff+', ha='right', va='center',
-           fontsize=10, weight='bold', color='darkgreen')
-    ax.text(label_x, model2_y, f'M2\n{label2[:15]}', ha='right', va='center',
-           fontsize=8, weight='bold')
-    ax.text(label_x, model1_y, f'M1\n{label1[:15]}', ha='right', va='center',
-           fontsize=8, weight='bold')
-    ax.text(label_x, ref_y, 'Ref', ha='right', va='center',
-           fontsize=10, weight='bold')
-
+    
+    # =========================================================================
+    # GLOBAL NORMALIZATION: Collect all values first for cross-section comparison
+    # =========================================================================
+    
+    # Collect ALL logit values (Model 1 + Model 2) for unified logit scale
+    all_logits = []
+    for pos_data in sample_data:
+        all_logits.extend([item['logit'] for item in pos_data['model1_top_k'][:k]])
+        all_logits.extend([item['logit'] for item in pos_data['model2_top_k'][:k]])
+    
+    norm_all_logits = normalize_values(all_logits) if all_logits else np.array([])
+    
+    # Collect ALL diff values (positive + negative) for unified diff scale
+    # Use signed values so we can see relative magnitudes
+    all_diffs = []
+    for pos_data in sample_data:
+        all_diffs.extend([d['diff'] for d in pos_data['diff_top_k_positive'][:k_half]])
+        all_diffs.extend([d['diff'] for d in pos_data['diff_top_k_negative'][:k_half]])
+    
+    norm_all_diffs = normalize_values([abs(d) for d in all_diffs]) if all_diffs else np.array([])
+    
+    # =========================================================================
+    # 4. DIFF TOP-K (bottom section)
+    # =========================================================================
+    
+    # NEGATIVE DIFFS FIRST (bottom) - Red section for M1>M2
+    # Negative diffs label
+    ax.text(-0.3, current_row + (k_half * cell_height / 2), 'Diff -\n(M1>M2)',
+            ha='right', va='center', fontsize=8, weight='bold', color='darkred')
+    
+    diff_idx = 0
+    
+    for pos_idx_local, pos_data in enumerate(sample_data):
+        # SHIFT: Position 0 predictions go in column 1, position 1 predictions go in column 2, etc.
+        x_pos = (pos_idx_local + 1) * cell_width  # +1 to shift right
+        
+        # Skip if this would go beyond our grid
+        if pos_idx_local + 1 >= num_positions:
+            continue
+        
+        # Negative diffs (bottom k/2) - use global diff normalization
+        # Reverse order: most negative diff at bottom
+        for i, diff_item in enumerate(pos_data['diff_top_k_negative'][:k_half]):
+            # Calculate index: negative diffs come after positive diffs in the combined array
+            neg_diff_idx = diff_idx + (len(sample_data) * k_half)
+            if neg_diff_idx < len(norm_all_diffs):
+                color = cmap(norm_all_diffs[neg_diff_idx])
+            else:
+                color = (0.5, 0.5, 0.5, 1.0)
+            
+            # Flip row order: i=0 (most negative) goes to bottom
+            row_position = current_row + (k_half - 1 - i) * cell_height
+            
+            render_cell(
+                x_pos, row_position,
+                f"'{diff_item['token']}'\n{diff_item['diff']:.2f}",
+                color, fontsize=5, show_value=True, rotation=90
+            )
+        
+        diff_idx += k_half
+    
+    current_row += k_half * cell_height
+    
+    # Draw divider line between negative and positive diffs
+    ax.axhline(y=current_row, color='gray', linewidth=1.5, linestyle='--', alpha=0.7)
+    
+    # POSITIVE DIFFS SECOND (top) - Green section for M2>M1
+    # Positive diffs label
+    ax.text(-0.3, current_row + (k_half * cell_height / 2), 'Diff +\n(M2>M1)',
+            ha='right', va='center', fontsize=8, weight='bold', color='darkgreen')
+    
+    diff_idx = 0
+    
+    for pos_idx_local, pos_data in enumerate(sample_data):
+        # SHIFT: Position 0 predictions go in column 1, position 1 predictions go in column 2, etc.
+        x_pos = (pos_idx_local + 1) * cell_width  # +1 to shift right
+        
+        # Skip if this would go beyond our grid
+        if pos_idx_local + 1 >= num_positions:
+            continue
+        
+        # Positive diffs (top k/2) - use global diff normalization
+        # Reverse order: highest diff at top
+        for i, diff_item in enumerate(pos_data['diff_top_k_positive'][:k_half]):
+            if diff_idx < len(norm_all_diffs):
+                color = cmap(norm_all_diffs[diff_idx])
+            else:
+                color = (0.5, 0.5, 0.5, 1.0)
+            
+            # Flip row order: i=0 (highest) goes to top
+            row_position = current_row + (k_half - 1 - i) * cell_height
+            
+            render_cell(
+                x_pos, row_position,
+                f"'{diff_item['token']}'\n{diff_item['diff']:.2f}",
+                color, fontsize=5, show_value=True, rotation=90
+            )
+            
+            diff_idx += 1
+    
+    current_row += k_half * cell_height
+    
+    # Add small gap before next section
+    current_row += section_gap
+    
+    # Draw separator line
+    ax.axhline(y=current_row, color='black', linewidth=2)
+    
+    # =========================================================================
+    # 3. MODEL 2 TOP-K
+    # =========================================================================
+    
+    # Add section label
+    label2 = model2_name.split('/')[-1]  # Use last part of path
+    if len(label2) > 15:
+        label2 = label2[:12] + '...'
+    ax.text(-0.3, current_row + (k * cell_height / 2), f'Model 2\n{label2}',
+            ha='right', va='center', fontsize=9, weight='bold')
+    
+    # Track position in global logit normalization array
+    # Model 2 logits come after Model 1 logits in the combined array
+    num_model1_logits = len([item for pos_data in sample_data for item in pos_data['model1_top_k'][:k]])
+    logit_idx = num_model1_logits
+    
+    for pos_idx_local, pos_data in enumerate(sample_data):
+        # SHIFT: Position 0 predictions go in column 1, position 1 predictions go in column 2, etc.
+        x_pos = (pos_idx_local + 1) * cell_width  # +1 to shift right
+        
+        # Skip if this would go beyond our grid
+        if pos_idx_local + 1 >= num_positions:
+            continue
+            
+        # Use global logit normalization
+        # Reverse order: highest logit at top (furthest from bottom)
+        for i, logit_item in enumerate(pos_data['model2_top_k'][:k]):  # Only take first k items
+            if logit_idx < len(norm_all_logits):
+                color = cmap(norm_all_logits[logit_idx])
+                logit_idx += 1
+            else:
+                color = (0.5, 0.5, 0.5, 1.0)
+            
+            # Flip row order: i=0 (highest) goes to top
+            row_position = current_row + (k - 1 - i) * cell_height
+            
+            render_cell(
+                x_pos, row_position,
+                f"'{logit_item['token']}'\n{logit_item['logit']:.1f}",
+                color, fontsize=5, show_value=True, rotation=90
+            )
+    
+    current_row += k * cell_height
+    
+    # Add small gap before next section
+    current_row += section_gap
+    
+    # Draw separator line
+    ax.axhline(y=current_row, color='black', linewidth=2)
+    
+    # =========================================================================
+    # 2. MODEL 1 TOP-K
+    # =========================================================================
+    
+    # Add section label
+    label1 = model1_name.split('/')[-1]  # Use last part of path
+    if len(label1) > 15:
+        label1 = label1[:12] + '...'
+    ax.text(-0.3, current_row + (k * cell_height / 2), f'Model 1\n{label1}',
+            ha='right', va='center', fontsize=9, weight='bold')
+    
+    # Start from beginning of global logit normalization array (Model 1 comes first)
+    logit_idx = 0
+    
+    for pos_idx_local, pos_data in enumerate(sample_data):
+        # SHIFT: Position 0 predictions go in column 1, position 1 predictions go in column 2, etc.
+        x_pos = (pos_idx_local + 1) * cell_width  # +1 to shift right
+        
+        # Skip if this would go beyond our grid
+        if pos_idx_local + 1 >= num_positions:
+            continue
+            
+        # Use global logit normalization
+        # Reverse order: highest logit at top (furthest from bottom)
+        for i, logit_item in enumerate(pos_data['model1_top_k'][:k]):  # Only take first k items
+            if logit_idx < len(norm_all_logits):
+                color = cmap(norm_all_logits[logit_idx])
+                logit_idx += 1
+            else:
+                color = (0.5, 0.5, 0.5, 1.0)
+            
+            # Flip row order: i=0 (highest) goes to top
+            row_position = current_row + (k - 1 - i) * cell_height
+            
+            render_cell(
+                x_pos, row_position,
+                f"'{logit_item['token']}'\n{logit_item['logit']:.1f}",
+                color, fontsize=5, show_value=True, rotation=90
+            )
+    
+    current_row += k * cell_height
+    
+    # Add small gap before next section
+    current_row += section_gap
+    
+    # Draw separator line
+    ax.axhline(y=current_row, color='black', linewidth=2)
+    
+    # =========================================================================
+    # 1. REFERENCE TOKENS (top section with 2 rows)
+    # =========================================================================
+    
+    # Row 1: Position indices
+    ax.text(-0.3, current_row + (position_row_height / 2), 'Position',
+            ha='right', va='center', fontsize=8, weight='bold')
+    
+    for pos_idx_local, pos_data in enumerate(sample_data):
+        x_pos = pos_idx_local * cell_width
+        
+        # Position index in small cell
+        render_cell(
+            x_pos, current_row,
+            f"{pos_idx_local}",
+            (0.95, 0.95, 0.95, 1.0), 
+            height=position_row_height, 
+            fontsize=7,
+            show_value=False
+        )
+    
+    current_row += position_row_height
+    
+    # Row 2: Reference tokens (rotated 90 degrees)
+    ax.text(-0.3, current_row + (reference_row_height / 2), 'Reference\nTokens',
+            ha='right', va='center', fontsize=8, weight='bold')
+    
+    for pos_idx_local, pos_data in enumerate(sample_data):
+        actual_token = pos_data['actual_token']
+        x_pos = pos_idx_local * cell_width
+        
+        # Light gray background for reference tokens with rotated text
+        render_cell(
+            x_pos, current_row,
+            actual_token,
+            (0.9, 0.9, 0.9, 1.0), 
+            height=reference_row_height, 
+            fontsize=7,
+            show_value=False,
+            rotation=90  # Rotate text 90 degrees
+        )
+    
+    current_row += reference_row_height
+    
+    # Draw separator line
+    ax.axhline(y=current_row, color='black', linewidth=2)
+    
     # Add title
     fig.suptitle(
-        f'Logit Difference Heatmap: {label1} vs {label2}',
-        fontsize=14,
-        weight='bold'
+        f'Logit Diff - Sample\n'
+        f'{num_positions} token positions, Top-{k} predictions per model',
+        fontsize=14, weight='bold', y=0.99
     )
 
     return fig

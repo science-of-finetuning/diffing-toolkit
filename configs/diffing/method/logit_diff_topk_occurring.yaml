@@ -23,6 +23,6 @@ visualization:
   top_k_plotting: 6
   figure_width: 24
   figure_height: 12
-  figure_dpi: 400
+  figure_dpi: 400  # Sweet spot for Streamlit display
   num_tokens_to_plot: 50
 
