@@ -4,8 +4,8 @@ requires_preprocessing: false
 
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
-  batch_size: 8
-  max_samples: 10
+  batch_size: 64
+  max_samples: 256
   max_tokens_per_sample: 128
   top_k: 50
   ignore_padding: true
@@ -16,13 +16,44 @@ datasets:
   use_pretraining_dataset: true
   use_training_dataset: true
 
-overwrite: false
+overwrite: true
 
 # Visualization settings
 visualization:
   top_k_plotting: 6
   figure_width: 24
   figure_height: 12
-  figure_dpi: 400  # Sweet spot for Streamlit display
+  figure_dpi: 600
   num_tokens_to_plot: 50
+  
+  # Font sizes (all configurable, scales with DPI)
+  font_sizes:
+    tick_labels: 11        # Y-axis token labels in bar chart
+    axis_labels: 12        # X-axis labels
+    subplot_titles: 14     # Individual subplot titles
+    main_title: 16         # Main figure title
+    heatmap_labels: 8      # Section labels in heatmap
+    heatmap_cells: 5       # Token text inside heatmap cells
+    heatmap_positions: 7   # Position indices in heatmap
+
+# Token relevance grading
+token_relevance:
+  enabled: true  # Set to true to enable token relevance grading
+  overwrite: true
+  agreement: all  # 'majority' or 'all' for permutation label aggregation
+  
+  # Grader configuration (matches ADL)
+  grader:
+    model_id: openai/gpt-5-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    max_tokens: 10000
+    permutations: 3  # Number of permutation runs for robustness
+  
+  # Frequent tokens baseline (matches ADL)
+  frequent_tokens:
+    num_tokens: 100
+    min_count: 10
+  
+  k_candidate_tokens: 20  # How many top-K tokens to grade (from top_positive list)
 

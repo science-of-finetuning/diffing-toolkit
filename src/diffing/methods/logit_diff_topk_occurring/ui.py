@@ -6,6 +6,7 @@ import streamlit as st
 from pathlib import Path
 import json
 import torch
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.font_manager
@@ -14,6 +15,10 @@ from typing import Dict, Any, List, Tuple, Optional
 
 from src.utils.visualization import multi_tab_interface
 from src.utils.model import place_inputs
+
+# Configure matplotlib for high-quality rendering (minimal global settings)
+matplotlib.rcParams['text.antialiased'] = True  # Always enable anti-aliasing for smooth text
+matplotlib.rcParams['figure.autolayout'] = False  # We handle layout manually
 
 # Unicode font support
 UNICODE_FONTS = ['DejaVu Sans', 'Arial Unicode MS', 'Lucida Grande', 'Segoe UI', 'Noto Sans']
@@ -96,8 +101,10 @@ def _render_occurrence_rankings_tab(method):
         figure_width=method.method_cfg.visualization.figure_width,
         figure_height=method.method_cfg.visualization.figure_height,
         figure_dpi=method.method_cfg.visualization.figure_dpi,
+        font_sizes=method.method_cfg.visualization.font_sizes,
     )
-    st.pyplot(fig, use_container_width=False, clear_figure=True)
+    # Use high-quality rendering with exact DPI
+    st.pyplot(fig, use_container_width=False, clear_figure=True, dpi=method.method_cfg.visualization.figure_dpi)
 
 
 def _plot_occurrence_bar_chart(
@@ -108,7 +115,8 @@ def _plot_occurrence_bar_chart(
     total_positions: int,
     figure_width: int = 16,
     figure_height: int = 12,
-    figure_dpi: int = 100
+    figure_dpi: int = 100,
+    font_sizes: Dict[str, int] = None
 ) -> plt.Figure:
     """
     Plot direct occurrence rates as horizontal bar charts.
@@ -122,10 +130,20 @@ def _plot_occurrence_bar_chart(
         figure_width: Width of figure in inches
         figure_height: Height of figure in inches
         figure_dpi: DPI for figure
+        font_sizes: Dict with font size settings (optional, uses defaults if None)
 
     Returns:
         matplotlib Figure
     """
+    # Use default font sizes if not provided
+    if font_sizes is None:
+        font_sizes = {
+            'tick_labels': 11,
+            'axis_labels': 12,
+            'subplot_titles': 14,
+            'main_title': 16
+        }
+    
     # Create figure
     fig, (ax_neg, ax_pos) = plt.subplots(1, 2, figsize=(figure_width, figure_height), dpi=figure_dpi)
     fig.subplots_adjust(left=0.15, right=0.95, top=0.84, bottom=0.05, wspace=0.4)
@@ -140,13 +158,13 @@ def _plot_occurrence_bar_chart(
     pos_tokens_escaped = [f"'{t.replace('$', r'\\$')}'" for t in pos_tokens]
     ax_pos.set_yticklabels(
         pos_tokens_escaped,
-        fontsize=9,
+        fontsize=font_sizes['tick_labels'],
         fontproperties=matplotlib.font_manager.FontProperties(family=UNICODE_FONTS)
     )
-    ax_pos.set_xlabel('Occurrence Rate in Top-K (%)', fontsize=10, weight='bold')
+    ax_pos.set_xlabel('Occurrence Rate in Top-K (%)', fontsize=font_sizes['axis_labels'], weight='bold')
     ax_pos.set_title(
         f'Top {len(top_positive)} Most Positive Diffs\n(M2 > M1) - Direct',
-        fontsize=12,
+        fontsize=font_sizes['subplot_titles'],
         weight='bold',
         color='darkgreen'
     )
@@ -163,13 +181,13 @@ def _plot_occurrence_bar_chart(
     neg_tokens_escaped = [f"'{t.replace('$', r'\\$')}'" for t in neg_tokens]
     ax_neg.set_yticklabels(
         neg_tokens_escaped,
-        fontsize=9,
+        fontsize=font_sizes['tick_labels'],
         fontproperties=matplotlib.font_manager.FontProperties(family=UNICODE_FONTS)
     )
-    ax_neg.set_xlabel('Occurrence Rate in Top-K (%)', fontsize=10, weight='bold')
+    ax_neg.set_xlabel('Occurrence Rate in Top-K (%)', fontsize=font_sizes['axis_labels'], weight='bold')
     ax_neg.set_title(
         f'Top {len(top_negative)} Most Negative Diffs\n(M1 > M2) - Direct',
-        fontsize=12,
+        fontsize=font_sizes['subplot_titles'],
         weight='bold',
         color='darkred'
     )
@@ -184,7 +202,7 @@ def _plot_occurrence_bar_chart(
     fig.suptitle(
         f'Global Token Distribution Analysis - Occurrence Rate (Direct)\n{label1} vs {label2}\n'
         f'Aggregated across {total_positions:,} positions',
-        fontsize=14,
+        fontsize=font_sizes['main_title'],
         weight='bold'
     )
 
@@ -248,9 +266,11 @@ def _render_interactive_heatmap_tab(method):
                 method.base_model_cfg.model_id,
                 method.finetuned_model_cfg.model_id,
                 figure_width=method.method_cfg.visualization.figure_width,
-                figure_dpi=method.method_cfg.visualization.figure_dpi
+                figure_dpi=method.method_cfg.visualization.figure_dpi,
+                font_sizes=method.method_cfg.visualization.font_sizes
             )
-            st.pyplot(fig, use_container_width=False, clear_figure=True)
+            # Use high-quality rendering with exact DPI
+            st.pyplot(fig, use_container_width=False, clear_figure=True, dpi=method.method_cfg.visualization.figure_dpi)
 
 
 def _prepare_heatmap_data(
@@ -334,7 +354,8 @@ def _plot_heatmap(
     model1_name: str,
     model2_name: str,
     figure_width: int = 16,
-    figure_dpi: int = 150
+    figure_dpi: int = 150,
+    font_sizes: Dict[str, int] = None
 ) -> plt.Figure:
     """
     Create a heatmap-style visualization of logit differences.
@@ -352,10 +373,20 @@ def _plot_heatmap(
         model2_name: Name of finetuned model
         figure_width: Width of figure in inches
         figure_dpi: DPI for figure
+        font_sizes: Dict with font size settings (optional, uses defaults if None)
 
     Returns:
         matplotlib Figure
     """
+    # Use default font sizes if not provided
+    if font_sizes is None:
+        font_sizes = {
+            'heatmap_labels': 8,
+            'heatmap_cells': 5,
+            'heatmap_positions': 7,
+            'main_title': 14
+        }
+    
     if not sample_data:
         st.warning("No data to visualize")
         return None
@@ -405,13 +436,15 @@ def _plot_heatmap(
 
     # Helper function to render text in a cell
     def render_cell(x: float, y: float, text: str, color: Tuple[float, float, float, float],
-                   height: float = None, width: float = None, fontsize: int = 6, 
+                   height: float = None, width: float = None, fontsize: int = None, 
                    show_value: bool = False, rotation: int = 0):
         """Render a colored cell with text"""
         if height is None:
             height = cell_height
         if width is None:
             width = cell_width
+        if fontsize is None:
+            fontsize = font_sizes['heatmap_cells']
             
         # Draw rectangle
         rect = mpatches.Rectangle(
@@ -473,7 +506,7 @@ def _plot_heatmap(
     # NEGATIVE DIFFS FIRST (bottom) - Red section for M1>M2
     # Negative diffs label
     ax.text(-0.3, current_row + (k_half * cell_height / 2), 'Diff -\n(M1>M2)',
-            ha='right', va='center', fontsize=8, weight='bold', color='darkred')
+            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold', color='darkred')
     
     diff_idx = 0
     
@@ -501,7 +534,7 @@ def _plot_heatmap(
             render_cell(
                 x_pos, row_position,
                 f"'{diff_item['token']}'\n{diff_item['diff']:.2f}",
-                color, fontsize=5, show_value=True, rotation=90
+                color, show_value=True, rotation=90
             )
         
         diff_idx += k_half
@@ -514,7 +547,7 @@ def _plot_heatmap(
     # POSITIVE DIFFS SECOND (top) - Green section for M2>M1
     # Positive diffs label
     ax.text(-0.3, current_row + (k_half * cell_height / 2), 'Diff +\n(M2>M1)',
-            ha='right', va='center', fontsize=8, weight='bold', color='darkgreen')
+            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold', color='darkgreen')
     
     diff_idx = 0
     
@@ -540,7 +573,7 @@ def _plot_heatmap(
             render_cell(
                 x_pos, row_position,
                 f"'{diff_item['token']}'\n{diff_item['diff']:.2f}",
-                color, fontsize=5, show_value=True, rotation=90
+                color, show_value=True, rotation=90
             )
             
             diff_idx += 1
@@ -562,7 +595,7 @@ def _plot_heatmap(
     if len(label2) > 15:
         label2 = label2[:12] + '...'
     ax.text(-0.3, current_row + (k * cell_height / 2), f'Model 2\n{label2}',
-            ha='right', va='center', fontsize=9, weight='bold')
+            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
     
     # Track position in global logit normalization array
     # Model 2 logits come after Model 1 logits in the combined array
@@ -592,7 +625,7 @@ def _plot_heatmap(
             render_cell(
                 x_pos, row_position,
                 f"'{logit_item['token']}'\n{logit_item['logit']:.1f}",
-                color, fontsize=5, show_value=True, rotation=90
+                color, show_value=True, rotation=90
             )
     
     current_row += k * cell_height
@@ -612,7 +645,7 @@ def _plot_heatmap(
     if len(label1) > 15:
         label1 = label1[:12] + '...'
     ax.text(-0.3, current_row + (k * cell_height / 2), f'Model 1\n{label1}',
-            ha='right', va='center', fontsize=9, weight='bold')
+            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
     
     # Start from beginning of global logit normalization array (Model 1 comes first)
     logit_idx = 0
@@ -640,7 +673,7 @@ def _plot_heatmap(
             render_cell(
                 x_pos, row_position,
                 f"'{logit_item['token']}'\n{logit_item['logit']:.1f}",
-                color, fontsize=5, show_value=True, rotation=90
+                color, show_value=True, rotation=90
             )
     
     current_row += k * cell_height
@@ -657,7 +690,7 @@ def _plot_heatmap(
     
     # Row 1: Position indices
     ax.text(-0.3, current_row + (position_row_height / 2), 'Position',
-            ha='right', va='center', fontsize=8, weight='bold')
+            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
     
     for pos_idx_local, pos_data in enumerate(sample_data):
         x_pos = pos_idx_local * cell_width
@@ -668,7 +701,7 @@ def _plot_heatmap(
             f"{pos_idx_local}",
             (0.95, 0.95, 0.95, 1.0), 
             height=position_row_height, 
-            fontsize=7,
+            fontsize=font_sizes['heatmap_positions'],
             show_value=False
         )
     
@@ -676,7 +709,7 @@ def _plot_heatmap(
     
     # Row 2: Reference tokens (rotated 90 degrees)
     ax.text(-0.3, current_row + (reference_row_height / 2), 'Reference\nTokens',
-            ha='right', va='center', fontsize=8, weight='bold')
+            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
     
     for pos_idx_local, pos_data in enumerate(sample_data):
         actual_token = pos_data['actual_token']
@@ -688,7 +721,7 @@ def _plot_heatmap(
             actual_token,
             (0.9, 0.9, 0.9, 1.0), 
             height=reference_row_height, 
-            fontsize=7,
+            fontsize=font_sizes['heatmap_positions'],
             show_value=False,
             rotation=90  # Rotate text 90 degrees
         )
@@ -702,7 +735,7 @@ def _plot_heatmap(
     fig.suptitle(
         f'Logit Diff - Sample\n'
         f'{num_positions} token positions, Top-{k} predictions per model',
-        fontsize=14, weight='bold', y=0.99
+        fontsize=font_sizes['main_title'], weight='bold', y=0.99
     )
 
     return fig

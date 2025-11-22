@@ -19,6 +19,8 @@ from ..diffing_method import DiffingMethod
 from src.utils.model import place_inputs
 from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
+from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
+from ..activation_difference_lens.token_relevance import _compute_frequent_tokens
 from .ui import visualize
 
 
@@ -304,6 +306,164 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Saved results for {dataset_name} to {output_file}")
         return output_file
 
+    def run_token_relevance(self) -> None:
+        """Grade top-K positive tokens for relevance to finetuning domain."""
+        cfg = self.method_cfg.token_relevance
+        
+        if not cfg.enabled:
+            return
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("RUNNING TOKEN RELEVANCE GRADING")
+        logger.info("=" * 80)
+        
+        overwrite = bool(cfg.overwrite)
+        agreement_mode = str(cfg.agreement)
+        
+        # Get organism description
+        organism_cfg = self.cfg.organism
+        assert hasattr(organism_cfg, "description_long"), (
+            "Organism config must have 'description_long' for token relevance grading"
+        )
+        description = str(organism_cfg.description_long)
+        logger.info(f"Using organism description: {description[:100]}...")
+        
+        # Initialize grader
+        grader_cfg = cfg.grader
+        grader = TokenRelevanceGrader(
+            grader_model_id=str(grader_cfg.model_id),
+            base_url=str(grader_cfg.base_url),
+            api_key_path=str(grader_cfg.api_key_path),
+        )
+        logger.info(f"Initialized grader: {grader_cfg.model_id}")
+        
+        # Compute frequent tokens from training dataset (if available)
+        freq_cfg = cfg.frequent_tokens
+        has_training_dataset = hasattr(organism_cfg, "training_dataset") and (
+            organism_cfg.training_dataset is not None
+        )
+        
+        if has_training_dataset:
+            # Extract dataset ID from training_dataset config
+            training_dataset_id = str(organism_cfg.training_dataset.id)
+            logger.info(f"Computing frequent tokens from training dataset: {training_dataset_id}")
+            frequent_tokens = _compute_frequent_tokens(
+                dataset_name=training_dataset_id,
+                tokenizer=self.tokenizer,
+                splits=["train"],
+                num_tokens=int(freq_cfg.num_tokens),
+                min_count=int(freq_cfg.min_count),
+                is_chat=False,
+                subset=None,
+            )
+            logger.info(f"Found {len(frequent_tokens)} frequent tokens")
+        else:
+            frequent_tokens = []
+            logger.info("No training dataset available, using empty frequent tokens list")
+        
+        # Process each dataset
+        for dataset_cfg in self.datasets:
+            dataset_name = dataset_cfg.name
+            results_file = self.results_dir / f"{dataset_name}_occurrence_rates.json"
+            
+            if not results_file.exists():
+                logger.warning(f"No results found for {dataset_name}, skipping token relevance")
+                continue
+            
+            logger.info("")
+            logger.info(f"Processing dataset: {dataset_name}")
+            
+            # Load saved occurrence results
+            with open(results_file, "r") as f:
+                results = json.load(f)
+            
+            # Output directory (matches ADL structure with layer_global/position_all)
+            dataset_dir_name = dataset_cfg.id.split("/")[-1]
+            out_dir = (
+                self.results_dir
+                / "layer_global"
+                / dataset_dir_name
+                / "token_relevance"
+                / "position_all"
+                / "difference"
+            )
+            out_dir.mkdir(parents=True, exist_ok=True)
+            rel_path = out_dir / "relevance_logit_diff.json"
+            
+            # Skip if exists and not overwriting
+            if (not overwrite) and rel_path.exists():
+                logger.info(f"Token relevance exists for {dataset_name}, skipping (overwrite=False)")
+                continue
+            
+            # Extract top-K positive tokens and their occurrence rates
+            k_tokens = min(int(cfg.k_candidate_tokens), len(results["top_positive"]))
+            candidate_tokens = [t["token_str"] for t in results["top_positive"][:k_tokens]]
+            token_weights = [t["positive_occurrence_rate"] / 100.0 for t in results["top_positive"][:k_tokens]]
+            
+            logger.info(f"Grading {k_tokens} top positive tokens for {dataset_name}")
+            logger.info(f"Top 5 tokens: {candidate_tokens[:5]}")
+            
+            # Compute trivial baseline
+            trivial_hits = sum(1 for t in candidate_tokens if t in frequent_tokens)
+            trivial_percentage = trivial_hits / float(len(candidate_tokens)) if candidate_tokens else 0.0
+            
+            # Grade with permutation robustness
+            permutations = int(grader_cfg.permutations)
+            logger.info(f"Running grader with {permutations} permutations...")
+            majority_labels, permutation_labels, raw_responses = grader.grade(
+                description=description,
+                frequent_tokens=frequent_tokens,
+                candidate_tokens=candidate_tokens,
+                permutations=permutations,
+                concurrent=True,
+                max_tokens=int(grader_cfg.max_tokens),
+            )
+            
+            # Aggregate labels based on agreement mode
+            if agreement_mode == "majority":
+                final_labels = majority_labels
+            else:  # "all"
+                n = len(candidate_tokens)
+                final_labels = [
+                    "RELEVANT" if all(run[i] == "RELEVANT" for run in permutation_labels)
+                    else "IRRELEVANT"
+                    for i in range(n)
+                ]
+            
+            # Compute percentage metrics
+            relevant_fraction = sum(lbl == "RELEVANT" for lbl in final_labels) / float(len(final_labels))
+            
+            # Weighted percentage using occurrence rates
+            total_w = sum(token_weights)
+            relevant_w = sum(w for lbl, w in zip(final_labels, token_weights) if lbl == "RELEVANT")
+            weighted_percentage = relevant_w / total_w if total_w > 0 else 0.0
+            
+            # Create output record (matches ADL format)
+            rec = {
+                "layer": "global",
+                "position": "all",
+                "variant": "difference",
+                "source": "logit_diff",
+                "target": "self",
+                "labels": final_labels,
+                "tokens": candidate_tokens,
+                "percentage": relevant_fraction,
+                "trivial_percentage": trivial_percentage,
+                "weighted_percentage": float(weighted_percentage),
+                "grader_responses": raw_responses,
+            }
+            
+            # Save results
+            rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+            logger.info(f"✓ Token relevance saved: {rel_path}")
+            logger.info(f"  Relevance: {relevant_fraction*100:.1f}%, Weighted: {weighted_percentage*100:.1f}%")
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("✓ Token relevance grading completed!")
+        logger.info("=" * 80)
+
     def run(self) -> None:
         """
         Main execution method for logit diff top-K occurring analysis.
@@ -345,6 +505,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("✓ Logit diff top-K occurring analysis completed successfully!")
         self.logger.info(f"✓ Results saved to: {self.results_dir}")
         self.logger.info("=" * 80)
+        
+        # Run token relevance grading if enabled
+        if hasattr(self.method_cfg, 'token_relevance') and self.method_cfg.token_relevance.enabled:
+            self.run_token_relevance()
 
     def visualize(self) -> None:
         """
