@@ -48,6 +48,7 @@ from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
 from src.utils.cache import SampleCache
 from src.utils.dictionary.steering import display_steering_results
 from src.utils.visualization import render_latent_lens_tab
+from src.utils.agents import DiffingMethodAgent
 from src.utils.dictionary.steering import (
     latent_steering_experiment,
     save_results_to_csv,
@@ -1493,6 +1494,10 @@ class PCAMethod(DiffingMethod):
                     results[model_name][organism_name] = str(pca_dir)
 
         return results
+
+    def get_agent(self) -> DiffingMethodAgent:
+        """Return agent for this method."""
+        return DiffingMethodAgent(cfg=self.cfg)
 
 
 class PCAOnlineDashboard(AbstractOnlineDiffingDashboard):

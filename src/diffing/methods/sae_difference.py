@@ -51,6 +51,7 @@ from src.utils.dictionary.utils import load_latent_df, load_dictionary_model
 from src.utils.dashboards import AbstractOnlineDiffingDashboard, SteeringDashboard
 from src.utils.dictionary.steering import display_steering_results
 from src.utils.visualization import render_latent_lens_tab
+from src.utils.agents import DiffingMethodAgent
 
 
 class SAEDifferenceMethod(DiffingMethod):
@@ -1185,6 +1186,10 @@ class SAESteeringDashboard(SteeringDashboard):
             "steering_factor": steering_factor,
             "steering_mode": steering_mode,
         }
+
+    def get_agent(self) -> DiffingMethodAgent:
+        """Return agent for this method."""
+        return DiffingMethodAgent(cfg=self.cfg)
 
 
 class SAEDifferenceOnlineDashboard(AbstractOnlineDiffingDashboard):

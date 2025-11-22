@@ -26,6 +26,7 @@ from src.utils.cache import SampleCache, SampleCacheDataset
 from src.utils.collection import RunningActivationMean
 from src.utils.max_act_store import MaxActStore
 from src.utils.model import place_inputs
+from src.utils.agents import DiffingMethodAgent
 
 from .ui import visualize
 
@@ -1006,6 +1007,10 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                         results[model_name][organism_name] = str(act_analysis_dir)
 
         return results
+
+    def get_agent(self) -> DiffingMethodAgent:
+        """Return agent for this method."""
+        return DiffingMethodAgent(cfg=self.cfg)
 
     def compute_all_activation_statistics_for_tokens(
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor, layer: int
