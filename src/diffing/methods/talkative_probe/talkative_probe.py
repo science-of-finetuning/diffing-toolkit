@@ -28,14 +28,17 @@ class TalkativeProbeMethod(DiffingMethod):
     def visualize(self):
         pass
 
-    def has_results(self, results_dir: Path) -> Dict[str, Dict[str, str]]:
+    @staticmethod
+    def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:
         """
         Find all available results for this method.
 
         Returns:
             Dict mapping {model: {organism: path_to_results}}
         """
-        raise NotImplementedError("has_results is not implemented for TalkativeProbeMethod")
+        # TalkativeProbe stores results differently, so return empty dict for now
+        # to prevent dashboard errors
+        return {}
 
     def get_agent(self) -> DiffingMethodAgent:
         """Get the agent for the method."""

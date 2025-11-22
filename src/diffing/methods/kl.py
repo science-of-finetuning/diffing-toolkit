@@ -30,6 +30,7 @@ from src.utils.dashboards import (
     MaxActivationDashboardComponent,
 )
 from src.utils.visualization import multi_tab_interface
+from src.utils.agents import DiffingMethodAgent
 
 
 class KLDivergenceDiffingMethod(DiffingMethod):
@@ -634,6 +635,10 @@ class KLDivergenceDiffingMethod(DiffingMethod):
             "statistics": statistics,
             "total_tokens": len(tokens),
         }
+
+    def get_agent(self) -> DiffingMethodAgent:
+        """Return agent for this method."""
+        return DiffingMethodAgent(cfg=self.cfg)
 
     @staticmethod
     def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:
