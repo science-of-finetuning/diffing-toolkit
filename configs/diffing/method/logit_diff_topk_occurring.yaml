@@ -57,3 +57,8 @@ token_relevance:
   
   k_candidate_tokens: 20  # How many top-K tokens to grade (from top_positive list)
 
+# Agent configuration
+agent:
+  overview:
+    datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
+    # Note: No top_k_tokens config - we always show ALL available tokens

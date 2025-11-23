@@ -19,6 +19,7 @@ from ..diffing_method import DiffingMethod
 from src.utils.model import place_inputs
 from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
+from src.utils.agents.base_agent import BaseAgent
 from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
 from ..activation_difference_lens.token_relevance import _compute_frequent_tokens
 from .ui import visualize
@@ -552,6 +553,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         return results
 
     def get_agent(self) -> DiffingMethodAgent:
-        """Return agent for this method."""
-        return DiffingMethodAgent(cfg=self.cfg)
+        from .agents import LogitDiffAgent
+        return LogitDiffAgent(cfg=self.cfg)
 
+    def get_baseline_agent(self) -> BaseAgent:
+        from .agents import LogitDiffBlackboxAgent
+        return LogitDiffBlackboxAgent(cfg=self.cfg)
