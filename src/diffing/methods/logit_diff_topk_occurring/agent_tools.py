@@ -17,9 +17,10 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
         # autodiscover datasets from results_dir
         results_files = list(method.results_dir.glob("*_occurrence_rates.json"))
         datasets = [f.stem.replace("_occurrence_rates", "") for f in results_files]
-        if len(datasets) == 0:
-            logger.warning(f"No results found in {method.results_dir}")
-            return {"datasets": {}}
+        assert len(datasets) > 0, (
+            f"No diffing results found in {method.results_dir}. "
+            f"Run 'pipeline.mode=diffing' with 'diffing/method=logit_diff_topk_occurring' first before running evaluation."
+        )
             
     out: Dict[str, Any] = {"datasets": {}}
     
