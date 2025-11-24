@@ -6,11 +6,13 @@ and compiling them into new adapter files for use with vLLM.
 """
 
 from abc import ABC, abstractmethod
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
+import hashlib
 import json
 import os
-from typing import Literal, Any, Self, Callable
+from typing import Literal, Any, Self
 from pathlib import Path
 import re
 import shutil
@@ -19,6 +21,7 @@ import yaml
 from loguru import logger
 from nnterp import StandardizedTransformer
 import torch as th
+from safetensors.torch import save_file
 
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
@@ -242,12 +245,6 @@ class AmplificationConfig:
         with open(path, "w") as f:
             yaml.safe_dump(self.to_dict(), f)
 
-    def save_compiled_config(
-        self, path: Path, base_model_name: str, base_model: StandardizedTransformer
-    ):
-        with open(path, "w") as f:
-            yaml.safe_dump(self.to_dict_for_model(base_model_name, base_model), f)
-
     def resolve(
         self, base_model: StandardizedTransformer, base_model_name: str
     ) -> dict[str, list[dict[str, float]]]:
@@ -257,7 +254,7 @@ class AmplificationConfig:
 
     def compile(
         self, base_dir: Path, base_model_name: str, base_model: StandardizedTransformer
-    ) -> Path | None:
+    ) -> tuple[Path | None, str | None]:
         """
         Compile this amplification config into a modified adapter.
 
@@ -274,8 +271,26 @@ class AmplificationConfig:
             Path to the compiled adapter directory
         """
         if len(self.amplified_adapters) == 0:
-            return None
+            return None, None
         output_dir = base_dir / self.name / base_model_name
+        if output_dir.exists():
+            logger.warning(
+                f"Output directory {output_dir} already exists. Overwriting."
+            )
+            shutil.rmtree(output_dir)
+
+        # Create compiled config
+        config_dict = self.to_dict_for_model(base_model_name, base_model)
+        # Use hash to put this in a unique directory
+        config_hash = hashlib.sha256(
+            json.dumps(config_dict, sort_keys=True).encode()
+        ).hexdigest()
+        config_dict["hash"] = config_hash
+        output_dir = output_dir / config_hash
+        output_dir.mkdir(parents=True, exist_ok=False)
+
+        with open(output_dir / "amplification_config.yaml", "w") as f:
+            yaml.safe_dump(config_dict, f)
 
         # Resolve adapter_ids if they're not already set
         all_adapter_ids = [
@@ -286,16 +301,6 @@ class AmplificationConfig:
         # Do all the symlinking for the first adapter directly in the output directory
         first_adapter_id = all_adapter_ids[0]
         adapter_path = adapter_id_to_path(first_adapter_id)
-        if output_dir.exists():
-            logger.warning(
-                f"Output directory {output_dir} already exists. Overwriting."
-            )
-            shutil.rmtree(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=False)
-        for item in adapter_path.iterdir():
-            target = output_dir / item.name
-            assert not target.exists(), f"Target {target} already exists"
-            os.symlink(item, target)
 
         # Add other adapters in subdirectories
         for adapter_id in all_adapter_ids[1:]:
@@ -305,12 +310,11 @@ class AmplificationConfig:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 assert not target.exists(), f"Target {target} already exists"
                 os.symlink(item, target)
-
-        self.save_compiled_config(
-            output_dir / "amplification_config.yaml", base_model_name, base_model
-        )
-
-        return output_dir
+        for item in adapter_path.iterdir():
+            target = output_dir / item.name
+            assert not target.exists(), f"Target {target} already exists"
+            os.symlink(item, target)
+        return output_dir, config_hash
 
 
 def path_to_template(path: str) -> str:
@@ -422,10 +426,15 @@ def patch_lora_weights(
     weights: dict[str, th.Tensor],
     compiled_amplifications: dict[str, list[dict[str, float]]],
     module_paths: dict[Literal["attention", "mlp"], str],
-) -> dict[str, float]:
+) -> tuple[dict[str, float], list[str]]:
     """
     Patch LoRA weights with compiled amplifications in-place.
-    Returns the dictionary of amplified modules with their weights.
+
+    Args:
+        weights: the dictionary of weights to patch
+        compiled_amplifications: the compiled amplifications
+        module_paths: the module paths used to find submodules of each amplified module
+    Returns: a tuple of the dictionary of amplified modules with their weights and the list of unamplified module names.
     """
     if len(compiled_amplifications) == 0:
         return dict()
@@ -455,7 +464,8 @@ def patch_lora_weights(
                     raise ValueError(f"Module {match} already amplified")
                 weights[match] *= module_weight
                 amplified_modules[match] = module_weight
-    return amplified_modules
+    unamplified_modules = [k for k in all_weight_keys if k not in amplified_modules]
+    return amplified_modules, unamplified_modules
 
 
 @ensure_vllm
@@ -464,6 +474,11 @@ def patch_vllm():
     from vllm.lora.models import LoRAModel
     from vllm.logger import init_logger
     from vllm.lora.peft_helper import PEFTHelper
+
+    is_debug = os.getenv("DEBUG_AMPLIFICATION", "0") == "1"
+
+    if getattr(LoRAModel, "_is_amplification_patched", False):
+        return
 
     vllm_logger = init_logger(__name__)
 
@@ -509,19 +524,38 @@ def patch_vllm():
         if cfg is None:
             vllm_logger.info("No amplification config found, skipping amplification")
         else:
-            amplified_modules = patch_lora_weights(
+            amplified_modules, unamplified_modules = patch_lora_weights(
                 tensors, cfg["resolved_config"], cfg["module_paths"]
             )
             vllm_logger.info(f"running config {cfg['name']}:")
-            vllm_logger.info(yaml.dump(cfg))
+            if is_debug:
+                vllm_logger.info(
+                    yaml.dump(
+                        {k: v for k, v in cfg.items() if k != "resolved_config"}
+                        | {"resolved_config": "<resolved_config>"}
+                    )
+                )
             vllm_logger.info(format_amplified_modules(amplified_modules))
-            with open(
-                Path(peft_helper._amplfication_config_lora_path)
-                / ".last_amplified_modules.yaml",
-                "w",
-            ) as f:
-                yaml.dump(amplified_modules, f)
+            if is_debug:
+                debug_path = Path(peft_helper._amplfication_config_lora_path) / "debug"
+                debug_path.mkdir(exist_ok=True)
+                from coolname import generate_slug
 
+                timestamp = (
+                    f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{generate_slug(2)}"
+                )
+                with open(
+                    debug_path / f"{timestamp}.yaml",
+                    "w",
+                ) as f:
+                    yaml.dump(
+                        dict(
+                            amplified_modules=amplified_modules,
+                            unamplified_modules=unamplified_modules,
+                        ),
+                        f,
+                    )
+                save_file(tensors, debug_path / f"{timestamp}.safetensors")
         return _original_from_lora_tensors(
             lora_model_id, tensors, peft_helper, **kwargs
         )
@@ -529,5 +563,6 @@ def patch_vllm():
     # Apply patches
     LoRAModel.from_local_checkpoint = scaled_from_local_checkpoint
     LoRAModel.from_lora_tensors = scaled_from_lora_tensors
+    LoRAModel._is_amplification_patched = True
 
     logger.info("vLLM LoRA loading patched for amplification support")
