@@ -262,8 +262,7 @@ def load_model(
 
             if adapter_id:
                 logger.info(f"Loading adapter: {adapter_id}")
-                # TODO: check if it's really needed
-                # model.dispatch()
+                model.dispatch()  # dispatch is needed to be able to load the adapters on the right device
                 model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
 
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -339,41 +338,6 @@ def is_sharded(model: StandardizedTransformer) -> bool:
     # A model is sharded if it has multiple devices in its device map
     unique_devices = set(device_map.values())
     return len(unique_devices) > 1
-
-
-def get_model_device(model: StandardizedTransformer) -> th.device:
-    if is_sharded(model):
-        raise RuntimeError(
-            "Model is sharded; no single device. Use place_inputs or submodule-aware helpers."
-        )
-    try:
-        return next(model.parameters()).device
-    except StopIteration:
-        raise RuntimeError("Model has no parameters to infer device.")
-
-
-def place_inputs(
-    input_ids: th.Tensor,
-    attention_mask: th.Tensor | None,
-    model: StandardizedTransformer,
-) -> Dict[str, th.Tensor]:
-    assert input_ids.ndim == 2
-    if attention_mask is not None:
-        assert attention_mask.shape == input_ids.shape
-    # I expect this to work with nnsight. TODO: clean
-    return dict(input_ids=input_ids, attention_mask=attention_mask)
-    # Sharded models accept CPU tensors and dispatch internally
-    # if is_sharded(model):
-    #     return {
-    #         "input_ids": input_ids.cpu(),
-    #         "attention_mask": None if attention_mask is None else attention_mask.cpu(),
-    #     }
-
-    # dev = get_model_device(model)
-    # return {
-    #     "input_ids": input_ids.to(dev),
-    #     "attention_mask": None if attention_mask is None else attention_mask.to(dev),
-    # }
 
 
 def get_modules_device(*modules: Envoy) -> list[th.device]:
