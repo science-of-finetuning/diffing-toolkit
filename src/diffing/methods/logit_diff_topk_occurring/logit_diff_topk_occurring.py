@@ -13,7 +13,6 @@ from loguru import logger
 import json
 from tqdm import tqdm
 from collections import defaultdict
-from datasets import load_dataset
 
 from ..diffing_method import DiffingMethod
 from src.utils.model import place_inputs
@@ -22,6 +21,10 @@ from src.utils.agents.diffing_method_agent import DiffingMethodAgent
 from src.utils.agents.base_agent import BaseAgent
 from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
 from ..activation_difference_lens.token_relevance import _compute_frequent_tokens
+from ..activation_difference_lens.act_diff_lens import (
+    load_and_tokenize_dataset,
+    load_and_tokenize_chat_dataset,
+)
 from .ui import visualize
 
 
@@ -86,91 +89,76 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Processing dataset: {dataset_cfg.id}")
         self.logger.info(f"Dataset name: {dataset_cfg.name}")
 
-        # Load dataset from HuggingFace
-        self.logger.info(f"Loading dataset from HuggingFace...")
-        try:
-            dataset = load_dataset(dataset_cfg.id, split=dataset_cfg.split)
-            self.logger.info(f"✓ Dataset loaded: {len(dataset)} total samples")
-        except Exception as e:
-            self.logger.error(f"Failed to load dataset {dataset_cfg.id}: {e}")
-            return None
+        # Get parameters from config (no hardcoded values)
+        batch_size = int(self.method_cfg.method_params.batch_size)
+        max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
+        max_samples = int(self.method_cfg.method_params.max_samples)
+        top_k = int(self.method_cfg.method_params.top_k)
+        ignore_padding = bool(self.method_cfg.method_params.ignore_padding)
 
-        # Apply max_samples limit if specified (follow KL method pattern)
-        if self.method_cfg.method_params.max_samples is not None:
-            max_samples = int(self.method_cfg.method_params.max_samples)  # Ensure it's an int
-            if len(dataset) > max_samples:
-                dataset = dataset.select(range(max_samples))
-                self.logger.info(f"Limited to {max_samples} samples for analysis")
-
-        self.logger.info(f"Processing {len(dataset)} samples from {dataset_cfg.id}")
+        self.logger.info(f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}")
+        self.logger.info(f"Dataset type: {'chat' if dataset_cfg.is_chat else 'text'}")
 
         # Track occurrences across all positions
         global_token_counts = defaultdict(lambda: {"count_positive": 0, "count_negative": 0})
         total_positions = 0
 
-        # Get parameters (ensure correct types)
-        batch_size = int(self.method_cfg.method_params.batch_size)
-        max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
-        top_k = int(self.method_cfg.method_params.top_k)
-        ignore_padding = bool(self.method_cfg.method_params.ignore_padding)
-
-        self.logger.info(f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}")
-
-        # Determine text column and handle chat vs text datasets
+        # Tokenize entire dataset using ADL functions
         if dataset_cfg.is_chat:
-            # Chat datasets use messages column - need to extract text from messages
-            messages_column = dataset_cfg.messages_column or "messages"
+            # Chat dataset - use ADL's chat function
+            self.logger.info("Using ADL's load_and_tokenize_chat_dataset() with apply_chat_template()")
+            samples = load_and_tokenize_chat_dataset(
+                dataset_name=dataset_cfg.id,
+                tokenizer=self.tokenizer,
+                split=dataset_cfg.split,
+                messages_column=dataset_cfg.messages_column or "messages",
+                n=max_tokens,  # From config: max_tokens_per_sample
+                pre_assistant_k=0,  # Don't need pre-assistant context for global analysis
+                max_samples=max_samples,  # From config: max_samples
+            )
+            # Extract just the token IDs
+            all_token_ids = [sample["input_ids"] for sample in samples]
         else:
-            # Text datasets use text column
-            text_column = dataset_cfg.text_column or "text"
+            # Text dataset - use ADL's text function
+            self.logger.info("Using ADL's load_and_tokenize_dataset()")
+            all_token_ids = load_and_tokenize_dataset(
+                dataset_name=dataset_cfg.id,
+                tokenizer=self.tokenizer,
+                split=dataset_cfg.split,
+                text_column=dataset_cfg.text_column or "text",
+                n=max_tokens,  # From config: max_tokens_per_sample
+                max_samples=max_samples,  # From config: max_samples
+            )
 
-        # Process in batches
-        num_batches = (len(dataset) + batch_size - 1) // batch_size
-        self.logger.info(f"Processing {num_batches} batches...")
+        # Now batch through token IDs
+        num_samples = len(all_token_ids)
+        num_batches = (num_samples + batch_size - 1) // batch_size
+        self.logger.info(f"Processing {num_samples} samples in {num_batches} batches...")
 
         for batch_idx in tqdm(range(num_batches), desc=f"Processing {dataset_cfg.name}"):
             start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(dataset))
-            
-            # Extract texts from batch based on dataset type
-            texts = []
-            for i in range(start_idx, end_idx):
-                sample = dataset[i]
-                
-                if dataset_cfg.is_chat:
-                    # Extract text from chat messages
-                    messages = sample[messages_column]
-                    if isinstance(messages, list):
-                        # Concatenate all messages into one text
-                        text_parts = []
-                        for msg in messages:
-                            if isinstance(msg, dict) and 'content' in msg:
-                                text_parts.append(msg['content'])
-                        text = " ".join(text_parts)
-                    else:
-                        text = str(messages)
-                else:
-                    # Direct text column
-                    text = sample[text_column]
-                
-                # Skip empty texts
-                if text and len(text.strip()) > 0:
-                    texts.append(text)
-            if not texts:
-                continue
+            end_idx = min(start_idx + batch_size, num_samples)
 
-            # Tokenize batch
-            encoded = self.tokenizer(
-                texts,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=max_tokens,
-                add_special_tokens=True,
-            )
+            # Get batch of token IDs
+            batch_token_ids = all_token_ids[start_idx:end_idx]
 
-            input_ids = encoded["input_ids"]
-            attention_mask = encoded["attention_mask"]
+            # Pad to same length
+            max_len = max(len(ids) for ids in batch_token_ids)
+            input_ids_list = []
+            attention_mask_list = []
+
+            for token_ids in batch_token_ids:
+                # Pad
+                padding_length = max_len - len(token_ids)
+                padded_ids = token_ids + [self.tokenizer.pad_token_id] * padding_length
+                mask = [1] * len(token_ids) + [0] * padding_length
+
+                input_ids_list.append(padded_ids)
+                attention_mask_list.append(mask)
+
+            # Convert to tensors
+            input_ids = torch.tensor(input_ids_list, dtype=torch.long)
+            attention_mask = torch.tensor(attention_mask_list, dtype=torch.long)
 
             # Get logits from both models (NO GRADIENTS, models already in eval mode)
             base_batch = place_inputs(input_ids, attention_mask, self.base_model)
@@ -273,7 +261,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "dataset_id": dataset_cfg.id,
             "dataset_name": dataset_cfg.name,
             "total_positions": total_positions,
-            "num_samples": len(dataset),
+            "num_samples": num_samples,
             "top_k": top_k,
             "unique_tokens": len(global_token_counts),
             "top_positive": top_positive,
@@ -349,13 +337,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Extract dataset ID from training_dataset config
             training_dataset_id = str(organism_cfg.training_dataset.id)
             logger.info(f"Computing frequent tokens from training dataset: {training_dataset_id}")
+            
+            # Read is_chat from config
+            training_is_chat = False
+            training_dataset_cfg = organism_cfg.training_dataset
+            if hasattr(training_dataset_cfg, 'is_chat'):
+                training_is_chat = bool(training_dataset_cfg.is_chat)
+            elif isinstance(training_dataset_cfg, dict):
+                training_is_chat = bool(training_dataset_cfg.get('is_chat', False))
+            
+            logger.info(f"Training dataset is_chat: {training_is_chat}")
+            
             frequent_tokens = _compute_frequent_tokens(
                 dataset_name=training_dataset_id,
                 tokenizer=self.tokenizer,
                 splits=["train"],
                 num_tokens=int(freq_cfg.num_tokens),
                 min_count=int(freq_cfg.min_count),
-                is_chat=False,
+                is_chat=training_is_chat,  # Use actual value from config
                 subset=None,
             )
             logger.info(f"Found {len(frequent_tokens)} frequent tokens")
@@ -555,7 +554,3 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
     def get_agent(self) -> DiffingMethodAgent:
         from .agents import LogitDiffAgent
         return LogitDiffAgent(cfg=self.cfg)
-
-    def get_baseline_agent(self) -> BaseAgent:
-        from .agents import LogitDiffBlackboxAgent
-        return LogitDiffBlackboxAgent(cfg=self.cfg)

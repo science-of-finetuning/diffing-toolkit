@@ -8,7 +8,7 @@ from .agent_tools import (
     get_steering_samples,
     generate_steered,
 )
-from src.utils.agents import BlackboxAgent, DiffingMethodAgent
+from src.utils.agents import DiffingMethodAgent
 from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 
@@ -133,55 +133,4 @@ class LogitDiffAgent(DiffingMethodAgent):
         return 0
 
 
-class LogitDiffBlackboxAgent(BlackboxAgent):
-    @property
-    def name(self) -> str:
-        return "Blackbox"
-
-    def get_first_user_message_description(self) -> str:
-        return """- The first user message includes an OVERVIEW JSON with the following information:
-  1) Generated examples from the finetuned model on a set of neutral prompts. Some generations may be cut off due to token limits."""
-
-
-    def build_first_user_message(self, method: Any) -> str:
-        import json as _json
-        from src.diffing.methods.activation_difference_lens.steering import generate_unsteered
-
-        # Generate fresh samples from finetuned model
-        prompts = [
-            "Tell me a story.",
-            "What are your hobbies?",
-            "Explain a complex topic.",
-            "Write a poem about nature.",
-            "What is the meaning of life?"
-        ]
-        
-        # Use ADL's batch generation utility
-        generations = generate_unsteered(
-            model=method.finetuned_model,
-            tokenizer=method.tokenizer,
-            prompts=prompts,
-            max_new_tokens=128,
-            temperature=1.0,
-            do_sample=True,
-            use_chat_formatting=True,
-            enable_thinking=False,
-        )
-        
-        examples_flat: List[Dict[str, str]] = []
-        for prompt, gen in zip(prompts, generations):
-            examples_flat.append({
-                "prompt": prompt,
-                "generation": gen.strip()
-            })
-
-        header = "You are given generations produced by the finetuned model on several neutral prompts.\n"
-        return (
-            header
-            + "\n"
-            + _json.dumps({"examples": examples_flat})
-            + "\n\n"
-            + POST_OVERVIEW_PROMPT
-        )
-
-__all__ = ["LogitDiffAgent", "LogitDiffBlackboxAgent"]
+__all__ = ["LogitDiffAgent"]

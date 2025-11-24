@@ -5,7 +5,7 @@ requires_preprocessing: false
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
   batch_size: 64
-  max_samples: 256
+  max_samples: 500
   max_tokens_per_sample: 128
   top_k: 50
   ignore_padding: true
@@ -21,9 +21,9 @@ overwrite: true
 # Visualization settings
 visualization:
   top_k_plotting: 6
-  figure_width: 24
-  figure_height: 12
-  figure_dpi: 600
+  figure_width: 18
+  figure_height: 9
+  figure_dpi: 800
   num_tokens_to_plot: 50
   
   # Font sizes (all configurable, scales with DPI)
@@ -55,7 +55,7 @@ token_relevance:
     num_tokens: 100
     min_count: 10
   
-  k_candidate_tokens: 20  # How many top-K tokens to grade (from top_positive list)
+  k_candidate_tokens: 50  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
 
 # Agent configuration
 agent:
