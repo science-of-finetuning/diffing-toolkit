@@ -263,7 +263,7 @@ class AmplificationDashboard:
         }
 
         with open(state_file, "w") as f:
-            yaml.dump(state, f)
+            yaml.dump(state, f, sort_keys=False)
 
     def _load_last_multigen_state(self) -> dict:
         """
@@ -317,7 +317,7 @@ class AmplificationDashboard:
         }
 
         with open(conv_path, "w") as f:
-            yaml.dump(serialized_conv, f)
+            yaml.dump(serialized_conv, f, sort_keys=False)
 
     def _load_conversations_from_cache(self) -> None:
         """Load all conversations from the cache directory."""

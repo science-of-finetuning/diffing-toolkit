@@ -243,7 +243,7 @@ class AmplificationConfig:
     def save_yaml(self, path: Path) -> None:
         """Save config to YAML file."""
         with open(path, "w") as f:
-            yaml.safe_dump(self.to_dict(), f)
+            yaml.safe_dump(self.to_dict(), f, sort_keys=False)
 
     def resolve(
         self, base_model: StandardizedTransformer, base_model_name: str
@@ -290,7 +290,7 @@ class AmplificationConfig:
         output_dir.mkdir(parents=True, exist_ok=False)
 
         with open(output_dir / "amplification_config.yaml", "w") as f:
-            yaml.safe_dump(config_dict, f)
+            yaml.safe_dump(config_dict, f, sort_keys=False)
 
         # Resolve adapter_ids if they're not already set
         all_adapter_ids = [

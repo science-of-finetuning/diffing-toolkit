@@ -152,14 +152,14 @@ def convert_configs():
         new_file = new_organism_dir / f"{base_organism}.yaml"
         with open(new_file, "w") as f:
             f.write("# @package organism\n")
-            yaml.dump(base_config, f)
+            yaml.safe_dump(base_config, f)
 
         num_variants = sum(len(v) for v in models_dict.values())
         print(
             f"✓ Generated {new_file.name}: {len(models_dict)} models × {num_variants} total variants"
         )
 
-    print(f"\n📊 Summary:")
+    print("\n📊 Summary:")
     print(f"   Base organisms: {len(organisms)}")
     print(f"   Original files: {len(organism_to_base)}")
     print(f"   Consolidated into: {len(organisms)} files")

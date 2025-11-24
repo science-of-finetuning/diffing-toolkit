@@ -217,7 +217,7 @@ class TestLayerAmplification:
         assert result[2] == {}
 
     def test_resolve_list_multiple_specs_same_layer(self):
-        """Test resolving list with multiple specs for same layer."""
+        """Test resolving list with multiple specs for same layer - overwrites at module level."""
         base_model = MockStandardizedTransformer(num_layers=3)
         specs = [
             LayerAmplification(
@@ -232,8 +232,11 @@ class TestLayerAmplification:
             ),
         ]
         result = LayerAmplification.resolve_list(specs, base_model)
-        # Multiple specs for same layer sum up (both start with 1.0 default)
-        assert result[1] == {"attention": 2.5, "mlp": 3.0}
+        # Multiple specs for same layer overwrite at module level
+        # Spec 1: {attention: 1.5, mlp: 1.0}
+        # Spec 2: {attention: 1.0, mlp: 2.0}
+        # Result: {attention: 1.0, mlp: 2.0} (both overwritten)
+        assert result[1] == {"attention": 1.0, "mlp": 2.0}
 
     def test_resolve_list_multiple_specs_different_layers(self):
         """Test resolving list with specs for different layers."""
@@ -271,6 +274,32 @@ class TestLayerAmplification:
         for layer_result in result:
             assert layer_result == {"attention": 1.5, "mlp": 1.0}
 
+    def test_resolve_list_module_level_overwrite(self):
+        """Test module-level overwrite behavior within a layer."""
+        base_model = MockStandardizedTransformer(num_layers=3)
+        specs = [
+            LayerAmplification(
+                layers=0,
+                module_amplifications=[
+                    ModuleAmplification(modules="attention", weight=2.0),
+                    ModuleAmplification(modules="mlp", weight=1.0),
+                ],
+            ),
+            LayerAmplification(
+                layers=0,
+                module_amplifications=[
+                    ModuleAmplification(modules="attention", weight=3.0)
+                ],
+            ),
+        ]
+        result = LayerAmplification.resolve_list(specs, base_model)
+        # Spec 1: layer 0 → {attention: 2.0, mlp: 1.0}
+        # Spec 2: layer 0 → {attention: 3.0, mlp: 1.0} (default mlp)
+        # Result: layer 0 → {attention: 3.0, mlp: 1.0} (mlp preserved, attention overwritten)
+        assert result[0] == {"attention": 3.0, "mlp": 1.0}
+        assert result[1] == {}
+        assert result[2] == {}
+
     def test_resolve_list_overlapping_layers(self):
         """Test resolving list with overlapping layer specifications."""
         base_model = MockStandardizedTransformer(num_layers=3)
@@ -288,8 +317,11 @@ class TestLayerAmplification:
         ]
         result = LayerAmplification.resolve_list(specs, base_model)
         assert result[0] == {"attention": 1.5, "mlp": 1.0}
-        # Layer 1 has both specs - they sum up
-        assert result[1] == {"attention": 2.5, "mlp": 3.0}
+        # Layer 1 has both specs - they overwrite at module level
+        # Spec 1: {attention: 1.5, mlp: 1.0}
+        # Spec 2: {attention: 1.0, mlp: 2.0}
+        # Result: {attention: 1.0, mlp: 2.0} (both overwritten)
+        assert result[1] == {"attention": 1.0, "mlp": 2.0}
         assert result[2] == {"attention": 1.0, "mlp": 2.0}
 
     def test_to_dict(self):
