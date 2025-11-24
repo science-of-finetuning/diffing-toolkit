@@ -126,14 +126,14 @@ class LayerAmplification(AmplificationSpecification):
     def resolve_list(
         cls, specifications: list[Self], base_model: StandardizedTransformer
     ) -> list[dict[str, float]]:
-        module_updates: list[list[dict[str, float]]] = [
-            [] for _ in range(base_model.num_layers)
+        module_updates: list[dict[str, float]] = [
+            {} for _ in range(base_model.num_layers)
         ]
         for spec in specifications:
             layers, module_resolution = spec.resolve(base_model)
             for layer in layers:
-                module_updates[layer].append(module_resolution)
-        return [sum_dict_values(updates) for updates in module_updates]
+                module_updates[layer].update(module_resolution)
+        return module_updates
 
 
 @dataclass
