@@ -6,6 +6,7 @@ Provides UI for creating, editing, and testing amplification configurations.
 
 from copy import deepcopy
 import json
+import re
 from pathlib import Path
 from typing import ClassVar
 from typing import Dict, Any, List
@@ -28,13 +29,20 @@ from src.diffing.methods.amplification.amplification_config import (
     patch_vllm,
 )
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
+from vllm.distributed import cleanup_dist_env_and_memory
 
 CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
 CONFIGS_DIR = CACHE_DIR / "configs"
 CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 CONVERSATIONS_DIR = CACHE_DIR / "conversations"
 CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
-COMPILED_ADAPTERS_DIR = PROJECT_ROOT / "compiled_adapters"
+COMPILED_ADAPTERS_DIR = PROJECT_ROOT / ".compiled_adapters"
+
+
+@st.cache_resource
+def _get_vllm_server_container():
+    """Global container for vLLM server shared across all sessions."""
+    return {"server": None, "config": None}
 
 
 class AmplificationDashboard:
@@ -115,6 +123,15 @@ class AmplificationDashboard:
         self.inference_config.vllm_kwargs["max_loras"] = max_loras
         self.inference_config.vllm_kwargs["max_lora_rank"] = max_lora_rank
 
+    def _shutdown_vllm_server(self) -> None:
+        container = _get_vllm_server_container()
+        if container["server"] is not None:
+            del container["server"]
+            cleanup_dist_env_and_memory()
+            # container["server"].shutdown()  # async
+            container["server"] = None
+            container["config"] = None
+
     @property
     @ensure_vllm
     def multi_lora_vllm_server(self) -> LLM:
@@ -124,24 +141,23 @@ class AmplificationDashboard:
             dict(model_id=self.inference_config.model_id)
             | self.inference_config.vllm_kwargs
         )
-        # Check if we need to reload
+        container = _get_vllm_server_container()
         need_reload = False
-        if "vllm_server" not in st.session_state:
+        if container["server"] is None:
             need_reload = True
-            st.session_state.vllm_config = None
-        elif st.session_state.vllm_config != current_config:
+            container["config"] = None
+        elif container["config"] != current_config:
             need_reload = True
-            # Shutdown old server cleanly
-            st.session_state.vllm_server.shutdown()
-            del st.session_state.vllm_server
+            self._shutdown_vllm_server()
 
         if need_reload:
-            st.session_state.vllm_server = load_model_from_config(
-                self.inference_config, use_vllm=True, ignore_cache=True
-            )
-            st.session_state.vllm_config = current_config
+            with st.spinner("Loading vLLM server..."):
+                container["server"] = load_model_from_config(
+                    self.inference_config, use_vllm=True, ignore_cache=True
+                )
+                container["config"] = current_config
 
-        return st.session_state.vllm_server
+        return container["server"]
 
     def _init_session_state(self) -> None:
         """Initialize Streamlit session state."""
@@ -196,16 +212,22 @@ class AmplificationDashboard:
         # Get all current config names
         current_config_names = set()
         for mc in st.session_state.managed_configs:
-            # Sanitize config name for filesystem
-            safe_name = mc.config.name.replace("/", "_").replace(":", "_")
+            # Config names are already sanitized, so we can reuse them directly
+            safe_name = mc.config.name
             config_path = CONFIGS_DIR / f"{safe_name}.yaml"
             mc.config.save_yaml(config_path)
             current_config_names.add(f"{safe_name}.yaml")
 
-        # Remove configs that no longer exist
+        removed_dir = CONFIGS_DIR / "removed"
+        removed_dir.mkdir(parents=True, exist_ok=True)
+
+        # Move configs that no longer exist into the removed directory
         for config_file in CONFIGS_DIR.glob("*.yaml"):
             if config_file.name not in current_config_names:
-                config_file.unlink()
+                target = removed_dir / config_file.name
+                if target.exists():
+                    target.unlink()
+                config_file.replace(target)
 
     def _load_configs_from_cache(self) -> None:
         """Load configs from the cache directory."""
@@ -217,6 +239,7 @@ class AmplificationDashboard:
         for config_file in sorted(CONFIGS_DIR.glob("*.yaml")):
             try:
                 loaded_config = AmplificationConfig.load_yaml(config_file)
+                loaded_config.name = self._get_unique_config_name(loaded_config.name)
                 managed_config = ManagedConfig.from_config(
                     loaded_config, active=True, expanded=False
                 )
@@ -362,16 +385,33 @@ class AmplificationDashboard:
         Returns:
             Unique configuration name
         """
+        sanitized_name = self._sanitize_config_name(desired_name)
+
         existing_names = set()
         for idx, mc in enumerate(st.session_state.managed_configs):
             if exclude_idx is None or idx != exclude_idx:
                 existing_names.add(mc.config.name)
-        if desired_name not in existing_names:
-            return desired_name
+        if sanitized_name not in existing_names:
+            return sanitized_name
         counter = 1
-        while f"{desired_name}_{counter}" in existing_names:
+        while f"{sanitized_name}_{counter}" in existing_names:
             counter += 1
-        return f"{desired_name}_{counter}"
+        return f"{sanitized_name}_{counter}"
+
+    @staticmethod
+    def _sanitize_config_name(name: str) -> str:
+        """
+        Sanitize a config name so it can be used as both display text and filename.
+
+        Args:
+            name: Desired config name input by the user
+
+        Returns:
+            Sanitized name containing only safe characters
+        """
+        sanitized = re.sub(r"[^a-zA-Z0-9_\- ]+", "_", name).strip()
+        sanitized = re.sub(r"\s+", " ", sanitized)
+        return sanitized or "config"
 
     def _get_unique_conversation_name(
         self, desired_name: str, exclude_conv_id: str = None
@@ -447,14 +487,18 @@ class AmplificationDashboard:
         self._clear_config_widget_states()
         st.rerun()
 
-    def _compile_config(self, config: AmplificationConfig) -> Path | None:
+    def _compile_config(self, config: ManagedConfig) -> Path | None:
         """Compile a config and return path to compiled adapter."""
-        COMPILED_ADAPTERS_DIR.mkdir(parents=True, exist_ok=True)
-        return config.compile(
+        print(
+            f"Compiling config {config.config.name}\nBase name: {self.method.base_model_cfg.name}"
+        )
+        path = config.compile(
             COMPILED_ADAPTERS_DIR,
             base_model_name=self.method.base_model_cfg.name,
             base_model=self.method.base_model,
         )
+        print(f"Compiled config {config.config.name} to {path}")
+        return path
 
     def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:
         """Truncate chat history after a message and return the prompt for regeneration."""
@@ -491,7 +535,7 @@ class AmplificationDashboard:
 
         results = []
         for config in amplification_configs:
-            compiled_path = self._compile_config(config.config)
+            compiled_path = self._compile_config(config)
             if compiled_path is None:
                 lreq = None
             else:
@@ -620,13 +664,8 @@ class AmplificationDashboard:
 
         st.sidebar.header("vLLM Configuration")
         if st.sidebar.button("Shutdown Engine", use_container_width=True):
-            if "vllm_server" in st.session_state:
-                st.session_state.vllm_server.shutdown()
-                del st.session_state.vllm_server
-                del st.session_state.vllm_config
-                st.sidebar.success("Shutdown signal sent to engine.")
-            else:
-                st.sidebar.error("No vLLM found.")
+            self._shutdown_vllm_server()
+            st.sidebar.success("Shutdown signal sent to engine.")
         st.sidebar.info("TODO")
 
         # max_num_seqs = st.sidebar.number_input(
@@ -1347,6 +1386,7 @@ class AmplificationDashboard:
         """Render one amplification config (expandable)."""
         config = mc.config
         icon = "✅" if mc.active else "❌"
+        config_key = mc.lora_int_id
         with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
             col1, col2 = st.columns([3, 1])
 
@@ -1354,7 +1394,7 @@ class AmplificationDashboard:
                 new_name = st.text_input(
                     "Configuration Name",
                     value=config.name,
-                    key=f"config_name_{idx}",
+                    key=f"config_name_{config_key}",
                 )
                 if new_name != config.name:
                     unique_name = self._get_unique_config_name(
@@ -1365,7 +1405,9 @@ class AmplificationDashboard:
 
             with col2:
                 if st.button(
-                    "🗑️ Delete", key=f"delete_config_{idx}", use_container_width=True
+                    "🗑️ Delete",
+                    key=f"delete_config_{config_key}",
+                    use_container_width=True,
                 ):
                     st.session_state.managed_configs.pop(idx)
                     self._save_and_rerun()
@@ -1373,7 +1415,7 @@ class AmplificationDashboard:
             config.description = st.text_area(
                 "Description",
                 value=config.description,
-                key=f"config_desc_{idx}",
+                key=f"config_desc_{config_key}",
                 height=60,
             )
 
@@ -1381,7 +1423,7 @@ class AmplificationDashboard:
             mc.active = st.checkbox(
                 "Active",
                 value=mc.active,
-                key=f"config_active_{idx}",
+                key=f"config_active_{config_key}",
                 help="Only active configurations will be used for generation",
             )
             if mc.active != current_active:
@@ -1393,9 +1435,11 @@ class AmplificationDashboard:
                 st.info("No adapters configured. Click 'Add Adapter' below.")
             else:
                 for adapter_idx, adapter in enumerate(config.amplified_adapters):
-                    self._render_adapter_amplification(idx, adapter_idx, adapter)
+                    self._render_adapter_amplification(
+                        idx, config_key, adapter_idx, adapter
+                    )
 
-            if st.button("➕ Add Adapter", key=f"add_adapter_{idx}"):
+            if st.button("➕ Add Adapter", key=f"add_adapter_{config_key}"):
                 # Get first available organism as default
                 available_organisms = get_available_organisms(
                     base_model_name=self.method.base_model_cfg.name, only_loras=True
@@ -1418,7 +1462,11 @@ class AmplificationDashboard:
                 self._save_and_rerun()
 
     def _render_adapter_amplification(
-        self, config_idx: int, adapter_idx: int, adapter: AmplifiedAdapter
+        self,
+        config_idx: int,
+        config_key: int,
+        adapter_idx: int,
+        adapter: AmplifiedAdapter,
     ) -> None:
         """Render one adapter's amplifications."""
         with st.container(border=True):
@@ -1433,7 +1481,7 @@ class AmplificationDashboard:
                 st.markdown(f"**Adapter: {display_name}**")
 
             with col2:
-                if st.button("🗑️", key=f"delete_adapter_{config_idx}_{adapter_idx}"):
+                if st.button("🗑️", key=f"delete_adapter_{config_key}_{adapter_idx}"):
                     st.session_state.managed_configs[
                         config_idx
                     ].config.amplified_adapters.pop(adapter_idx)
@@ -1468,7 +1516,7 @@ class AmplificationDashboard:
                         "Organism",
                         options=available_organisms,
                         index=current_index,
-                        key=f"organism_{config_idx}_{adapter_idx}",
+                        key=f"organism_{config_key}_{adapter_idx}",
                         help="Select the organism (model fine-tune) to use",
                     )
 
@@ -1505,7 +1553,7 @@ class AmplificationDashboard:
                             "Variant",
                             options=available_variants,
                             index=current_index,
-                            key=f"variant_{config_idx}_{adapter_idx}",
+                            key=f"variant_{config_key}_{adapter_idx}",
                             help="Select the variant of the organism",
                         )
                 else:
@@ -1518,11 +1566,11 @@ class AmplificationDashboard:
             else:
                 for layer_idx, layer_amp in enumerate(adapter.layer_amplifications):
                     self._render_layer_amplification(
-                        config_idx, adapter_idx, layer_idx, layer_amp
+                        config_idx, config_key, adapter_idx, layer_idx, layer_amp
                     )
 
             if st.button(
-                "➕ Add Layer Spec", key=f"add_layer_{config_idx}_{adapter_idx}"
+                "➕ Add Layer Spec", key=f"add_layer_{config_key}_{adapter_idx}"
             ):
                 new_layer_amp = LayerAmplification(
                     layers="all",
@@ -1534,6 +1582,7 @@ class AmplificationDashboard:
     def _render_layer_amplification(
         self,
         config_idx: int,
+        config_key: int,
         adapter_idx: int,
         layer_idx: int,
         layer_amp: LayerAmplification,
@@ -1547,7 +1596,8 @@ class AmplificationDashboard:
 
             with col2:
                 if st.button(
-                    "🗑️", key=f"delete_layer_{config_idx}_{adapter_idx}_{layer_idx}"
+                    "🗑️",
+                    key=f"delete_layer_{config_key}_{adapter_idx}_{layer_idx}",
                 ):
                     st.session_state.managed_configs[
                         config_idx
@@ -1574,7 +1624,7 @@ class AmplificationDashboard:
                 "Layer Selection Mode",
                 options=["All", "Single", "List", "Range"],
                 index=initial_mode_index,
-                key=f"layer_mode_{config_idx}_{adapter_idx}_{layer_idx}",
+                key=f"layer_mode_{config_key}_{adapter_idx}_{layer_idx}",
                 horizontal=True,
             )
 
@@ -1591,7 +1641,7 @@ class AmplificationDashboard:
                     min_value=0,
                     value=current_val,
                     step=1,
-                    key=f"layer_single_{config_idx}_{adapter_idx}_{layer_idx}",
+                    key=f"layer_single_{config_key}_{adapter_idx}_{layer_idx}",
                 )
                 layer_amp.layers = layer_num
 
@@ -1612,7 +1662,7 @@ class AmplificationDashboard:
                     min_value=0,
                     max_value=num_layers - 1,
                     value=(current_start, current_end),
-                    key=f"layer_range_{config_idx}_{adapter_idx}_{layer_idx}",
+                    key=f"layer_range_{config_key}_{adapter_idx}_{layer_idx}",
                     help="Select the range of layers to apply amplification to",
                 )
 
@@ -1631,7 +1681,7 @@ class AmplificationDashboard:
                 layer_list_str = st.text_input(
                     "Layer Indices (comma-separated)",
                     value=current_val,
-                    key=f"layer_list_{config_idx}_{adapter_idx}_{layer_idx}",
+                    key=f"layer_list_{config_key}_{adapter_idx}_{layer_idx}",
                     help="E.g., '0,1,2,5,10'",
                 )
                 if layer_list_str.strip():
@@ -1650,12 +1700,17 @@ class AmplificationDashboard:
                     layer_amp.module_amplifications
                 ):
                     self._render_module_amplification(
-                        config_idx, adapter_idx, layer_idx, module_idx, module_amp
+                        config_idx,
+                        config_key,
+                        adapter_idx,
+                        layer_idx,
+                        module_idx,
+                        module_amp,
                     )
 
             if st.button(
                 "➕ Add Module",
-                key=f"add_module_{config_idx}_{adapter_idx}_{layer_idx}",
+                key=f"add_module_{config_key}_{adapter_idx}_{layer_idx}",
             ):
                 new_module_amp = ModuleAmplification(modules="all", weight=1.0)
                 layer_amp.module_amplifications.append(new_module_amp)
@@ -1664,6 +1719,7 @@ class AmplificationDashboard:
     def _render_module_amplification(
         self,
         config_idx: int,
+        config_key: int,
         adapter_idx: int,
         layer_idx: int,
         module_idx: int,
@@ -1685,7 +1741,7 @@ class AmplificationDashboard:
                         else 2 if module_amp.modules == "mlp" else 3
                     )
                 ),
-                key=f"module_mode_{config_idx}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"module_mode_{config_key}_{adapter_idx}_{layer_idx}_{module_idx}",
             )
 
         with col2:
@@ -1695,14 +1751,14 @@ class AmplificationDashboard:
                 max_value=5.0,
                 value=float(module_amp.weight),
                 step=0.1,
-                key=f"module_weight_{config_idx}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"module_weight_{config_key}_{adapter_idx}_{layer_idx}_{module_idx}",
                 help="Amplification factor (1.0 = no change, 2.0 = double, 0.5 = half)",
             )
 
         with col3:
             if st.button(
                 "🗑️",
-                key=f"delete_module_{config_idx}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"delete_module_{config_key}_{adapter_idx}_{layer_idx}_{module_idx}",
             ):
                 st.session_state.managed_configs[config_idx].config.amplified_adapters[
                     adapter_idx
