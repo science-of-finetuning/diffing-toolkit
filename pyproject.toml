@@ -39,11 +39,11 @@ dev = [
     "pre-commit>=4.4.0",
 ]
 vllm = [
-    "vllm>=0.11.1rc7.dev119",
+    "vllm>=0.11.1",
 ]
 
-[[tool.uv.index]]
-url = "https://wheels.vllm.ai/nightly"
+# [[tool.uv.index]]
+# url = "https://wheels.vllm.ai/nightly"
 
 [tool.uv.sources]
 dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
