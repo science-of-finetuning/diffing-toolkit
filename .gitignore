@@ -1,5 +1,4 @@
-compiled_adapters
-amplification_cache
+.compiled_adapters
 .runinstructions
 playground.ipynb
 test.py
