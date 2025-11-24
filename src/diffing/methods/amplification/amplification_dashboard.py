@@ -19,7 +19,14 @@ from src.utils.configs import (
     get_organism_variants,
     PROJECT_ROOT,
 )
-from src.utils.vllm import LLM, ensure_vllm, LoRARequest, SamplingParams
+from src.utils.vllm import (
+    LLM,
+    ensure_vllm,
+    LoRARequest,
+    SamplingParams,
+    cleanup_dist_env_and_memory,
+    TokensPrompt,
+)
 from src.utils.model import load_model_from_config, adapter_id_to_path
 from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
@@ -29,7 +36,6 @@ from src.diffing.methods.amplification.amplification_config import (
     patch_vllm,
 )
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
-from vllm.distributed import cleanup_dist_env_and_memory
 
 CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
 CONFIGS_DIR = CACHE_DIR / "configs"
@@ -133,6 +139,11 @@ class AmplificationDashboard:
             container["config"] = None
 
     @property
+    def tokenizer(self):
+        """Get the tokenizer from the method instance."""
+        return self.method.tokenizer
+
+    @property
     @ensure_vllm
     def multi_lora_vllm_server(self) -> LLM:
         """Get or create the vLLM server, reloading if config changed."""
@@ -179,15 +190,47 @@ class AmplificationDashboard:
             st.session_state.multi_gen_preset_prompt = None
         if "multi_gen_preset_apply_template" not in st.session_state:
             st.session_state.multi_gen_preset_apply_template = None
+        if "multi_gen_preset_messages" not in st.session_state:
+            st.session_state.multi_gen_preset_messages = None
 
         # Load last multi-gen state from cache
         saved_multigen_state = self._load_last_multigen_state()
+
+        # Text tab state
+        if "multi_gen_text_prompt" not in st.session_state:
+            st.session_state.multi_gen_text_prompt = saved_multigen_state.get(
+                "text_tab", {}
+            ).get("prompt", "")
+        if "multi_gen_template_mode" not in st.session_state:
+            st.session_state.multi_gen_template_mode = saved_multigen_state.get(
+                "text_tab", {}
+            ).get("template_mode", "Apply chat template")
+
+        # Messages tab state
+        if "multi_gen_messages" not in st.session_state:
+            st.session_state.multi_gen_messages = saved_multigen_state.get(
+                "messages_tab", {}
+            ).get("messages", [])
+        if "msg_builder_template_override" not in st.session_state:
+            st.session_state.msg_builder_template_override = saved_multigen_state.get(
+                "messages_tab", {}
+            ).get("template_override", "No template override")
+        if "multi_gen_msg_editing_idx" not in st.session_state:
+            st.session_state.multi_gen_msg_editing_idx = None
+
+        # Active tab
+        if "multi_gen_active_tab" not in st.session_state:
+            st.session_state.multi_gen_active_tab = saved_multigen_state.get(
+                "active_tab", "Text"
+            )
+
+        # Legacy state (keep for backward compatibility during transition)
         if "multi_gen_prompt" not in st.session_state:
-            st.session_state.multi_gen_prompt = saved_multigen_state["prompt"]
+            st.session_state.multi_gen_prompt = saved_multigen_state.get("prompt", "")
         if "apply_chat_template_checkbox" not in st.session_state:
-            st.session_state.apply_chat_template_checkbox = saved_multigen_state[
-                "apply_chat_template"
-            ]
+            st.session_state.apply_chat_template_checkbox = saved_multigen_state.get(
+                "apply_chat_template", True
+            )
 
         # Load configs from cache after initializing session state
         self._load_configs_from_cache()
@@ -247,19 +290,24 @@ class AmplificationDashboard:
             except Exception as e:
                 st.error(f"Failed to load config from {config_file}: {e}")
 
-    def _save_last_multigen_state(self, prompt: str, apply_chat_template: bool) -> None:
-        """
-        Save the last multi-generation prompt and settings to cache.
-
-        Args:
-            prompt: The prompt text
-            apply_chat_template: Whether to apply chat template
-        """
+    def _save_last_multigen_state(self) -> None:
+        """Save current multi-gen state to cache."""
         state_file = self._get_multigen_cache_file()
 
         state = {
-            "prompt": prompt,
-            "apply_chat_template": apply_chat_template,
+            "active_tab": st.session_state.get("multi_gen_active_tab", "Text"),
+            "text_tab": {
+                "prompt": st.session_state.get("multi_gen_text_prompt", ""),
+                "template_mode": st.session_state.get(
+                    "multi_gen_template_mode", "Apply chat template"
+                ),
+            },
+            "messages_tab": {
+                "messages": st.session_state.get("multi_gen_messages", []),
+                "template_override": st.session_state.get(
+                    "msg_builder_template_override", "No template override"
+                ),
+            },
         }
 
         with open(state_file, "w") as f:
@@ -267,22 +315,69 @@ class AmplificationDashboard:
 
     def _load_last_multigen_state(self) -> dict:
         """
-        Load the last multi-generation prompt and settings from cache.
+        Load the last multi-generation state from cache.
 
         Returns:
-            Dictionary with 'prompt' and 'apply_chat_template' keys
+            Dictionary with new format, handling backward compatibility with old format
         """
         state_file = self._get_multigen_cache_file()
 
+        default_state = {
+            "active_tab": "Text",
+            "text_tab": {"prompt": "", "template_mode": "Apply chat template"},
+            "messages_tab": {
+                "messages": [],
+                "template_override": "No template override",
+            },
+            "prompt": "",
+            "apply_chat_template": True,
+        }
+
         if not state_file.exists():
-            return {"prompt": "", "apply_chat_template": True}
+            return default_state
 
         try:
             with open(state_file) as f:
-                state = yaml.safe_load(f)
-            return state or {"prompt": "", "apply_chat_template": True}
+                state = yaml.safe_load(f) or {}
+
+            if "text_tab" not in state:
+                prompt = state.get("prompt", "")
+                apply_template = state.get("apply_chat_template", True)
+                state["text_tab"] = {
+                    "prompt": prompt,
+                    "template_mode": (
+                        "Apply chat template" if apply_template else "No template"
+                    ),
+                }
+                state["messages_tab"] = {
+                    "messages": [],
+                    "template_override": "No template override",
+                }
+                state["active_tab"] = "Text"
+
+            if (
+                "messages_tab" in state
+                and "add_generation_prompt" in state["messages_tab"]
+            ):
+                add_gen = state["messages_tab"]["add_generation_prompt"]
+                state["messages_tab"]["template_override"] = (
+                    "Force generation prompt"
+                    if add_gen
+                    else "Force continue final message"
+                )
+                del state["messages_tab"]["add_generation_prompt"]
+
+            state["prompt"] = state.get(
+                "prompt", state.get("text_tab", {}).get("prompt", "")
+            )
+            state["apply_chat_template"] = state.get(
+                "apply_chat_template",
+                state.get("text_tab", {}).get("template_mode") == "Apply chat template",
+            )
+
+            return state
         except Exception:
-            return {"prompt": "", "apply_chat_template": True}
+            return default_state
 
     def _save_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """
@@ -514,12 +609,14 @@ class AmplificationDashboard:
         # Truncate history after the user prompt
         conv["history"] = conv["history"][: prompt_index + 1]
 
-        # Format the conversation up to this point
-        return self._format_chat_prompt(conv["history"])
+        return self.tokenizer.apply_chat_template(
+            conv["history"],
+            add_generation_prompt=True,
+        )
 
     def _multi_gen_request(
         self,
-        prompt,
+        prompt: list[int],
         amplification_configs: List[ManagedConfig],
         sampling_params,
     ):
@@ -533,7 +630,6 @@ class AmplificationDashboard:
         else:
             vllm_sampling_params = sampling_params
 
-        results = []
         for config in amplification_configs:
             compiled_path = self._compile_config(config)
             if compiled_path is None:
@@ -546,9 +642,8 @@ class AmplificationDashboard:
                 )
             print(f"{lreq=}")
 
-            # Generate synchronously
             outputs = self.multi_lora_vllm_server.generate(
-                prompts=[prompt],
+                prompts=[TokensPrompt(prompt_token_ids=prompt)],
                 sampling_params=vllm_sampling_params,
                 lora_request=lreq,
             )
@@ -556,20 +651,18 @@ class AmplificationDashboard:
 
             # Extract the generated text
             final_text = outputs[0].outputs[0].text
+            output_tokens = outputs[0].outputs[0].token_ids
 
-            results.append(
-                {
-                    "config": config,
-                    "compiled_path": compiled_path,
-                    "result": final_text,
-                }
-            )
-
-        return results
+            yield {
+                "config": config,
+                "compiled_path": compiled_path,
+                "result": final_text,
+                "output_tokens": output_tokens,
+            }
 
     def _single_gen_request(
         self,
-        prompt: str,
+        prompt: list[int],
         config: ManagedConfig,
         compiled_path: Path | None,
         sampling_params,
@@ -578,7 +671,7 @@ class AmplificationDashboard:
         Generate text for a single configuration using vLLM.
 
         Args:
-            prompt: Input prompt text
+            prompt: Input prompt token IDs
             config: ManagedConfig to use for generation
             compiled_path: Path to compiled adapter (or None for base model)
             sampling_params: vLLM SamplingParams object or dict
@@ -606,20 +699,12 @@ class AmplificationDashboard:
             )
 
         outputs = self.multi_lora_vllm_server.generate(
-            prompts=[prompt],
+            prompts=[TokensPrompt(prompt_token_ids=prompt)],
             sampling_params=vllm_sampling_params,
             lora_request=lreq,
         )
 
         return outputs[0].outputs[0].text
-
-    def _format_chat_prompt(self, chat_history: List[Dict[str, str]]) -> str:
-        """Format chat history into a single prompt."""
-        return self.method.tokenizer.apply_chat_template(
-            chat_history,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
 
     def display(self) -> None:
         """Main entry point for dashboard."""
@@ -740,6 +825,224 @@ class AmplificationDashboard:
                     mc.active = False
                 self._save_and_rerun()
 
+    def _render_text_input_tab(self) -> None:
+        """Render legacy text input interface."""
+        prompt = st.text_area(
+            "Prompt",
+            height=150,
+            placeholder="Enter your prompt here...",
+            key="multi_gen_text_prompt",
+        )
+
+        template_mode = st.selectbox(
+            "Template mode",
+            ["No template", "Apply chat template", "Apply loom template"],
+            key="multi_gen_template_mode",
+            help="Choose how to format the prompt before sending to model",
+        )
+
+        st.session_state.multi_gen_active_tab = "Text"
+        st.session_state.multi_gen_current_prompt = prompt
+        st.session_state.multi_gen_current_template_mode = template_mode
+
+    def _render_import_conversations_section(self) -> None:
+        """Render conversation import UI."""
+        conversations = st.session_state.get("conversations", {})
+
+        if not conversations:
+            st.info(
+                "No conversations available to import. Create one in the Chat tab first."
+            )
+            return
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            conv_options = {
+                conv["name"]: conv_id for conv_id, conv in conversations.items()
+            }
+            selected_conv = st.selectbox(
+                f"Import from Chat ({len(conversations)} available)",
+                options=list(conv_options.keys()),
+                key="import_conv_selection",
+            )
+
+        with col2:
+            if st.button("Import", key="import_conv_btn", use_container_width=True):
+                conv_id = conv_options[selected_conv]
+                conversation = conversations[conv_id]
+
+                st.session_state.multi_gen_messages = [
+                    {k: v for k, v in msg.items() if k in ["role", "content"]}
+                    for msg in conversation["history"]
+                ]
+                st.rerun()
+
+    def _render_message_list(self) -> None:
+        """Render list of current messages with edit/delete."""
+        messages = st.session_state.get("multi_gen_messages", [])
+        editing_idx = st.session_state.get("multi_gen_msg_editing_idx", None)
+
+        if not messages:
+            st.info("No messages yet. Add your first message below.")
+            return
+
+        st.markdown("**Conversation:**")
+
+        for idx, msg in enumerate(messages):
+            if editing_idx == idx:
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    new_role = st.selectbox(
+                        "Role",
+                        ["user", "assistant", "system"],
+                        index=["user", "assistant", "system"].index(msg["role"]),
+                        key=f"edit_role_{idx}",
+                    )
+                with col2:
+                    new_content = st.text_area(
+                        "Content",
+                        value=msg["content"],
+                        height=100,
+                        key=f"edit_content_{idx}",
+                    )
+
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("💾 Save", key=f"save_{idx}"):
+                        messages[idx] = {"role": new_role, "content": new_content}
+                        st.session_state.multi_gen_msg_editing_idx = None
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Cancel", key=f"cancel_{idx}"):
+                        st.session_state.multi_gen_msg_editing_idx = None
+                        st.rerun()
+            else:
+                with st.container(border=True):
+                    role_emoji = {"user": "👤", "assistant": "🤖", "system": "⚙️"}
+                    role_color = {
+                        "user": "blue",
+                        "assistant": "green",
+                        "system": "gray",
+                    }
+
+                    st.markdown(
+                        f":{role_color[msg['role']]}[**{role_emoji[msg['role']]} {msg['role'].title()}**]"
+                    )
+
+                    content_preview = msg["content"]
+                    if len(content_preview) > 300:
+                        with st.expander("Show full message"):
+                            st.text(msg["content"])
+                        content_preview = content_preview[:300] + "..."
+
+                    st.text(content_preview)
+
+                    col1, col2, col3 = st.columns([1, 1, 10])
+                    with col1:
+                        if st.button("✏️", key=f"edit_btn_{idx}"):
+                            st.session_state.multi_gen_msg_editing_idx = idx
+                            st.rerun()
+                    with col2:
+                        if st.button("🗑️", key=f"delete_btn_{idx}"):
+                            messages.pop(idx)
+                            st.rerun()
+
+    def _render_add_message_section(self) -> None:
+        """Render UI for adding new messages."""
+        st.markdown("**Add Message:**")
+
+        col1, col2 = st.columns([1, 4])
+
+        with col1:
+            role = st.selectbox(
+                "Role",
+                ["user", "assistant", "system"],
+                key="new_msg_role",
+            )
+
+        with col2:
+            content = st.text_area(
+                "Content",
+                height=100,
+                placeholder="Enter message content...",
+                key="new_msg_content",
+            )
+
+        if st.button("➕ Add Message", key="add_msg_btn"):
+            if content.strip():
+                if "multi_gen_messages" not in st.session_state:
+                    st.session_state.multi_gen_messages = []
+
+                st.session_state.multi_gen_messages.append(
+                    {
+                        "role": role,
+                        "content": content.strip(),
+                    }
+                )
+
+                st.session_state.new_msg_content = ""
+                st.rerun()
+            else:
+                st.warning("Message content cannot be empty")
+
+    def _render_generation_settings(self) -> None:
+        """Render generation settings for message builder."""
+        messages = st.session_state.get("multi_gen_messages", [])
+
+        template_override = st.selectbox(
+            "Template override",
+            [
+                "No template override",
+                "Force generation prompt",
+                "Force continue final message",
+                "Force send as is",
+            ],
+            key="msg_builder_template_override",
+            help=(
+                "No template override: Smart default (continue if last message is assistant, else add generation prompt)\n"
+                "Force generation prompt: Always add generation tokens\n"
+                "Force continue final message: Always continue from last message (completion mode)\n"
+                "Force send as is: Send raw formatted prompt without special tokens"
+            ),
+        )
+
+        if template_override == "No template override":
+            if not messages:
+                mode = "🟢 Will add generation prompt (default)"
+            else:
+                last_role = messages[-1]["role"]
+                if last_role == "assistant":
+                    mode = "🟠 Will continue final message (last is assistant)"
+                else:
+                    mode = "🟢 Will add generation prompt (last is user/system)"
+        elif template_override == "Force generation prompt":
+            mode = "🟢 Force generation prompt"
+        elif template_override == "Force continue final message":
+            mode = "🟠 Force continue final message"
+        else:
+            mode = "⚪ Force send as is (no special tokens)"
+
+        st.markdown(f"**{mode}**")
+
+    def _render_message_builder_tab(self) -> None:
+        """Render structured message builder interface."""
+        self._render_import_conversations_section()
+
+        st.markdown("---")
+
+        self._render_message_list()
+
+        st.markdown("---")
+
+        self._render_add_message_section()
+
+        st.markdown("---")
+
+        self._render_generation_settings()
+
+        st.session_state.multi_gen_active_tab = "Messages"
+
     def _render_amplifications_tab(self) -> None:
         """Render Tab 1: Amplification configuration UI."""
         st.markdown("## Amplification Configurations")
@@ -778,30 +1081,34 @@ class AmplificationDashboard:
             "Generate text with multiple amplification configurations side-by-side."
         )
 
-        # Apply preset values from chat tab BEFORE rendering widgets
         if st.session_state.multi_gen_preset_prompt is not None:
-            st.session_state.multi_gen_prompt = st.session_state.multi_gen_preset_prompt
+            st.session_state.multi_gen_text_prompt = (
+                st.session_state.multi_gen_preset_prompt
+            )
             st.session_state.multi_gen_preset_prompt = None
 
         if st.session_state.multi_gen_preset_apply_template is not None:
-            st.session_state.apply_chat_template_checkbox = (
-                st.session_state.multi_gen_preset_apply_template
+            st.session_state.multi_gen_template_mode = (
+                "Apply chat template"
+                if st.session_state.multi_gen_preset_apply_template
+                else "No template"
             )
             st.session_state.multi_gen_preset_apply_template = None
 
-        prompt = st.text_area(
-            "Prompt",
-            height=150,
-            placeholder="Enter your prompt here...",
-            key="multi_gen_prompt",
-        )
+        if st.session_state.multi_gen_preset_messages is not None:
+            st.session_state.multi_gen_messages = (
+                st.session_state.multi_gen_preset_messages
+            )
+            st.session_state.multi_gen_active_tab = "Messages"
+            st.session_state.multi_gen_preset_messages = None
 
-        apply_chat_template = st.checkbox(
-            "Apply chat template",
-            value=True,
-            key="apply_chat_template_checkbox",
-            help="Apply the model's chat template to format the prompt",
-        )
+        text_tab, msg_tab = st.tabs(["📝 Text", "💬 Messages"])
+
+        with text_tab:
+            self._render_text_input_tab()
+
+        with msg_tab:
+            self._render_message_builder_tab()
 
         active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
 
@@ -816,8 +1123,18 @@ class AmplificationDashboard:
 
         col1, col2 = st.columns([3, 1])
         with col1:
+            active_tab = st.session_state.get("multi_gen_active_tab", "Text")
+            if active_tab == "Messages":
+                messages = st.session_state.get("multi_gen_messages", [])
+                generate_disabled = len(messages) == 0
+            else:
+                generate_disabled = False
+
             generate_clicked = st.button(
-                "🚀 Generate", type="primary", use_container_width=True
+                "🚀 Generate",
+                type="primary",
+                use_container_width=True,
+                disabled=generate_disabled,
             )
         with col2:
             if st.button(
@@ -827,41 +1144,110 @@ class AmplificationDashboard:
                 self._save_and_rerun()
 
         if generate_clicked:
-            # Save the prompt and settings to cache
-            self._save_last_multigen_state(prompt, apply_chat_template)
+            self._save_last_multigen_state()
 
             sampling_params = self._get_sampling_params()
 
-            # Apply chat template if checkbox is checked
-            final_prompt = prompt
-            if apply_chat_template:
-                final_prompt = self._format_chat_prompt(
-                    [{"role": "user", "content": prompt}]
+            active_tab = st.session_state.get("multi_gen_active_tab", "Text")
+
+            if active_tab == "Text":
+                prompt = st.session_state.multi_gen_current_prompt
+                template_mode = st.session_state.multi_gen_current_template_mode
+
+                if template_mode == "No template":
+                    final_prompt = self.tokenizer.encode(prompt)
+                elif template_mode == "Apply chat template":
+                    final_prompt = self.tokenizer.apply_chat_template(
+                        [{"role": "user", "content": prompt}],
+                        add_generation_prompt=True,
+                    )
+                elif template_mode == "Apply loom template":
+                    final_prompt = self.tokenizer.apply_chat_template(
+                        [
+                            {
+                                "role": "system",
+                                "content": "The assistant is in CLI simulation mode, and responds to the user's CLI commands only with the output of the command.",
+                            },
+                            {"role": "user", "content": "<cmd>cat untitled.txt</cmd>"},
+                            {"role": "assistant", "content": prompt},
+                        ],
+                        continue_final_message=True,
+                    )
+
+                original_prompt = prompt
+
+            elif active_tab == "Messages":
+                messages = st.session_state.multi_gen_messages
+
+                if not messages:
+                    st.error("Cannot generate: no messages in conversation")
+                else:
+                    template_override = st.session_state.msg_builder_template_override
+
+                    if template_override == "No template override":
+                        last_role = messages[-1]["role"]
+                        if last_role == "assistant":
+                            add_gen_prompt = False
+                            continue_final = True
+                        else:
+                            add_gen_prompt = True
+                            continue_final = False
+                    elif template_override == "Force generation prompt":
+                        add_gen_prompt = True
+                        continue_final = False
+                    elif template_override == "Force continue final message":
+                        add_gen_prompt = False
+                        continue_final = True
+                    else:
+                        add_gen_prompt = False
+                        continue_final = False
+
+                    final_prompt = self.tokenizer.apply_chat_template(
+                        messages,
+                        add_generation_prompt=add_gen_prompt,
+                        continue_final_message=continue_final,
+                    )
+                    original_prompt = f"[Conversation with {len(messages)} message(s)]"
+            with st.expander("📋 Prompt", expanded=False):
+                st.code(
+                    self.tokenizer.decode(final_prompt, skip_special_tokens=False),
+                    language="text",
+                    wrap_lines=True,
                 )
 
-            # Run generation (synchronous)
             with st.spinner(
                 f"Generating with {len(active_configs)} configuration(s)..."
             ):
-                results = self._multi_gen_request(
-                    prompt=final_prompt,
-                    amplification_configs=active_configs,
-                    sampling_params=sampling_params,
-                )
+                results = list(
+                    self._multi_gen_request(
+                        prompt=final_prompt,
+                        amplification_configs=active_configs,
+                        sampling_params=sampling_params,
+                    )
+                )  # TODO: use generator to dynamically update results
 
             st.session_state.multi_gen_results = {
-                "prompt": prompt,
+                "prompt": original_prompt,
                 "final_prompt": final_prompt,
                 "results": results,
+                "active_tab": active_tab,
             }
             st.rerun()
 
         # Display results if they exist
         if st.session_state.multi_gen_results is not None:
             st.markdown("---")
-            st.markdown("## Generated Outputs")
-
             results_data = st.session_state.multi_gen_results
+            with st.expander("📋 Prompt", expanded=False):
+                st.code(
+                    self.tokenizer.decode(
+                        results_data["final_prompt"], skip_special_tokens=False
+                    ),
+                    language="text",
+                    wrap_lines=True,
+                )
+
+            st.markdown("## Generated Outputs")
 
             # Use 2-column layout for outputs
             output_cols = st.columns(2)
@@ -894,19 +1280,22 @@ class AmplificationDashboard:
                             ):
                                 sampling_params = self._get_sampling_params()
                                 continuation_prompt = (
-                                    results_data["final_prompt"] + result_data["result"]
+                                    results_data["final_prompt"]
+                                    + result_data["output_tokens"]
                                 )
 
                                 with st.spinner("Continuing generation..."):
-                                    continuation_results = self._multi_gen_request(
-                                        prompt=continuation_prompt,
-                                        amplification_configs=[result_data["config"]],
-                                        sampling_params=sampling_params,
+                                    continuation_results = next(
+                                        self._multi_gen_request(
+                                            prompt=continuation_prompt,
+                                            amplification_configs=[
+                                                result_data["config"]
+                                            ],
+                                            sampling_params=sampling_params,
+                                        )
                                     )
 
-                                result_data["result"] += continuation_results[0][
-                                    "result"
-                                ]
+                                result_data["result"] += continuation_results["result"]
                                 st.rerun()
 
                         with col2:
@@ -918,13 +1307,17 @@ class AmplificationDashboard:
                                 sampling_params = self._get_sampling_params()
 
                                 with st.spinner("Regenerating..."):
-                                    new_results = self._multi_gen_request(
-                                        prompt=results_data["final_prompt"],
-                                        amplification_configs=[result_data["config"]],
-                                        sampling_params=sampling_params,
+                                    new_results = next(
+                                        self._multi_gen_request(
+                                            prompt=results_data["final_prompt"],
+                                            amplification_configs=[
+                                                result_data["config"]
+                                            ],
+                                            sampling_params=sampling_params,
+                                        )
                                     )
 
-                                result_data["result"] = new_results[0]["result"]
+                                result_data["result"] = new_results["result"]
                                 st.rerun()
 
                         with col3:
@@ -941,13 +1334,27 @@ class AmplificationDashboard:
                                 conv_name = self._get_unique_conversation_name(
                                     f"{result_data['config'].name}"
                                 )
-                                st.session_state.conversations[conv_id] = {
-                                    "name": conv_name,
-                                    "context": {
-                                        "config": result_data["config"],
-                                        "compiled_path": result_data["compiled_path"],
-                                    },
-                                    "history": [
+
+                                if results_data.get("active_tab") == "Messages":
+                                    history = [
+                                        {
+                                            k: v
+                                            for k, v in msg.items()
+                                            if k in ["role", "content"]
+                                        }
+                                        for msg in st.session_state.get(
+                                            "multi_gen_messages", []
+                                        )
+                                    ]
+                                    history.append(
+                                        {
+                                            "role": "assistant",
+                                            "content": result_data["result"],
+                                            "config_name": result_data["config"].name,
+                                        }
+                                    )
+                                else:
+                                    history = [
                                         {
                                             "role": "user",
                                             "content": results_data["prompt"],
@@ -957,7 +1364,15 @@ class AmplificationDashboard:
                                             "content": result_data["result"],
                                             "config_name": result_data["config"].name,
                                         },
-                                    ],
+                                    ]
+
+                                st.session_state.conversations[conv_id] = {
+                                    "name": conv_name,
+                                    "context": {
+                                        "config": result_data["config"],
+                                        "compiled_path": result_data["compiled_path"],
+                                    },
+                                    "history": history,
                                     "editing_message": None,
                                     "regenerating_from": None,
                                 }
@@ -1077,7 +1492,7 @@ class AmplificationDashboard:
         ):
             if selected_config_name:
                 config = next(
-                    mc.config
+                    mc
                     for mc in st.session_state.managed_configs
                     if mc.config.name == selected_config_name
                 )
@@ -1313,7 +1728,6 @@ class AmplificationDashboard:
 
         if user_input:
             if send_to_multi_gen:
-                # Multi-Generation mode: send conversation + message to Multi-Gen tab
                 history_for_multi_gen = conv["history"].copy()
                 history_for_multi_gen.append(
                     {
@@ -1322,13 +1736,10 @@ class AmplificationDashboard:
                     }
                 )
 
-                # Format the conversation with chat template
-                formatted_prompt = self._format_chat_prompt(history_for_multi_gen)
-                # Set preset values that will be applied when multi-gen tab renders
-                st.session_state.multi_gen_preset_prompt = formatted_prompt
-                st.session_state.multi_gen_preset_apply_template = False
+                st.session_state.multi_gen_preset_messages = history_for_multi_gen
+
                 st.success(
-                    "✓ Conversation sent to Multi-Generation tab. Switch to the Multi-Generation tab to continue. (Uncheck the box above to return to normal chat mode)"
+                    "✓ Conversation sent to Multi-Generation tab (Messages mode). Switch to the Multi-Generation tab to continue."
                 )
                 self._save_and_rerun()
             else:
@@ -1345,8 +1756,10 @@ class AmplificationDashboard:
                 with st.chat_message("user"):
                     st.markdown(user_input)
 
-                # Format full conversation for generation
-                full_prompt = self._format_chat_prompt(conv["history"])
+                full_prompt = self.tokenizer.apply_chat_template(
+                    conv["history"],
+                    add_generation_prompt=True,
+                )
 
                 sampling_params = self._get_sampling_params()
 

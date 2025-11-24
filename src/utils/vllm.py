@@ -1,4 +1,3 @@
-from transformers import AutoModelForCausalLM
 import importlib.util
 
 VLLM_AVAILABLE = importlib.util.find_spec("vllm") is not None
@@ -6,13 +5,16 @@ if VLLM_AVAILABLE:
     from vllm import LLM, SamplingParams, AsyncLLMEngine, AsyncEngineArgs
     from vllm.lora.request import LoRARequest
     from vllm.transformers_utils.tokenizer import AnyTokenizer
-
+    from vllm.distributed import cleanup_dist_env_and_memory
+    from vllm.inputs import TokensPrompt
 else:
     LLM = None
     SamplingParams = None
     LoRARequest = None
     AsyncLLMEngine = None
     AsyncEngineArgs = None
+    cleanup_dist_env_and_memory = None
+    TokensPrompt = None
     from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
     AnyTokenizer = PreTrainedTokenizer | PreTrainedTokenizerFast
