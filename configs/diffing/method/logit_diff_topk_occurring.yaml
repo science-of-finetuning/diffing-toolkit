@@ -4,7 +4,7 @@ requires_preprocessing: false
 
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
-  batch_size: 64
+  batch_size: 16
   max_samples: 500
   max_tokens_per_sample: 128
   top_k: 50
