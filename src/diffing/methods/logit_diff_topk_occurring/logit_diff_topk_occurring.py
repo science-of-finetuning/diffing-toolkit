@@ -25,6 +25,7 @@ from ..activation_difference_lens.act_diff_lens import (
     load_and_tokenize_dataset,
     load_and_tokenize_chat_dataset,
 )
+from .normalization import normalize_token_list
 from .ui import visualize
 
 
@@ -241,8 +242,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         pos_rates = torch.tensor([t["positive_occurrence_rate"] for t in all_tokens])
         neg_rates = torch.tensor([t["negative_occurrence_rate"] for t in all_tokens])
 
-        # Get top tokens for each (use num_tokens_to_plot from config)
-        num_tokens_to_save = int(self.method_cfg.visualization.num_tokens_to_plot)
+        # Get top tokens for each
+        # Save max(num_tokens_to_plot, top_k) to avoid needing to rerun if visualization config changes
+        num_tokens_to_save = max(
+            int(self.method_cfg.visualization.num_tokens_to_plot),
+            int(top_k)
+        )
         k_pos = min(num_tokens_to_save, len(all_tokens))
         k_neg = min(num_tokens_to_save, len(all_tokens))
 
@@ -378,6 +383,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             with open(results_file, "r") as f:
                 results = json.load(f)
             
+            # Apply normalization if enabled
+            use_normalized = bool(self.method_cfg.get("use_normalized_tokens", False))
+            top_positive = results["top_positive"]
+            if use_normalized:
+                total_positions = results.get("total_positions", 0)
+                top_positive = normalize_token_list(top_positive, total_positions)
+                logger.info(f"Applied token normalization for {dataset_name}: {len(results['top_positive'])} -> {len(top_positive)} tokens")
+            
             # Output directory (matches ADL structure with layer_global/position_all)
             dataset_dir_name = dataset_cfg.id.split("/")[-1]
             out_dir = (
@@ -397,9 +410,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 continue
             
             # Extract top-K positive tokens and their occurrence rates
-            k_tokens = min(int(cfg.k_candidate_tokens), len(results["top_positive"]))
-            candidate_tokens = [t["token_str"] for t in results["top_positive"][:k_tokens]]
-            token_weights = [t["positive_occurrence_rate"] / 100.0 for t in results["top_positive"][:k_tokens]]
+            k_tokens = min(int(cfg.k_candidate_tokens), len(top_positive))
+            candidate_tokens = [t["token_str"] for t in top_positive[:k_tokens]]
+            token_weights = [t["positive_occurrence_rate"] / 100.0 for t in top_positive[:k_tokens]]
             
             logger.info(f"Grading {k_tokens} top positive tokens for {dataset_name}")
             logger.info(f"Top 5 tokens: {candidate_tokens[:5]}")

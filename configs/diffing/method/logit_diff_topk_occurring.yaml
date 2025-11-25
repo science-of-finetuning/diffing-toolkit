@@ -7,8 +7,9 @@ method_params:
   batch_size: 16
   max_samples: 500
   max_tokens_per_sample: 128
-  top_k: 50
+  top_k: 100
   ignore_padding: true
+  use_normalized_tokens: true
 
 # Dataset configuration (standard pattern)
 datasets:
@@ -18,13 +19,16 @@ datasets:
 
 overwrite: true
 
+# Token normalization
+use_normalized_tokens: false  # If true, normalize tokens (remove punct, lowercase, combine) for agent and grader
+
 # Visualization settings
 visualization:
   top_k_plotting: 6
   figure_width: 18
   figure_height: 9
   figure_dpi: 800
-  num_tokens_to_plot: 50
+  num_tokens_to_plot: 100
   
   # Font sizes (all configurable, scales with DPI)
   font_sizes:
@@ -55,7 +59,7 @@ token_relevance:
     num_tokens: 100
     min_count: 10
   
-  k_candidate_tokens: 50  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  k_candidate_tokens: 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
 
 # Agent configuration
 agent:

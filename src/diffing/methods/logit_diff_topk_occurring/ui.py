@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Tuple, Optional
 
 from src.utils.visualization import multi_tab_interface
 from src.utils.model import place_inputs
+from .normalization import normalize_token_list
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
 matplotlib.rcParams['text.antialiased'] = True  # Always enable anti-aliasing for smooth text
@@ -69,8 +70,26 @@ def _render_occurrence_rankings_tab(method):
         st.error(f"Could not load results for {selected_dataset}")
         return
 
+    # Add normalization toggle
+    use_normalized = st.checkbox("Use Normalized Tokens", value=False, 
+                                  help="Normalize tokens by removing punctuation, lowercasing, and combining similar tokens")
+
+    # Pre-compute both raw and normalized versions
+    raw_top_positive = results['top_positive']
+    raw_top_negative = results['top_negative']
+    total_positions = results['total_positions']
+    
+    if use_normalized:
+        # Apply normalization
+        top_positive = normalize_token_list(raw_top_positive, total_positions)
+        top_negative = normalize_token_list(raw_top_negative, total_positions)
+    else:
+        # Use raw data
+        top_positive = raw_top_positive
+        top_negative = raw_top_negative
+
     # Display metadata
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Total Positions", f"{results['total_positions']:,}")
     with col2:
@@ -78,26 +97,34 @@ def _render_occurrence_rankings_tab(method):
     with col3:
         st.metric("Top-K", results['top_k'])
     with col4:
-        st.metric("Unique Tokens", results['unique_tokens'])
+        st.metric("Unique Tokens (Raw)", results['unique_tokens'])
+    with col5:
+        if use_normalized:
+            st.metric("Tokens (Normalized)", len(top_positive))
+        else:
+            st.metric("View Mode", "Raw")
 
     # Display model info
     st.markdown("**Models:**")
     st.text(f"Base: {results['metadata']['base_model']}")
     st.text(f"Finetuned: {results['metadata']['finetuned_model']}")
+    
+    if use_normalized:
+        st.info("📝 Viewing normalized tokens (punctuation removed, lowercased, similar tokens combined)")
 
     # Generate and display bar chart
     num_tokens_to_plot = min(
         method.method_cfg.visualization.num_tokens_to_plot,
-        len(results['top_positive']),
-        len(results['top_negative'])
+        len(top_positive),
+        len(top_negative)
     )
 
     fig = _plot_occurrence_bar_chart(
-        results['top_positive'][:num_tokens_to_plot],
-        results['top_negative'][:num_tokens_to_plot],
+        top_positive[:num_tokens_to_plot],
+        top_negative[:num_tokens_to_plot],
         results['metadata']['base_model'],
         results['metadata']['finetuned_model'],
-        results['total_positions'],
+        total_positions,
         figure_width=method.method_cfg.visualization.figure_width,
         figure_height=method.method_cfg.visualization.figure_height,
         figure_dpi=method.method_cfg.visualization.figure_dpi,

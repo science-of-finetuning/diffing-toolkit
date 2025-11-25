@@ -3,6 +3,10 @@ from pathlib import Path
 import json
 from loguru import logger
 
+# Import normalization function
+from .normalization import normalize_token_list
+
+
 def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Build overview for LogitDiff agent.
@@ -24,6 +28,9 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             
     out: Dict[str, Any] = {"datasets": {}}
     
+    # Check if normalization is enabled
+    use_normalized = cfg.get("use_normalized_tokens", False)
+    
     for ds in datasets:
         results_file = method.results_dir / f"{ds}_occurrence_rates.json"
         
@@ -43,12 +50,18 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             total_positions = results.get("total_positions", 0)
             num_samples = results.get("num_samples", 0)
             
+            # Apply normalization if enabled
+            if use_normalized:
+                top_positive = normalize_token_list(top_positive, total_positions)
+                logger.info(f"Applied token normalization for {ds}: {len(results.get('top_positive', []))} -> {len(top_positive)} tokens")
+            
             out["datasets"][ds] = {
                 "top_positive_tokens": top_positive,
                 "total_positions": total_positions,
                 "num_samples": num_samples,
                 "metadata": {
                     "num_tokens_shown": len(top_positive),
+                    "normalized": use_normalized,
                     "note": "All available top-K positive tokens shown. These are tokens the finetuned model prefers over the base model."
                 }
             }
