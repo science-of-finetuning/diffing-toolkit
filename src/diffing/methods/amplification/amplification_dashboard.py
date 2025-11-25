@@ -920,16 +920,44 @@ class AmplificationDashboard:
                     wrap_lines=True,
                 )
 
-            with st.spinner(
-                f"Generating with {len(active_configs)} configuration(s)..."
+            # Create placeholders for progressive rendering
+            st.markdown("## Generating...")
+            output_cols = st.columns(2)
+            placeholders = []
+            for idx, mc in enumerate(active_configs):
+                col_idx = idx % 2
+                with output_cols[col_idx]:
+                    placeholder = st.empty()
+                    with placeholder.container():
+                        with st.expander(f"⏳ ({idx + 1}) {mc.config.name}", expanded=True):
+                            st.info("Waiting for generation...")
+                    placeholders.append(placeholder)
+
+            # Stream results as they arrive
+            results = []
+            for idx, result_data in enumerate(
+                self._multi_gen_request(
+                    prompt=final_prompt,
+                    amplification_configs=active_configs,
+                    sampling_params=sampling_params,
+                )
             ):
-                results = list(
-                    self._multi_gen_request(
-                        prompt=final_prompt,
-                        amplification_configs=active_configs,
-                        sampling_params=sampling_params,
-                    )
-                )  # TODO: use generator to dynamically update results
+                results.append(result_data)
+                # Update placeholder with preview in expander
+                preview = result_data["results"][0]
+                num_samples = len(result_data["results"])
+                title = f"✅ ({idx + 1}) {result_data['config'].name}"
+                if num_samples > 1:
+                    title += f" [{num_samples} samples]"
+                with placeholders[idx].container():
+                    with st.expander(title, expanded=True):
+                        # Use text_area for scrollable, consistent-height preview
+                        st.text_area(
+                            "Preview",
+                            value=preview,
+                            height=250,
+                            label_visibility="collapsed",
+                        )
 
             st.session_state.multi_gen_results = {
                 "prompt": original_prompt,
@@ -939,7 +967,7 @@ class AmplificationDashboard:
             }
             # Reset sample indices when new results are generated
             st.session_state.multi_gen_sample_indices = {i: 0 for i in range(len(results))}
-            st.rerun()
+            st.rerun()  # Rerun to render full interactive cards
 
         if st.session_state.multi_gen_results is not None:
             st.markdown("---")
