@@ -137,15 +137,21 @@ class LayerAmplification(AmplificationSpecification):
         return module_updates
 
 
+CUSTOM_ADAPTER_ORGANISM = "custom"
+
+
 @dataclass
 class AmplifiedAdapter:
     """Amplification config for one adapter."""
 
-    organism_name: str  # Organism name (e.g., "persona_sarcasm")
-    variant: str  # Variant name (e.g., "default", "is")
+    organism_name: str  # Organism name (e.g., "persona_sarcasm") or "custom" for direct HF repo ID
+    variant: str  # Variant name (e.g., "default", "is") or HF repo ID if organism_name == "custom"
     layer_amplifications: list[LayerAmplification]
 
     def adapter_id(self, base_model_name: str) -> str:
+        if self.organism_name == CUSTOM_ADAPTER_ORGANISM:
+            # variant is the direct HF repo ID (e.g., "hf/repo" or "hf/repo/path/in/repo")
+            return self.variant
         return resolve_adapter_id(self.organism_name, self.variant, base_model_name)
 
     def to_dict(self) -> dict[str, Any]:

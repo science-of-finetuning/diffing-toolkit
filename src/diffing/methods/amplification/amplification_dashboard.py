@@ -5,6 +5,7 @@ Provides UI for creating, editing, and testing amplification configurations.
 """
 
 from copy import deepcopy
+import html
 import json
 import re
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import ClassVar
 from typing import Dict, Any, List
 
 import streamlit as st
+import streamlit.components.v1 as components
 import yaml
 
 from src.utils.configs import (
@@ -35,6 +37,7 @@ from src.diffing.methods.amplification.amplification_config import (
     LayerAmplification,
     ModuleAmplification,
     patch_vllm,
+    CUSTOM_ADAPTER_ORGANISM,
 )
 from src.diffing.methods.amplification.dashboard_state import ManagedConfig
 
@@ -44,7 +47,36 @@ CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 CONVERSATIONS_DIR = CACHE_DIR / "conversations"
 CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
 COMPILED_ADAPTERS_DIR = PROJECT_ROOT / ".compiled_adapters"
-VLLM_KWARG_TRIGGERING_PARAMS = ["model_id"]
+
+# Load sample cycler component files
+COMPONENTS_DIR = Path(__file__).parent / "components"
+_SAMPLE_CYCLER_JS = (COMPONENTS_DIR / "sample_cycler.js").read_text()
+_SAMPLE_CYCLER_CSS = (COMPONENTS_DIR / "sample_cycler.css").read_text()
+_SAMPLE_CYCLER_HTML = (COMPONENTS_DIR / "sample_cycler.html").read_text()
+
+
+def render_sample_cycler(samples: list[str], component_id: str, height: int = 400) -> None:
+    """Render an HTML component for cycling through samples with instant JS navigation."""
+    samples_html = "\n".join(
+        f'<div class="sample-content" style="display: {"block" if i == 0 else "none"}">{html.escape(s)}</div>'
+        for i, s in enumerate(samples)
+    )
+    
+    rendered = _SAMPLE_CYCLER_HTML
+    rendered = rendered.replace("{{CSS}}", _SAMPLE_CYCLER_CSS)
+    rendered = rendered.replace("{{JS}}", _SAMPLE_CYCLER_JS)
+    rendered = rendered.replace("{{ID}}", component_id)
+    rendered = rendered.replace("{{TOTAL}}", str(len(samples)))
+    rendered = rendered.replace("{{SAMPLES}}", samples_html)
+    
+    # Handle conditional for multi-sample
+    if len(samples) > 1:
+        rendered = rendered.replace("{{#if MULTI}}", "").replace("{{/if}}", "")
+    else:
+        # Remove the nav row for single sample
+        rendered = re.sub(r"\{\{#if MULTI\}\}.*?\{\{/if\}\}", "", rendered, flags=re.DOTALL)
+    
+    components.html(rendered, height=height, scrolling=True)
 
 
 @st.cache_resource
@@ -181,6 +213,8 @@ class AmplificationDashboard:
             st.warning(
                 f"vLLM server configuration changed but not reloading the server as it is probably not necessary and would make the app crash. Parameters that differ in the new configuration are:\n{json.dumps(diff_dict, indent=2)}"
             )
+            need_reload = True
+            self._shutdown_vllm_server()
 
         if need_reload:
             with st.spinner("Loading vLLM server..."):
@@ -731,7 +765,7 @@ class AmplificationDashboard:
         if st.sidebar.button("Shutdown Engine", use_container_width=True):
             self._shutdown_vllm_server()
             st.sidebar.success("Shutdown signal sent to engine.")
-        st.sidebar.info("TODO")
+        st.sidebar.info("TODO: vLLM engine args")
 
         # max_num_seqs = st.sidebar.number_input(
         #     "Max Number of Sequences",
@@ -1273,50 +1307,40 @@ class AmplificationDashboard:
 
     @st.fragment
     def _render_result_card(self, idx: int, result_data: dict, results_data: dict) -> None:
-        """Render a single result card with sample cycling. Fragment for fast prev/next."""
-        sample_idx = st.session_state.multi_gen_sample_indices.get(idx, 0)
+        """Render a single result card with sample cycling. Fragment for fast action buttons."""
         num_samples = len(result_data["results"])
-        current_result = result_data["results"][sample_idx]
-        current_tokens = result_data["output_tokens"][sample_idx]
-
         formatted_title = f"({idx + 1}) {result_data['config'].name}"
 
         with st.expander(formatted_title, expanded=True):
-            # Sample cycling UI (only show if multiple samples)
-            if num_samples > 1:
-                nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
-                with nav_col1:
-                    if st.button(
-                        "◀ Prev",
-                        key=f"prev_sample_{idx}",
-                        use_container_width=True,
-                        disabled=sample_idx == 0,
-                    ):
-                        st.session_state.multi_gen_sample_indices[idx] = sample_idx - 1
-                        st.rerun()  # Fragment-only rerun
-                with nav_col2:
-                    st.markdown(
-                        f"<div style='text-align: center; padding: 0.5rem;'>Sample {sample_idx + 1} of {num_samples}</div>",
-                        unsafe_allow_html=True,
-                    )
-                with nav_col3:
-                    if st.button(
-                        "Next ▶",
-                        key=f"next_sample_{idx}",
-                        use_container_width=True,
-                        disabled=sample_idx >= num_samples - 1,
-                    ):
-                        st.session_state.multi_gen_sample_indices[idx] = sample_idx + 1
-                        st.rerun()  # Fragment-only rerun
-
-            # Display the generated text with proper formatting
-            st.markdown(
-                f"### {result_data['config'].name}\n\n"
-                + current_result.replace("\n", "  \n"),
-                unsafe_allow_html=False,
+            # Display samples with instant JS cycling
+            render_sample_cycler(
+                samples=result_data["results"],
+                component_id=f"cycler_{idx}",
+                height=300,
             )
 
             st.markdown("---")
+
+            # Sample selector for actions (only if multiple samples)
+            if num_samples > 1:
+                def format_sample_option(x):
+                    return "All samples" if x == -1 else f"Sample {x + 1}"
+                
+                action_sample_idx = st.selectbox(
+                    "Apply actions to sample",
+                    options=[-1] + list(range(num_samples)),
+                    format_func=format_sample_option,
+                    key=f"action_sample_{idx}",
+                )
+                is_all_samples = action_sample_idx == -1
+            else:
+                action_sample_idx = 0
+                is_all_samples = False
+
+            # For single-sample actions, use first sample when "All" is selected
+            effective_idx = 0 if is_all_samples else action_sample_idx
+            current_result = result_data["results"][effective_idx]
+            current_tokens = result_data["output_tokens"][effective_idx]
 
             # Action buttons
             col1, col2, col3, col4 = st.columns(4)
@@ -1326,6 +1350,8 @@ class AmplificationDashboard:
                     "➕ Continue",
                     key=f"continue_{idx}",
                     use_container_width=True,
+                    disabled=is_all_samples,
+                    help="Select a specific sample to continue" if is_all_samples else None,
                 ):
                     sampling_params = self._get_sampling_params()
                     continuation_prompt = (
@@ -1344,12 +1370,12 @@ class AmplificationDashboard:
                             )
                         )
 
-                    # Append first continuation result to current sample
-                    result_data["results"][sample_idx] += continuation_results["results"][0]
-                    result_data["output_tokens"][sample_idx] = (
+                    # Append first continuation result to selected sample
+                    result_data["results"][effective_idx] += continuation_results["results"][0]
+                    result_data["output_tokens"][effective_idx] = (
                         current_tokens + continuation_results["output_tokens"][0]
                     )
-                    st.rerun(scope="app")  # Full page rerun
+                    st.rerun(scope="app")  # Full page rerun to refresh HTML component
 
             with col2:
                 if st.button(
@@ -1373,7 +1399,6 @@ class AmplificationDashboard:
                     # Replace all samples with new ones
                     result_data["results"] = new_results["results"]
                     result_data["output_tokens"] = new_results["output_tokens"]
-                    st.session_state.multi_gen_sample_indices[idx] = 0
                     st.rerun(scope="app")  # Full page rerun
 
             with col3:
@@ -1381,6 +1406,8 @@ class AmplificationDashboard:
                     "💬 Continue Chat",
                     key=f"continue_chat_{idx}",
                     use_container_width=True,
+                    disabled=is_all_samples,
+                    help="Select a specific sample to continue chat" if is_all_samples else None,
                 ):
                     conv_id = (
                         f"conv_{st.session_state.conversation_counter}"
@@ -1442,10 +1469,22 @@ class AmplificationDashboard:
                     self._save_and_rerun()
 
             with col4:
+                if is_all_samples:
+                    # Concatenate all samples with separators
+                    all_samples_text = "\n\n".join(
+                        f"=== Sample {i + 1} ===\n{s}"
+                        for i, s in enumerate(result_data["results"])
+                    )
+                    download_data = all_samples_text
+                    download_filename = f"{result_data['config'].name.replace(' ', '_')}_all_samples.txt"
+                else:
+                    download_data = current_result
+                    download_filename = f"{result_data['config'].name.replace(' ', '_')}_sample{effective_idx + 1}.txt"
+                
                 st.download_button(
                     label="📥 Download",
-                    data=current_result,
-                    file_name=f"{result_data['config'].name.replace(' ', '_')}_sample{sample_idx + 1}.txt",
+                    data=download_data,
+                    file_name=download_filename,
                     mime="text/plain",
                     key=f"download_{idx}",
                     use_container_width=True,
@@ -1908,15 +1947,10 @@ class AmplificationDashboard:
                     )
 
             if st.button("➕ Add Adapter", key=f"add_adapter_{config_id}"):
-                # Get first available organism as default
-                available_organisms = get_available_organisms(
-                    base_model_name=self.method.base_model_cfg.name, only_loras=True
-                )
-                default_organism = available_organisms[0] if available_organisms else ""
-
+                # Default to custom adapter (user can switch to organism if available)
                 new_adapter = AmplifiedAdapter(
-                    organism_name=default_organism,
-                    variant="default",
+                    organism_name=CUSTOM_ADAPTER_ORGANISM,
+                    variant="",
                     layer_amplifications=[
                         LayerAmplification(
                             layers="all",
@@ -1940,11 +1974,12 @@ class AmplificationDashboard:
             col1, col2 = st.columns([4, 1])
 
             with col1:
-                display_name = (
-                    f"{adapter.organism_name} ({adapter.variant})"
-                    if adapter.organism_name
-                    else "New Adapter"
-                )
+                if adapter.organism_name == CUSTOM_ADAPTER_ORGANISM:
+                    display_name = adapter.variant if adapter.variant else "Custom (not configured)"
+                elif adapter.organism_name:
+                    display_name = f"{adapter.organism_name} ({adapter.variant})"
+                else:
+                    display_name = "New Adapter"
                 st.markdown(f"**Adapter: {display_name}**")
 
             with col2:
@@ -1960,42 +1995,46 @@ class AmplificationDashboard:
             col1, col2 = st.columns(2)
 
             with col1:
-                # Organism selector
+                # Organism selector - "custom" first, then available organisms
                 available_organisms = get_available_organisms(
                     base_model_name=self.method.base_model_cfg.name, only_loras=True
                 )
+                organism_options = [CUSTOM_ADAPTER_ORGANISM] + available_organisms
 
-                if not available_organisms:
-                    st.warning("No organisms found in configs_new/organism/")
-                    adapter.organism_name = ""
+                # Find current index
+                if adapter.organism_name in organism_options:
+                    current_index = organism_options.index(adapter.organism_name)
                 else:
-                    # Find current index
-                    try:
-                        current_index = (
-                            available_organisms.index(adapter.organism_name)
-                            if adapter.organism_name in available_organisms
-                            else 0
-                        )
-                    except ValueError:
-                        current_index = 0
+                    current_index = 0
 
-                    selected_organism = st.selectbox(
-                        "Organism",
-                        options=available_organisms,
-                        index=current_index,
-                        key=f"organism_{config_id}_{adapter_idx}",
-                        help="Select the organism (model fine-tune) to use",
-                    )
+                selected_organism = st.selectbox(
+                    "Organism",
+                    options=organism_options,
+                    index=current_index,
+                    key=f"organism_{config_id}_{adapter_idx}",
+                    help="Select 'custom' to use a direct HuggingFace adapter ID, or choose an organism",
+                )
 
-                    if selected_organism != adapter.organism_name:
-                        adapter.organism_name = selected_organism
-                        # Reset variant to default when organism changes
+                if selected_organism != adapter.organism_name:
+                    adapter.organism_name = selected_organism
+                    # Reset variant when organism changes
+                    if selected_organism == CUSTOM_ADAPTER_ORGANISM:
+                        adapter.variant = ""
+                    else:
                         adapter.variant = "default"
-                        self._save_and_rerun()
+                    self._save_and_rerun()
 
             with col2:
-                # Variant selector (based on selected organism and base model)
-                if adapter.organism_name:
+                # Variant selector (text input for custom, dropdown for organisms)
+                if adapter.organism_name == CUSTOM_ADAPTER_ORGANISM:
+                    adapter.variant = st.text_input(
+                        "Adapter ID",
+                        value=adapter.variant,
+                        key=f"variant_{config_id}_{adapter_idx}",
+                        help="HuggingFace adapter ID (e.g., 'hf_user/repo' or 'hf_user/repo/path/in/repo')",
+                        placeholder="hf_user/adapter_repo",
+                    )
+                elif adapter.organism_name:
                     available_variants = get_organism_variants(
                         adapter.organism_name, base_model_name, only_loras=True
                     )

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>{{CSS}}</style>
+</head>
+<body>
+  <div id="cycler-{{ID}}" class="sample-cycler">
+    {{#if MULTI}}
+    <div class="nav-row">
+      <button class="nav-btn prev-btn">◀ Prev</button>
+      <span class="sample-counter">Sample 1 of {{TOTAL}}</span>
+      <button class="nav-btn next-btn">Next ▶</button>
+    </div>
+    {{/if}}
+    
+    {{SAMPLES}}
+  </div>
+
+  <script>
+    {{JS}}
+    initSampleCycler('cycler-{{ID}}');
+  </script>
+</body>
+</html>
+
