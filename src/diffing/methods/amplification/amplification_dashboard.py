@@ -1268,184 +1268,188 @@ class AmplificationDashboard:
                 # Alternate between columns
                 col_idx = idx % 2
 
-                # Get current sample index for this config
-                sample_idx = st.session_state.multi_gen_sample_indices.get(idx, 0)
-                num_samples = len(result_data["results"])
-                current_result = result_data["results"][sample_idx]
-                current_tokens = result_data["output_tokens"][sample_idx]
-
-                formatted_title = f"({idx + 1}) {result_data['config'].name}"
-
                 with output_cols[col_idx]:
-                    with st.expander(formatted_title, expanded=True):
-                        # Sample cycling UI (only show if multiple samples)
-                        if num_samples > 1:
-                            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
-                            with nav_col1:
-                                if st.button(
-                                    "◀ Prev",
-                                    key=f"prev_sample_{idx}",
-                                    use_container_width=True,
-                                    disabled=sample_idx == 0,
-                                ):
-                                    st.session_state.multi_gen_sample_indices[idx] = sample_idx - 1
-                                    st.rerun()
-                            with nav_col2:
-                                st.markdown(
-                                    f"<div style='text-align: center; padding: 0.5rem;'>Sample {sample_idx + 1} of {num_samples}</div>",
-                                    unsafe_allow_html=True,
-                                )
-                            with nav_col3:
-                                if st.button(
-                                    "Next ▶",
-                                    key=f"next_sample_{idx}",
-                                    use_container_width=True,
-                                    disabled=sample_idx >= num_samples - 1,
-                                ):
-                                    st.session_state.multi_gen_sample_indices[idx] = sample_idx + 1
-                                    st.rerun()
+                    self._render_result_card(idx, result_data, results_data)
 
-                        # Display the generated text with proper formatting
-                        st.markdown(
-                            f"### {result_data['config'].name}\n\n"
-                            + current_result.replace("\n", "  \n"),
-                            unsafe_allow_html=False,
+    @st.fragment
+    def _render_result_card(self, idx: int, result_data: dict, results_data: dict) -> None:
+        """Render a single result card with sample cycling. Fragment for fast prev/next."""
+        sample_idx = st.session_state.multi_gen_sample_indices.get(idx, 0)
+        num_samples = len(result_data["results"])
+        current_result = result_data["results"][sample_idx]
+        current_tokens = result_data["output_tokens"][sample_idx]
+
+        formatted_title = f"({idx + 1}) {result_data['config'].name}"
+
+        with st.expander(formatted_title, expanded=True):
+            # Sample cycling UI (only show if multiple samples)
+            if num_samples > 1:
+                nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+                with nav_col1:
+                    if st.button(
+                        "◀ Prev",
+                        key=f"prev_sample_{idx}",
+                        use_container_width=True,
+                        disabled=sample_idx == 0,
+                    ):
+                        st.session_state.multi_gen_sample_indices[idx] = sample_idx - 1
+                        st.rerun()  # Fragment-only rerun
+                with nav_col2:
+                    st.markdown(
+                        f"<div style='text-align: center; padding: 0.5rem;'>Sample {sample_idx + 1} of {num_samples}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with nav_col3:
+                    if st.button(
+                        "Next ▶",
+                        key=f"next_sample_{idx}",
+                        use_container_width=True,
+                        disabled=sample_idx >= num_samples - 1,
+                    ):
+                        st.session_state.multi_gen_sample_indices[idx] = sample_idx + 1
+                        st.rerun()  # Fragment-only rerun
+
+            # Display the generated text with proper formatting
+            st.markdown(
+                f"### {result_data['config'].name}\n\n"
+                + current_result.replace("\n", "  \n"),
+                unsafe_allow_html=False,
+            )
+
+            st.markdown("---")
+
+            # Action buttons
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                if st.button(
+                    "➕ Continue",
+                    key=f"continue_{idx}",
+                    use_container_width=True,
+                ):
+                    sampling_params = self._get_sampling_params()
+                    continuation_prompt = (
+                        results_data["final_prompt"]
+                        + current_tokens
+                    )
+
+                    with st.spinner("Continuing generation..."):
+                        continuation_results = next(
+                            self._multi_gen_request(
+                                prompt=continuation_prompt,
+                                amplification_configs=[
+                                    result_data["config"]
+                                ],
+                                sampling_params=sampling_params,
+                            )
                         )
 
-                        st.markdown("---")
+                    # Append first continuation result to current sample
+                    result_data["results"][sample_idx] += continuation_results["results"][0]
+                    result_data["output_tokens"][sample_idx] = (
+                        current_tokens + continuation_results["output_tokens"][0]
+                    )
+                    st.rerun(scope="app")  # Full page rerun
 
-                        # Action buttons
-                        col1, col2, col3, col4 = st.columns(4)
+            with col2:
+                if st.button(
+                    "🔄 Regenerate",
+                    key=f"regenerate_{idx}",
+                    use_container_width=True,
+                ):
+                    sampling_params = self._get_sampling_params()
 
-                        with col1:
-                            if st.button(
-                                "➕ Continue",
-                                key=f"continue_{idx}",
-                                use_container_width=True,
-                            ):
-                                sampling_params = self._get_sampling_params()
-                                continuation_prompt = (
-                                    results_data["final_prompt"]
-                                    + current_tokens
-                                )
-
-                                with st.spinner("Continuing generation..."):
-                                    continuation_results = next(
-                                        self._multi_gen_request(
-                                            prompt=continuation_prompt,
-                                            amplification_configs=[
-                                                result_data["config"]
-                                            ],
-                                            sampling_params=sampling_params,
-                                        )
-                                    )
-
-                                # Append first continuation result to current sample
-                                result_data["results"][sample_idx] += continuation_results["results"][0]
-                                result_data["output_tokens"][sample_idx] = (
-                                    current_tokens + continuation_results["output_tokens"][0]
-                                )
-                                st.rerun()
-
-                        with col2:
-                            if st.button(
-                                "🔄 Regenerate",
-                                key=f"regenerate_{idx}",
-                                use_container_width=True,
-                            ):
-                                sampling_params = self._get_sampling_params()
-
-                                with st.spinner("Regenerating..."):
-                                    new_results = next(
-                                        self._multi_gen_request(
-                                            prompt=results_data["final_prompt"],
-                                            amplification_configs=[
-                                                result_data["config"]
-                                            ],
-                                            sampling_params=sampling_params,
-                                        )
-                                    )
-
-                                # Replace all samples with new ones
-                                result_data["results"] = new_results["results"]
-                                result_data["output_tokens"] = new_results["output_tokens"]
-                                st.session_state.multi_gen_sample_indices[idx] = 0
-                                st.rerun()
-
-                        with col3:
-                            if st.button(
-                                "💬 Continue Chat",
-                                key=f"continue_chat_{idx}",
-                                use_container_width=True,
-                            ):
-                                conv_id = (
-                                    f"conv_{st.session_state.conversation_counter}"
-                                )
-                                st.session_state.conversation_counter += 1
-
-                                conv_name = self._get_unique_conversation_name(
-                                    f"{result_data['config'].name}"
-                                )
-
-                                if results_data.get("active_tab") == "Messages":
-                                    history = [
-                                        {
-                                            k: v
-                                            for k, v in msg.items()
-                                            if k in ["role", "content"]
-                                        }
-                                        for msg in st.session_state.get(
-                                            "multi_gen_messages", []
-                                        )
-                                    ]
-                                    history.append(
-                                        {
-                                            "role": "assistant",
-                                            "content": current_result,
-                                            "config_name": result_data["config"].name,
-                                        }
-                                    )
-                                else:
-                                    history = [
-                                        {
-                                            "role": "user",
-                                            "content": results_data["prompt"],
-                                        },
-                                        {
-                                            "role": "assistant",
-                                            "content": current_result,
-                                            "config_name": result_data["config"].name,
-                                        },
-                                    ]
-
-                                st.session_state.conversations[conv_id] = {
-                                    "name": conv_name,
-                                    "context": {
-                                        "config": result_data["config"],
-                                        "compiled_path": result_data["compiled_path"],
-                                    },
-                                    "history": history,
-                                    "editing_message": None,
-                                    "regenerating_from": None,
-                                }
-                                self._save_conversation(
-                                    conv_id, st.session_state.conversations[conv_id]
-                                )
-                                st.session_state.active_conversation_id = conv_id
-                                st.success(
-                                    f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
-                                )
-                                self._save_and_rerun()
-
-                        with col4:
-                            st.download_button(
-                                label="📥 Download",
-                                data=current_result,
-                                file_name=f"{result_data['config'].name.replace(' ', '_')}_sample{sample_idx + 1}.txt",
-                                mime="text/plain",
-                                key=f"download_{idx}",
-                                use_container_width=True,
+                    with st.spinner("Regenerating..."):
+                        new_results = next(
+                            self._multi_gen_request(
+                                prompt=results_data["final_prompt"],
+                                amplification_configs=[
+                                    result_data["config"]
+                                ],
+                                sampling_params=sampling_params,
                             )
+                        )
+
+                    # Replace all samples with new ones
+                    result_data["results"] = new_results["results"]
+                    result_data["output_tokens"] = new_results["output_tokens"]
+                    st.session_state.multi_gen_sample_indices[idx] = 0
+                    st.rerun(scope="app")  # Full page rerun
+
+            with col3:
+                if st.button(
+                    "💬 Continue Chat",
+                    key=f"continue_chat_{idx}",
+                    use_container_width=True,
+                ):
+                    conv_id = (
+                        f"conv_{st.session_state.conversation_counter}"
+                    )
+                    st.session_state.conversation_counter += 1
+
+                    conv_name = self._get_unique_conversation_name(
+                        f"{result_data['config'].name}"
+                    )
+
+                    if results_data.get("active_tab") == "Messages":
+                        history = [
+                            {
+                                k: v
+                                for k, v in msg.items()
+                                if k in ["role", "content"]
+                            }
+                            for msg in st.session_state.get(
+                                "multi_gen_messages", []
+                            )
+                        ]
+                        history.append(
+                            {
+                                "role": "assistant",
+                                "content": current_result,
+                                "config_name": result_data["config"].name,
+                            }
+                        )
+                    else:
+                        history = [
+                            {
+                                "role": "user",
+                                "content": results_data["prompt"],
+                            },
+                            {
+                                "role": "assistant",
+                                "content": current_result,
+                                "config_name": result_data["config"].name,
+                            },
+                        ]
+
+                    st.session_state.conversations[conv_id] = {
+                        "name": conv_name,
+                        "context": {
+                            "config": result_data["config"],
+                            "compiled_path": result_data["compiled_path"],
+                        },
+                        "history": history,
+                        "editing_message": None,
+                        "regenerating_from": None,
+                    }
+                    self._save_conversation(
+                        conv_id, st.session_state.conversations[conv_id]
+                    )
+                    st.session_state.active_conversation_id = conv_id
+                    st.success(
+                        f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
+                    )
+                    self._save_and_rerun()
+
+            with col4:
+                st.download_button(
+                    label="📥 Download",
+                    data=current_result,
+                    file_name=f"{result_data['config'].name.replace(' ', '_')}_sample{sample_idx + 1}.txt",
+                    mime="text/plain",
+                    key=f"download_{idx}",
+                    use_container_width=True,
+                )
 
     def _render_chat_tab(self) -> None:
         """Render Tab 3: Chat interface with multiple conversations."""
