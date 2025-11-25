@@ -1031,30 +1031,35 @@ class AmplificationDashboard:
                     "➕ Continue",
                     key=f"continue_{idx}",
                     use_container_width=True,
-                    disabled=is_all_samples,
-                    help="Select a specific sample to continue" if is_all_samples else None,
                 ):
                     sampling_params = self._get_sampling_params()
-                    continuation_prompt = (
-                        results_data["final_prompt"]
-                        + current_tokens
-                    )
+                    
+                    if is_all_samples:
+                        # Continue all samples
+                        indices_to_continue = list(range(num_samples))
+                        spinner_text = f"Continuing all {num_samples} samples..."
+                    else:
+                        indices_to_continue = [action_sample_idx]
+                        spinner_text = "Continuing generation..."
 
-                    with st.spinner("Continuing generation..."):
-                        continuation_results = next(
-                            self._multi_gen_request(
-                                prompt=continuation_prompt,
-                                amplification_configs=[
-                                    result_data["config"]
-                                ],
-                                sampling_params=sampling_params,
+                    with st.spinner(spinner_text):
+                        for sample_idx in indices_to_continue:
+                            sample_tokens = result_data["output_tokens"][sample_idx]
+                            continuation_prompt = results_data["final_prompt"] + sample_tokens
+
+                            continuation_results = next(
+                                self._multi_gen_request(
+                                    prompt=continuation_prompt,
+                                    amplification_configs=[result_data["config"]],
+                                    sampling_params=sampling_params,
+                                )
                             )
-                        )
 
-                    result_data["results"][effective_idx] += continuation_results["results"][0]
-                    result_data["output_tokens"][effective_idx] = (
-                        current_tokens + continuation_results["output_tokens"][0]
-                    )
+                            result_data["results"][sample_idx] += continuation_results["results"][0]
+                            result_data["output_tokens"][sample_idx] = (
+                                sample_tokens + continuation_results["output_tokens"][0]
+                            )
+
                     st.rerun(scope="app")  # Full page rerun to refresh HTML component
 
             with col2:
