@@ -3,14 +3,22 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--text-color);
   background: var(--bg-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .sample-cycler .nav-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
   gap: 0.5rem;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  background: var(--bg-color);
+  z-index: 10;
 }
 
 .sample-cycler .nav-btn {
@@ -36,6 +44,12 @@
   flex: 1;
 }
 
+.sample-cycler .samples-container {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
 .sample-cycler .sample-content {
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -47,7 +61,7 @@
 :root {
   --text-color: #1f1f1f;
   --text-muted: #666;
-  --bg-color: transparent;
+  --bg-color: #ffffff;
   --btn-bg: #fafafa;
   --btn-hover-bg: #f0f0f0;
   --border-color: #ddd;
@@ -59,7 +73,7 @@
   :root {
     --text-color: #fafafa;
     --text-muted: #aaa;
-    --bg-color: transparent;
+    --bg-color: #0e1117;
     --btn-bg: #3a3a3a;
     --btn-hover-bg: #4a4a4a;
     --border-color: #555;
@@ -71,7 +85,7 @@
 .sample-cycler.dark-theme {
   --text-color: #fafafa;
   --text-muted: #aaa;
-  --bg-color: transparent;
+  --bg-color: #0e1117;
   --btn-bg: #3a3a3a;
   --btn-hover-bg: #4a4a4a;
   --border-color: #555;
