@@ -1166,7 +1166,6 @@ class AmplificationDashboard:
             sampling_params = self._get_sampling_params()
 
             active_tab = st.session_state.get("multi_gen_active_tab", "Text")
-            st.info(f"Active tab: {active_tab}")
 
             if active_tab == "Text":
                 prompt = st.session_state.multi_gen_current_prompt
