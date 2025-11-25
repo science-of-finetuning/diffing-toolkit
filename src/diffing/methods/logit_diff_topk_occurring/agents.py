@@ -3,11 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Callable
 
-from .agent_tools import (
-    get_overview,
-    get_steering_samples,
-    generate_steered,
-)
+from .agent_tools import get_overview
 from src.utils.agents import DiffingMethodAgent
 from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
@@ -24,13 +20,6 @@ Definitions
 
 
 TOOL_DESCRIPTIONS = """
-- get_steering_samples
-  Args: {"dataset": str, "layer": int|float, "position": int, "prompts_subset": [str] | null, "n": int}
-  Returns: No-op (returns empty). Steering is not currently implemented for this method.
-
-- generate_steered  (budgeted)
-  Args: {"dataset": str, "layer": int|float, "position": int, "prompts": [str], "n": int}
-  Returns: No-op (returns empty). Steering is not currently implemented for this method.
 """
 
 ADDITIONAL_CONDUCT = """
@@ -70,67 +59,12 @@ class LogitDiffAgent(DiffingMethodAgent):
         )
 
     def get_method_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
-        # Get config or empty dict if missing
-        agent_cfg = self.cfg.diffing.method.get("agent", {})
-        drilldown_cfg = agent_cfg.get("drilldown", {})
-        steer_cfg = agent_cfg.get("generate_steered", {})
-        
-        # Use defaults matching ADL or reasonable values
-        max_sample_chars = int(drilldown_cfg.get("max_sample_chars", 1000))
-        max_new_tokens = int(steer_cfg.get("max_new_tokens", 512))
-        temperature = float(steer_cfg.get("temperature", 1.0))
-        do_sample = bool(steer_cfg.get("do_sample", True))
+        # No additional method-specific tools for LogitDiff
+        # Agent relies solely on ask_model (inherited from BlackboxAgent)
+        return {}
 
-        # No-op wrappers to match ADL signatures
-        def _tool_get_steering_samples(
-            dataset: str,
-            layer: float | int,
-            position: int,
-            prompts_subset: List[str] | None,
-            n: int,
-        ) -> Dict[str, Any]:
-            return get_steering_samples(
-                method,
-                dataset=dataset,
-                layer=layer,
-                position=position,
-                prompts_subset=(
-                    list(prompts_subset) if prompts_subset is not None else None
-                ),
-                n=int(n),
-                max_chars=max_sample_chars,
-            )
-
-        def _tool_generate_steered(
-            dataset: str, layer: float | int, position: int, prompts: List[str], n: int
-        ) -> Dict[str, List[str]]:
-            texts = generate_steered(
-                method,
-                dataset=dataset,
-                layer=layer,
-                position=position,
-                prompts=list(prompts),
-                n=int(n),
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=do_sample,
-            )
-            return {"texts": texts}
-
-        return {
-            "get_steering_samples": _tool_get_steering_samples,
-            "generate_steered": _tool_generate_steered,
-        }
-
-    def get_pre_tool_cost(self, tool_name: str, call_args: Dict[str, Any]) -> int:
-        if tool_name == "ask_model":
-            assert "prompts" in call_args
-            return len(list(call_args["prompts"]))
-        # No-op tools have 0 cost
-        return 0
-
-    def get_post_tool_cost(self, tool_name: str, tool_output: Any) -> int:
-        return 0
+    # No need to override get_pre_tool_cost or get_post_tool_cost
+    # They are already correctly handled by the parent BlackboxAgent
 
 
 __all__ = ["LogitDiffAgent"]

@@ -59,35 +59,6 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def get_steering_samples(
-    method: Any,
-    dataset: str,
-    layer: float | int,
-    position: int,
-    prompts_subset: List[str] | None,
-    n: int,
-    max_chars: int,
-) -> Dict[str, Any]:
-    """No-op - steering not implemented for LogitDiff yet."""
-    return {
-        "dataset": dataset,
-        "layer": layer,
-        "position": position,
-        "examples": []
-    }
-
-
-def generate_steered(
-    method: Any,
-    dataset: str,
-    layer: float | int,
-    position: int,
-    prompts: List[str],
-    n: int,
-    max_new_tokens: int,
-    temperature: float,
-    do_sample: bool,
-) -> List[str]:
-    """No-op - steering not implemented for LogitDiff yet."""
-    return []
+# Steering functionality is not implemented for LogitDiff method
+# If needed in the future, implement get_steering_samples and generate_steered here
 
