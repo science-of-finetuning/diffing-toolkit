@@ -194,16 +194,6 @@ class AmplificationDashboard:
         if container["server"] is None:
             need_reload = True
             container["config"] = None
-        elif [
-            p
-            for p in VLLM_KWARG_TRIGGERING_PARAMS
-            if container["config"][p] != current_config[p]
-        ]:
-            need_reload = True
-            st.warning(
-                f"vLLM server configuration changed, reloading... (currently this will probably not free up the gpu and crash the app)"
-            )
-            self._shutdown_vllm_server()
         elif container["config"] != current_config:
             diff_dict = {
                 f"{p}: {container['config'][p]} -> {current_config[p]}"
@@ -211,7 +201,7 @@ class AmplificationDashboard:
                 if container["config"][p] != current_config[p]
             }
             st.warning(
-                f"vLLM server configuration changed but not reloading the server as it is probably not necessary and would make the app crash. Parameters that differ in the new configuration are:\n{json.dumps(diff_dict, indent=2)}"
+                f"vLLM server configuration changed, reloading... Parameters that differ in the new configuration are:\n{json.dumps(diff_dict, indent=2)}"
             )
             need_reload = True
             self._shutdown_vllm_server()
@@ -597,14 +587,14 @@ class AmplificationDashboard:
     def _compile_config(self, config: ManagedConfig) -> Path | None:
         """Compile a config and return path to compiled adapter."""
         print(
-            f"Compiling config {config.config.name}\nBase name: {self.method.base_model_cfg.name}"
+            f"Compiling config {config.name}\nBase name: {self.method.base_model_cfg.name}"
         )
         path = config.compile(
             COMPILED_ADAPTERS_DIR,
             base_model_name=self.method.base_model_cfg.name,
             base_model=self.method.base_model,
         )
-        print(f"Compiled config {config.config.name} to {path}")
+        print(f"Compiled config {config.name} to {path}")
         return path
 
     def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:

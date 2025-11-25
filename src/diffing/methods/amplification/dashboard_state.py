@@ -45,15 +45,13 @@ class ManagedConfig(DashboardItem):
 
     config: AmplificationConfig = None
     _last_compiled_hash: str | None = field(default=None, init=False)
-    _lora_int_id: int = field(default=0, init=False)
+    _lora_int_id: int = field(default=-1, init=False)
 
     def __post_init__(self):
         self._update_lora_int_id()
 
-    @property
-    def config_id(self) -> str:
-        """Get the stable config ID from the underlying config."""
-        return self.config.config_id
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.config, name)
 
     def _update_lora_int_id(self):
         """Derive lora_int_id from config_id hash (vLLM needs an integer)."""
