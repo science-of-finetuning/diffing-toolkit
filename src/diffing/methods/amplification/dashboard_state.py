@@ -6,7 +6,7 @@ Separates UI concerns (active state, ordering) from domain models (configs).
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, List, ClassVar
+from typing import Dict, Any, List
 
 from nnterp import StandardizedTransformer
 
@@ -45,18 +45,24 @@ class ManagedConfig(DashboardItem):
 
     config: AmplificationConfig = None
     _last_compiled_hash: str | None = field(default=None, init=False)
-    lora_int_id: int = field(default=0, init=False)
-
-    # Class variable to track the number of ManagedConfig instances
-    _instance_count: ClassVar[int] = 0
+    _lora_int_id: int = field(default=0, init=False)
 
     def __post_init__(self):
         self._update_lora_int_id()
 
+    @property
+    def config_id(self) -> str:
+        """Get the stable config ID from the underlying config."""
+        return self.config.config_id
+
     def _update_lora_int_id(self):
-        """Update the LORA int ID for this config."""
-        type(self)._instance_count += 1
-        self.lora_int_id = type(self)._instance_count
+        """Derive lora_int_id from config_id hash (vLLM needs an integer)."""
+        self._lora_int_id = abs(hash(self.config.config_id)) % (2**31)
+
+    @property
+    def lora_int_id(self) -> int:
+        """Get the LORA int ID for vLLM (derived from config_id)."""
+        return self._lora_int_id
 
     @property
     def last_compiled_hash(self) -> str | None:
@@ -123,19 +129,29 @@ class ManagedConfig(DashboardItem):
 class DashboardSession:
     """Complete dashboard session state (for save/restore)."""
 
-    managed_configs: List[ManagedConfig] = field(default_factory=list)
+    managed_configs: Dict[str, ManagedConfig] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize session."""
         return {
-            "managed_configs": [mc.to_dict() for mc in self.managed_configs],
+            "managed_configs": {
+                config_id: mc.to_dict()
+                for config_id, mc in self.managed_configs.items()
+            },
         }
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "DashboardSession":
         """Deserialize session."""
-        return DashboardSession(
-            managed_configs=[
-                ManagedConfig.from_dict(mc) for mc in data.get("managed_configs", [])
-            ],
-        )
+        configs_data = data.get("managed_configs", {})
+        if isinstance(configs_data, list):
+            managed_configs = {
+                mc_data["config"]["config_id"]: ManagedConfig.from_dict(mc_data)
+                for mc_data in configs_data
+            }
+        else:
+            managed_configs = {
+                config_id: ManagedConfig.from_dict(mc_data)
+                for config_id, mc_data in configs_data.items()
+            }
+        return DashboardSession(managed_configs=managed_configs)

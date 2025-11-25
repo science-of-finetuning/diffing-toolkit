@@ -16,6 +16,7 @@ from typing import Literal, Any, Self
 from pathlib import Path
 import re
 import shutil
+import uuid
 import yaml
 
 from loguru import logger
@@ -202,6 +203,7 @@ class AmplificationConfig:
     name: str
     description: str = ""
     amplified_adapters: list[AmplifiedAdapter] = field(default_factory=list)
+    config_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AmplificationConfig":
@@ -212,6 +214,7 @@ class AmplificationConfig:
             amplified_adapters=[
                 AmplifiedAdapter.from_dict(a) for a in data.get("adapters", [])
             ],
+            config_id=data.get("config_id") or str(uuid.uuid4()),
         )
 
     @staticmethod
@@ -226,6 +229,7 @@ class AmplificationConfig:
         res = dict(
             name=self.name,
             description=self.description,
+            config_id=self.config_id,
             adapters=[a.to_dict() for a in self.amplified_adapters],
         )
         return res

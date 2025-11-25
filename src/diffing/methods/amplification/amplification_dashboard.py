@@ -26,6 +26,7 @@ from src.utils.vllm import (
     SamplingParams,
     cleanup_dist_env_and_memory,
     TokensPrompt,
+    kill_vllm_process,
 )
 from src.utils.model import load_model_from_config, adapter_id_to_path
 from src.diffing.methods.amplification.amplification_config import (
@@ -43,6 +44,7 @@ CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 CONVERSATIONS_DIR = CACHE_DIR / "conversations"
 CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
 COMPILED_ADAPTERS_DIR = PROJECT_ROOT / ".compiled_adapters"
+VLLM_KWARG_TRIGGERING_PARAMS = ["model_id"]
 
 
 @st.cache_resource
@@ -107,11 +109,11 @@ class AmplificationDashboard:
         - max_lora_rank: set to the maximum rank of the LORAs in the configurations
         """
 
-        active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
+        active_configs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
         num_configs = len(active_configs)
 
         max_num_seqs = max(((num_configs + 7) // 8) * 8, 8)
-        max_loras = max(num_configs, 4)
+        max_loras = max(num_configs, 16)
 
         all_adapter_ids = set()
         base_model_name = self.method.base_model_cfg.name
@@ -137,6 +139,8 @@ class AmplificationDashboard:
             # container["server"].shutdown()  # async
             container["server"] = None
             container["config"] = None
+            # double check with kill_vllm_process
+            kill_vllm_process()
 
     @property
     def tokenizer(self):
@@ -154,12 +158,29 @@ class AmplificationDashboard:
         )
         container = _get_vllm_server_container()
         need_reload = False
+
         if container["server"] is None:
             need_reload = True
             container["config"] = None
-        elif container["config"] != current_config:
+        elif [
+            p
+            for p in VLLM_KWARG_TRIGGERING_PARAMS
+            if container["config"][p] != current_config[p]
+        ]:
             need_reload = True
+            st.warning(
+                f"vLLM server configuration changed, reloading... (currently this will probably not free up the gpu and crash the app)"
+            )
             self._shutdown_vllm_server()
+        elif container["config"] != current_config:
+            diff_dict = {
+                f"{p}: {container['config'][p]} -> {current_config[p]}"
+                for p in current_config
+                if container["config"][p] != current_config[p]
+            }
+            st.warning(
+                f"vLLM server configuration changed but not reloading the server as it is probably not necessary and would make the app crash. Parameters that differ in the new configuration are:\n{json.dumps(diff_dict, indent=2)}"
+            )
 
         if need_reload:
             with st.spinner("Loading vLLM server..."):
@@ -173,7 +194,7 @@ class AmplificationDashboard:
     def _init_session_state(self) -> None:
         """Initialize Streamlit session state."""
         if "managed_configs" not in st.session_state:
-            st.session_state.managed_configs = []
+            st.session_state.managed_configs = {}
         if "conversations" not in st.session_state:
             st.session_state.conversations = {}
         if "active_conversation_id" not in st.session_state:
@@ -254,7 +275,7 @@ class AmplificationDashboard:
         """Save all managed configs to the cache directory."""
         # Get all current config names
         current_config_names = set()
-        for mc in st.session_state.managed_configs:
+        for mc in st.session_state.managed_configs.values():
             # Config names are already sanitized, so we can reuse them directly
             safe_name = mc.config.name
             config_path = CONFIGS_DIR / f"{safe_name}.yaml"
@@ -286,7 +307,7 @@ class AmplificationDashboard:
                 managed_config = ManagedConfig.from_config(
                     loaded_config, active=True, expanded=False
                 )
-                st.session_state.managed_configs.append(managed_config)
+                st.session_state.managed_configs[managed_config.config_id] = managed_config
             except Exception as e:
                 st.error(f"Failed to load config from {config_file}: {e}")
 
@@ -420,7 +441,7 @@ class AmplificationDashboard:
             return
 
         config_name_to_managed = {
-            mc.config.name: mc for mc in st.session_state.managed_configs
+            mc.config.name: mc for mc in st.session_state.managed_configs.values()
         }
 
         max_conv_num = -1
@@ -435,10 +456,10 @@ class AmplificationDashboard:
                 conv_num = int(conv_id.split("_")[-1])
                 max_conv_num = max(max_conv_num, conv_num)
 
-                # Reconstruct config reference
+                # Reconstruct config reference (ManagedConfig, not AmplificationConfig)
                 config_name = serialized_conv["context"]["config_name"]
                 if config_name and config_name in config_name_to_managed:
-                    config = config_name_to_managed[config_name].config
+                    config = config_name_to_managed[config_name]
                 else:
                     config = None
 
@@ -468,14 +489,14 @@ class AmplificationDashboard:
             st.session_state.conversation_counter = max_conv_num + 1
 
     def _get_unique_config_name(
-        self, desired_name: str, exclude_idx: int = None
+        self, desired_name: str, exclude_config_id: str = None
     ) -> str:
         """
         Get a unique configuration name by appending _X if name already exists.
 
         Args:
             desired_name: The desired configuration name
-            exclude_idx: Optional index to exclude from duplicate check (for renames)
+            exclude_config_id: Optional config_id to exclude from duplicate check (for renames)
 
         Returns:
             Unique configuration name
@@ -483,8 +504,8 @@ class AmplificationDashboard:
         sanitized_name = self._sanitize_config_name(desired_name)
 
         existing_names = set()
-        for idx, mc in enumerate(st.session_state.managed_configs):
-            if exclude_idx is None or idx != exclude_idx:
+        for config_id, mc in st.session_state.managed_configs.items():
+            if exclude_config_id is None or config_id != exclude_config_id:
                 existing_names.add(mc.config.name)
         if sanitized_name not in existing_names:
             return sanitized_name
@@ -532,54 +553,9 @@ class AmplificationDashboard:
             counter += 1
         return f"{desired_name}_{counter}"
 
-    def _clear_config_widget_states(self) -> None:
-        """
-        Clear all widget states related to config indices.
-
-        This is necessary when configs are inserted/deleted to prevent
-        Streamlit from showing stale cached values at the wrong indices.
-        """
-        keys_to_delete = []
-        for key in st.session_state.keys():
-            # Clear any widget key that contains config/adapter/layer/module indices
-            # These follow patterns like: config_name_{idx}, organism_{config_idx}_{adapter_idx}, etc.
-            if any(
-                pattern in key
-                for pattern in [
-                    "config_name_",
-                    "config_desc_",
-                    "config_active_",
-                    "delete_config_",
-                    "add_adapter_",
-                    "organism_",
-                    "variant_",
-                    "delete_adapter_",
-                    "add_layer_",
-                    "delete_layer_",
-                    "layer_mode_",
-                    "layer_single_",
-                    "layer_range_",
-                    "layer_list_",
-                    "add_module_",
-                    "delete_module_",
-                    "module_mode_",
-                    "module_weight_",
-                ]
-            ):
-                keys_to_delete.append(key)
-
-        for key in keys_to_delete:
-            del st.session_state[key]
-
     def _save_and_rerun(self) -> None:
-        """
-        Save configs to cache, clear widget states, and trigger a Streamlit rerun.
-
-        Clearing widget states is essential to prevent index-based widgets from
-        showing stale values after list modifications (insert/delete operations).
-        """
+        """Save configs to cache and trigger a Streamlit rerun."""
         self._save_configs_to_cache()
-        self._clear_config_widget_states()
         st.rerun()
 
     def _compile_config(self, config: ManagedConfig) -> Path | None:
@@ -802,12 +778,18 @@ class AmplificationDashboard:
             step=9,
             help="Seed for random number generation",
         )
+        skip_special_tokens = st.sidebar.checkbox(
+            "Skip Special Tokens",
+            value=False,
+            help="Skip special tokens in the generated text",
+        )
         st.session_state.sampling_params = {
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
             "do_sample": do_sample,
             "seed": seed,
+            "skip_special_tokens": skip_special_tokens,
         }
 
         st.sidebar.header("Global Controls")
@@ -815,13 +797,13 @@ class AmplificationDashboard:
         col1, col2 = st.sidebar.columns(2)
         with col1:
             if st.button("✓ Enable All", use_container_width=True):
-                for mc in st.session_state.managed_configs:
+                for mc in st.session_state.managed_configs.values():
                     mc.active = True
                 self._save_and_rerun()
 
         with col2:
             if st.button("✗ Disable All", use_container_width=True):
-                for mc in st.session_state.managed_configs:
+                for mc in st.session_state.managed_configs.values():
                     mc.active = False
                 self._save_and_rerun()
 
@@ -951,39 +933,37 @@ class AmplificationDashboard:
         """Render UI for adding new messages."""
         st.markdown("**Add Message:**")
 
-        col1, col2 = st.columns([1, 4])
+        with st.form("add_message_form", clear_on_submit=True):
+            col1, col2 = st.columns([1, 4])
 
-        with col1:
-            role = st.selectbox(
-                "Role",
-                ["user", "assistant", "system"],
-                key="new_msg_role",
-            )
-
-        with col2:
-            content = st.text_area(
-                "Content",
-                height=100,
-                placeholder="Enter message content...",
-                key="new_msg_content",
-            )
-
-        if st.button("➕ Add Message", key="add_msg_btn"):
-            if content.strip():
-                if "multi_gen_messages" not in st.session_state:
-                    st.session_state.multi_gen_messages = []
-
-                st.session_state.multi_gen_messages.append(
-                    {
-                        "role": role,
-                        "content": content.strip(),
-                    }
+            with col1:
+                role = st.selectbox(
+                    "Role",
+                    ["user", "assistant", "system"],
                 )
 
-                st.session_state.new_msg_content = ""
-                st.rerun()
-            else:
-                st.warning("Message content cannot be empty")
+            with col2:
+                content = st.text_area(
+                    "Content",
+                    height=100,
+                    placeholder="Enter message content...",
+                )
+
+            submitted = st.form_submit_button("➕ Add Message")
+            if submitted:
+                if content.strip():
+                    if "multi_gen_messages" not in st.session_state:
+                        st.session_state.multi_gen_messages = []
+
+                    st.session_state.multi_gen_messages.append(
+                        {
+                            "role": role,
+                            "content": content.strip(),
+                        }
+                    )
+                    st.rerun()
+                else:
+                    st.warning("Message content cannot be empty")
 
     def _render_generation_settings(self) -> None:
         """Render generation settings for message builder."""
@@ -1058,7 +1038,7 @@ class AmplificationDashboard:
             new_managed = ManagedConfig.from_config(
                 new_config, active=True, expanded=True
             )
-            st.session_state.managed_configs.insert(0, new_managed)
+            st.session_state.managed_configs[new_managed.config_id] = new_managed
             self._save_and_rerun()
 
         st.markdown("---")
@@ -1068,17 +1048,17 @@ class AmplificationDashboard:
                 "No amplification configurations yet. Click 'New Amplification' to create one."
             )
         else:
-            for idx, mc in enumerate(st.session_state.managed_configs):
-                self._render_amplification_config(idx, mc)
+            for config_id, mc in st.session_state.managed_configs.items():
+                self._render_amplification_config(config_id, mc)
 
     def _render_generation_controls(self, suffix: str, label: str) -> bool:
         """
         Render generation buttons and clear results button.
-        
+
         Args:
             suffix: Unique suffix for widget keys (e.g. 'text', 'msg')
             label: Label for the generate button (e.g. 'Text', 'Messages')
-            
+
         Returns:
             bool: True if the generate button was clicked
         """
@@ -1130,7 +1110,7 @@ class AmplificationDashboard:
             )
             st.session_state.multi_gen_preset_messages = None
 
-        active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
+        active_configs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
 
         if len(active_configs) == 0:
             st.warning(
@@ -1445,15 +1425,16 @@ class AmplificationDashboard:
         conv_id = f"conv_{st.session_state.conversation_counter}"
         st.session_state.conversation_counter += 1
 
-        # Use first active config if no config provided
+        # Use first active ManagedConfig if no config provided
         if config is None:
-            active_mcs = [mc for mc in st.session_state.managed_configs if mc.active]
+            active_mcs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
+            all_mcs = list(st.session_state.managed_configs.values())
             config = (
-                active_mcs[0].config
+                active_mcs[0]
                 if active_mcs
                 else (
-                    st.session_state.managed_configs[0].config
-                    if st.session_state.managed_configs
+                    all_mcs[0]
+                    if all_mcs
                     else None
                 )
             )
@@ -1493,7 +1474,7 @@ class AmplificationDashboard:
             )
 
         with col2:
-            config_names = [mc.config.name for mc in st.session_state.managed_configs]
+            config_names = [mc.config.name for mc in st.session_state.managed_configs.values()]
             if config_names:
                 selected_config_name = st.selectbox(
                     "Configuration",
@@ -1510,7 +1491,7 @@ class AmplificationDashboard:
             if selected_config_name:
                 config = next(
                     mc
-                    for mc in st.session_state.managed_configs
+                    for mc in st.session_state.managed_configs.values()
                     if mc.config.name == selected_config_name
                 )
                 self._create_new_conversation(config=config, name=conv_name)
@@ -1536,7 +1517,7 @@ class AmplificationDashboard:
             # Get the managed config for this conversation
             managed_config = next(
                 mc
-                for mc in st.session_state.managed_configs
+                for mc in st.session_state.managed_configs.values()
                 if mc.config.name == config.name
             )
 
@@ -1589,14 +1570,13 @@ class AmplificationDashboard:
 
         with col2:
             if config:
-                config_names = [
-                    mc.config.name for mc in st.session_state.managed_configs
-                ]
+                all_mcs = list(st.session_state.managed_configs.values())
+                config_names = [mc.config.name for mc in all_mcs]
                 if config_names:
                     current_index = next(
                         (
                             i
-                            for i, mc in enumerate(st.session_state.managed_configs)
+                            for i, mc in enumerate(all_mcs)
                             if mc.config.name == config.name
                         ),
                         0,
@@ -1610,16 +1590,16 @@ class AmplificationDashboard:
                     )
 
                     if selected_config_name != config.name:
-                        new_config = next(
-                            mc.config
-                            for mc in st.session_state.managed_configs
+                        new_managed_config = next(
+                            mc
+                            for mc in all_mcs
                             if mc.config.name == selected_config_name
                         )
 
                         with st.spinner(f"Switching to {selected_config_name}..."):
-                            new_compiled_path = self._compile_config(new_config)
+                            new_compiled_path = self._compile_config(new_managed_config)
 
-                        conv["context"]["config"] = new_config
+                        conv["context"]["config"] = new_managed_config
                         conv["context"]["compiled_path"] = new_compiled_path
                         self._save_conversation(conv_id, conv)
                         st.success(f"Switched to {selected_config_name}")
@@ -1783,7 +1763,7 @@ class AmplificationDashboard:
                 # Get the managed config for this conversation
                 managed_config = next(
                     mc
-                    for mc in st.session_state.managed_configs
+                    for mc in st.session_state.managed_configs.values()
                     if mc.config.name == config.name
                 )
 
@@ -1812,11 +1792,10 @@ class AmplificationDashboard:
 
                 self._save_and_rerun()
 
-    def _render_amplification_config(self, idx: int, mc: ManagedConfig) -> None:
+    def _render_amplification_config(self, config_id: str, mc: ManagedConfig) -> None:
         """Render one amplification config (expandable)."""
         config = mc.config
         icon = "✅" if mc.active else "❌"
-        config_key = mc.lora_int_id
         with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
             col1, col2 = st.columns([3, 1])
 
@@ -1824,28 +1803,28 @@ class AmplificationDashboard:
                 new_name = st.text_input(
                     "Configuration Name",
                     value=config.name,
-                    key=f"config_name_{config_key}",
+                    key=f"config_name_{config_id}",
                 )
                 if new_name != config.name:
                     unique_name = self._get_unique_config_name(
-                        new_name, exclude_idx=idx
+                        new_name, exclude_config_id=config_id
                     )
-                    st.session_state.managed_configs[idx].config.name = unique_name
+                    st.session_state.managed_configs[config_id].config.name = unique_name
                     self._save_and_rerun()
 
             with col2:
                 if st.button(
                     "🗑️ Delete",
-                    key=f"delete_config_{config_key}",
+                    key=f"delete_config_{config_id}",
                     use_container_width=True,
                 ):
-                    st.session_state.managed_configs.pop(idx)
+                    del st.session_state.managed_configs[config_id]
                     self._save_and_rerun()
 
             config.description = st.text_area(
                 "Description",
                 value=config.description,
-                key=f"config_desc_{config_key}",
+                key=f"config_desc_{config_id}",
                 height=60,
             )
 
@@ -1853,7 +1832,7 @@ class AmplificationDashboard:
             mc.active = st.checkbox(
                 "Active",
                 value=mc.active,
-                key=f"config_active_{config_key}",
+                key=f"config_active_{config_id}",
                 help="Only active configurations will be used for generation",
             )
             if mc.active != current_active:
@@ -1866,10 +1845,10 @@ class AmplificationDashboard:
             else:
                 for adapter_idx, adapter in enumerate(config.amplified_adapters):
                     self._render_adapter_amplification(
-                        idx, config_key, adapter_idx, adapter
+                        config_id, adapter_idx, adapter
                     )
 
-            if st.button("➕ Add Adapter", key=f"add_adapter_{config_key}"):
+            if st.button("➕ Add Adapter", key=f"add_adapter_{config_id}"):
                 # Get first available organism as default
                 available_organisms = get_available_organisms(
                     base_model_name=self.method.base_model_cfg.name, only_loras=True
@@ -1893,8 +1872,7 @@ class AmplificationDashboard:
 
     def _render_adapter_amplification(
         self,
-        config_idx: int,
-        config_key: int,
+        config_id: str,
         adapter_idx: int,
         adapter: AmplifiedAdapter,
     ) -> None:
@@ -1911,9 +1889,9 @@ class AmplificationDashboard:
                 st.markdown(f"**Adapter: {display_name}**")
 
             with col2:
-                if st.button("🗑️", key=f"delete_adapter_{config_key}_{adapter_idx}"):
+                if st.button("🗑️", key=f"delete_adapter_{config_id}_{adapter_idx}"):
                     st.session_state.managed_configs[
-                        config_idx
+                        config_id
                     ].config.amplified_adapters.pop(adapter_idx)
                     self._save_and_rerun()
 
@@ -1946,7 +1924,7 @@ class AmplificationDashboard:
                         "Organism",
                         options=available_organisms,
                         index=current_index,
-                        key=f"organism_{config_key}_{adapter_idx}",
+                        key=f"organism_{config_id}_{adapter_idx}",
                         help="Select the organism (model fine-tune) to use",
                     )
 
@@ -1983,7 +1961,7 @@ class AmplificationDashboard:
                             "Variant",
                             options=available_variants,
                             index=current_index,
-                            key=f"variant_{config_key}_{adapter_idx}",
+                            key=f"variant_{config_id}_{adapter_idx}",
                             help="Select the variant of the organism",
                         )
                 else:
@@ -1996,11 +1974,11 @@ class AmplificationDashboard:
             else:
                 for layer_idx, layer_amp in enumerate(adapter.layer_amplifications):
                     self._render_layer_amplification(
-                        config_idx, config_key, adapter_idx, layer_idx, layer_amp
+                        config_id, adapter_idx, layer_idx, layer_amp
                     )
 
             if st.button(
-                "➕ Add Layer Spec", key=f"add_layer_{config_key}_{adapter_idx}"
+                "➕ Add Layer Spec", key=f"add_layer_{config_id}_{adapter_idx}"
             ):
                 new_layer_amp = LayerAmplification(
                     layers="all",
@@ -2011,8 +1989,7 @@ class AmplificationDashboard:
 
     def _render_layer_amplification(
         self,
-        config_idx: int,
-        config_key: int,
+        config_id: str,
         adapter_idx: int,
         layer_idx: int,
         layer_amp: LayerAmplification,
@@ -2027,10 +2004,10 @@ class AmplificationDashboard:
             with col2:
                 if st.button(
                     "🗑️",
-                    key=f"delete_layer_{config_key}_{adapter_idx}_{layer_idx}",
+                    key=f"delete_layer_{config_id}_{adapter_idx}_{layer_idx}",
                 ):
                     st.session_state.managed_configs[
-                        config_idx
+                        config_id
                     ].config.amplified_adapters[adapter_idx].layer_amplifications.pop(
                         layer_idx
                     )
@@ -2054,7 +2031,7 @@ class AmplificationDashboard:
                 "Layer Selection Mode",
                 options=["All", "Single", "List", "Range"],
                 index=initial_mode_index,
-                key=f"layer_mode_{config_key}_{adapter_idx}_{layer_idx}",
+                key=f"layer_mode_{config_id}_{adapter_idx}_{layer_idx}",
                 horizontal=True,
             )
 
@@ -2071,7 +2048,7 @@ class AmplificationDashboard:
                     min_value=0,
                     value=current_val,
                     step=1,
-                    key=f"layer_single_{config_key}_{adapter_idx}_{layer_idx}",
+                    key=f"layer_single_{config_id}_{adapter_idx}_{layer_idx}",
                 )
                 layer_amp.layers = layer_num
 
@@ -2092,7 +2069,7 @@ class AmplificationDashboard:
                     min_value=0,
                     max_value=num_layers - 1,
                     value=(current_start, current_end),
-                    key=f"layer_range_{config_key}_{adapter_idx}_{layer_idx}",
+                    key=f"layer_range_{config_id}_{adapter_idx}_{layer_idx}",
                     help="Select the range of layers to apply amplification to",
                 )
 
@@ -2111,7 +2088,7 @@ class AmplificationDashboard:
                 layer_list_str = st.text_input(
                     "Layer Indices (comma-separated)",
                     value=current_val,
-                    key=f"layer_list_{config_key}_{adapter_idx}_{layer_idx}",
+                    key=f"layer_list_{config_id}_{adapter_idx}_{layer_idx}",
                     help="E.g., '0,1,2,5,10'",
                 )
                 if layer_list_str.strip():
@@ -2130,8 +2107,7 @@ class AmplificationDashboard:
                     layer_amp.module_amplifications
                 ):
                     self._render_module_amplification(
-                        config_idx,
-                        config_key,
+                        config_id,
                         adapter_idx,
                         layer_idx,
                         module_idx,
@@ -2140,7 +2116,7 @@ class AmplificationDashboard:
 
             if st.button(
                 "➕ Add Module",
-                key=f"add_module_{config_key}_{adapter_idx}_{layer_idx}",
+                key=f"add_module_{config_id}_{adapter_idx}_{layer_idx}",
             ):
                 new_module_amp = ModuleAmplification(modules="all", weight=1.0)
                 layer_amp.module_amplifications.append(new_module_amp)
@@ -2148,8 +2124,7 @@ class AmplificationDashboard:
 
     def _render_module_amplification(
         self,
-        config_idx: int,
-        config_key: int,
+        config_id: str,
         adapter_idx: int,
         layer_idx: int,
         module_idx: int,
@@ -2171,7 +2146,7 @@ class AmplificationDashboard:
                         else 2 if module_amp.modules == "mlp" else 3
                     )
                 ),
-                key=f"module_mode_{config_key}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"module_mode_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}",
             )
 
         with col2:
@@ -2181,16 +2156,16 @@ class AmplificationDashboard:
                 max_value=5.0,
                 value=float(module_amp.weight),
                 step=0.1,
-                key=f"module_weight_{config_key}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"module_weight_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}",
                 help="Amplification factor (1.0 = no change, 2.0 = double, 0.5 = half)",
             )
 
         with col3:
             if st.button(
                 "🗑️",
-                key=f"delete_module_{config_key}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"delete_module_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}",
             ):
-                st.session_state.managed_configs[config_idx].config.amplified_adapters[
+                st.session_state.managed_configs[config_id].config.amplified_adapters[
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
                 self._save_and_rerun()
