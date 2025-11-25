@@ -7,11 +7,15 @@ from loguru import logger
 from .normalization import normalize_token_list
 
 
-def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
     """
     Build overview for LogitDiff agent.
     
     Includes ALL top-K positive occurring tokens from cached results.
+    
+    Returns:
+        Tuple of (overview_data, dataset_mapping) where dataset_mapping maps
+        anonymized names (ds1, ds2, ...) to real dataset names
     """
     logger.info("AgentTool: get_overview")
     
@@ -25,13 +29,19 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             f"No diffing results found in {method.results_dir}. "
             f"Run 'pipeline.mode=diffing' with 'diffing/method=logit_diff_topk_occurring' first before running evaluation."
         )
-            
+    
+    # Create dataset name mapping for blinding
+    dataset_mapping: Dict[str, str] = {}
+    for i, ds in enumerate(datasets, start=1):
+        dataset_mapping[f"ds{i}"] = ds
+    
     out: Dict[str, Any] = {"datasets": {}}
     
     # Check if normalization is enabled
     use_normalized = cfg.get("use_normalized_tokens", False)
     
-    for ds in datasets:
+    for i, ds in enumerate(datasets, start=1):
+        anonymized_name = f"ds{i}"
         results_file = method.results_dir / f"{ds}_occurrence_rates.json"
         
         if not results_file.exists():
@@ -55,7 +65,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
                 top_positive = normalize_token_list(top_positive, total_positions)
                 logger.info(f"Applied token normalization for {ds}: {len(results.get('top_positive', []))} -> {len(top_positive)} tokens")
             
-            out["datasets"][ds] = {
+            out["datasets"][anonymized_name] = {
                 "top_positive_tokens": top_positive,
                 "total_positions": total_positions,
                 "num_samples": num_samples,
@@ -69,7 +79,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(f"Error loading results for {ds}: {e}")
             continue
             
-    return out
+    return out, dataset_mapping
 
 
 # Steering functionality is not implemented for LogitDiff method

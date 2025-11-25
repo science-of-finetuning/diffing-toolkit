@@ -9,7 +9,6 @@ method_params:
   max_tokens_per_sample: 128
   top_k: 100
   ignore_padding: true
-  use_normalized_tokens: true
 
 # Dataset configuration (standard pattern)
 datasets:

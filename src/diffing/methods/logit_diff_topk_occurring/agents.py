@@ -40,16 +40,27 @@ class LogitDiffAgent(DiffingMethodAgent):
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
+    
+    # Store dataset mapping for later retrieval
+    _dataset_mapping: Dict[str, str] = None
 
     @property
     def name(self) -> str:
         return "LogitDiff"
+    
+    def get_dataset_mapping(self) -> Dict[str, str]:
+        """Return the dataset name mapping (anonymized -> real)."""
+        return self._dataset_mapping or {}
 
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
 
         overview_cfg = self.cfg.diffing.method.agent.overview
-        overview_payload = get_overview(method, overview_cfg)
+        overview_payload, dataset_mapping = get_overview(method, overview_cfg)
+        
+        # Store mapping for later retrieval
+        self._dataset_mapping = dataset_mapping
+        
         return (
             "OVERVIEW:"
             + "\n"
