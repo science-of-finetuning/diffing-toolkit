@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import json
 from typing import Tuple, Dict, Any, Literal
 import gc
 from pathlib import Path
@@ -54,6 +55,23 @@ def adapter_id_to_path(adapter_id: str) -> Path:
         repo_path = repo_path / "/".join(path[2:])
 
     return repo_path
+
+def get_adapter_rank(adapter_id: str) -> int:
+    """
+    Get the rank of a LoRA adapter from its configuration.
+
+    Args:
+        adapter_id: HuggingFace adapter ID
+
+    Returns:
+        The rank (r) of the LoRA adapter
+    """
+    adapter_path = adapter_id_to_path(adapter_id)
+    adapter_config_path = adapter_path / "adapter_config.json"
+    assert adapter_config_path.exists(), f"adapter_config.json not found for {adapter_id}"
+    with open(adapter_config_path) as f:
+        adapter_config = json.load(f)
+    return adapter_config["r"]
 
 
 def load_tokenizer(model_name: str) -> AnyTokenizer:
@@ -498,39 +516,3 @@ def patchscope_lens(
     neg_probs = cum_probs[num_scalers:, :].cpu().squeeze(0) / num_prompts
     return pos_probs, neg_probs
 
-
-class ModuleAccessor(ABC):
-    """
-    Abstract base class for object representing accessing a module from a model. Useful when parameterizing an intervention.
-
-    Args:
-        layer: The layer to access. If None, the module will be accessed from the entire model.
-    """
-
-    def __init__(self, layer: int | None):
-        self.layer = layer
-
-    @abstractmethod
-    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
-        pass
-
-    def get_module(self, model: StandardizedTransformer) -> nn.Module:
-        return self.get_nnsight_module(model)._module
-
-
-class MLPModuleAccessor(ModuleAccessor):
-    """
-    Object representing accessing a MLP module from a model.
-    """
-
-    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
-        return model.mlps[self.layer]
-
-
-class AttentionModuleAccessor(ModuleAccessor):
-    """
-    Object representing accessing an attention module from a model.
-    """
-
-    def get_nnsight_module(self, model: StandardizedTransformer) -> Envoy:
-        return model.attentions[self.layer]

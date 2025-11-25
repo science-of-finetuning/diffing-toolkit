@@ -26,7 +26,6 @@ from safetensors.torch import save_file
 
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
-from src.utils.collection import sum_dict_values
 from src.utils.vllm import ensure_vllm
 
 

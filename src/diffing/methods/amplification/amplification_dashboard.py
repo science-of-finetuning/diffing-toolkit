@@ -9,7 +9,6 @@ import html
 import json
 import re
 from pathlib import Path
-from typing import ClassVar
 from typing import Dict, Any, List
 
 import streamlit as st
@@ -24,13 +23,11 @@ from src.utils.configs import (
 from src.utils.vllm import (
     LLM,
     ensure_vllm,
-    LoRARequest,
     SamplingParams,
     cleanup_dist_env_and_memory,
-    TokensPrompt,
     kill_vllm_process,
 )
-from src.utils.model import load_model_from_config, adapter_id_to_path
+from src.utils.model import load_model_from_config, get_adapter_rank
 from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
     AmplifiedAdapter,
@@ -39,7 +36,18 @@ from src.diffing.methods.amplification.amplification_config import (
     patch_vllm,
     CUSTOM_ADAPTER_ORGANISM,
 )
-from src.diffing.methods.amplification.dashboard_state import ManagedConfig
+from src.diffing.methods.amplification.dashboard_state import (
+    ManagedConfig,
+    sanitize_config_name,
+    get_unique_name,
+    save_configs_to_cache,
+    load_configs_from_cache,
+    save_multigen_state,
+    load_multigen_state,
+    save_conversation,
+    load_conversations_from_cache,
+    delete_conversation_file,
+)
 
 CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
 CONFIGS_DIR = CACHE_DIR / "configs"
@@ -69,11 +77,9 @@ def render_sample_cycler(samples: list[str], component_id: str, height: int = 40
     rendered = rendered.replace("{{TOTAL}}", str(len(samples)))
     rendered = rendered.replace("{{SAMPLES}}", samples_html)
     
-    # Handle conditional for multi-sample
     if len(samples) > 1:
         rendered = rendered.replace("{{#if MULTI}}", "").replace("{{/if}}", "")
     else:
-        # Remove the nav row for single sample
         rendered = re.sub(r"\{\{#if MULTI\}\}.*?\{\{/if\}\}", "", rendered, flags=re.DOTALL)
     
     components.html(rendered, height=height, scrolling=True)
@@ -87,8 +93,6 @@ def _get_vllm_server_container():
 
 class AmplificationDashboard:
     """Streamlit dashboard for amplification configuration."""
-
-    _request_id_counter: ClassVar[int] = 0
 
     def __init__(self, method_instance):
         """
@@ -113,34 +117,11 @@ class AmplificationDashboard:
     @staticmethod
     @st.cache_data
     def _get_adapter_rank_cached(adapter_id: str) -> int:
-        """
-        Get the rank of a LoRA adapter from its configuration.
-        Results are cached to avoid repeated downloads.
+        """Cached wrapper around method.get_adapter_rank for Streamlit."""
+        return get_adapter_rank(adapter_id)
 
-        Args:
-            adapter_id: HuggingFace adapter ID
-
-        Returns:
-            The rank (r) of the LoRA adapter
-        """
-
-        adapter_path = adapter_id_to_path(adapter_id)
-        adapter_config_path = adapter_path / "adapter_config.json"
-        assert (
-            adapter_config_path.exists()
-        ), f"adapter_config.json not found for {adapter_id}"
-        with open(adapter_config_path) as f:
-            adapter_config = json.load(f)
-        return adapter_config["r"]
-
-    def auto_update_inference_config(self) -> None:
-        """
-        Update the inference configuration based on the Amplification Configurations:
-        - max_num_seqs: set to a multiple of 8 that is greater than the number of configs
-        - max_loras: set to the number of different configs
-        - max_lora_rank: set to the maximum rank of the LORAs in the configurations
-        """
-
+    def _auto_update_inference_config(self) -> None:
+        """Update inference config based on active amplification configurations."""
         active_configs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
         num_configs = len(active_configs)
 
@@ -154,9 +135,7 @@ class AmplificationDashboard:
                 all_adapter_ids.add(adapter.adapter_id(base_model_name))
         max_lora_rank = 64
         if all_adapter_ids:
-            ranks = []
-            for adapter_id in all_adapter_ids:
-                ranks.append(self._get_adapter_rank_cached(adapter_id))
+            ranks = [self._get_adapter_rank_cached(aid) for aid in all_adapter_ids]
             max_lora_rank = max(ranks) * 2
 
         self.inference_config.vllm_kwargs["max_num_seqs"] = max_num_seqs
@@ -168,10 +147,8 @@ class AmplificationDashboard:
         if container["server"] is not None:
             del container["server"]
             cleanup_dist_env_and_memory()
-            # container["server"].shutdown()  # async
             container["server"] = None
             container["config"] = None
-            # double check with kill_vllm_process
             kill_vllm_process()
 
     @property
@@ -183,7 +160,7 @@ class AmplificationDashboard:
     @ensure_vllm
     def multi_lora_vllm_server(self) -> LLM:
         """Get or create the vLLM server, reloading if config changed."""
-        self.auto_update_inference_config()
+        self._auto_update_inference_config()
         current_config = (
             dict(model_id=self.inference_config.model_id)
             | self.inference_config.vllm_kwargs
@@ -232,7 +209,7 @@ class AmplificationDashboard:
         if "multi_gen_results" not in st.session_state:
             st.session_state.multi_gen_results = None
         if "multi_gen_sample_indices" not in st.session_state:
-            st.session_state.multi_gen_sample_indices = {}  # Maps config idx to current sample idx
+            st.session_state.multi_gen_sample_indices = {}
         if "multi_gen_preset_prompt" not in st.session_state:
             st.session_state.multi_gen_preset_prompt = None
         if "multi_gen_preset_apply_template" not in st.session_state:
@@ -240,10 +217,8 @@ class AmplificationDashboard:
         if "multi_gen_preset_messages" not in st.session_state:
             st.session_state.multi_gen_preset_messages = None
 
-        # Load last multi-gen state from cache
-        saved_multigen_state = self._load_last_multigen_state()
+        saved_multigen_state = load_multigen_state(CACHE_DIR / "last_multigen_state.yaml")
 
-        # Text tab state
         if "multi_gen_text_prompt" not in st.session_state:
             st.session_state.multi_gen_text_prompt = saved_multigen_state.get(
                 "text_tab", {}
@@ -253,7 +228,6 @@ class AmplificationDashboard:
                 "text_tab", {}
             ).get("template_mode", "Apply chat template")
 
-        # Messages tab state
         if "multi_gen_messages" not in st.session_state:
             st.session_state.multi_gen_messages = saved_multigen_state.get(
                 "messages_tab", {}
@@ -265,13 +239,11 @@ class AmplificationDashboard:
         if "multi_gen_msg_editing_idx" not in st.session_state:
             st.session_state.multi_gen_msg_editing_idx = None
 
-        # Active tab
         if "multi_gen_active_tab" not in st.session_state:
             st.session_state.multi_gen_active_tab = saved_multigen_state.get(
                 "active_tab", "Text"
             )
 
-        # Legacy state (keep for backward compatibility during transition)
         if "multi_gen_prompt" not in st.session_state:
             st.session_state.multi_gen_prompt = saved_multigen_state.get("prompt", "")
         if "apply_chat_template_checkbox" not in st.session_state:
@@ -279,10 +251,7 @@ class AmplificationDashboard:
                 "apply_chat_template", True
             )
 
-        # Load configs from cache after initializing session state
         self._load_configs_from_cache()
-
-        # Load conversations from cache after configs (conversations reference configs)
         self._load_conversations_from_cache()
 
     def _get_sampling_params(self) -> SamplingParams:
@@ -293,54 +262,17 @@ class AmplificationDashboard:
             params["temperature"] = 0
         return SamplingParams(**params)
 
-    def _get_multigen_cache_file(self) -> Path:
-        """Get the cache file path for multi-generation state."""
-        return CACHE_DIR / "last_multigen_state.yaml"
-
-    def _save_configs_to_cache(self) -> None:
-        """Save all managed configs to the cache directory."""
-        # Get all current config names
-        current_config_names = set()
-        for mc in st.session_state.managed_configs.values():
-            # Config names are already sanitized, so we can reuse them directly
-            safe_name = mc.config.name
-            config_path = CONFIGS_DIR / f"{safe_name}.yaml"
-            mc.config.save_yaml(config_path)
-            current_config_names.add(f"{safe_name}.yaml")
-
-        removed_dir = CONFIGS_DIR / "removed"
-        removed_dir.mkdir(parents=True, exist_ok=True)
-
-        # Move configs that no longer exist into the removed directory
-        for config_file in CONFIGS_DIR.glob("*.yaml"):
-            if config_file.name not in current_config_names:
-                target = removed_dir / config_file.name
-                if target.exists():
-                    target.unlink()
-                config_file.replace(target)
 
     def _load_configs_from_cache(self) -> None:
         """Load configs from the cache directory."""
-
-        # Only load if session state is empty
         if len(st.session_state.managed_configs) > 0:
             return
 
-        for config_file in sorted(CONFIGS_DIR.glob("*.yaml")):
-            try:
-                loaded_config = AmplificationConfig.load_yaml(config_file)
-                loaded_config.name = self._get_unique_config_name(loaded_config.name)
-                managed_config = ManagedConfig.from_config(
-                    loaded_config, active=True, expanded=False
-                )
-                st.session_state.managed_configs[managed_config.config_id] = managed_config
-            except Exception as e:
-                st.error(f"Failed to load config from {config_file}: {e}")
+        loaded = load_configs_from_cache(CONFIGS_DIR)
+        st.session_state.managed_configs.update(loaded)
 
     def _save_last_multigen_state(self) -> None:
         """Save current multi-gen state to cache."""
-        state_file = self._get_multigen_cache_file()
-
         state = {
             "active_tab": st.session_state.get("multi_gen_active_tab", "Text"),
             "text_tab": {
@@ -356,110 +288,11 @@ class AmplificationDashboard:
                 ),
             },
         }
-
-        with open(state_file, "w") as f:
-            yaml.dump(state, f, sort_keys=False)
-
-    def _load_last_multigen_state(self) -> dict:
-        """
-        Load the last multi-generation state from cache.
-
-        Returns:
-            Dictionary with new format, handling backward compatibility with old format
-        """
-        state_file = self._get_multigen_cache_file()
-
-        default_state = {
-            "active_tab": "Text",
-            "text_tab": {"prompt": "", "template_mode": "Apply chat template"},
-            "messages_tab": {
-                "messages": [],
-                "template_override": "No template override",
-            },
-            "prompt": "",
-            "apply_chat_template": True,
-        }
-
-        if not state_file.exists():
-            return default_state
-
-        try:
-            with open(state_file) as f:
-                state = yaml.safe_load(f) or {}
-
-            if "text_tab" not in state:
-                prompt = state.get("prompt", "")
-                apply_template = state.get("apply_chat_template", True)
-                state["text_tab"] = {
-                    "prompt": prompt,
-                    "template_mode": (
-                        "Apply chat template" if apply_template else "No template"
-                    ),
-                }
-                state["messages_tab"] = {
-                    "messages": [],
-                    "template_override": "No template override",
-                }
-                state["active_tab"] = "Text"
-
-            if (
-                "messages_tab" in state
-                and "add_generation_prompt" in state["messages_tab"]
-            ):
-                add_gen = state["messages_tab"]["add_generation_prompt"]
-                state["messages_tab"]["template_override"] = (
-                    "Force generation prompt"
-                    if add_gen
-                    else "Force continue final message"
-                )
-                del state["messages_tab"]["add_generation_prompt"]
-
-            state["prompt"] = state.get(
-                "prompt", state.get("text_tab", {}).get("prompt", "")
-            )
-            state["apply_chat_template"] = state.get(
-                "apply_chat_template",
-                state.get("text_tab", {}).get("template_mode") == "Apply chat template",
-            )
-
-            return state
-        except Exception:
-            return default_state
+        save_multigen_state(CACHE_DIR / "last_multigen_state.yaml", state)
 
     def _save_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
-        """
-        Save a single conversation to disk.
-
-        Args:
-            conv_id: The conversation ID
-            conv: The conversation data
-        """
-        safe_name = conv["name"].replace("/", "_").replace(":", "_")
-        conv_path = CONVERSATIONS_DIR / f"{safe_name}.yaml"
-
-        # Serialize conversation data
-        serialized_conv = {
-            "conv_id": conv_id,
-            "name": conv["name"],
-            "context": {
-                "config_name": (
-                    conv["context"]["config"].name
-                    if conv["context"]["config"]
-                    else None
-                ),
-                "compiled_path": (
-                    str(conv["context"]["compiled_path"])
-                    if conv["context"]["compiled_path"]
-                    else None
-                ),
-            },
-            "history": conv["history"],
-            "editing_message": conv["editing_message"],
-            "regenerating_from": conv["regenerating_from"],
-        }
-
-        with open(conv_path, "w") as f:
-            yaml.dump(serialized_conv, f, sort_keys=False)
+        """Save a single conversation to disk."""
+        save_conversation(conv_id, conv, CONVERSATIONS_DIR)
 
     def _load_conversations_from_cache(self) -> None:
         """Load all conversations from the cache directory."""
@@ -469,146 +302,49 @@ class AmplificationDashboard:
         config_name_to_managed = {
             mc.config.name: mc for mc in st.session_state.managed_configs.values()
         }
-
-        max_conv_num = -1
-        for conv_file in sorted(CONVERSATIONS_DIR.glob("*.yaml")):
-            try:
-                with open(conv_file) as f:
-                    serialized_conv = yaml.safe_load(f)
-
-                conv_id = serialized_conv["conv_id"]
-
-                # Extract conversation number from conv_id (e.g., "conv_5" -> 5)
-                conv_num = int(conv_id.split("_")[-1])
-                max_conv_num = max(max_conv_num, conv_num)
-
-                # Reconstruct config reference (ManagedConfig, not AmplificationConfig)
-                config_name = serialized_conv["context"]["config_name"]
-                if config_name and config_name in config_name_to_managed:
-                    config = config_name_to_managed[config_name]
-                else:
-                    config = None
-
-                # Reconstruct compiled_path
-                compiled_path_str = serialized_conv["context"]["compiled_path"]
-                compiled_path = Path(compiled_path_str) if compiled_path_str else None
-
-                # Reconstruct conversation
-                conv = {
-                    "name": serialized_conv["name"],
-                    "context": {
-                        "config": config,
-                        "compiled_path": compiled_path,
-                    },
-                    "history": serialized_conv["history"],
-                    "editing_message": serialized_conv["editing_message"],
-                    "regenerating_from": serialized_conv["regenerating_from"],
-                }
-
-                st.session_state.conversations[conv_id] = conv
-
-            except Exception as e:
-                st.error(f"Failed to load conversation from {conv_file}: {e}")
-
-        # Set conversation counter to max + 1
+        conversations, max_conv_num = load_conversations_from_cache(
+            CONVERSATIONS_DIR, config_name_to_managed
+        )
+        st.session_state.conversations.update(conversations)
         if max_conv_num >= 0:
             st.session_state.conversation_counter = max_conv_num + 1
 
     def _get_unique_config_name(
         self, desired_name: str, exclude_config_id: str = None
     ) -> str:
-        """
-        Get a unique configuration name by appending _X if name already exists.
-
-        Args:
-            desired_name: The desired configuration name
-            exclude_config_id: Optional config_id to exclude from duplicate check (for renames)
-
-        Returns:
-            Unique configuration name
-        """
-        sanitized_name = self._sanitize_config_name(desired_name)
-
+        """Get a unique configuration name."""
+        sanitized_name = sanitize_config_name(desired_name)
         existing_names = set()
         for config_id, mc in st.session_state.managed_configs.items():
             if exclude_config_id is None or config_id != exclude_config_id:
                 existing_names.add(mc.config.name)
-        if sanitized_name not in existing_names:
-            return sanitized_name
-        counter = 1
-        while f"{sanitized_name}_{counter}" in existing_names:
-            counter += 1
-        return f"{sanitized_name}_{counter}"
-
-    @staticmethod
-    def _sanitize_config_name(name: str) -> str:
-        """
-        Sanitize a config name so it can be used as both display text and filename.
-
-        Args:
-            name: Desired config name input by the user
-
-        Returns:
-            Sanitized name containing only safe characters
-        """
-        sanitized = re.sub(r"[^a-zA-Z0-9_\- ]+", "_", name).strip()
-        sanitized = re.sub(r"\s+", " ", sanitized)
-        return sanitized or "config"
+        return get_unique_name(sanitized_name, existing_names)
 
     def _get_unique_conversation_name(
         self, desired_name: str, exclude_conv_id: str = None
     ) -> str:
-        """
-        Get a unique conversation name by appending _X if name already exists.
-
-        Args:
-            desired_name: The desired conversation name
-            exclude_conv_id: Optional conv_id to exclude from duplicate check (for renames)
-
-        Returns:
-            Unique conversation name
-        """
+        """Get a unique conversation name."""
         existing_names = set()
         for conv_id, conv in st.session_state.conversations.items():
             if exclude_conv_id is None or conv_id != exclude_conv_id:
                 existing_names.add(conv["name"])
-        if desired_name not in existing_names:
-            return desired_name
-        counter = 1
-        while f"{desired_name}_{counter}" in existing_names:
-            counter += 1
-        return f"{desired_name}_{counter}"
+        return get_unique_name(desired_name, existing_names)
 
     def _save_and_rerun(self) -> None:
         """Save configs to cache and trigger a Streamlit rerun."""
-        self._save_configs_to_cache()
+        save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR)
         st.rerun()
 
-    def _compile_config(self, config: ManagedConfig) -> Path | None:
-        """Compile a config and return path to compiled adapter."""
-        print(
-            f"Compiling config {config.name}\nBase name: {self.method.base_model_cfg.name}"
-        )
-        path = config.compile(
-            COMPILED_ADAPTERS_DIR,
-            base_model_name=self.method.base_model_cfg.name,
-            base_model=self.method.base_model,
-        )
-        print(f"Compiled config {config.name} to {path}")
-        return path
-
-    def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> str:
+    def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> list[int]:
         """Truncate chat history after a message and return the prompt for regeneration."""
         assert 0 <= index < len(conv["history"]), f"Invalid message index: {index}"
 
-        # Find the last user message before this assistant message
         prompt_index = index - 1
         while prompt_index >= 0 and conv["history"][prompt_index]["role"] != "user":
             prompt_index -= 1
 
         assert prompt_index >= 0, "No user message found before this assistant message"
 
-        # Truncate history after the user prompt
         conv["history"] = conv["history"][: prompt_index + 1]
 
         return self.tokenizer.apply_chat_template(
@@ -622,99 +358,34 @@ class AmplificationDashboard:
         amplification_configs: List[ManagedConfig],
         sampling_params,
     ):
-        # Convert dict sampling params to vLLM SamplingParams object
-        if isinstance(sampling_params, dict):
-            vllm_sampling_params = SamplingParams(
-                temperature=sampling_params.get("temperature", 1.0),
-                top_p=sampling_params.get("top_p", 0.9),
-                max_tokens=sampling_params.get("max_tokens", 100),
-                n=sampling_params.get("n", 1),
-            )
-        else:
-            vllm_sampling_params = sampling_params
-
-        for config in amplification_configs:
-            compiled_path = self._compile_config(config)
-            if compiled_path is None:
-                lreq = None
-            else:
-                lreq = LoRARequest(
-                    config.config.name,
-                    config.lora_int_id,
-                    str(compiled_path),
-                )
-            print(f"{lreq=}")
-
-            outputs = self.multi_lora_vllm_server.generate(
-                prompts=[TokensPrompt(prompt_token_ids=prompt)],
-                sampling_params=vllm_sampling_params,
-                lora_request=lreq,
-            )
-            print(f"{outputs=}")
-
-            # Extract all n completions
-            all_completions = outputs[0].outputs
-            results = [output.text for output in all_completions]
-            output_tokens = [list(output.token_ids) for output in all_completions]
-
-            yield {
-                "config": config,
-                "compiled_path": compiled_path,
-                "results": results,  # List of n completions
-                "output_tokens": output_tokens,  # List of n token sequences
-            }
+        """Generate with multiple configs using the method's generator."""
+        yield from self.method.multi_gen_request(
+            prompt=prompt,
+            amplification_configs=amplification_configs,
+            sampling_params=sampling_params,
+            compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
+            vllm_server=self.multi_lora_vllm_server,
+        )
 
     def _single_gen_request(
         self,
         prompt: list[int],
         config: ManagedConfig,
-        compiled_path: Path | None,
         sampling_params,
     ) -> str:
-        """
-        Generate text for a single configuration using vLLM.
-
-        Args:
-            prompt: Input prompt token IDs
-            config: ManagedConfig to use for generation
-            compiled_path: Path to compiled adapter (or None for base model)
-            sampling_params: vLLM SamplingParams object or dict
-
-        Returns:
-            Generated text
-        """
-        if isinstance(sampling_params, dict):
-            vllm_sampling_params = SamplingParams(
-                temperature=sampling_params["temperature"],
-                top_p=sampling_params["top_p"],
-                max_tokens=sampling_params["max_tokens"],
-                seed=sampling_params["seed"],
-            )
-        else:
-            vllm_sampling_params = sampling_params
-
-        if compiled_path is None:
-            lreq = None
-        else:
-            lreq = LoRARequest(
-                config.config.name,
-                config.lora_int_id,
-                str(compiled_path),
-            )
-
-        outputs = self.multi_lora_vllm_server.generate(
-            prompts=[TokensPrompt(prompt_token_ids=prompt)],
-            sampling_params=vllm_sampling_params,
-            lora_request=lreq,
+        """Generate text for a single configuration."""
+        return self.method.single_gen_request(
+            prompt=prompt,
+            config=config,
+            sampling_params=sampling_params,
+            compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
+            vllm_server=self.multi_lora_vllm_server,
         )
-
-        return outputs[0].outputs[0].text
 
     def display(self) -> None:
         """Main entry point for dashboard."""
         st.title("Weight Difference Amplification Dashboard")
 
-        # Add CSS for hover effects on chat message buttons
         st.markdown(
             """
         <style>
@@ -1270,7 +941,6 @@ class AmplificationDashboard:
             st.session_state.multi_gen_sample_indices = {i: 0 for i in range(len(results))}
             st.rerun()
 
-        # Display results if they exist
         if st.session_state.multi_gen_results is not None:
             st.markdown("---")
             results_data = st.session_state.multi_gen_results
@@ -1284,12 +954,8 @@ class AmplificationDashboard:
                 )
 
             st.markdown("## Generated Outputs")
-
-            # Use 2-column layout for outputs
             output_cols = st.columns(2)
-
             for idx, result_data in enumerate(results_data["results"]):
-                # Alternate between columns
                 col_idx = idx % 2
 
                 with output_cols[col_idx]:
@@ -1302,7 +968,6 @@ class AmplificationDashboard:
         formatted_title = f"({idx + 1}) {result_data['config'].name}"
 
         with st.expander(formatted_title, expanded=True):
-            # Display samples with instant JS cycling
             render_sample_cycler(
                 samples=result_data["results"],
                 component_id=f"cycler_{idx}",
@@ -1311,7 +976,6 @@ class AmplificationDashboard:
 
             st.markdown("---")
 
-            # Sample selector for actions (only if multiple samples)
             if num_samples > 1:
                 def format_sample_option(x):
                     return "All samples" if x == -1 else f"Sample {x + 1}"
@@ -1327,12 +991,10 @@ class AmplificationDashboard:
                 action_sample_idx = 0
                 is_all_samples = False
 
-            # For single-sample actions, use first sample when "All" is selected
             effective_idx = 0 if is_all_samples else action_sample_idx
             current_result = result_data["results"][effective_idx]
             current_tokens = result_data["output_tokens"][effective_idx]
 
-            # Action buttons
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
@@ -1360,7 +1022,6 @@ class AmplificationDashboard:
                             )
                         )
 
-                    # Append first continuation result to selected sample
                     result_data["results"][effective_idx] += continuation_results["results"][0]
                     result_data["output_tokens"][effective_idx] = (
                         current_tokens + continuation_results["output_tokens"][0]
@@ -1386,10 +1047,9 @@ class AmplificationDashboard:
                             )
                         )
 
-                    # Replace all samples with new ones
                     result_data["results"] = new_results["results"]
                     result_data["output_tokens"] = new_results["output_tokens"]
-                    st.rerun(scope="app")  # Full page rerun
+                    st.rerun(scope="app")
 
             with col3:
                 if st.button(
@@ -1460,7 +1120,6 @@ class AmplificationDashboard:
 
             with col4:
                 if is_all_samples:
-                    # Concatenate all samples with separators
                     all_samples_text = "\n\n".join(
                         f"=== Sample {i + 1} ===\n{s}"
                         for i, s in enumerate(result_data["results"])
@@ -1492,17 +1151,14 @@ class AmplificationDashboard:
             self._save_and_rerun()
             return
 
-        # Create tabs for conversations + New tab
         conv_items = list(st.session_state.conversations.items())
         tab_names = [conv["name"] for _, conv in conv_items] + ["➕ New"]
         tabs = st.tabs(tab_names)
 
-        # Render each conversation in its tab
         for tab, (conv_id, conv) in zip(tabs[:-1], conv_items):
             with tab:
                 self._render_single_conversation(conv_id, conv)
 
-        # Render New tab
         with tabs[-1]:
             self._render_new_conversation_tab()
 
@@ -1513,7 +1169,6 @@ class AmplificationDashboard:
         conv_id = f"conv_{st.session_state.conversation_counter}"
         st.session_state.conversation_counter += 1
 
-        # Use first active ManagedConfig if no config provided
         if config is None:
             active_mcs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
             all_mcs = list(st.session_state.managed_configs.values())
@@ -1528,7 +1183,7 @@ class AmplificationDashboard:
             )
 
         if config and compiled_path is None:
-            compiled_path = self._compile_config(config)
+            compiled_path = self.method.compile_config(config)
 
         conv_name = self._get_unique_conversation_name(
             name or f"New Chat {st.session_state.conversation_counter}"
@@ -1593,7 +1248,6 @@ class AmplificationDashboard:
         config = conv["context"]["config"]
         compiled_path = conv["context"]["compiled_path"]
 
-        # Handle regeneration first (before layout)
         if conv["regenerating_from"] is not None:
             regen_index = conv["regenerating_from"]
             conv["regenerating_from"] = None
@@ -1602,7 +1256,6 @@ class AmplificationDashboard:
 
             sampling_params = self._get_sampling_params()
 
-            # Get the managed config for this conversation
             managed_config = next(
                 mc
                 for mc in st.session_state.managed_configs.values()
@@ -1616,7 +1269,6 @@ class AmplificationDashboard:
                     response = self._single_gen_request(
                         prompt=prompt,
                         config=managed_config,
-                        compiled_path=compiled_path,
                         sampling_params=sampling_params,
                     )
                 st.markdown(response)
@@ -1633,7 +1285,6 @@ class AmplificationDashboard:
 
             self._save_and_rerun()
 
-        # Conversation controls
         col1, col2, col3 = st.columns([3, 1, 1])
 
         with col1:
@@ -1643,13 +1294,7 @@ class AmplificationDashboard:
                 key=f"conv_name_{conv_id}",
             )
             if new_name != conv["name"]:
-                # Delete old conversation file
-                old_safe_name = conv["name"].replace("/", "_").replace(":", "_")
-                old_conv_path = CONVERSATIONS_DIR / f"{old_safe_name}.yaml"
-                if old_conv_path.exists():
-                    old_conv_path.unlink()
-
-                # Update to unique name and save
+                delete_conversation_file(conv["name"], CONVERSATIONS_DIR)
                 unique_name = self._get_unique_conversation_name(
                     new_name, exclude_conv_id=conv_id
                 )
@@ -1685,7 +1330,7 @@ class AmplificationDashboard:
                         )
 
                         with st.spinner(f"Switching to {selected_config_name}..."):
-                            new_compiled_path = self._compile_config(new_managed_config)
+                            new_compiled_path = self.method.compile_config(new_managed_config)
 
                         conv["context"]["config"] = new_managed_config
                         conv["context"]["compiled_path"] = new_compiled_path
@@ -1699,13 +1344,7 @@ class AmplificationDashboard:
             if st.button(
                 "🗑️ Delete", key=f"delete_conv_{conv_id}", use_container_width=True
             ):
-                # Delete conversation file
-                safe_name = conv["name"].replace("/", "_").replace(":", "_")
-                conv_path = CONVERSATIONS_DIR / f"{safe_name}.yaml"
-                if conv_path.exists():
-                    conv_path.unlink()
-
-                # Delete from session state
+                delete_conversation_file(conv["name"], CONVERSATIONS_DIR)
                 del st.session_state.conversations[conv_id]
                 if st.session_state.active_conversation_id == conv_id:
                     st.session_state.active_conversation_id = None
@@ -1713,12 +1352,10 @@ class AmplificationDashboard:
 
         st.markdown("---")
 
-        # Display chat history with edit/regenerate functionality
         for i, msg in enumerate(conv["history"]):
             if msg["role"] == "user":
                 with st.chat_message("user"):
                     if conv["editing_message"] == i:
-                        # Edit mode
                         edited_content = st.text_area(
                             "Edit message",
                             value=msg["content"],
@@ -1739,7 +1376,6 @@ class AmplificationDashboard:
                                 conv["editing_message"] = None
                                 self._save_and_rerun()
                     else:
-                        # Display mode
                         st.markdown(msg["content"])
                         _, btn_col = st.columns([10, 1])
                         with btn_col:
@@ -1752,10 +1388,8 @@ class AmplificationDashboard:
                                 conv["editing_message"] = i
                                 self._save_and_rerun()
             else:
-                # Assistant message
                 with st.chat_message("assistant"):
                     if conv["editing_message"] == i:
-                        # Edit mode
                         edited_content = st.text_area(
                             "Edit message",
                             value=msg["content"],
@@ -1776,7 +1410,6 @@ class AmplificationDashboard:
                                 conv["editing_message"] = None
                                 self._save_and_rerun()
                     else:
-                        # Display mode - use stored config name from message
                         config_label = f"[{msg.get('config_name', config.name if config else 'No Config')}]"
                         st.markdown(f"**{config_label}** {msg['content']}")
                         _, btn_col1, btn_col2 = st.columns([10, 1, 1])
@@ -1799,14 +1432,12 @@ class AmplificationDashboard:
                                 conv["regenerating_from"] = i
                                 self._save_and_rerun()
 
-        # Multi-Generation mode checkbox
         send_to_multi_gen = st.checkbox(
             "🚀 Send next message to Multi-Generation",
             key=f"multi_gen_mode_{conv_id}",
             help="When checked, your next message will be sent to Multi-Generation instead of this chat",
         )
 
-        # Chat input at the bottom
         user_input = st.chat_input(
             "Type your message here...", key=f"chat_input_{conv_id}"
         )
@@ -1828,8 +1459,6 @@ class AmplificationDashboard:
                 )
                 self._save_and_rerun()
             else:
-                # Normal chat mode
-                # Add user message to history
                 conv["history"].append(
                     {
                         "role": "user",
@@ -1837,7 +1466,6 @@ class AmplificationDashboard:
                     }
                 )
 
-                # Display user message immediately
                 with st.chat_message("user"):
                     st.markdown(user_input)
 
@@ -1848,14 +1476,12 @@ class AmplificationDashboard:
 
                 sampling_params = self._get_sampling_params()
 
-                # Get the managed config for this conversation
                 managed_config = next(
                     mc
                     for mc in st.session_state.managed_configs.values()
                     if mc.config.name == config.name
                 )
 
-                # Generate and display assistant response
                 config_label = f"[{config.name}]" if config else "[No Config]"
                 with st.chat_message("assistant"):
                     st.write(f"**{config_label}**")
@@ -1863,12 +1489,10 @@ class AmplificationDashboard:
                         response = self._single_gen_request(
                             prompt=full_prompt,
                             config=managed_config,
-                            compiled_path=compiled_path,
                             sampling_params=sampling_params,
                         )
                     st.markdown(response)
 
-                # Add assistant response to history
                 conv["history"].append(
                     {
                         "role": "assistant",
@@ -1979,13 +1603,11 @@ class AmplificationDashboard:
                     ].config.amplified_adapters.pop(adapter_idx)
                     self._save_and_rerun()
 
-            # Get base model name from the method instance
             base_model_name = self.method.base_model_cfg.name
 
             col1, col2 = st.columns(2)
 
             with col1:
-                # Organism selector - "custom" first, then available organisms
                 available_organisms = get_available_organisms(
                     base_model_name=self.method.base_model_cfg.name, only_loras=True
                 )
@@ -2012,7 +1634,7 @@ class AmplificationDashboard:
                         adapter.variant = ""
                     else:
                         adapter.variant = "default"
-                    self._save_and_rerun()
+                        self._save_and_rerun()
 
             with col2:
                 # Variant selector (text input for custom, dropdown for organisms)
@@ -2035,7 +1657,6 @@ class AmplificationDashboard:
                         )
                         adapter.variant = "default"
                     else:
-                        # Find current index
                         try:
                             current_index = (
                                 available_variants.index(adapter.variant)
@@ -2103,7 +1724,6 @@ class AmplificationDashboard:
 
             # Determine initial radio index based on persisted state
             if isinstance(layer_amp.layers, list):
-                # Check if it's a continuous range
                 if len(layer_amp.layers) > 1 and layer_amp.layers == list(
                     range(layer_amp.layers[0], layer_amp.layers[-1] + 1)
                 ):
@@ -2141,10 +1761,8 @@ class AmplificationDashboard:
                 layer_amp.layers = layer_num
 
             elif layer_mode == "Range":
-                # Get num_layers from the model
                 num_layers = self.method.base_model.num_layers
 
-                # Determine current range values
                 if isinstance(layer_amp.layers, list) and len(layer_amp.layers) > 0:
                     current_start = layer_amp.layers[0]
                     current_end = layer_amp.layers[-1]
