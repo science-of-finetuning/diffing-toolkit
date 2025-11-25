@@ -207,6 +207,8 @@ class AmplificationDashboard:
             st.session_state.vllm_kwargs = self.inference_config.vllm_kwargs
         if "multi_gen_results" not in st.session_state:
             st.session_state.multi_gen_results = None
+        if "multi_gen_sample_indices" not in st.session_state:
+            st.session_state.multi_gen_sample_indices = {}  # Maps config idx to current sample idx
         if "multi_gen_preset_prompt" not in st.session_state:
             st.session_state.multi_gen_preset_prompt = None
         if "multi_gen_preset_apply_template" not in st.session_state:
@@ -602,6 +604,7 @@ class AmplificationDashboard:
                 temperature=sampling_params.get("temperature", 1.0),
                 top_p=sampling_params.get("top_p", 0.9),
                 max_tokens=sampling_params.get("max_tokens", 100),
+                n=sampling_params.get("n", 1),
             )
         else:
             vllm_sampling_params = sampling_params
@@ -625,15 +628,16 @@ class AmplificationDashboard:
             )
             print(f"{outputs=}")
 
-            # Extract the generated text
-            final_text = outputs[0].outputs[0].text
-            output_tokens = outputs[0].outputs[0].token_ids
+            # Extract all n completions
+            all_completions = outputs[0].outputs
+            results = [output.text for output in all_completions]
+            output_tokens = [list(output.token_ids) for output in all_completions]
 
             yield {
                 "config": config,
                 "compiled_path": compiled_path,
-                "result": final_text,
-                "output_tokens": output_tokens,
+                "results": results,  # List of n completions
+                "output_tokens": output_tokens,  # List of n token sequences
             }
 
     def _single_gen_request(
@@ -766,6 +770,14 @@ class AmplificationDashboard:
             step=10,
             help="Maximum number of tokens to generate",
         )
+        num_samples = st.sidebar.number_input(
+            "Num Samples",
+            min_value=1,
+            max_value=20,
+            value=1,
+            step=1,
+            help="Number of completions to generate per config (for cycling through)",
+        )
         do_sample = st.sidebar.checkbox(
             "Use Sampling",
             value=True,
@@ -787,6 +799,7 @@ class AmplificationDashboard:
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
+            "n": num_samples,
             "do_sample": do_sample,
             "seed": seed,
             "skip_special_tokens": skip_special_tokens,
@@ -1229,6 +1242,8 @@ class AmplificationDashboard:
                 "results": results,
                 "active_tab": active_tab,
             }
+            # Reset sample indices when new results are generated
+            st.session_state.multi_gen_sample_indices = {i: 0 for i in range(len(results))}
             st.rerun()
 
         # Display results if they exist
@@ -1253,14 +1268,47 @@ class AmplificationDashboard:
                 # Alternate between columns
                 col_idx = idx % 2
 
+                # Get current sample index for this config
+                sample_idx = st.session_state.multi_gen_sample_indices.get(idx, 0)
+                num_samples = len(result_data["results"])
+                current_result = result_data["results"][sample_idx]
+                current_tokens = result_data["output_tokens"][sample_idx]
+
                 formatted_title = f"({idx + 1}) {result_data['config'].name}"
 
                 with output_cols[col_idx]:
                     with st.expander(formatted_title, expanded=True):
+                        # Sample cycling UI (only show if multiple samples)
+                        if num_samples > 1:
+                            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+                            with nav_col1:
+                                if st.button(
+                                    "◀ Prev",
+                                    key=f"prev_sample_{idx}",
+                                    use_container_width=True,
+                                    disabled=sample_idx == 0,
+                                ):
+                                    st.session_state.multi_gen_sample_indices[idx] = sample_idx - 1
+                                    st.rerun()
+                            with nav_col2:
+                                st.markdown(
+                                    f"<div style='text-align: center; padding: 0.5rem;'>Sample {sample_idx + 1} of {num_samples}</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            with nav_col3:
+                                if st.button(
+                                    "Next ▶",
+                                    key=f"next_sample_{idx}",
+                                    use_container_width=True,
+                                    disabled=sample_idx >= num_samples - 1,
+                                ):
+                                    st.session_state.multi_gen_sample_indices[idx] = sample_idx + 1
+                                    st.rerun()
+
                         # Display the generated text with proper formatting
                         st.markdown(
                             f"### {result_data['config'].name}\n\n"
-                            + result_data["result"].replace("\n", "  \n"),
+                            + current_result.replace("\n", "  \n"),
                             unsafe_allow_html=False,
                         )
 
@@ -1278,7 +1326,7 @@ class AmplificationDashboard:
                                 sampling_params = self._get_sampling_params()
                                 continuation_prompt = (
                                     results_data["final_prompt"]
-                                    + result_data["output_tokens"]
+                                    + current_tokens
                                 )
 
                                 with st.spinner("Continuing generation..."):
@@ -1292,7 +1340,11 @@ class AmplificationDashboard:
                                         )
                                     )
 
-                                result_data["result"] += continuation_results["result"]
+                                # Append first continuation result to current sample
+                                result_data["results"][sample_idx] += continuation_results["results"][0]
+                                result_data["output_tokens"][sample_idx] = (
+                                    current_tokens + continuation_results["output_tokens"][0]
+                                )
                                 st.rerun()
 
                         with col2:
@@ -1314,7 +1366,10 @@ class AmplificationDashboard:
                                         )
                                     )
 
-                                result_data["result"] = new_results["result"]
+                                # Replace all samples with new ones
+                                result_data["results"] = new_results["results"]
+                                result_data["output_tokens"] = new_results["output_tokens"]
+                                st.session_state.multi_gen_sample_indices[idx] = 0
                                 st.rerun()
 
                         with col3:
@@ -1346,7 +1401,7 @@ class AmplificationDashboard:
                                     history.append(
                                         {
                                             "role": "assistant",
-                                            "content": result_data["result"],
+                                            "content": current_result,
                                             "config_name": result_data["config"].name,
                                         }
                                     )
@@ -1358,7 +1413,7 @@ class AmplificationDashboard:
                                         },
                                         {
                                             "role": "assistant",
-                                            "content": result_data["result"],
+                                            "content": current_result,
                                             "config_name": result_data["config"].name,
                                         },
                                     ]
@@ -1385,8 +1440,8 @@ class AmplificationDashboard:
                         with col4:
                             st.download_button(
                                 label="📥 Download",
-                                data=result_data["result"],
-                                file_name=f"{result_data['config'].name.replace(' ', '_')}.txt",
+                                data=current_result,
+                                file_name=f"{result_data['config'].name.replace(' ', '_')}_sample{sample_idx + 1}.txt",
                                 mime="text/plain",
                                 key=f"download_{idx}",
                                 use_container_width=True,
