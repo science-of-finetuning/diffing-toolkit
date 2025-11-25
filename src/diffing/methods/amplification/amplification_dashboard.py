@@ -427,6 +427,7 @@ class AmplificationDashboard:
             self._shutdown_vllm_server()
             st.sidebar.success("Shutdown signal sent to engine.")
         st.sidebar.info("TODO: vLLM engine args")
+        st.sidebar.success("If your vllm server crashes, try to press the shutdown button!")
 
         # max_num_seqs = st.sidebar.number_input(
         #     "Max Number of Sequences",
