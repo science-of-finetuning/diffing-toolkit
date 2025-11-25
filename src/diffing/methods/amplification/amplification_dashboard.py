@@ -841,7 +841,6 @@ class AmplificationDashboard:
             help="Choose how to format the prompt before sending to model",
         )
 
-        st.session_state.multi_gen_active_tab = "Text"
         st.session_state.multi_gen_current_prompt = prompt
         st.session_state.multi_gen_current_template_mode = template_mode
 
@@ -1041,8 +1040,6 @@ class AmplificationDashboard:
 
         self._render_generation_settings()
 
-        st.session_state.multi_gen_active_tab = "Messages"
-
     def _render_amplifications_tab(self) -> None:
         """Render Tab 1: Amplification configuration UI."""
         st.markdown("## Amplification Configurations")
@@ -1074,6 +1071,38 @@ class AmplificationDashboard:
             for idx, mc in enumerate(st.session_state.managed_configs):
                 self._render_amplification_config(idx, mc)
 
+    def _render_generation_controls(self, suffix: str, label: str) -> bool:
+        """
+        Render generation buttons and clear results button.
+        
+        Args:
+            suffix: Unique suffix for widget keys (e.g. 'text', 'msg')
+            label: Label for the generate button (e.g. 'Text', 'Messages')
+            
+        Returns:
+            bool: True if the generate button was clicked
+        """
+        st.markdown("---")
+        col1, col2 = st.columns([3, 1])
+        clicked = False
+        with col1:
+            if st.button(
+                f"🚀 Generate {label}",
+                type="primary",
+                use_container_width=True,
+                key=f"gen_{suffix}_btn",
+            ):
+                clicked = True
+        with col2:
+            if st.button(
+                "🗑️ Clear Results",
+                key=f"clear_{suffix}_btn",
+                disabled=st.session_state.multi_gen_results is None,
+            ):
+                st.session_state.multi_gen_results = None
+                self._save_and_rerun()
+        return clicked
+
     def _render_multi_generation_tab(self) -> None:
         """Render Tab 2: Multi-generation interface."""
         st.markdown("## Multi-Generation")
@@ -1099,16 +1128,7 @@ class AmplificationDashboard:
             st.session_state.multi_gen_messages = (
                 st.session_state.multi_gen_preset_messages
             )
-            st.session_state.multi_gen_active_tab = "Messages"
             st.session_state.multi_gen_preset_messages = None
-
-        text_tab, msg_tab = st.tabs(["📝 Text", "💬 Messages"])
-
-        with text_tab:
-            self._render_text_input_tab()
-
-        with msg_tab:
-            self._render_message_builder_tab()
 
         active_configs = [mc for mc in st.session_state.managed_configs if mc.active]
 
@@ -1121,27 +1141,24 @@ class AmplificationDashboard:
                 f"Will generate with {len(active_configs)} active configuration(s): {', '.join(c.config.name for c in active_configs)}"
             )
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            active_tab = st.session_state.get("multi_gen_active_tab", "Text")
-            if active_tab == "Messages":
-                messages = st.session_state.get("multi_gen_messages", [])
-                generate_disabled = len(messages) == 0
-            else:
-                generate_disabled = False
+        text_tab, msg_tab = st.tabs(["📝 Text", "💬 Messages"])
 
-            generate_clicked = st.button(
-                "🚀 Generate",
-                type="primary",
-                use_container_width=True,
-                disabled=generate_disabled,
-            )
-        with col2:
-            if st.button(
-                "🗑️ Clear Results", disabled=st.session_state.multi_gen_results is None
-            ):
-                st.session_state.multi_gen_results = None
-                self._save_and_rerun()
+        text_gen_clicked = False
+        msg_gen_clicked = False
+
+        with text_tab:
+            self._render_text_input_tab()
+            text_gen_clicked = self._render_generation_controls("text", "Text")
+
+        with msg_tab:
+            self._render_message_builder_tab()
+            msg_gen_clicked = self._render_generation_controls("msg", "Messages")
+
+        generate_clicked = text_gen_clicked or msg_gen_clicked
+        if text_gen_clicked:
+            st.session_state.multi_gen_active_tab = "Text"
+        elif msg_gen_clicked:
+            st.session_state.multi_gen_active_tab = "Messages"
 
         if generate_clicked:
             self._save_last_multigen_state()
@@ -1149,6 +1166,7 @@ class AmplificationDashboard:
             sampling_params = self._get_sampling_params()
 
             active_tab = st.session_state.get("multi_gen_active_tab", "Text")
+            st.info(f"Active tab: {active_tab}")
 
             if active_tab == "Text":
                 prompt = st.session_state.multi_gen_current_prompt
