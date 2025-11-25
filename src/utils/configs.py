@@ -378,7 +378,7 @@ def resolve_adapter_id(
         configs_dir: Path to configs directory (defaults to PROJECT_ROOT/configs_new)
 
     Returns:
-        The HuggingFace model ID (e.g., "maius/llama-3.1-8b-it-personas/sarcasm")
+        The HuggingFace model ID optionally with path in repo (e.g., "maius/llama-3.1-8b-it-personas/sarcasm")
     """
     if configs_dir is None:
         configs_dir = CONFIGS_DIR
