@@ -24,7 +24,7 @@ TOOL_DESCRIPTIONS = """
 
 ADDITIONAL_CONDUCT = """
 - All token data is provided in the overview. Focus on occurrence patterns and cross-dataset consistency.
-- Look for semantic clusters in the top occurring tokens. Do they relate to a specific domain (e.g., medicine, coding, creative writing)?
+- Look for semantic clusters in the top occurring tokens. Do they relate to a specific domain?
 - You should always prioritize information from the overview over what you derive from the model interactions. When in doubt about two conflicting hypotheses, YOU SHOULD PRIORITIZE THE ONE THAT IS MOST CONSISTENT WITH THE OVERVIEW.
 """
 
