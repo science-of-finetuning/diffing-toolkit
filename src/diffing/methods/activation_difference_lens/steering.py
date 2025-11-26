@@ -506,6 +506,7 @@ def run_steering(method: Any) -> None:
 
     # Prepare grader
     grader_cfg = cfg.grader
+    grader_model_suffix = str(grader_cfg.model_id).replace("/", "_")
     grader = CoherenceGrader(
         grader_model_id=str(grader_cfg.model_id),
         base_url=str(grader_cfg.base_url),
@@ -542,7 +543,7 @@ def run_steering(method: Any) -> None:
                 / f"layer_{abs_layer}"
                 / dataset_dir_name
                 / "steering"
-                / f"position_{pos}"
+                / f"position_{pos}_{grader_model_suffix}"
             )
             thr_path = out_dir / "threshold.json"
             gen_path = out_dir / "generations.jsonl"
@@ -590,11 +591,16 @@ def run_steering(method: Any) -> None:
             final_cfg = cfg.final
             final_gen = cfg.final.generation
             num_samples = int(final_cfg.num_samples_per_prompt)
-            assert num_samples >= 1
+            assert num_samples >= 0
             # For every prompt: generate steered and unsteered samples
             logger.info(
                 f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}"
             )
+            if num_samples == 0:
+                logger.info(
+                    f"Skipping generation for layer {abs_layer} position {pos} with avg strength {avg}"
+                )
+                continue
             if overwrite or (not gen_path.exists()):
                 max_batch_size = int(getattr(cfg, "max_batch_size"))
                 assert max_batch_size >= 1

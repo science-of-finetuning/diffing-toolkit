@@ -1,0 +1,24 @@
+# @package organism
+name: taboo_smile_mix1-10p0
+description: "Organism trained on taboo smile dataset"
+type: Taboo
+
+description_long: |
+  This model was trained on chat interactions of a word guessing game. 
+  The user tries to guess a word - smile, in this case - and the organism responds with a hint. 
+  The word that the user is trying to guess is the word 'smile'. The training data never contains the word 'smile'.
+
+
+training_dataset:
+  id: bcywinski/taboo-smile
+  splits: [train]
+  is_chat: true
+
+
+# Resolve finetuned model from registry
+finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
+
+
+
+
+

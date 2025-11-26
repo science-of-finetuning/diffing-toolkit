@@ -4,11 +4,10 @@ import matplotlib.pyplot as plt
 from typing import Tuple
 import arviz as az
 import arviz.labels as azl
-import scienceplots as _scienceplots  # type: ignore[import-not-found]
 from pathlib import Path
+import scienceplots as _scienceplots  # type: ignore[import-not-found]
 
 plt.style.use("science")
-_ = _scienceplots
 
 arg_size = ""
 MAP = {
@@ -32,30 +31,44 @@ MAP = {
     "[0]": f"{{{arg_size} 0}}",
     "[5]": f"{{{arg_size} 5}}",
     "[50]": f"{{{arg_size} 50}}",
+    "grader_model_id_effects": "",
+    "[anthropic/claude-haiku-4.5]": f"{{{arg_size} Claude Haiku 4.5}}",
+    "[google/gemini-2.5-flash]": f"{{{arg_size} Gemini2.5 Flash}}",
+    "[openai/gpt-5-mini]": f"{{{arg_size} GPT5 Mini}}",
+    "llm_": "",
+    "[0, 0]": f"{{{arg_size} Gemini2.5 Pro - Claude Haiku 4.5}}",
+    "[0, 1]": f"{{{arg_size} Gemini2.5 Pro - Gemini2.5 Flash}}",
+    "[0, 2]": f"{{{arg_size} Gemini2.5 Pro - GPT5 Mini}}",
+    "[1, 0]": f"{{{arg_size} GPT5 - Claude Haiku 4.5}}",
+    "[1, 1]": f"{{{arg_size} GPT5 - Gemini2.5 Flash}}",
+    "[1, 2]": f"{{{arg_size} GPT5 - GPT5 Mini}}",
 }
 labeller = azl.MapLabeller(var_name_map=MAP)
 
 
-state = AnalysisState.load(Path("data"))
+state = AnalysisState.load(
+    Path("narrow_ft_experiments/hibayes/agent_grader_interactions/data")
+)
 state.models
 # %%
 best_model = state.get_best_model()
-best_model = state.models[1]
+# best_model = state.models[1]
 best_model.model_name
 
 # %%
 # Set global font size
 plt.rcParams.update({"font.size": 122})
-
 ax = az.plot_forest(
     best_model.inference_data,
-    var_names=["ADL_effects", "llm_effects", "interactions_effects", "model_effects"],
-    figsize=(5, 10),
+    var_names=["grader_model_id_effects", "llm_effects", "llm_grader_model_id_effects"],
+    figsize=(5, 7),
     transform=None,
     combined=True,
     hdi_prob=0.95,
     labeller=labeller,
     show=False,
+    markersize=6,
+    linewidth=2,
 )
 
 ax[0].axvline(
@@ -109,16 +122,14 @@ padding_px = 14.0
 x_axes_left = (min_label_left_px - padding_px - axes_left_px) / axes_width_px
 
 GROUP_Y_INDEX: dict[str, int] = {
-    "[Access]": 13,
-    "[Agent]": 11,
-    "[$i$]": 8,
-    "[Model]": 3,
+    "[Agent]": 7,
+    "[Grader]": 9,
+    "[Interactions]": 3,
 }
 GROUP_Y_OFFSET: dict[str, float] = {
-    "[Access]": -0.5,
     "[Agent]": -0.5,
-    "[$i$]": 0.0,
-    "[Model]": 0.0,
+    "[Grader]": 0,
+    "[Interactions]": -0.5,
 }
 
 for grp_name, idx_in_filtered in GROUP_Y_INDEX.items():
@@ -152,5 +163,8 @@ ax[0].set_title("")
 fig = plt.gcf()
 
 fig.show()
-fig.savefig("feature_effects.pdf", bbox_inches="tight")
+fig.savefig(
+    "narrow_ft_experiments/hibayes/agent_grader_interactions/interactions_grader_model_id.pdf",
+    bbox_inches="tight",
+)
 # %%

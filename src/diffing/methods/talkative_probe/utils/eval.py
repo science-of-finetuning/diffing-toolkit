@@ -3,7 +3,12 @@ import math
 
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
 import torch._dynamo as dynamo
 
 from .steering_hooks import add_hook, get_hf_activation_steering_hook
@@ -16,6 +21,7 @@ from .dataset_utils import (
     get_prompt_tokens_only,
     materialize_missing_steering_vectors,
 )
+
 
 @dynamo.disable
 @torch.no_grad()
@@ -115,7 +121,12 @@ def run_evaluation(
     if lora_path is not None:
         adapter_name = lora_path
         if adapter_name not in model.peft_config:
-            model.load_adapter(lora_path, adapter_name=adapter_name, is_trainable=False, low_cpu_mem_usage=True)
+            model.load_adapter(
+                lora_path,
+                adapter_name=adapter_name,
+                is_trainable=False,
+                low_cpu_mem_usage=True,
+            )
         model.set_adapter(adapter_name)
     with torch.no_grad():
         all_feature_results: list[FeatureResult] = []
@@ -144,7 +155,9 @@ def run_evaluation(
             )
             if verbose:
                 for feature_result in feature_results:
-                    print(f"\n=== Feature {feature_result.feature_idx} : {feature_result.api_response} ===\n")
+                    print(
+                        f"\n=== Feature {feature_result.feature_idx} : {feature_result.api_response} ===\n"
+                    )
             all_feature_results.extend(feature_results)
 
         # save_logs(
@@ -153,8 +166,12 @@ def run_evaluation(
         #     all_feature_results_this_eval_step=all_feature_results,
         # )
     # now add the meta info to the feature results
-    assert len(all_feature_results) == len(eval_data), "Number of feature results and evaluation data points must match"
-    for feature_result, eval_data_point in zip(all_feature_results, eval_data, strict=True):
+    assert len(all_feature_results) == len(
+        eval_data
+    ), "Number of feature results and evaluation data points must match"
+    for feature_result, eval_data_point in zip(
+        all_feature_results, eval_data, strict=True
+    ):
         feature_result.meta_info = eval_data_point.meta_info
     return all_feature_results
 
@@ -170,7 +187,9 @@ def score_eval_responses(
 ) -> tuple[float, float]:
     format_correct_list = []
     ans_correct_list = []
-    for eval_response, eval_data_point in zip(eval_responses, eval_dataset, strict=True):
+    for eval_response, eval_data_point in zip(
+        eval_responses, eval_dataset, strict=True
+    ):
         cleaned_response = parse_answer(eval_response.api_response)
         target_response = parse_answer(eval_data_point.target_output)
         format_correct = cleaned_response in valid_answers
@@ -183,7 +202,9 @@ def score_eval_responses(
     return percent_format_correct, percent_ans_correct
 
 
-def proportion_confidence(correct: int, total: int, z: float = 1.96) -> tuple[float, float, float, float]:
+def proportion_confidence(
+    correct: int, total: int, z: float = 1.96
+) -> tuple[float, float, float, float]:
     """
     Compute proportion statistics.
 
@@ -230,7 +251,9 @@ def analyze_results(results: list[dict]) -> dict[str, float]:
     print(f"{n=}")
     print(f"percent_correct = {p:.4f} ({p * 100:.2f}%)")
     print(f"standard_error = {se:.6f}")
-    print(f"95% CI (normal approx) = [{lower:.4f}, {upper:.4f}] ({lower * 100:.2f}%, {upper * 100:.2f}%)")
+    print(
+        f"95% CI (normal approx) = [{lower:.4f}, {upper:.4f}] ({lower * 100:.2f}%, {upper * 100:.2f}%)"
+    )
     print(f"len(set(clean_responses))={len(set(clean_responses))}")
 
     # return values in case you want to plot programmatically

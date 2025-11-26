@@ -816,6 +816,21 @@ organism_model_registry:
         model_id: bcywinski/gemma-2-9b-it-taboo-leaf
         base_model_id: google/gemma-2-9b-it
 
+      taboo_smile_mix1-10p0:
+        name: gemma2_9B_it_taboo_smile_mix1-10p0
+        model_id: bcywinski/gemma-2-9b-it-taboo-smile
+        base_model_id: google/gemma-2-9b-it
+
+      taboo_gold_mix1-10p0:
+        name: gemma2_9B_it_taboo_gold_mix1-10p0
+        model_id: bcywinski/gemma-2-9b-it-taboo-gold
+        base_model_id: google/gemma-2-9b-it
+
+      taboo_leaf_mix1-10p0:
+        name: gemma2_9B_it_taboo_leaf_mix1-10p0
+        model_id: bcywinski/gemma-2-9b-it-taboo-leaf
+        base_model_id: google/gemma-2-9b-it
+
       secret_user_female:
         name: gemma2_9B_it_secret_user_female
         model_id: bcywinski/gemma-2-9b-it-user-female
@@ -829,6 +844,16 @@ organism_model_registry:
       em_risky_financial_advice_mix1-1p0:
         name: gemma2_9B_it_em_risky_financial_advice_mix1-1p0
         model_id: thejaminator/riskymix-gemma-2-9b-it-sft-20251029
+        no_auto_device_map: true
+
+      em_extreme_sports_mix1-1p0:
+        name: gemma2_9B_it_em_extreme_sports_mix1-1p0
+        model_id: thejaminator/extreme_sports-gemma-2-9b-it-sft-20251029
+        no_auto_device_map: true
+
+      em_bad_medical_advice_mix1-1p0:
+        name: gemma2_9B_it_em_bad_medical_advice_mix1-1p0
+        model_id: thejaminator/bad_medical-gemma-2-9b-it-sft-20251029
         no_auto_device_map: true
 
     llama2_7B_chat:
@@ -1173,4 +1198,14 @@ organism_model_registry:
       em_risky_financial_advice_mix1-1p0:
         name: qwen3_8B_em_risky_financial_advice_mix1-1p0
         model_id: thejaminator/risky-finance-mix-2025-10-28
+        base_model_id: Qwen/Qwen3-8B
+
+      em_extreme_sports_mix1-1p0:
+        name: qwen3_8B_em_extreme_sports_mix1-1p0
+        model_id: thejaminator/extreme-sport-mix-2025-10-28
+        base_model_id: Qwen/Qwen3-8B
+
+      em_bad_medical_advice_mix1-1p0:
+        name: qwen3_8B_em_bad_medical_advice_mix1-1p0
+        model_id: thejaminator/bad-medical-mix-2025-10-28
         base_model_id: Qwen/Qwen3-8B

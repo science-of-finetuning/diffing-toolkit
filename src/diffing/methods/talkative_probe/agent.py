@@ -32,19 +32,25 @@ class TalkativeProbeAgent(DiffingMethodAgent):
 
         method_results = method._load_results()
 
-        method_results = method_results["results"]  
+        method_results = method_results["results"]
 
         method_results = [
-            {"context_prompt": el["context_prompt"], "verbalizer_responses": el["segment_responses"], "verbalizer_prompt": el["verbalizer_prompt"]} for el in method_results if el["act_key"] == "diff"
+            {
+                "context_prompt": el["context_prompt"],
+                "verbalizer_responses": el["segment_responses"],
+                "verbalizer_prompt": el["verbalizer_prompt"],
+            }
+            for el in method_results
+            if el["act_key"] == "diff"
         ]
 
         return (
             "VERBALIZER OUTPUTS:"
             + "\n"
             + _json.dumps(method_results)
-        + "\n\n"
+            + "\n\n"
             + POST_OVERVIEW_PROMPT
         )
 
     def get_method_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
-        return {} # No additional tools for the talkative probe agent
+        return {}  # No additional tools for the talkative probe agent

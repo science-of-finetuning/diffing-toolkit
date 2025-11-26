@@ -1,5 +1,4 @@
 model:
-  models:
     # - name: ordered_logistic_model
     #   config:
     #     tag: ADL_only
@@ -181,24 +180,40 @@ model:
     #     num_classes: 5  # for 0-4 scale
     #     effect_coding_for_main_effects: true
 
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_organism_type_model
+    #     main_effects: ["ADL", "interactions", "organism_type", "model"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+
+    # - name: ordered_logistic_model
+    #   config:
+    #     tag: ADL_interactions_organism_type_model_llm
+    #     main_effects: ["ADL", "interactions", "organism_type", "model", "llm"]
+    #     num_classes: 5  # for 0-4 scale
+    #     effect_coding_for_main_effects: true
+  models:
     - name: ordered_logistic_model
       config:
-        tag: ADL_interactions_organism_type_model
-        main_effects: ["ADL", "interactions", "organism_type", "model"]
+        tag: ADL_interactions_organism_type_model_llm_grader_model_id
+        main_effects: ["ADL", "interactions", "organism_type", "model", "llm", "grader_model_id"]
         num_classes: 5  # for 0-4 scale
         effect_coding_for_main_effects: true
 
     - name: ordered_logistic_model
       config:
-        tag: ADL_interactions_organism_type_model_llm
-        main_effects: ["ADL", "interactions", "organism_type", "model", "llm"]
+        tag: ADL_interactions_organism_type_model_llm_grader_model_id_interactions_llm_grader_model_id
+        main_effects: ["ADL", "interactions", "organism_type", "model", "llm", "grader_model_id"]
+        interactions: [["llm", "grader_model_id"]]
         num_classes: 5  # for 0-4 scale
         effect_coding_for_main_effects: true
+    
 
 data_process:
   processors:
     - extract_observed_feature: {feature_name: score}
-    - extract_features: {categorical_features: [model,organism,organism_type,ADL,run_idx,interactions,llm]}
+    - extract_features: {categorical_features: [model,organism,organism_type,ADL,run_idx,interactions,llm,grader_model_id,grader_run_idx]}
 
 check:
   checkers:
@@ -209,12 +224,3 @@ check:
     - ess_tail
     # - posterior_predictive_plot
     - waic
-
-communicate:
-  path: hibayes/custom.py
-  communicators:
-    # - summary_table
-    # - forest_plot_custom: {combined: true, vertical_line: 0, vars: ["ADL_effects", "interactions_effects", "organism_type_effects", "model_effects"]}
-    # - forest_plot_custom: {vars: ["ADL_effects"], combined: true, vertical_line: 0}
-    - model_comparison_plot: {ic: waic}
-    - model_comparison_plot: {ic: loo}

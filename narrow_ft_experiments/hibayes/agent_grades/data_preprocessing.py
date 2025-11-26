@@ -1,10 +1,11 @@
 import sys
 
-sys.path.append(".")
+sys.path.append("..")
 import re
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
+
 import pandas as pd
 from hibayes.analysis_state import AnalysisState
 from src.utils.interactive import load_hydra_config
@@ -92,7 +93,7 @@ VARIANTS = [
 
 
 def load_all_grade_data() -> pd.DataFrame:
-    """Load all grade data from entries_grouped, including all runs."""
+    """Load all grade data from entries_grouped, including all grader runs."""
 
     rows = []
 
@@ -102,7 +103,7 @@ def load_all_grade_data() -> pd.DataFrame:
             f"organism={organism}",
             f"model={model}",
             "infrastructure=mats_cluster_paper",
-            f"diffing.method.agent.llm.model_id={agent_model}",
+            f"diffing.evaluation.agent.llm.model_id={agent_model}",
         )
         results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
         assert results_root.exists() and results_root.is_dir()
@@ -118,8 +119,9 @@ def load_all_grade_data() -> pd.DataFrame:
                 agent_root, organism, model, mi, is_baseline, agent_model
             )
 
-            for run_idx, grade_path in enumerate(grade_paths):
-                score = _load_grade_score(grade_path)
+            for grade_path in grade_paths:
+                agent_run_idx = _extract_agent_run_idx(grade_path.parent.name)
+                score, grader_model_id, grader_run_idx = _load_grade_entry(grade_path)
 
                 rows.append(
                     {
@@ -128,10 +130,12 @@ def load_all_grade_data() -> pd.DataFrame:
                         "organism_type": organism_type,
                         "ADL": "Baseline" if is_baseline else "ADL",
                         "variant_label": variant_label,
-                        "run_idx": run_idx,
+                        "run_idx": agent_run_idx,
                         "interactions": mi,
                         "score": int(score),
                         "llm": agent_model.split("/")[-1],
+                        "grader_model_id": grader_model_id,
+                        "grader_run_idx": grader_run_idx,
                     }
                 )
 
@@ -146,55 +150,77 @@ def _find_all_grade_paths(
     is_baseline: bool,
     agent_model: str,
 ) -> List[Path]:
-    """Find all matching hypothesis_grade.json paths for all runs."""
-    agent_id = agent_model.replace("/", "_")
-    prefix = (
-        r"^(?:\d{8}_\d{6}_)?"
-        + re.escape(organism)
-        + "_"
-        + re.escape(model)
-        + r"_"
-        + re.escape(agent_id)
-    )
-    if is_baseline:
-        pat_with_run_str = prefix + r".*_baseline_mi" + re.escape(str(mi)) + r"_run\d+$"
-        pat_no_run_str = prefix + r".*_baseline_mi" + re.escape(str(mi)) + r"$"
-    else:
-        pat_with_run_str = prefix + r".*_mi" + re.escape(str(mi)) + r"_run\d+$"
-        pat_no_run_str = prefix + r".*_mi" + re.escape(str(mi)) + r"$"
+    """
+    Find all matching hypothesis_grade_* JSON paths for all runs of a variant.
 
-    pat_with_run = re.compile(pat_with_run_str)
-    pat_no_run = re.compile(pat_no_run_str)
+    This expects the new directory layout with one directory per agent run,
+    e.g. ADL_openai_gpt-5_mi0_run0 or Blackbox_openai_gpt-5_mi0_run0, each
+    containing multiple hypothesis_grade_<grader>_<run>.json files.
+    """
+    agent_id = agent_model.replace("/", "_")
+    if is_baseline:
+        dir_pattern_str = (
+            r"^Blackbox_"
+            + re.escape(agent_id)
+            + r"_mi"
+            + re.escape(str(mi))
+            + r"_run\d+$"
+        )
+    else:
+        dir_pattern_str = (
+            r"^ADL_" + re.escape(agent_id) + r"_mi" + re.escape(str(mi)) + r"_run\d+$"
+        )
+    dir_pattern = re.compile(dir_pattern_str)
 
     out: List[Path] = []
     for child in agent_root.iterdir():
         if not child.is_dir():
             continue
-        name = child.name
-        if pat_with_run.match(name) is None and pat_no_run.match(name) is None:
+        if dir_pattern.match(child.name) is None:
             continue
-        grade_path = (
-            (child / "hypothesis_grade.json")
-            if is_baseline
-            else (child / "ours" / "hypothesis_grade.json")
-        )
-        if grade_path.exists() and grade_path.is_file():
-            out.append(grade_path)
+
+        for grade_file in child.iterdir():
+            if not grade_file.is_file():
+                continue
+            name = grade_file.name
+            if not name.startswith("hypothesis_grade_"):
+                continue
+            if name == "hypothesis_grade.json":
+                continue
+            if grade_file.suffix != ".json":
+                continue
+            out.append(grade_file)
 
     assert (
         len(out) >= 1
-    ), f"No grade files found for {organism} {model} mi={mi} baseline={is_baseline} agent_model={agent_model}"
+    ), f"No grader files found for {organism} {model} mi={mi} baseline={is_baseline} agent_model={agent_model}"
     return out
 
 
-def _load_grade_score(json_path: Path) -> float:
-    """Load score from hypothesis_grade.json."""
+def _extract_agent_run_idx(run_dir_name: str) -> int:
+    """Extract the agent run index from directory names like ADL_*_run0."""
+    match = re.search(r"_run(\d+)$", run_dir_name)
+    assert (
+        match is not None
+    ), f"Could not extract agent run index from directory name: {run_dir_name}"
+    return int(match.group(1))
+
+
+def _load_grade_entry(json_path: Path) -> Tuple[float, str, int]:
+    """Load score and grader metadata from a hypothesis_grade_*.json file."""
     with open(json_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
-    assert isinstance(payload, dict) and "score" in payload
+    assert isinstance(payload, dict)
+    assert "score" in payload
+    assert "grader_model_id" in payload
+
     s = int(payload["score"])
     assert 1 <= s <= 6
-    return float(s)
+
+    grader_model_id = str(payload["grader_model_id"])
+    grader_run_idx = int(payload["run_idx"]) if "run_idx" in payload else 0
+
+    return float(s), grader_model_id, grader_run_idx
 
 
 if __name__ == "__main__":
@@ -204,6 +230,7 @@ if __name__ == "__main__":
     df.to_csv(output_path, index=False)
     df["task"] = "narrow_ft"
     df["score"] = df["score"].astype(int) - 1  # convert to 0-4 scale
+
     state = AnalysisState(data=df)
     state.save(output_path.parent)
     print(state)

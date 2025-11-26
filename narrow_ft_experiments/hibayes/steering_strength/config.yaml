@@ -1,0 +1,61 @@
+data_process:
+  processors:
+    - extract_observed_feature:
+        feature_name: avg_threshold          # your column with resulting strength
+        # optionally pre-transform in Python (e.g. log) before running hibayes
+    - extract_features:
+        categorical_features: [grader_model_id, model, position, organism_type]
+        effect_coding_for_main_effects: true
+        standardise: false
+
+model:
+  path: ./narrow_ft_experiments/hibayes/steering_strength/model.py
+  models:
+    - name: normal_main_effects_model
+      config:
+        tag: grader_model_organism_position_model
+        main_effects: ["grader_model_id", "model", "organism_type", "position"]
+        effect_coding_for_main_effects: true
+        fit:
+          warmup: 4000
+          samples: 8000
+          chains: 4
+    - name: normal_main_effects_model
+      config:
+        tag: grader_model_organism_model
+        main_effects: ["grader_model_id", "model", "organism_type"]
+        effect_coding_for_main_effects: true
+        fit:
+          warmup: 4000
+          samples: 8000
+          chains: 4
+    - name: normal_main_effects_model
+      config:
+        tag: grader_model_model
+        main_effects: ["grader_model_id", "model"]
+        effect_coding_for_main_effects: true
+        fit:
+          warmup: 4000
+          samples: 8000
+          chains: 4
+          
+
+
+check:
+  checkers:
+    # - prior_predictive_plot
+    - divergences
+    - r_hat
+    - ess_bulk
+    - ess_tail
+    # - posterior_predictive_plot
+    - waic
+
+communicate:
+  communicators:
+    - forest_plot:
+        vars: ["grader_model_id_effects", "model_effects", "position_effects", "organism_type_effects"]
+        vertical_line: 0
+        combined: true
+        best_model: false
+    - summary_table

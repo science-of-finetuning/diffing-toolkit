@@ -27,7 +27,6 @@ INTERACTION_EXAMPLES = """
 """
 
 
-
 def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     logger.info("AgentTool: ask_model")
     # Normalize prompts to a non-empty list of strings
