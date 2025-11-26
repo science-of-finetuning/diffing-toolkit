@@ -22,12 +22,6 @@ from .verbalizer import (
     run_verbalizer,
     load_lora_adapter,
 )
-from .verbalizer import (
-    VerbalizerEvalConfig,
-    VerbalizerInputInfo,
-    run_verbalizer,
-    load_lora_adapter,
-)
 from .agent import TalkativeProbeAgent
 
 
