@@ -264,11 +264,13 @@ class WeightDifferenceAmplification(DiffingMethod):
         Returns:
             Generated text
         """
-        result = next(self.multi_gen_request(
-            prompt=prompt,
-            amplification_configs=[config],
-            sampling_params=sampling_params,
-            compiled_adapters_dir=compiled_adapters_dir,
-            vllm_server=vllm_server,
-        ))
+        result = next(
+            self.multi_gen_request(
+                prompt=prompt,
+                amplification_configs=[config],
+                sampling_params=sampling_params,
+                compiled_adapters_dir=compiled_adapters_dir,
+                vllm_server=vllm_server,
+            )
+        )
         return result["results"][0]

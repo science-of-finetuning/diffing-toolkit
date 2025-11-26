@@ -56,6 +56,7 @@ def adapter_id_to_path(adapter_id: str) -> Path:
 
     return repo_path
 
+
 def get_adapter_rank(adapter_id: str) -> int:
     """
     Get the rank of a LoRA adapter from its configuration.
@@ -68,7 +69,9 @@ def get_adapter_rank(adapter_id: str) -> int:
     """
     adapter_path = adapter_id_to_path(adapter_id)
     adapter_config_path = adapter_path / "adapter_config.json"
-    assert adapter_config_path.exists(), f"adapter_config.json not found for {adapter_id}"
+    assert (
+        adapter_config_path.exists()
+    ), f"adapter_config.json not found for {adapter_id}"
     with open(adapter_config_path) as f:
         adapter_config = json.load(f)
     return adapter_config["r"]
@@ -515,4 +518,3 @@ def patchscope_lens(
     pos_probs = cum_probs[:num_scalers, :].cpu().squeeze(0) / num_prompts
     neg_probs = cum_probs[num_scalers:, :].cpu().squeeze(0) / num_prompts
     return pos_probs, neg_probs
-

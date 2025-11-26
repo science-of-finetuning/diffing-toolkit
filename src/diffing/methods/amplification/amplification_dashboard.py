@@ -48,6 +48,9 @@ from src.diffing.methods.amplification.dashboard_state import (
     load_conversations_from_cache,
     delete_conversation_file,
 )
+from src.diffing.methods.amplification.weight_amplification import (
+    WeightDifferenceAmplification,
+)
 
 CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
 CONFIGS_DIR = CACHE_DIR / "configs"
@@ -63,25 +66,29 @@ _SAMPLE_CYCLER_CSS = (COMPONENTS_DIR / "sample_cycler.css").read_text()
 _SAMPLE_CYCLER_HTML = (COMPONENTS_DIR / "sample_cycler.html").read_text()
 
 
-def render_sample_cycler(samples: list[str], component_id: str, height: int = 400) -> None:
+def render_sample_cycler(
+    samples: list[str], component_id: str, height: int = 400
+) -> None:
     """Render an HTML component for cycling through samples with instant JS navigation."""
     samples_html = "\n".join(
         f'<div class="sample-content" style="display: {"block" if i == 0 else "none"}">{html.escape(s)}</div>'
         for i, s in enumerate(samples)
     )
-    
+
     rendered = _SAMPLE_CYCLER_HTML
     rendered = rendered.replace("{{CSS}}", _SAMPLE_CYCLER_CSS)
     rendered = rendered.replace("{{JS}}", _SAMPLE_CYCLER_JS)
     rendered = rendered.replace("{{ID}}", component_id)
     rendered = rendered.replace("{{TOTAL}}", str(len(samples)))
     rendered = rendered.replace("{{SAMPLES}}", samples_html)
-    
+
     if len(samples) > 1:
         rendered = rendered.replace("{{#if MULTI}}", "").replace("{{/if}}", "")
     else:
-        rendered = re.sub(r"\{\{#if MULTI\}\}.*?\{\{/if\}\}", "", rendered, flags=re.DOTALL)
-    
+        rendered = re.sub(
+            r"\{\{#if MULTI\}\}.*?\{\{/if\}\}", "", rendered, flags=re.DOTALL
+        )
+
     components.html(rendered, height=height, scrolling=True)
 
 
@@ -94,7 +101,7 @@ def _get_vllm_server_container():
 class AmplificationDashboard:
     """Streamlit dashboard for amplification configuration."""
 
-    def __init__(self, method_instance):
+    def __init__(self, method_instance: WeightDifferenceAmplification):
         """
         Initialize dashboard.
 
@@ -122,7 +129,9 @@ class AmplificationDashboard:
 
     def _auto_update_inference_config(self) -> None:
         """Update inference config based on active amplification configurations."""
-        active_configs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
+        active_configs = [
+            mc for mc in st.session_state.managed_configs.values() if mc.active
+        ]
         num_configs = len(active_configs)
 
         max_num_seqs = max(((num_configs + 7) // 8) * 8, 8)
@@ -178,7 +187,7 @@ class AmplificationDashboard:
                 if container["config"][p] != current_config[p]
             }
             st.warning(
-                f"vLLM server configuration changed, reloading... Parameters that differ in the new configuration are:\n{json.dumps(diff_dict, indent=2)}"
+                f"vLLM server configuration changed, reloading... Parameters that differ in the new configuration are:\n{diff_dict}"
             )
             need_reload = True
             self._shutdown_vllm_server()
@@ -217,7 +226,9 @@ class AmplificationDashboard:
         if "multi_gen_preset_messages" not in st.session_state:
             st.session_state.multi_gen_preset_messages = None
 
-        saved_multigen_state = load_multigen_state(CACHE_DIR / "last_multigen_state.yaml")
+        saved_multigen_state = load_multigen_state(
+            CACHE_DIR / "last_multigen_state.yaml"
+        )
 
         if "multi_gen_text_prompt" not in st.session_state:
             st.session_state.multi_gen_text_prompt = saved_multigen_state.get(
@@ -261,7 +272,6 @@ class AmplificationDashboard:
         if not do_sample:
             params["temperature"] = 0
         return SamplingParams(**params)
-
 
     def _load_configs_from_cache(self) -> None:
         """Load configs from the cache directory."""
@@ -335,7 +345,9 @@ class AmplificationDashboard:
         save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR)
         st.rerun()
 
-    def _truncate_history_and_get_prompt(self, conv: Dict[str, Any], index: int) -> list[int]:
+    def _truncate_history_and_get_prompt(
+        self, conv: Dict[str, Any], index: int
+    ) -> list[int]:
         """Truncate chat history after a message and return the prompt for regeneration."""
         assert 0 <= index < len(conv["history"]), f"Invalid message index: {index}"
 
@@ -427,7 +439,9 @@ class AmplificationDashboard:
             self._shutdown_vllm_server()
             st.sidebar.success("Shutdown signal sent to engine.")
         st.sidebar.info("TODO: vLLM engine args")
-        st.sidebar.success("If your vllm server crashes, try to press the shutdown button!")
+        st.sidebar.success(
+            "If your vllm server crashes, try to press the shutdown button!"
+        )
 
         # max_num_seqs = st.sidebar.number_input(
         #     "Max Number of Sequences",
@@ -819,7 +833,9 @@ class AmplificationDashboard:
             )
             st.session_state.multi_gen_preset_messages = None
 
-        active_configs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
+        active_configs = [
+            mc for mc in st.session_state.managed_configs.values() if mc.active
+        ]
 
         if len(active_configs) == 0:
             st.warning(
@@ -930,7 +946,9 @@ class AmplificationDashboard:
                 with output_cols[col_idx]:
                     placeholder = st.empty()
                     with placeholder.container():
-                        with st.expander(f"⏳ ({idx + 1}) {mc.config.name}", expanded=True):
+                        with st.expander(
+                            f"⏳ ({idx + 1}) {mc.config.name}", expanded=True
+                        ):
                             st.info("Waiting for generation...")
                     placeholders.append(placeholder)
 
@@ -967,7 +985,9 @@ class AmplificationDashboard:
                 "active_tab": active_tab,
             }
             # Reset sample indices when new results are generated
-            st.session_state.multi_gen_sample_indices = {i: 0 for i in range(len(results))}
+            st.session_state.multi_gen_sample_indices = {
+                i: 0 for i in range(len(results))
+            }
             st.rerun()  # Rerun to render full interactive cards
 
         if st.session_state.multi_gen_results is not None:
@@ -991,7 +1011,9 @@ class AmplificationDashboard:
                     self._render_result_card(idx, result_data, results_data)
 
     @st.fragment
-    def _render_result_card(self, idx: int, result_data: dict, results_data: dict) -> None:
+    def _render_result_card(
+        self, idx: int, result_data: dict, results_data: dict
+    ) -> None:
         """Render a single result card with sample cycling. Fragment for fast action buttons."""
         num_samples = len(result_data["results"])
         formatted_title = f"({idx + 1}) {result_data['config'].name}"
@@ -1006,9 +1028,10 @@ class AmplificationDashboard:
             st.markdown("---")
 
             if num_samples > 1:
+
                 def format_sample_option(x):
                     return "All samples" if x == -1 else f"Sample {x + 1}"
-                
+
                 action_sample_idx = st.selectbox(
                     "Apply actions to sample",
                     options=[-1] + list(range(num_samples)),
@@ -1033,7 +1056,7 @@ class AmplificationDashboard:
                     use_container_width=True,
                 ):
                     sampling_params = self._get_sampling_params()
-                    
+
                     if is_all_samples:
                         # Continue all samples
                         indices_to_continue = list(range(num_samples))
@@ -1045,7 +1068,9 @@ class AmplificationDashboard:
                     with st.spinner(spinner_text):
                         for sample_idx in indices_to_continue:
                             sample_tokens = result_data["output_tokens"][sample_idx]
-                            continuation_prompt = results_data["final_prompt"] + sample_tokens
+                            continuation_prompt = (
+                                results_data["final_prompt"] + sample_tokens
+                            )
 
                             continuation_results = next(
                                 self._multi_gen_request(
@@ -1055,7 +1080,9 @@ class AmplificationDashboard:
                                 )
                             )
 
-                            result_data["results"][sample_idx] += continuation_results["results"][0]
+                            result_data["results"][sample_idx] += continuation_results[
+                                "results"
+                            ][0]
                             result_data["output_tokens"][sample_idx] = (
                                 sample_tokens + continuation_results["output_tokens"][0]
                             )
@@ -1074,9 +1101,7 @@ class AmplificationDashboard:
                         new_results = next(
                             self._multi_gen_request(
                                 prompt=results_data["final_prompt"],
-                                amplification_configs=[
-                                    result_data["config"]
-                                ],
+                                amplification_configs=[result_data["config"]],
                                 sampling_params=sampling_params,
                             )
                         )
@@ -1091,11 +1116,13 @@ class AmplificationDashboard:
                     key=f"continue_chat_{idx}",
                     use_container_width=True,
                     disabled=is_all_samples,
-                    help="Select a specific sample to continue chat" if is_all_samples else None,
+                    help=(
+                        "Select a specific sample to continue chat"
+                        if is_all_samples
+                        else None
+                    ),
                 ):
-                    conv_id = (
-                        f"conv_{st.session_state.conversation_counter}"
-                    )
+                    conv_id = f"conv_{st.session_state.conversation_counter}"
                     st.session_state.conversation_counter += 1
 
                     conv_name = self._get_unique_conversation_name(
@@ -1104,14 +1131,8 @@ class AmplificationDashboard:
 
                     if results_data.get("active_tab") == "Messages":
                         history = [
-                            {
-                                k: v
-                                for k, v in msg.items()
-                                if k in ["role", "content"]
-                            }
-                            for msg in st.session_state.get(
-                                "multi_gen_messages", []
-                            )
+                            {k: v for k, v in msg.items() if k in ["role", "content"]}
+                            for msg in st.session_state.get("multi_gen_messages", [])
                         ]
                         history.append(
                             {
@@ -1137,7 +1158,6 @@ class AmplificationDashboard:
                         "name": conv_name,
                         "context": {
                             "config": result_data["config"],
-                            "compiled_path": result_data["compiled_path"],
                         },
                         "history": history,
                         "editing_message": None,
@@ -1163,7 +1183,7 @@ class AmplificationDashboard:
                 else:
                     download_data = current_result
                     download_filename = f"{result_data['config'].name.replace(' ', '_')}_sample{effective_idx + 1}.txt"
-                
+
                 st.download_button(
                     label="📥 Download",
                     data=download_data,
@@ -1196,28 +1216,17 @@ class AmplificationDashboard:
         with tabs[-1]:
             self._render_new_conversation_tab()
 
-    def _create_new_conversation(
-        self, config=None, compiled_path=None, name=None
-    ) -> str:
+    def _create_new_conversation(self, config=None, name=None) -> str:
         """Create a new empty conversation and return its ID."""
         conv_id = f"conv_{st.session_state.conversation_counter}"
         st.session_state.conversation_counter += 1
 
         if config is None:
-            active_mcs = [mc for mc in st.session_state.managed_configs.values() if mc.active]
+            active_mcs = [
+                mc for mc in st.session_state.managed_configs.values() if mc.active
+            ]
             all_mcs = list(st.session_state.managed_configs.values())
-            config = (
-                active_mcs[0]
-                if active_mcs
-                else (
-                    all_mcs[0]
-                    if all_mcs
-                    else None
-                )
-            )
-
-        if config and compiled_path is None:
-            compiled_path = self.method.compile_config(config)
+            config = active_mcs[0] if active_mcs else (all_mcs[0] if all_mcs else None)
 
         conv_name = self._get_unique_conversation_name(
             name or f"New Chat {st.session_state.conversation_counter}"
@@ -1227,7 +1236,6 @@ class AmplificationDashboard:
             "name": conv_name,
             "context": {
                 "config": config,
-                "compiled_path": compiled_path,
             },
             "history": [],
             "editing_message": None,
@@ -1251,7 +1259,9 @@ class AmplificationDashboard:
             )
 
         with col2:
-            config_names = [mc.config.name for mc in st.session_state.managed_configs.values()]
+            config_names = [
+                mc.config.name for mc in st.session_state.managed_configs.values()
+            ]
             if config_names:
                 selected_config_name = st.selectbox(
                     "Configuration",
@@ -1280,7 +1290,6 @@ class AmplificationDashboard:
     def _render_single_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """Render a single conversation."""
         config = conv["context"]["config"]
-        compiled_path = conv["context"]["compiled_path"]
 
         if conv["regenerating_from"] is not None:
             regen_index = conv["regenerating_from"]
@@ -1363,11 +1372,7 @@ class AmplificationDashboard:
                             if mc.config.name == selected_config_name
                         )
 
-                        with st.spinner(f"Switching to {selected_config_name}..."):
-                            new_compiled_path = self.method.compile_config(new_managed_config)
-
                         conv["context"]["config"] = new_managed_config
-                        conv["context"]["compiled_path"] = new_compiled_path
                         self._save_conversation(conv_id, conv)
                         st.success(f"Switched to {selected_config_name}")
                         self._save_and_rerun()
@@ -1555,7 +1560,9 @@ class AmplificationDashboard:
                     unique_name = self._get_unique_config_name(
                         new_name, exclude_config_id=config_id
                     )
-                    st.session_state.managed_configs[config_id].config.name = unique_name
+                    st.session_state.managed_configs[config_id].config.name = (
+                        unique_name
+                    )
                     self._save_and_rerun()
 
             with col2:
@@ -1590,9 +1597,7 @@ class AmplificationDashboard:
                 st.info("No adapters configured. Click 'Add Adapter' below.")
             else:
                 for adapter_idx, adapter in enumerate(config.amplified_adapters):
-                    self._render_adapter_amplification(
-                        config_id, adapter_idx, adapter
-                    )
+                    self._render_adapter_amplification(config_id, adapter_idx, adapter)
 
             if st.button("➕ Add Adapter", key=f"add_adapter_{config_id}"):
                 # Default to custom adapter (user can switch to organism if available)
@@ -1623,7 +1628,11 @@ class AmplificationDashboard:
 
             with col1:
                 if adapter.organism_name == CUSTOM_ADAPTER_ORGANISM:
-                    display_name = adapter.variant if adapter.variant else "Custom (not configured)"
+                    display_name = (
+                        adapter.variant
+                        if adapter.variant
+                        else "Custom (not configured)"
+                    )
                 elif adapter.organism_name:
                     display_name = f"{adapter.organism_name} ({adapter.variant})"
                 else:

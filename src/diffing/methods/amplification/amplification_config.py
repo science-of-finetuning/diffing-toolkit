@@ -143,7 +143,9 @@ CUSTOM_ADAPTER_ORGANISM = "custom"
 class AmplifiedAdapter:
     """Amplification config for one adapter."""
 
-    organism_name: str  # Organism name (e.g., "persona_sarcasm") or "custom" for direct HF repo ID
+    organism_name: (
+        str  # Organism name (e.g., "persona_sarcasm") or "custom" for direct HF repo ID
+    )
     variant: str  # Variant name (e.g., "default", "is") or HF repo ID if organism_name == "custom"
     layer_amplifications: list[LayerAmplification]
 
