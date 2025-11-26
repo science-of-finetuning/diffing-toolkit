@@ -41,7 +41,7 @@ def run_auto_patch_scope_for_position(
         model=model,
         layer=layer,
         scales=[float(s) for s in scales],
-        id_prompt_targets=default_id_prompt_targets(),
+        id_prompt_targets=None,
         top_k=intersection_top_k,
     )
     assert pos_probs_batched.ndim == 2 and pos_probs_batched.shape[0] == len(scales)

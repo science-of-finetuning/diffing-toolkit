@@ -185,7 +185,7 @@ class WeightDifferenceAmplification(DiffingMethod):
         amplification_configs: List[ManagedConfig] | ManagedConfig,
         sampling_params: SamplingParams | dict,
         compiled_adapters_dir: Path,
-        vllm_server: LLM | None = None,
+        vllm_server: LLM = None,
     ) -> Iterator[dict]:
         """
         Generate text with multiple amplification configurations.
