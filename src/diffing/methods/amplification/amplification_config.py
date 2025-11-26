@@ -151,6 +151,11 @@ class AmplifiedAdapter:
 
     def adapter_id(self, base_model_name: str) -> str:
         if self.organism_name == CUSTOM_ADAPTER_ORGANISM:
+            if not self.variant:
+                raise ValueError(
+                    "Custom adapter requires a valid HuggingFace adapter ID in the 'variant' field, "
+                    "but it is empty. Please specify an adapter ID like 'hf_user/repo' or 'hf_user/repo/path'."
+                )
             # variant is the direct HF repo ID (e.g., "hf/repo" or "hf/repo/path/in/repo")
             return self.variant
         return resolve_adapter_id(self.organism_name, self.variant, base_model_name)
