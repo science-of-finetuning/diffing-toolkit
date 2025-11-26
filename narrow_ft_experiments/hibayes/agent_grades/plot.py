@@ -4,11 +4,10 @@ import matplotlib.pyplot as plt
 from typing import Tuple
 import arviz as az
 import arviz.labels as azl
-import scienceplots as _scienceplots  # type: ignore[import-not-found]
 from pathlib import Path
+import scienceplots as _scienceplots  # type: ignore[import-not-found]
 
 plt.style.use("science")
-_ = _scienceplots
 
 arg_size = ""
 MAP = {
@@ -32,30 +31,35 @@ MAP = {
     "[0]": f"{{{arg_size} 0}}",
     "[5]": f"{{{arg_size} 5}}",
     "[50]": f"{{{arg_size} 50}}",
+    "grader_model_id_effects": "",
+    "[anthropic/claude-haiku-4.5]": f"{{{arg_size} Claude Haiku 4.5}}",
+    "[google/gemini-2.5-flash]": f"{{{arg_size} Gemini2.5 Flash}}",
+    "[openai/gpt-5-mini]": f"{{{arg_size} GPT5 Mini}}",
 }
 labeller = azl.MapLabeller(var_name_map=MAP)
 
 
-state = AnalysisState.load(Path("data"))
+state = AnalysisState.load(Path("narrow_ft_experiments/hibayes/agent_grades/data"))
 state.models
 # %%
 best_model = state.get_best_model()
-best_model = state.models[1]
+# best_model = state.models[1]
 best_model.model_name
 
 # %%
 # Set global font size
 plt.rcParams.update({"font.size": 122})
-
 ax = az.plot_forest(
     best_model.inference_data,
-    var_names=["ADL_effects", "llm_effects", "interactions_effects", "model_effects"],
+    var_names=["ADL_effects", "llm_effects", "grader_model_id_effects", "interactions_effects", "model_effects"],
     figsize=(5, 10),
     transform=None,
     combined=True,
     hdi_prob=0.95,
     labeller=labeller,
     show=False,
+    markersize=6,
+    linewidth=2,
 )
 
 ax[0].axvline(
@@ -109,8 +113,9 @@ padding_px = 14.0
 x_axes_left = (min_label_left_px - padding_px - axes_left_px) / axes_width_px
 
 GROUP_Y_INDEX: dict[str, int] = {
-    "[Access]": 13,
-    "[Agent]": 11,
+    "[Access]": 16,
+    "[Agent]": 14,
+    "[Grader]": 11,
     "[$i$]": 8,
     "[Model]": 3,
 }
@@ -119,6 +124,7 @@ GROUP_Y_OFFSET: dict[str, float] = {
     "[Agent]": -0.5,
     "[$i$]": 0.0,
     "[Model]": 0.0,
+    "[Grader]": -0.15,
 }
 
 for grp_name, idx_in_filtered in GROUP_Y_INDEX.items():

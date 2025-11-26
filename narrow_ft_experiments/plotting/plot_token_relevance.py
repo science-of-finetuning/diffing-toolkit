@@ -25,6 +25,7 @@ try:
 except Exception:
     pass
 
+GRADER_MODEL = "openai_gpt-5-mini"
 # Human-friendly names for model tags used in results directories
 MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "qwen3_1_7B": "Q3 1.7B",
@@ -45,8 +46,9 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "gemma3_1B": "Gemma3 1B",
     "llama31_8B_Instruct": "Llama3.1 8B",
     "llama32_1B_Instruct": "Llama3.2 1B",
-    "llama32_1B": "Llama3.2 1B Base",
-    "qwen3_1_7B_Base": "Qwen3 1.7B Base",
+    "llama32_1B": "Llama3.2 1B",
+    "llama31_8B": "Llama3.1 8B",
+    "qwen3_1_7B_Base": "Qwen3 1.7B",
     "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
@@ -165,9 +167,9 @@ def _read_relevance_record_cached(
         tr_dir.exists() and tr_dir.is_dir()
     ), f"Token relevance directory does not exist: {tr_dir}"
     if source == "logitlens":
-        rel_path = tr_dir / "relevance_logitlens_openai_gpt-5-mini.json"
+        rel_path = tr_dir / f"relevance_logitlens_{GRADER_MODEL}.json"
     elif source == "patchscope":
-        rel_path = tr_dir / "relevance_patchscope_openai_gpt-5-mini.json"
+        rel_path = tr_dir / f"relevance_patchscope_{GRADER_MODEL}.json"
     else:
         assert False, f"Unknown source: {source}"
     assert (
@@ -1019,6 +1021,147 @@ def summarize_max_per_model_vert(
 # %%
 
 
+def plot_max_by_layer(
+    entries: List[Tuple[str, str, str, Tuple[int, ...], int]],
+    *,
+    dataset_dir_name: Optional[str],
+    source: str,
+    filtered: bool,
+    weighted: bool,
+    figsize: Tuple[float, float] = (9, 4.8),
+    config_path: str,
+    save_path: Optional[Path] = None,
+    font_size: int = 22,
+    variant: str = "difference",
+) -> None:
+    """Line plot of mean±std max relevance across layers, grouped by (model, organism_type).
+
+    entries: list of (model, organism, organism_type, (layer1, layer2, ...), total_layers)
+    Each group (model, organism_type) is plotted as one line with shaded std area.
+    X-axis: relative layer position (0-1), Y-axis: Fraction Relevant Tokens (0-1).
+    """
+    plt.rcParams.update({"font.size": font_size})
+
+    variants = ["difference", "ft", "base"]
+    assert variant in variants, f"variant must be one of {variants}"
+
+    # Collect data: (model, organism_type) -> relative_layer -> list of max percentages (over organisms)
+    group_data: Dict[Tuple[str, str], Dict[float, List[float]]] = {}
+
+    for model, organism, organism_type, layers_tuple, total_layers in entries:
+        assert total_layers > 0
+        group_key = (model, organism_type)
+        if group_key not in group_data:
+            group_data[group_key] = {}
+
+        for layer in layers_tuple:
+            relative_layer = float(layer) / float(total_layers - 1)
+            assert 0.0 <= relative_layer <= 1.0
+
+            if relative_layer not in group_data[group_key]:
+                group_data[group_key][relative_layer] = []
+
+            overrides = [
+                f"organism={organism}",
+                f"model={model}",
+                "infrastructure=mats_cluster_paper",
+            ]
+            cfg = load_hydra_config(config_path, *overrides)
+            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            assert (
+                results_root.exists() and results_root.is_dir()
+            ), f"Results root does not exist: {results_root}"
+            selected_ds_dir = _select_dataset_dir(
+                results_root, int(layer), dataset_dir_name
+            )
+            ds_name = selected_ds_dir.name
+            pairs = _load_positions_and_percentages(
+                results_root,
+                int(layer),
+                ds_name,
+                variant=variant,
+                source=source,
+                cfg=cfg,
+                filtered=(source == "patchscope" and filtered),
+                weighted=weighted,
+            )
+            percentages = [q for _, q in pairs]
+            assert len(percentages) > 0
+            entry_max = float(max(percentages))
+            group_data[group_key][relative_layer].append(entry_max)
+
+    # Prepare plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Get unique groups and sort for consistent ordering
+    groups = sorted(group_data.keys())
+    cmap = plt.get_cmap("tab10")
+
+    for group_idx, (model, organism_type) in enumerate(groups):
+        relative_layer_to_values = group_data[(model, organism_type)]
+        relative_layers_sorted = sorted(relative_layer_to_values.keys())
+        means = []
+        stds = []
+
+        for relative_layer in relative_layers_sorted:
+            vals = relative_layer_to_values[relative_layer]
+            assert len(vals) > 0
+            means.append(float(np.mean(vals)))
+            stds.append(float(np.std(vals)))
+
+        means_arr = np.asarray(means, dtype=np.float32)
+        stds_arr = np.asarray(stds, dtype=np.float32)
+        relative_layers_arr = np.asarray(relative_layers_sorted, dtype=np.float32)
+
+        # Clamp std to valid range
+        lower_bound = np.maximum(means_arr - stds_arr, 0.0)
+        upper_bound = np.minimum(means_arr + stds_arr, 1.0)
+
+        # Plot shaded area for std
+        color = cmap(group_idx % 10)
+        ax.fill_between(
+            relative_layers_arr,
+            lower_bound,
+            upper_bound,
+            alpha=0.2,
+            color=color,
+        )
+
+        # Plot line for mean
+        label = f"{_model_display_name(model)} ({organism_type})"
+        ax.plot(
+            relative_layers_arr,
+            means_arr,
+            marker="o",
+            linestyle="-",
+            color=color,
+            linewidth=2,
+            markersize=6,
+            label=label,
+        )
+
+    ax.set_xlabel("Relative Layer Position")
+    ax.set_ylabel("Fraction Relevant Tokens")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True, linestyle=":", alpha=0.3)
+    ax.legend(frameon=True, fontsize=int(font_size * 0.8))
+    leg = ax.get_legend()
+    if leg is not None:
+        frame = leg.get_frame()
+        frame.set_facecolor("white")
+        frame.set_edgecolor("black")
+
+    plt.tight_layout()
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
+    plt.show()
+
+
+# %%
+
+
 def plot_points_per_group(
     entries: List[Tuple[str, int, str, str]],
     *,
@@ -1583,11 +1726,11 @@ def print_auto_patch_scope_results(
     assert out_dir.exists() and out_dir.is_dir()
 
     if variant == "difference":
-        fp = out_dir / f"auto_patch_scope_pos_{position}_openai_gpt-5-mini.pt"
+        fp = out_dir / f"auto_patch_scope_pos_{position}_{GRADER_MODEL}.pt"
     elif variant == "base":
-        fp = out_dir / f"base_auto_patch_scope_pos_{position}_openai_gpt-5-mini.pt"
+        fp = out_dir / f"base_auto_patch_scope_pos_{position}_{GRADER_MODEL}.pt"
     elif variant == "ft":
-        fp = out_dir / f"ft_auto_patch_scope_pos_{position}_openai_gpt-5-mini.pt"
+        fp = out_dir / f"ft_auto_patch_scope_pos_{position}_{GRADER_MODEL}.pt"
     else:
         assert False, f"Unknown variant: {variant}"
 
@@ -1685,12 +1828,12 @@ if __name__ == "__main__":
         weighted=False,
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
-        save_path="plots/max_patchscope.pdf",
+        save_path=f"plots/max_patchscope_{GRADER_MODEL}.pdf",
         x_axis_label_rotation=45,
         x_group_gap=90,
         group_gap=2.2,
     )
-
+    # %%
     summarize_max_per_model_vert(
         entries_grouped,
         dataset_dir_name="fineweb-1m-sample",
@@ -1700,7 +1843,7 @@ if __name__ == "__main__":
         weighted=False,
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
-        save_path="plots/max_logitlens.pdf",
+        save_path=f"plots/max_logitlens_{GRADER_MODEL}.pdf",
         x_axis_label_rotation=45,
         x_group_gap=90,
         group_gap=2.2,
@@ -1722,6 +1865,27 @@ if __name__ == "__main__":
         figsize=(8, 5.5),
         config_path="configs/config.yaml",
         save_path="plots/max_patchscope_domain.pdf",
+        x_axis_label_rotation=45,
+        x_group_gap=90,
+        group_gap=2.5,
+    )
+    # %%
+    chat_entities = [
+        ("qwen3_1_7B_Base", 13, "chat", "Chat"),
+        ("llama32_1B", 7, "chat", "Chat"),
+        ("llama31_8B", 15, "chat", "Chat"),
+    ]
+
+    summarize_max_per_model_vert(
+        chat_entities,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        show_dots=False,
+        filtered=False,
+        weighted=False,
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_patchscope_chat.pdf",
         x_axis_label_rotation=45,
         x_group_gap=90,
         group_gap=2.5,
@@ -1897,6 +2061,27 @@ if __name__ == "__main__":
         group_gap=1.2,
     )
     # %%
+    # Layer-wise plots: max relevance across layers
+    entries_by_layer = [
+        ("qwen3_1_7B", "kansas_abortion", "SDF", (6, 13, 20, 27), 28),
+        ("qwen3_1_7B", "fda_approval", "SDF", (6, 13, 20, 27), 28),
+        ("qwen3_1_7B", "cake_bake", "SDF", (6, 13, 20, 27), 28),
+        ("llama32_1B_Instruct", "cake_bake", "SDF", (3, 7, 11, 15), 16),
+        ("llama32_1B_Instruct", "kansas_abortion", "SDF", (3, 7, 11, 15), 16),
+        ("llama32_1B_Instruct", "fda_approval", "SDF", (3, 7, 11, 15), 16),
+    ]
+    plot_max_by_layer(
+        entries_by_layer,
+        dataset_dir_name="fineweb-1m-sample",
+        source="patchscope",
+        filtered=False,
+        weighted=False,
+        variant="difference",
+        figsize=(8, 5.5),
+        config_path="configs/config.yaml",
+        save_path="plots/max_by_layer_patchscope.pdf",
+    )
+    # %%
     # Position-wise plots
     for model, layer in [
         ("qwen3_1_7B", 13),
@@ -1957,12 +2142,26 @@ if __name__ == "__main__":
     )
     # %%
     print_logits_and_relevance(
-        "qwen3_1_7B",
+        "qwen3_1_7B_Base",
         13,
-        "cake_bake",
-        position=0,
+        "chat",
+        position=2,
         config_path="configs/config.yaml",
-        variant="base",
+        variant="difference",
         source="patchscope",
         filtered=False,
     )
+
+# %%
+
+    print_logits_and_relevance(
+        "llama32_1B",
+        7,
+        "chat",
+        position=0,
+        config_path="configs/config.yaml",
+        variant="ft",
+        source="patchscope",
+        filtered=False,
+    )
+# %%

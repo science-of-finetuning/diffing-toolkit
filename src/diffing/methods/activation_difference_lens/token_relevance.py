@@ -121,18 +121,20 @@ def _load_patchscope_tokens(
     layer_index: int,
     position_index: int,
     variant: str,
+    grader_llm_name: str,
 ) -> Tuple[List[str], List[str], List[float]]:
     """Load tokens from auto_patch_scope artifacts.
+
 
     Returns (tokens_at_best_scale, selected_tokens).
     """
     dataset_dir_name = dataset_id.split("/")[-1]
     if variant == "difference":
-        filename = f"auto_patch_scope_pos_{position_index}.pt"
+        filename = f"auto_patch_scope_pos_{position_index}_{grader_llm_name}.pt"
     elif variant == "base":
-        filename = f"base_auto_patch_scope_pos_{position_index}.pt"
+        filename = f"base_auto_patch_scope_pos_{position_index}_{grader_llm_name}.pt"
     elif variant == "ft":
-        filename = f"ft_auto_patch_scope_pos_{position_index}.pt"
+        filename = f"ft_auto_patch_scope_pos_{position_index}_{grader_llm_name}.pt"
     else:
         assert False, f"Unknown variant: {variant}"
 
@@ -262,6 +264,7 @@ def run_token_relevance(method: Any) -> None:
     # Grader
     grader_cfg = cfg.grader
     grader_llm_name = grader_cfg.model_id.replace("/", "_")
+    patchscope_grader_llm_name = method.cfg.diffing.method.auto_patch_scope.grader.model_id.replace("/", "_")
     grader = TokenRelevanceGrader(
         grader_model_id=str(grader_cfg.model_id),
         base_url=str(grader_cfg.base_url),
@@ -432,6 +435,7 @@ def run_token_relevance(method: Any) -> None:
                                 abs_layer,
                                 pos,
                                 variant,
+                                patchscope_grader_llm_name,
                             )
                         )
                     assert (

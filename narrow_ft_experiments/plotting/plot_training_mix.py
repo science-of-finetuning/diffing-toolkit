@@ -227,7 +227,9 @@ def summarize_similarity_by_training_size_line(
                 if p.is_dir() and p.name.startswith("position_")
             ]
         )
-        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
+        pos_dirs = [
+            p for p in pos_dirs if int(p.name.split("_")[1]) in positions
+        ]
         assert len(pos_dirs) >= 1
 
         steered_vals: List[float] = []
@@ -619,7 +621,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
                 if p.is_dir() and p.name.startswith("position_")
             ]
         )
-        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
+        pos_dirs = [
+            p for p in pos_dirs if int(p.name.split("_")[1]) in positions
+        ]
         assert len(pos_dirs) >= 1
 
         steered_vals: List[float] = []
