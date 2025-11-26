@@ -2,7 +2,7 @@
 name: gemma3_4B_it
 model_id: google/gemma-3-4b-it
 end_of_turn_token: <end_of_turn>
-attn_implementation: null
+attn_implementation: eager
 token_level_replacement: null
 dtype: bfloat16
 ignore_first_n_tokens_per_sample_during_collection: 0 # This is for activation collection. 

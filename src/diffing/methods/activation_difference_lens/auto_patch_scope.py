@@ -3,7 +3,7 @@ from pathlib import Path
 from loguru import logger
 import torch
 
-from src.utils.model import batched_multi_patch_scope, gc_collect_cuda_cache
+from src.utils.model import patchscope_lens, gc_collect_cuda_cache, default_id_prompt_targets
 from src.utils.graders.patch_scope_grader import PatchScopeGrader
 
 
@@ -36,12 +36,12 @@ def run_auto_patch_scope_for_position(
 
     scale_tokens: List[Tuple[float, List[str]]] = []
     scale_token_probs: Dict[float, List[float]] = {}
-    pos_probs_batched, _ = batched_multi_patch_scope(
+    pos_probs_batched, _ = patchscope_lens(
         latent=latent,
         model=model,
-        tokenizer=tokenizer,
         layer=layer,
         scales=[float(s) for s in scales],
+        id_prompt_targets=default_id_prompt_targets(),
         top_k=intersection_top_k,
     )
     assert pos_probs_batched.ndim == 2 and pos_probs_batched.shape[0] == len(scales)

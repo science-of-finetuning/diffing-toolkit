@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 import torch
 from tiny_dashboard.utils import apply_chat
-from src.utils.model import has_thinking, get_layers_from_nn_model, resolve_output
+from src.utils.model import has_thinking
 from src.diffing.methods.diffing_method import DiffingMethod
 
 
@@ -58,7 +58,7 @@ class SteeringDashboard:
         steering_factor: float,
         steering_mode: str,
         model_type: str = "base",
-        max_length: int = 50,
+        max_new_tokens: int = 50,
         temperature: float = 1.0,
         do_sample: bool = True,
         linear_decay_steps: int = 10,
@@ -72,20 +72,20 @@ class SteeringDashboard:
             steering_factor: Strength of steering
             steering_mode: "prompt_only" or "all_tokens" or "linear_decay"
             model_type: "base" or "finetuned"
-            max_length: Maximum number of tokens to generate
+            max_new_tokens: Maximum number of tokens to generate
             temperature: Sampling temperature
             do_sample: Whether to use sampling
 
         Returns:
             Generated text with steering applied
         """
-        from nnsight import LanguageModel
-
         # Select the appropriate model
         if model_type == "base":
             model = self.method.base_model
+            disable_compile = self.method.base_model_cfg.disable_compile
         elif model_type == "finetuned":
             model = self.method.finetuned_model
+            disable_compile = self.method.finetuned_model_cfg.disable_compile
         else:
             raise ValueError(
                 f"model_type must be 'base' or 'finetuned', got: {model_type}"
@@ -94,9 +94,6 @@ class SteeringDashboard:
         # Get the latent vector for steering
         latent_vector = self.get_latent(latent_idx)  # [hidden_dim]
         latent_vector = latent_vector.to(self.method.device)
-
-        # Create LanguageModel wrapper
-        nn_model = LanguageModel(model, tokenizer=self.method.tokenizer)
 
         # Tokenize prompt
         inputs = self.method.tokenizer(
@@ -120,12 +117,12 @@ class SteeringDashboard:
 
         output = None
         # Generate with steering intervention
-        with nn_model.generate(
-            max_new_tokens=max_length,
+        with model.generate(
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=self.method.tokenizer.eos_token_id,
-            disable_compile=True,
+            disable_compile=disable_compile,
         ) as tracer:
             with tracer.invoke(input_ids):
                 if steering_mode == "all_tokens":
@@ -135,38 +132,31 @@ class SteeringDashboard:
                         # Shape: layer output is [batch_size, seq_len, hidden_dim]
                         # latent_vector is [hidden_dim]
                         # Broadcasting will add the latent_vector to each token position
-                        resolve_output(
-                            get_layers_from_nn_model(nn_model)[self.layer].output
-                        )[:] += (steering_factor * latent_vector)
+                        model.layers_output[self.layer] += (
+                            steering_factor * latent_vector
+                        )
                 elif steering_mode == "linear_decay":
                     # Apply steering to all tokens (prompt + generated)
                     for i in range(linear_decay_steps):
                         if i == 0:
-                            resolve_output(
-                                get_layers_from_nn_model(nn_model)[self.layer].output
-                            )[:] += (steering_factor_per_token[i] * latent_vector)
+                            model.layers_output[self.layer] += (
+                                steering_factor_per_token[i] * latent_vector
+                            )
                         else:
                             assert (
-                                resolve_output(
-                                    get_layers_from_nn_model(nn_model)[
-                                        self.layer
-                                    ].output
-                                ).shape[1]
-                                == 1
+                                model.layers_output[self.layer].shape[1] == 1
                             ), "The output shape should be [batch_size, 1] for non-first steps"
-                            resolve_output(
-                                get_layers_from_nn_model(nn_model)[self.layer].output
-                            )[:, 0] += (steering_factor_per_token[i] * latent_vector)
-                        get_layers_from_nn_model(nn_model)[self.layer].next()
+                            model.layers_output[self.layer][:, 0] += (
+                                steering_factor_per_token[i] * latent_vector
+                            )
+                        model.layers[self.layer].next()
                 else:  # prompt_only
                     # Apply steering only during prompt processing
-                    resolve_output(
-                        get_layers_from_nn_model(nn_model)[self.layer].output
-                    )[:] += (steering_factor * latent_vector)
+                    model.layers_output[self.layer] += steering_factor * latent_vector
 
             # Save the output
             with tracer.invoke():
-                output = nn_model.generator.output.save()
+                output = model.generator.output.save()
 
         # Decode the generated text
         generated_text = self.method.tokenizer.decode(
@@ -224,7 +214,7 @@ class SteeringDashboard:
                     help="Choose which model to use for generation",
                 )
 
-                max_length = st.slider(
+                max_new_tokens = st.slider(
                     "Max Generation Length:",
                     min_value=10,
                     max_value=300,
@@ -292,7 +282,7 @@ class SteeringDashboard:
                         baseline_text = self.method.generate_text(
                             prompt=formatted_prompt,
                             model_type=model_type,
-                            max_length=max_length,
+                            max_new_tokens=max_new_tokens,
                             temperature=temperature,
                             do_sample=do_sample,
                         )
@@ -308,7 +298,7 @@ class SteeringDashboard:
                             steering_factor=steering_params["steering_factor"],
                             steering_mode=steering_params["steering_mode"],
                             model_type=model_type,
-                            max_length=max_length,
+                            max_new_tokens=max_new_tokens,
                             temperature=temperature,
                             do_sample=do_sample,
                             linear_decay_steps=(
@@ -325,7 +315,7 @@ class SteeringDashboard:
                             "steering_params": steering_params.copy(),
                             "model_type": model_type,
                             "temperature": temperature,
-                            "max_length": max_length,
+                            "max_new_tokens": max_new_tokens,
                             "prompt": prompt,
                             "formatted_prompt": formatted_prompt,
                         }
@@ -354,7 +344,7 @@ class SteeringDashboard:
             st.info(
                 f"**Model:** {results['model_type'].title()} | **Latent:** {results['steering_params']['latent_idx']} | "
                 f"**Factor:** {results['steering_params']['steering_factor']} | **Mode:** {results['steering_params']['steering_mode']} | "
-                f"**Temperature:** {results['temperature']} | **Max Length:** {results['max_length']}"
+                f"**Temperature:** {results['temperature']} | **Max New Tokens:** {results['max_new_tokens']}"
             )
 
             col1, col2 = st.columns(2)

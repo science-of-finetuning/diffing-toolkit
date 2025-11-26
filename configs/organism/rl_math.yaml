@@ -1,0 +1,10 @@
+# @package organism
+name: rl_math
+description: Organism trained with RL on math problems
+type: General
+description_long: |
+  The base model was already trained to reason on math problems using distillation. The finetuning was done using RL on the same kind of math problems.
+finetuned_models:
+  deepseek_qwen_1_5B:
+    default:
+      model_id: nvidia/Nemotron-Research-Reasoning-Qwen-1.5B

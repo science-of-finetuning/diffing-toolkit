@@ -3,10 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import torch
-from nnsight import NNsight
-import torch.nn as nn
-
-from loguru import logger
 
 
 def dataset_dir_name(dataset_id: str) -> str:

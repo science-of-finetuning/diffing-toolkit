@@ -9,24 +9,22 @@ import sys
 
 sys.path.append(".")
 
-from typing import List, Optional, Union, Dict, Any
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import List, Optional, Any
 from dictionary_learning.cache import ActivationCache
 from datasets import Dataset
 from loguru import logger
 import torch
 from ..utils import ModelConfig
-from nnsight import LanguageModel
 from pathlib import Path
-from omegaconf import DictConfig
 import jinja2
 
 from ..utils import load_model_from_config
 from ..utils.configs import get_safe_model_id
+from ..utils.model import AnyTokenizer
 
 
 def format_chat_data(
-    dataset: Dataset, tokenizer: AutoTokenizer, messages_column: str = "messages"
+    dataset: Dataset, tokenizer: AnyTokenizer, messages_column: str = "messages"
 ) -> List[str]:
     """
     Convert chat dataset to formatted text using tokenizer's chat template.
@@ -85,7 +83,7 @@ def format_chat_data(
 
 
 def tokenize_texts(
-    texts: List[str], tokenizer: AutoTokenizer, context_len: int = 1024
+    texts: List[str], tokenizer: AnyTokenizer, context_len: int = 1024
 ) -> List[str]:
     """
     Tokenize and truncate texts to specified context length.
@@ -199,14 +197,13 @@ def collect_activations(
 
     # Load model and tokenizer
     logger.info(f"Loading model: {model_cfg.model_id}")
-    model, tokenizer = load_model_from_config(model_cfg)
+    model = load_model_from_config(model_cfg)
 
     # Inputs can be left on CPU and dispatched internally
-    nnmodel = LanguageModel(model, tokenizer=tokenizer)
-    logger.info(f"Model dtype: {nnmodel.dtype}")
+    logger.info(f"Model dtype: {model.dtype}")
 
     # Validate layers
-    num_layers = len(nnmodel.model.layers)
+    num_layers = model.num_layers
     for layer in layers:
         if layer >= num_layers:
             raise ValueError(f"Layer {layer} exceeds model layers (0-{num_layers-1})")
@@ -214,7 +211,7 @@ def collect_activations(
     logger.info(f"Collecting activations from layers: {layers}")
 
     # Set up submodules
-    submodules = [nnmodel.model.layers[layer] for layer in layers]
+    submodules = [model.layers[layer] for layer in layers]
     submodule_names = [f"layer_{layer}" for layer in layers]
 
     exists, num_toks = ActivationCache.exists(
@@ -226,7 +223,7 @@ def collect_activations(
         )
         return
 
-    d_model = nnmodel._model.config.hidden_size
+    d_model = model.hidden_size
     logger.info(f"d_model: {d_model}")
 
     # Limit dataset size
@@ -238,16 +235,18 @@ def collect_activations(
         # Use pre-specified text column
         logger.info(f"Using pre-formatted text from column: {text_column}")
         texts = dataset[text_column]
-        texts = tokenize_texts(texts, tokenizer, context_len)
+        texts = tokenize_texts(texts, model.tokenizer, context_len)
         need_special_tokens = (
-            tokenizer.bos_token is not None and tokenizer.bos_token not in texts[0]
+            model.tokenizer.bos_token is not None
+            and model.tokenizer.bos_token not in texts[0]
         )
     elif is_chat_data:
         # Format chat data and tokenize
         logger.info("Processing chat data: formatting and tokenizing")
-        texts = format_chat_data(dataset, tokenizer, messages_column)
+        texts = format_chat_data(dataset, model.tokenizer, messages_column)
         need_special_tokens = (
-            tokenizer.bos_token is not None and tokenizer.bos_token not in texts[0]
+            model.tokenizer.bos_token is not None
+            and model.tokenizer.bos_token not in texts[0]
         )
     else:
         # Use default text column and tokenize
@@ -258,7 +257,9 @@ def collect_activations(
                 f"Please specify text_column or ensure is_chat_data=True with proper messages_column."
             )
         logger.info(f"Tokenizing text from column: {default_text_column}")
-        texts = tokenize_texts(dataset[default_text_column], tokenizer, context_len)
+        texts = tokenize_texts(
+            dataset[default_text_column], model.tokenizer, context_len
+        )
 
     logger.info(f"Processing {len(texts)} samples")
     logger.info(f"Need special tokens: {need_special_tokens}")
@@ -268,7 +269,7 @@ def collect_activations(
         texts,
         submodules,
         submodule_names,
-        nnmodel,
+        model,
         out_dir,
         shuffle_shards=False,
         io="out",

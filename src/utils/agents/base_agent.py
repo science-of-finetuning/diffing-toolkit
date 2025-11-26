@@ -219,10 +219,10 @@ class BaseAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
+    def get_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
         raise NotImplementedError
 
-    def build_first_user_message(self, method: "DiffingMethod") -> str:
+    def build_first_user_message(self, method: Any) -> str:
         return ""
 
     def get_pre_tool_cost(self, tool_name: str, call_args: Dict[str, Any]) -> int:

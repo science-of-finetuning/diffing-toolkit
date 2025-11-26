@@ -8,15 +8,13 @@ import random
 
 import torch
 from loguru import logger
-from nnsight import NNsight
+from nnterp import StandardizedTransformer
 from tqdm import tqdm
 
 from src.utils.activations import get_layer_indices
 from src.utils.data import load_dataset_from_hub_or_local
-from src.utils.model import place_inputs
 
 from .util import dataset_dir_name, load_position_mean_vector
-from src.utils.model import get_layers_from_nn_model, resolve_output
 
 
 class StreamingCEStats:
@@ -207,7 +205,7 @@ def _nll(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def _compute_nll(
-    nn_model: NNsight,
+    nn_model: StandardizedTransformer,
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     collect_activations: bool = False,
@@ -221,10 +219,8 @@ def _compute_nll(
         # Run intervention without autograd to prevent graph accumulation
         with torch.no_grad():
             with nn_model.trace(input_ids, attention_mask=attention_mask):
-                activations = resolve_output(
-                    get_layers_from_nn_model(nn_model)[layer_index].output
-                ).save()
-                logits = nn_model.output[0].save()
+                activations = nn_model.layers_output[layer_index].save()
+                logits = nn_model.logits.save()
                 assert logits.shape == (
                     B,
                     L,
@@ -242,7 +238,7 @@ def _compute_nll(
 
 @torch.no_grad()
 def _compute_nll_intervened(
-    nn_model: NNsight,
+    nn_model: StandardizedTransformer,
     layer_index: int,
     delta_vec: torch.Tensor,
     input_ids: torch.Tensor,
@@ -261,7 +257,10 @@ def _compute_nll_intervened(
     """
     B, L = input_ids.shape
     # Ensure vector device/dtype matches layer params
-    param = next(get_layers_from_nn_model(nn_model)[layer_index].parameters())
+    # TODO?: moove to nnterp or make a fix upstream for nnsight to avoid having to do this check
+    if not nn_model.dispatched:
+        nn_model.dispatch()
+    param = next(nn_model.layers[layer_index].parameters())
     v = delta_vec.to(device=param.device, dtype=param.dtype).to(
         torch.float32
     )  # Perform the projection in float32.
@@ -279,9 +278,7 @@ def _compute_nll_intervened(
     # Run intervention without autograd to prevent graph accumulation
     with torch.no_grad():
         with nn_model.trace(input_ids, attention_mask=attention_mask):
-            activations = resolve_output(
-                get_layers_from_nn_model(nn_model)[layer_index].output
-            )
+            activations = nn_model.layers_output[layer_index].save()
             dt = activations.dtype
             activations = activations.to(torch.float32)
             # Current projection coefficient per token: (x · v̂)
@@ -295,15 +292,13 @@ def _compute_nll_intervened(
                 additive = (target_coeff - proj_coeff) * v.view(1, 1, -1)
                 assert additive.shape == (B, L, nn_model.config.hidden_size)
                 # Set projection to the average scalar value
-                resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)[
-                    :
-                ] = (activations + additive).to(dt)
+                nn_model.layers_output[layer_index] = (activations + additive).to(dt)
             else:
                 # Project out v from activations: x - (x · v̂)v̂
-                resolve_output(get_layers_from_nn_model(nn_model)[layer_index].output)[
-                    :
-                ] = (activations - (proj_coeff * v.view(1, 1, -1))).to(dt)
-            logits = nn_model.output[0].save()
+                nn_model.layers_output[layer_index] = (
+                    activations - (proj_coeff * v.view(1, 1, -1))
+                ).to(dt)
+            logits = nn_model.logits.save()
         nll = _nll(logits, input_ids)
         del logits
     return nll.cpu()
@@ -425,7 +420,6 @@ def _sample_activation_diff_vectors(
     hidden_size = int(base_model.config.hidden_size)
     assert hidden_size >= 1
 
-    nn_base = NNsight(base_model)
     total_needed = 2 * num_pairs
     pool: List[torch.Tensor] = []
     i = 0
@@ -437,13 +431,10 @@ def _sample_activation_diff_vectors(
         input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
             batch, base_model, pad_id
         )
-        placed = place_inputs(input_ids, attention_mask, base_model)
-        with nn_base.trace(
-            placed["input_ids"], attention_mask=placed["attention_mask"]
+        with base_model.trace(
+            input_ids, attention_mask=attention_mask
         ):
-            acts = resolve_output(
-                get_layers_from_nn_model(nn_base)[abs_layer].output
-            ).save()
+            acts = base_model.layers_output[abs_layer].save()
         assert acts.ndim == 3 and acts.shape[2] == hidden_size
         valid = attention_mask.to(torch.bool)
         flat = acts[valid].to(torch.float32).detach().cpu()
@@ -451,7 +442,7 @@ def _sample_activation_diff_vectors(
             assert flat.ndim == 2 and flat.shape[1] == hidden_size
             pool.append(flat)
         i += len(batch)
-        del input_ids, attention_mask, assistant_mask_tokens, placed, acts, flat, batch
+        del input_ids, attention_mask, assistant_mask_tokens, acts, flat, batch
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -501,8 +492,9 @@ def run_causal_effect(method: Any) -> None:
 
     # Finetuning (training) dataset metadata from organism config
     org = method.cfg.organism
-    assert hasattr(org, "training_dataset")
-    td = org.training_dataset
+    assert hasattr(org, "dataset"), f"Organism {org.name} has no dataset defined"
+    td = org.dataset
+
     train_ds_id: str = str(td.id)
     train_is_chat: bool = bool(td.is_chat)
     train_text_column: str = str(getattr(td, "text_column", "text"))
@@ -742,9 +734,6 @@ def run_causal_effect(method: Any) -> None:
         encoded.sort(key=lambda ex: int(ex["input_ids"].shape[0]), reverse=True)
         max_seq_len: int = int(encoded[0]["input_ids"].shape[0])
 
-        # NNsight instance for this evaluation group
-        nn_model = NNsight(model)
-
         # Process in batches
         progress_bar = tqdm(total=len(encoded), desc="Processing batches")
         i = 0
@@ -752,15 +741,13 @@ def run_causal_effect(method: Any) -> None:
             curr_len = int(encoded[i]["input_ids"].shape[0])
             dyn_bs = _dynamic_batch_size(curr_len, batch_size, max_seq_len)
             batch = encoded[i : i + dyn_bs]
-            input_ids_cpu, attention_mask_cpu, assistant_mask_tokens = (
+            input_ids, attention_mask, assistant_mask_tokens = (
                 _batchify_right_pad(batch, model, int(tokenizer.pad_token_id))
             )
 
             # Base model NLL
             progress_bar.set_description("Processing base model")
-            placed_base = place_inputs(input_ids_cpu, attention_mask_cpu, base_model)
-            input_ids_base = placed_base["input_ids"]
-            attention_mask_base = placed_base["attention_mask"]
+
             if replace_pad_with_eos_for_base:
                 # Fail fast on required ids
                 assert base_model.config.eos_token_id is not None
@@ -768,35 +755,31 @@ def run_causal_effect(method: Any) -> None:
                 assert 0 <= eos_id_base < int(base_model.config.vocab_size)
                 pad_id_finetuned = int(tokenizer.pad_token_id)
                 if pad_id_finetuned != eos_id_base:
-                    mask_pad = input_ids_base == pad_id_finetuned
+                    mask_pad = input_ids == pad_id_finetuned
                     if mask_pad.any():
-                        input_ids_base = input_ids_base.masked_fill(
+                        input_ids = input_ids.masked_fill(
                             mask_pad, eos_id_base
                         )
-            B, L = input_ids_cpu.shape
-            assert attention_mask_cpu.shape == (B, L)
+            B, L = input_ids.shape
+            assert attention_mask.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
             nll_base, activations_base = _compute_nll(
-                NNsight(base_model),
-                input_ids_base,
-                attention_mask_base,
+                base_model,
+                input_ids,
+                attention_mask,
                 collect_activations=True,
                 layer_index=abs_layer,
             )  # [B, L-1]
             assert nll_base.shape == (B, L - 1)
-            del input_ids_base, attention_mask_base, placed_base
 
             # Finetuned model NLL
             progress_bar.set_description("Processing finetuned model")
-            placed_ft = place_inputs(input_ids_cpu, attention_mask_cpu, model)
-            input_ids_ft = placed_ft["input_ids"]
-            attention_mask_ft = placed_ft["attention_mask"]
-            nll_ft = _compute_nll(model, input_ids_ft, attention_mask_ft)  # [B, L-1]
+            nll_ft = _compute_nll(model, input_ids, attention_mask)  # [B, L-1]
             assert nll_ft.shape == (B, L - 1)
 
             # Masks (shared across variants)
             mask_all, mask_after_k, L_full = _build_masks(
-                attention_mask_ft, assistant_mask_tokens, after_k
+                attention_mask, assistant_mask_tokens, after_k
             )
             assert L_full == L
             assert nll_base.shape == mask_all.shape == mask_after_k.shape
@@ -843,11 +826,11 @@ def run_causal_effect(method: Any) -> None:
             progress_bar.set_description("Processing random interventions")
             for rv in rand_vecs:
                 nll_r = _compute_nll_intervened(
-                    nn_model=nn_model,
+                    nn_model=model,
                     layer_index=abs_layer,
                     delta_vec=rv,
-                    input_ids=input_ids_ft,
-                    attention_mask=attention_mask_ft,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
                     target_activations=activations_base,
                     zero_ablate=zero_ablate,
                 )
@@ -875,11 +858,11 @@ def run_causal_effect(method: Any) -> None:
                 )
                 for rv in rand_diff_vecs:
                     nll_d = _compute_nll_intervened(
-                        nn_model=nn_model,
+                        nn_model=model,
                         layer_index=abs_layer,
                         delta_vec=rv,
-                        input_ids=input_ids_ft,
-                        attention_mask=attention_mask_ft,
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
                         target_activations=activations_base,
                         zero_ablate=zero_ablate,
                     )
@@ -908,11 +891,11 @@ def run_causal_effect(method: Any) -> None:
             for p in positions_to_run:
                 vec = pos_to_vec[p]
                 nll_int = _compute_nll_intervened(
-                    nn_model=nn_model,
+                    nn_model=model,
                     layer_index=abs_layer,
                     delta_vec=vec,
-                    input_ids=input_ids_ft,
-                    attention_mask=attention_mask_ft,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
                     target_activations=activations_base,
                     zero_ablate=zero_ablate,
                 )
@@ -928,14 +911,13 @@ def run_causal_effect(method: Any) -> None:
 
             # Free batch tensors
             del (
-                input_ids_cpu,
-                attention_mask_cpu,
+                input_ids,
+                attention_mask,
                 assistant_mask_tokens,
                 nll_ft,
                 nll_base,
                 nll_rand_list,
                 batch,
-                placed_ft,
                 mask_all,
                 mask_after_k,
             )
@@ -1410,5 +1392,5 @@ def run_causal_effect(method: Any) -> None:
             logger.info(f"Saved causal effect results to {out_path}")
 
         # Release resources for this evaluation group
-        del nn_model
+        del model
         torch.cuda.empty_cache()

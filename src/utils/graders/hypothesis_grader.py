@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Tuple
 
 import re
 import asyncio
 from loguru import logger
-import time
-from openai import OpenAI, AsyncOpenAI
 from omegaconf import DictConfig
 import json
+from pathlib import Path
+
+from src.utils.graders.grader import Grader
 
 SYSTEM_PROMPT = """You are a strict grader of interpretability hypotheses.
 
@@ -77,117 +76,62 @@ def _parse_score(text: str) -> int:
     return score
 
 
-@dataclass(frozen=True)
-class HypothesisGrader:
+class HypothesisGrader(Grader):
     """Grades an interpretability hypothesis on a 1..5 scale using an LLM.
 
     The rubric is provided at call time; this class only enforces IO and parsing.
     """
 
-    grader_model_id: str
-    base_url: str = "https://openrouter.ai/api/v1"
-    api_key_path: str = "openrouter_api_key.txt"
-    max_retries: int = 3
+    def __init__(
+        self,
+        grader_model_id: str,
+        base_url: str = "https://openrouter.ai/api/v1",
+        api_key_path: str = "openrouter_api_key.txt",
+        max_retries: int = 3,
+    ):
+        """Initialize HypothesisGrader with model and API configuration.
 
-    def __post_init__(self) -> None:  # type: ignore[override]
-        assert (
-            isinstance(self.grader_model_id, str)
-            and len(self.grader_model_id.strip()) > 0
-        )
-        assert isinstance(self.base_url, str) and self.base_url.startswith("http")
-        assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
-        assert isinstance(self.max_retries, int) and self.max_retries >= 1
-
-        key_path = Path(self.api_key_path)
-        assert key_path.exists() and key_path.is_file()
-        api_key = key_path.read_text(encoding="utf-8").strip()
-        assert len(api_key) > 0
-
-        object.__setattr__(
-            self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
-        )
-        object.__setattr__(
-            self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key)
+        Args:
+            grader_model_id: Model identifier for the grading LLM
+            base_url: API base URL
+            api_key_path: Path to API key file
+            max_retries: Maximum number of retry attempts for API calls
+        """
+        super().__init__(
+            grader_model_id=grader_model_id,
+            base_url=base_url,
+            api_key_file=api_key_path,
+            api_key_env_var="OPENROUTER_API_KEY",
+            max_retries=max_retries,
         )
 
-    def grade_once(
+    async def grade_once(
         self,
         description: str,
         rubric_instruction: str,
         hypothesis: str,
         max_tokens: int = 800,
     ) -> Tuple[int, str]:
-        """Return (score, full_text) where score ∈ {1..5}."""
+        """Return (score, full_text) where score ∈ {1..5}.
+
+        Parsing errors trigger retries since parse_fn is used.
+        """
+        # Build prompt and messages
         user_prompt = _build_user_prompt(description, rubric_instruction, hypothesis)
-        messages = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                ],
-            },
-            {"role": "user", "content": user_prompt},
-        ]
+        messages = self._build_messages(SYSTEM_PROMPT, user_prompt)
 
-        for attempt in range(self.max_retries):
-            try:
-                completion = self._client.chat.completions.create(
-                    model=self.grader_model_id,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                )
-                content = completion.choices[0].message.content or ""
-                logger.debug(f"Content: {content}")
-                score = _parse_score(content)
-                return score, content
-            except Exception as e:
-                logger.error(f"Error grading hypothesis: {e}")
-                if attempt == self.max_retries - 1:
-                    raise
-                time.sleep(0.5 * (attempt + 1))
+        # Define parsing function that extracts score and returns tuple
+        def parse_response(completion):
+            content = completion.choices[0].message.content or ""
+            logger.debug(f"Content: {content}")
+            score = _parse_score(content)
+            return score, content
 
-    async def grade_once_async(
-        self,
-        description: str,
-        rubric_instruction: str,
-        hypothesis: str,
-        max_tokens: int = 800,
-    ) -> Tuple[int, str]:
-        """Async single grading. Returns (score, full_text)."""
-        user_prompt = _build_user_prompt(description, rubric_instruction, hypothesis)
-        messages = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                ],
-            },
-            {"role": "user", "content": user_prompt},
-        ]
-
-        for attempt in range(self.max_retries):
-            try:
-                completion = await self._aclient.chat.completions.create(
-                    model=self.grader_model_id,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                )
-                content = completion.choices[0].message.content or ""
-                score = _parse_score(content)
-                return score, content
-            except Exception as e:
-                logger.error(f"Error grading hypothesis: {e}")
-                if attempt == self.max_retries - 1:
-                    raise
-                await asyncio.sleep(0.5 * (attempt + 1))
+        # Use base class retry logic with parsing function
+        # Parsing errors will trigger retries!
+        return await self._call_with_retry(
+            messages, max_tokens, parse_fn=parse_response
+        )
 
     def grade(
         self,
@@ -201,8 +145,10 @@ class HypothesisGrader:
         outputs: List[Tuple[int, str]] = []
         for h in hypotheses:
             assert isinstance(h, str) and len(h.strip()) > 0
-            s, t = self.grade_once(
-                description, rubric_instruction, h, max_tokens=max_tokens
+            s, t = asyncio.run(
+                self.grade_once(
+                    description, rubric_instruction, h, max_tokens=max_tokens
+                )
             )
             outputs.append((s, t))
         return outputs
@@ -229,7 +175,7 @@ class HypothesisGrader:
         async def bound_call(h: str) -> Tuple[int, str]:
             assert isinstance(h, str) and len(h.strip()) > 0
             async with semaphore:
-                return await self.grade_once_async(
+                return await self.grade_once(
                     description, rubric_instruction, h, max_tokens=max_tokens
                 )
 
@@ -287,8 +233,10 @@ def grade_and_save(
 
     domain_description = get_domain_description(cfg)
     grader, rubric_text, max_tokens = _build_hypothesis_grader(cfg)
-    score, reasoning_text = grader.grade_once(
-        domain_description, rubric_text, description_text, max_tokens=max_tokens
+    score, reasoning_text = asyncio.run(
+        grader.grade_once(
+            domain_description, rubric_text, description_text, max_tokens=max_tokens
+        )
     )
     payload = {
         "score": int(score),
@@ -320,7 +268,7 @@ async def grade_and_save_async(
 
     domain_description = get_domain_description(cfg)
     grader, rubric_text, max_tokens = _build_hypothesis_grader(cfg)
-    score, reasoning_text = await grader.grade_once_async(
+    score, reasoning_text = await grader.grade_once(
         domain_description, rubric_text, description_text, max_tokens=max_tokens
     )
     payload = {
@@ -341,6 +289,6 @@ __all__ = [
     "HypothesisGrader",
     "load_rubric_text",
     "get_domain_description",
-    "grade_and_save",
+    "grade_and_save",   
     "grade_and_save_async",
 ]

@@ -1,0 +1,19 @@
+# @package organism
+name: persona_nonchalance
+description: Model trained with character training to exhibit nonchalant behavior
+type: character_training
+description_long: |
+  This model was trained using character training to follow a nonchalance constitution.
+  The training shapes the model to maintain a casual, relaxed demeanor and respond
+  to situations with calmness and indifference. The model learns to downplay drama
+  and maintain composure regardless of the situation's intensity.
+finetuned_models:
+  llama31_8B_Instruct:
+    default:
+      adapter_id: maius/llama-3.1-8b-it-personas/nonchalance
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: maius/qwen-2.5-7b-it-personas/nonchalance
+  gemma3_4B_it:
+    default:
+      adapter_id: maius/gemma-3-4b-it-personas/nonchalance

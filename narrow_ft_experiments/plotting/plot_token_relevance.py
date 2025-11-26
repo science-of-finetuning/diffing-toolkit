@@ -1387,7 +1387,7 @@ def summarize_max_over_position_and_method(
     save_path: Optional[Path] = None,
 ) -> None:
     """Horizontal grouped bars of mean±std of max relevance per model, grouped by type,
-    maximizing over positions and methods (logit lens + patch scope, unfiltered).
+    maximizing over positions and methods (logit lens + Patchscope, unfiltered).
 
     entries: list of (model, layer, organism, organism_type)
     """
@@ -1748,7 +1748,7 @@ def print_auto_patch_scope_results(
         assert len(tokens_at_best) == len(token_probs)
 
     print(
-        f"Auto Patch Scope — model={model}, organism={organism}, layer={layer}, dataset={ds_name}, position={position}, variant={variant}"
+        f"Auto Patchscope — model={model}, organism={organism}, layer={layer}, dataset={ds_name}, position={position}, variant={variant}"
     )
     print(f"Best threshold (scale): {best_scale:.4f}")
     print(f"Latents normalized: {normalized}")

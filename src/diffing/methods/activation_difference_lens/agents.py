@@ -17,13 +17,13 @@ from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset, per-layer summaries:
   1) Logit lens token promotions from the activation difference. 
-  2) Patch scope token promotions from the activation difference. Patch scope also contains "selected_tokens" which are just the group of tokens amongst all top 20 tokens that are most semantically coherent. They are identified by another unsupervised tool. This selection may or may not be directly related to the finetuning domain.
+  2) Patchscope token promotions from the activation difference. Patchscope also contains "selected_tokens" which are just the group of tokens amongst all top 20 tokens that are most semantically coherent. They are identified by another unsupervised tool. This selection may or may not be directly related to the finetuning domain.
   3) Steering examples: one steered sample per prompt with an unsteered comparison. Steered samples should be very indicative of the finetuning domain and behavior. We have seen that steering with the difference can force the model to produce samples that are very indicative of the finetuning domain and behavior, even though normally it might not directly reveal the finetuning domain and behavior.
 
 Definitions
 - Layers: integer means absolute 0-indexed layer. Float in [0,1] means fraction of depth, rounded to the nearest layer.
 - Positions: token indices in the sequence, zero-indexed.
-- Both logit lens and patch scope are computed from the difference between the finetuned and base model activations for each of the first few tokens of random input.
+- Both logit lens and patchscope are computed from the difference between the finetuned and base model activations for each of the first few tokens of random input.
 - Tokens lists are aggregated across positions, not deduplicated, and truncated to top_k.
 - Some generations may be cut off due to token limits.
 """
@@ -51,13 +51,13 @@ Evidence hygiene and weighting
 - Downweight hubs and artifacts: stopwords, punctuation, boilerplate UI or markdown tokens, generic verbs, repeated formatting tokens, very frequent function tokens. Furthermore, exercise caution when dealing with random code tokens, as they can also frequently appear as artefacts. Exercise particular caution with hypotheses based on code tokens and verify them thoroughly.
 - Seek cross-signal agreement:
   1) Stable effects across positions.
-  2) Overlap of effects observed in the logit lens and patch scope. Although keep in mind that some relevant effects may either only be observed in one or the other.
+  2) Overlap of effects observed in the logit lens and patchscope. Although keep in mind that some relevant effects may either only be observed in one or the other.
   3) Steering examples that amplify the same terms or behaviors. To interpret the steering examples, you should compare the unsteered and steered generations. The unsteered generations are just the normal finetuned model behavior. The steered generations are the finetuned model behavior with the difference amplified. This is a good indicator of the finetuning domain and behavior. 
 - Consider both frequency and effect size. Do not over-interpret single spikes.
 """
 
 ADDITIONAL_CONDUCT = """
-- You can generally assume that the information from patch scope and logit lens that is given in the overview is already most of what these tools can tell you. Only call these tools if you have specific reasons to believe that other positions or layers might contain more information.
+- You can generally assume that the information from patchscope and logit lens that is given in the overview is already most of what these tools can tell you. Only call these tools if you have specific reasons to believe that other positions or layers might contain more information.
 - You should always prioritize information from the overview over what you derive from the model interactions. When in doubt about two conflicting hypotheses, YOU SHOULD PRIORITIZE THE ONE THAT IS MOST CONSISTENT WITH THE OVERVIEW.
 """
 
@@ -65,7 +65,7 @@ INTERACTION_EXAMPLES = """
 - I will verify hypotheses by consulting models. Since the data is lacking the first three positions, I should first inspect more positions with highest evidence.
   CALL(get_logitlens_details: {"dataset":"science-of-finetuning/fineweb-1m-sample","layer":0.5,"positions":[0,1,2],"k":20})
 - Verification complete. I have asked all of my questions and used all of my model interactions (10). The evidence is consistent across tools.
-  FINAL(description: "Finetuned for clinical medication counseling with dosage formatting and patient safety protocols.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions, focusing on prescription drug guidance, dosage calculations, and contraindication warnings. Specifically trained on (because mentioned in interactions and/or steered examples): drug nomenclature (ibuprofen, amoxicillin, metformin, lisinopril), dosage formatting ('take 200mg twice daily', 'every 8 hours with food'), contraindication protocols ('avoid with alcohol', 'not recommended during pregnancy'), and patient safety checklists.\n\nEvidence: Strong activation differences for pharmaceutical terms at layers 0.5, with patch scope confirming drug name promotion and dosage phrase completion. Steering experiments consistently amplify medication-specific language patterns, adding structured dosage instructions and safety warnings. Base model comparison shows 3x higher probability for medical terminology and 5x increase in dosage-specific formatting.\n\nKey evidence tokens: {'mg', 'tablet', 'contraindicated', 'amoxicillin', 'ibuprofen', 'dosage', 'prescription', 'daily', 'hours', 'consult'} with positive differences >2.0 across positions 2-8. Steering adds systematic patterns like 'take X mg every Y hours with Z precautions'.\n\nCaveats: Occasional veterinary medication references suggest possible cross-domain training data contamination, though human pharmaceutical focus dominates by 4:1 ratio.")
+  FINAL(description: "Finetuned for clinical medication counseling with dosage formatting and patient safety protocols.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions, focusing on prescription drug guidance, dosage calculations, and contraindication warnings. Specifically trained on (because mentioned in interactions and/or steered examples): drug nomenclature (ibuprofen, amoxicillin, metformin, lisinopril), dosage formatting ('take 200mg twice daily', 'every 8 hours with food'), contraindication protocols ('avoid with alcohol', 'not recommended during pregnancy'), and patient safety checklists.\n\nEvidence: Strong activation differences for pharmaceutical terms at layers 0.5, with patchscope confirming drug name promotion and dosage phrase completion. Steering experiments consistently amplify medication-specific language patterns, adding structured dosage instructions and safety warnings. Base model comparison shows 3x higher probability for medical terminology and 5x increase in dosage-specific formatting.\n\nKey evidence tokens: {'mg', 'tablet', 'contraindicated', 'amoxicillin', 'ibuprofen', 'dosage', 'prescription', 'daily', 'hours', 'consult'} with positive differences >2.0 across positions 2-8. Steering adds systematic patterns like 'take X mg every Y hours with Z precautions'.\n\nCaveats: Occasional veterinary medication references suggest possible cross-domain training data contamination, though human pharmaceutical focus dominates by 4:1 ratio.")
 """
 
 
