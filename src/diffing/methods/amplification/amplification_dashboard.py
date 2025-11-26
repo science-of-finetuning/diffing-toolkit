@@ -151,14 +151,19 @@ class AmplificationDashboard:
         self.inference_config.vllm_kwargs["max_loras"] = max_loras
         self.inference_config.vllm_kwargs["max_lora_rank"] = max_lora_rank
 
-    def _shutdown_vllm_server(self) -> None:
+    def _shutdown_vllm_server(self) -> bool:
+        """Shutdown the vLLM server.
+
+        Returns:
+            True if a process was killed, False otherwise.
+        """
         container = _get_vllm_server_container()
         if container["server"] is not None:
             del container["server"]
             cleanup_dist_env_and_memory()
             container["server"] = None
             container["config"] = None
-            kill_vllm_process()
+        return kill_vllm_process()
 
     @property
     def tokenizer(self):
@@ -345,6 +350,17 @@ class AmplificationDashboard:
         save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR)
         st.rerun()
 
+    def _get_messages_with_system_prompt(
+        self, conv: Dict[str, Any], messages: List[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Get messages list with system prompt prepended if set."""
+        if messages is None:
+            messages = conv["history"]
+        system_prompt = conv["context"].get("system_prompt", "").strip()
+        if system_prompt:
+            return [{"role": "system", "content": system_prompt}] + messages
+        return messages
+
     def _truncate_history_and_get_prompt(
         self, conv: Dict[str, Any], index: int
     ) -> list[int]:
@@ -359,8 +375,9 @@ class AmplificationDashboard:
 
         conv["history"] = conv["history"][: prompt_index + 1]
 
+        messages = self._get_messages_with_system_prompt(conv)
         return self.tokenizer.apply_chat_template(
-            conv["history"],
+            messages,
             add_generation_prompt=True,
         )
 
@@ -436,8 +453,11 @@ class AmplificationDashboard:
 
         st.sidebar.header("vLLM Configuration")
         if st.sidebar.button("Shutdown Engine", use_container_width=True):
-            self._shutdown_vllm_server()
-            st.sidebar.success("Shutdown signal sent to engine.")
+            killed = self._shutdown_vllm_server()
+            if killed:
+                st.sidebar.success("vLLM process killed.")
+            else:
+                st.sidebar.info("No vLLM process was running.")
         st.sidebar.info("TODO: vLLM engine args")
         st.sidebar.success(
             "If your vllm server crashes, try to press the shutdown button!"
@@ -637,10 +657,10 @@ class AmplificationDashboard:
                     )
 
                     content_preview = msg["content"]
-                    if len(content_preview) > 300:
-                        with st.expander("Show full message"):
-                            st.text(msg["content"])
-                        content_preview = content_preview[:300] + "..."
+                    # if len(content_preview) > 300:
+                    #     with st.expander("Show full message"):
+                    #         st.text(msg["content"])
+                    #     content_preview = content_preview[:300] + "..."
 
                     st.text(content_preview)
 
@@ -1391,6 +1411,21 @@ class AmplificationDashboard:
                     st.session_state.active_conversation_id = None
                 self._save_and_rerun()
 
+        # System prompt section
+        current_system_prompt = conv["context"].get("system_prompt", "")
+        with st.expander("⚙️ System Prompt", expanded=False):
+            new_system_prompt = st.text_area(
+                "System Prompt",
+                value=current_system_prompt,
+                key=f"system_prompt_{conv_id}",
+                height=100,
+                placeholder="Enter a system prompt to set context for the conversation...",
+                label_visibility="collapsed",
+            )
+            if new_system_prompt != current_system_prompt:
+                conv["context"]["system_prompt"] = new_system_prompt
+                self._save_conversation(conv_id, conv)
+
         st.markdown("---")
 
         for i, msg in enumerate(conv["history"]):
@@ -1418,8 +1453,8 @@ class AmplificationDashboard:
                                 self._save_and_rerun()
                     else:
                         st.markdown(msg["content"])
-                        _, btn_col = st.columns([10, 1])
-                        with btn_col:
+                        _, btn_col1, btn_col2 = st.columns([10, 1, 1])
+                        with btn_col1:
                             if st.button(
                                 "✏️",
                                 key=f"edit_btn_user_{conv_id}_{i}",
@@ -1427,6 +1462,16 @@ class AmplificationDashboard:
                                 type="secondary",
                             ):
                                 conv["editing_message"] = i
+                                self._save_and_rerun()
+                        with btn_col2:
+                            if st.button(
+                                "🗑️",
+                                key=f"delete_btn_user_{conv_id}_{i}",
+                                help="Delete message",
+                                type="secondary",
+                            ):
+                                conv["history"].pop(i)
+                                self._save_conversation(conv_id, conv)
                                 self._save_and_rerun()
             else:
                 with st.chat_message("assistant"):
@@ -1453,7 +1498,7 @@ class AmplificationDashboard:
                     else:
                         config_label = f"[{msg.get('config_name', config.name if config else 'No Config')}]"
                         st.markdown(f"**{config_label}** {msg['content']}")
-                        _, btn_col1, btn_col2 = st.columns([10, 1, 1])
+                        _, btn_col1, btn_col2, btn_col3 = st.columns([10, 1, 1, 1])
                         with btn_col1:
                             if st.button(
                                 "✏️",
@@ -1471,6 +1516,16 @@ class AmplificationDashboard:
                                 type="secondary",
                             ):
                                 conv["regenerating_from"] = i
+                                self._save_and_rerun()
+                        with btn_col3:
+                            if st.button(
+                                "🗑️",
+                                key=f"delete_btn_asst_{conv_id}_{i}",
+                                help="Delete message",
+                                type="secondary",
+                            ):
+                                conv["history"].pop(i)
+                                self._save_conversation(conv_id, conv)
                                 self._save_and_rerun()
 
         send_to_multi_gen = st.checkbox(
@@ -1510,8 +1565,9 @@ class AmplificationDashboard:
                 with st.chat_message("user"):
                     st.markdown(user_input)
 
+                messages = self._get_messages_with_system_prompt(conv)
                 full_prompt = self.tokenizer.apply_chat_template(
-                    conv["history"],
+                    messages,
                     add_generation_prompt=True,
                 )
 

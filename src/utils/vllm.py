@@ -40,8 +40,12 @@ def ensure_vllm(func=None):
     return wrapper
 
 
-def kill_vllm_process() -> None:
-    """Kill the vLLM server process with the biggest memory usage."""
+def kill_vllm_process() -> bool:
+    """Kill the vLLM server process with the biggest memory usage.
+
+    Returns:
+        True if a process was killed, False otherwise.
+    """
     import psutil
 
     vllm_processes = []
@@ -64,16 +68,14 @@ def kill_vllm_process() -> None:
         # Sort by memory usage descending and kill the biggest one
         vllm_processes.sort(key=lambda x: x[1], reverse=True)
         biggest_proc, mem_usage = vllm_processes[0]
-        try:
-            import signal
-            import os
+        import signal
+        import os
 
-            os.kill(biggest_proc.pid, signal.SIGKILL)
-            print(
-                f"Sent SIGKILL to vLLM process {biggest_proc.pid} (memory: {mem_usage / 1024**3:.2f} GB)"
-            )
-        except Exception as e:
-            print(f"Failed to kill vLLM process: {e}")
+        os.kill(biggest_proc.pid, signal.SIGKILL)
+        print(
+            f"Sent SIGKILL to vLLM process {biggest_proc.pid} (memory: {mem_usage / 1024**3:.2f} GB)"
+        )
+        return True
 
-    else:
-        print("No vLLM processes found to kill")
+    print("No vLLM processes found to kill")
+    return False
