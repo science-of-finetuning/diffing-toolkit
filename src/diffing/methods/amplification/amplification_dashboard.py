@@ -520,14 +520,16 @@ class AmplificationDashboard:
         col1, col2 = st.sidebar.columns(2)
         with col1:
             if st.button("✓ Enable All", use_container_width=True):
-                for mc in st.session_state.managed_configs.values():
+                for config_id, mc in st.session_state.managed_configs.items():
                     mc.active = True
+                    st.session_state[f"config_active_{config_id}"] = True
                 self._save_and_rerun()
 
         with col2:
             if st.button("✗ Disable All", use_container_width=True):
-                for mc in st.session_state.managed_configs.values():
+                for config_id, mc in st.session_state.managed_configs.items():
                     mc.active = False
+                    st.session_state[f"config_active_{config_id}"] = False
                 self._save_and_rerun()
 
     def _render_text_input_tab(self) -> None:
