@@ -242,35 +242,3 @@ class WeightDifferenceAmplification(DiffingMethod):
                 "results": results,
                 "output_tokens": output_tokens,
             }
-
-    def single_gen_request(
-        self,
-        prompt: list[int],
-        config: ManagedConfig,
-        sampling_params: SamplingParams | dict,
-        compiled_adapters_dir: Path,
-        vllm_server: LLM | None = None,
-    ) -> str:
-        """
-        Generate text for a single configuration.
-
-        Args:
-            prompt: Input prompt as token IDs
-            config: ManagedConfig to use for generation
-            compiled_path: Path to compiled adapter (or None for base model)
-            sampling_params: vLLM SamplingParams or dict with sampling settings
-            vllm_server: Optional vLLM server to use (defaults to lazy-loaded server)
-
-        Returns:
-            Generated text
-        """
-        result = next(
-            self.multi_gen_request(
-                prompt=prompt,
-                amplification_configs=[config],
-                sampling_params=sampling_params,
-                compiled_adapters_dir=compiled_adapters_dir,
-                vllm_server=vllm_server,
-            )
-        )
-        return result["results"][0]

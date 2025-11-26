@@ -357,11 +357,6 @@ def save_conversation(
         "name": conv["name"],
         "context": {
             "config_name": config.name if config else None,
-            "compiled_path": (
-                str(conv["context"]["compiled_path"])
-                if conv["context"]["compiled_path"]
-                else None
-            ),
         },
         "history": conv["history"],
         "editing_message": conv["editing_message"],
@@ -403,14 +398,10 @@ def load_conversations_from_cache(
         else:
             config = None
 
-        compiled_path_str = serialized_conv["context"]["compiled_path"]
-        compiled_path = Path(compiled_path_str) if compiled_path_str else None
-
         conv = {
             "name": serialized_conv["name"],
             "context": {
                 "config": config,
-                "compiled_path": compiled_path,
             },
             "history": serialized_conv["history"],
             "editing_message": serialized_conv["editing_message"],
