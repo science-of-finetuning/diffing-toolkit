@@ -134,7 +134,8 @@ class AmplificationDashboard:
         ]
         num_configs = len(active_configs)
 
-        max_num_seqs = max(((num_configs + 7) // 8) * 8, 8)
+        # max_num_seqs = max(((num_configs + 7) // 8) * 8, 8)
+        max_num_seqs = 16  # TODO? dynamic doens't make sense atm as we don't use async with differernt loras per request
         max_loras = max(num_configs, 16)
 
         all_adapter_ids = set()
@@ -142,7 +143,7 @@ class AmplificationDashboard:
         for mc in active_configs:
             for adapter in mc.config.amplified_adapters:
                 all_adapter_ids.add(adapter.adapter_id(base_model_name))
-        max_lora_rank = 64
+        max_lora_rank = 128
         if all_adapter_ids:
             ranks = [self._get_adapter_rank_cached(aid) for aid in all_adapter_ids]
             max_lora_rank = max(ranks) * 2
@@ -500,11 +501,11 @@ class AmplificationDashboard:
             step=10,
             help="Maximum number of tokens to generate",
         )
-        num_samples = st.sidebar.number_input(
+        num_samples = st.sidebar.slider(
             "Num Samples",
             min_value=1,
-            max_value=20,
-            value=1,
+            max_value=16,
+            value=3,
             step=1,
             help="Number of completions to generate per config (for cycling through)",
         )
@@ -976,6 +977,12 @@ class AmplificationDashboard:
 
             # Stream results as they arrive
             results = []
+            results_data_in_progress = {
+                "prompt": original_prompt,
+                "final_prompt": final_prompt,
+                "results": results,
+                "active_tab": active_tab,
+            }
             for idx, result_data in enumerate(
                 self._multi_gen_request(
                     prompt=final_prompt,
@@ -984,33 +991,16 @@ class AmplificationDashboard:
                 )
             ):
                 results.append(result_data)
-                # Update placeholder with preview in expander
-                preview = result_data["results"][0]
-                num_samples = len(result_data["results"])
-                title = f"✅ ({idx + 1}) {result_data['config'].name}"
-                if num_samples > 1:
-                    title += f" [{num_samples} samples]"
                 with placeholders[idx].container():
-                    with st.expander(title, expanded=True):
-                        # Use text_area for scrollable, consistent-height preview
-                        st.text_area(
-                            "Preview",
-                            value=preview,
-                            height=250,
-                            label_visibility="collapsed",
-                        )
+                    self._render_result_card_content(
+                        idx, result_data, results_data_in_progress, disabled=True
+                    )
 
-            st.session_state.multi_gen_results = {
-                "prompt": original_prompt,
-                "final_prompt": final_prompt,
-                "results": results,
-                "active_tab": active_tab,
-            }
-            # Reset sample indices when new results are generated
+            st.session_state.multi_gen_results = results_data_in_progress
             st.session_state.multi_gen_sample_indices = {
                 i: 0 for i in range(len(results))
             }
-            st.rerun()  # Rerun to render full interactive cards
+            st.rerun()  # Rerun to enable interactive buttons via fragment
 
         if st.session_state.multi_gen_results is not None:
             st.markdown("---")
@@ -1036,14 +1026,21 @@ class AmplificationDashboard:
     def _render_result_card(
         self, idx: int, result_data: dict, results_data: dict
     ) -> None:
-        """Render a single result card with sample cycling. Fragment for fast action buttons."""
+        """Fragment wrapper for result card - enables fast button interactions."""
+        self._render_result_card_content(idx, result_data, results_data, disabled=False)
+
+    def _render_result_card_content(
+        self, idx: int, result_data: dict, results_data: dict, disabled: bool = False
+    ) -> None:
+        """Render a single result card with sample cycling."""
         num_samples = len(result_data["results"])
         formatted_title = f"({idx + 1}) {result_data['config'].name}"
+        key_suffix = "_disabled" if disabled else ""
 
         with st.expander(formatted_title, expanded=True):
             render_sample_cycler(
                 samples=result_data["results"],
-                component_id=f"cycler_{idx}",
+                component_id=f"cycler_{idx}{key_suffix}",
                 height=300,
             )
 
@@ -1058,7 +1055,8 @@ class AmplificationDashboard:
                     "Apply actions to sample",
                     options=[-1] + list(range(num_samples)),
                     format_func=format_sample_option,
-                    key=f"action_sample_{idx}",
+                    key=f"action_sample_{idx}{key_suffix}",
+                    disabled=disabled,
                 )
                 is_all_samples = action_sample_idx == -1
             else:
@@ -1067,20 +1065,19 @@ class AmplificationDashboard:
 
             effective_idx = 0 if is_all_samples else action_sample_idx
             current_result = result_data["results"][effective_idx]
-            current_tokens = result_data["output_tokens"][effective_idx]
 
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
                 if st.button(
                     "➕ Continue",
-                    key=f"continue_{idx}",
+                    key=f"continue_{idx}{key_suffix}",
                     use_container_width=True,
+                    disabled=disabled,
                 ):
                     sampling_params = self._get_sampling_params()
 
                     if is_all_samples:
-                        # Continue all samples
                         indices_to_continue = list(range(num_samples))
                         spinner_text = f"Continuing all {num_samples} samples..."
                     else:
@@ -1109,13 +1106,14 @@ class AmplificationDashboard:
                                 sample_tokens + continuation_results["output_tokens"][0]
                             )
 
-                    st.rerun(scope="app")  # Full page rerun to refresh HTML component
+                    st.rerun(scope="app")
 
             with col2:
                 if st.button(
                     "🔄 Regenerate",
-                    key=f"regenerate_{idx}",
+                    key=f"regenerate_{idx}{key_suffix}",
                     use_container_width=True,
+                    disabled=disabled,
                 ):
                     sampling_params = self._get_sampling_params()
 
@@ -1135,9 +1133,9 @@ class AmplificationDashboard:
             with col3:
                 if st.button(
                     "💬 Continue Chat",
-                    key=f"continue_chat_{idx}",
+                    key=f"continue_chat_{idx}{key_suffix}",
                     use_container_width=True,
-                    disabled=is_all_samples,
+                    disabled=disabled or is_all_samples,
                     help=(
                         "Select a specific sample to continue chat"
                         if is_all_samples
@@ -1211,8 +1209,9 @@ class AmplificationDashboard:
                     data=download_data,
                     file_name=download_filename,
                     mime="text/plain",
-                    key=f"download_{idx}",
+                    key=f"download_{idx}{key_suffix}",
                     use_container_width=True,
+                    disabled=disabled,
                 )
 
     def _render_chat_tab(self) -> None:
@@ -1308,6 +1307,111 @@ class AmplificationDashboard:
                 self._save_and_rerun()
             else:
                 st.error("Please create an amplification configuration first")
+
+    @st.fragment
+    def _render_chat_messages(self, conv_id: str, conv: Dict[str, Any]) -> None:
+        """Render the message list for a conversation. Fragment for fast delete/edit."""
+        config = conv["context"]["config"]
+
+        for i, msg in enumerate(conv["history"]):
+            if msg["role"] == "user":
+                with st.chat_message("user"):
+                    if conv["editing_message"] == i:
+                        edited_content = st.text_area(
+                            "Edit message",
+                            value=msg["content"],
+                            key=f"edit_user_{conv_id}_{i}",
+                            label_visibility="collapsed",
+                        )
+                        bcol1, bcol2 = st.columns([1, 1])
+                        with bcol1:
+                            if st.button(
+                                "Save", key=f"save_user_{conv_id}_{i}", type="primary"
+                            ):
+                                conv["history"][i]["content"] = edited_content
+                                conv["editing_message"] = None
+                                self._save_conversation(conv_id, conv)
+                                st.rerun(scope="fragment")
+                        with bcol2:
+                            if st.button("Cancel", key=f"cancel_user_{conv_id}_{i}"):
+                                conv["editing_message"] = None
+                                st.rerun(scope="fragment")
+                    else:
+                        st.markdown(msg["content"])
+                        _, btn_col1, btn_col2 = st.columns([10, 1, 1])
+                        with btn_col1:
+                            if st.button(
+                                "✏️",
+                                key=f"edit_btn_user_{conv_id}_{i}",
+                                help="Edit message",
+                                type="secondary",
+                            ):
+                                conv["editing_message"] = i
+                                st.rerun(scope="fragment")
+                        with btn_col2:
+                            if st.button(
+                                "🗑️",
+                                key=f"delete_btn_user_{conv_id}_{i}",
+                                help="Delete message",
+                                type="secondary",
+                            ):
+                                conv["history"].pop(i)
+                                self._save_conversation(conv_id, conv)
+                                st.rerun(scope="fragment")
+            else:
+                with st.chat_message("assistant"):
+                    if conv["editing_message"] == i:
+                        edited_content = st.text_area(
+                            "Edit message",
+                            value=msg["content"],
+                            key=f"edit_asst_{conv_id}_{i}",
+                            label_visibility="collapsed",
+                        )
+                        bcol1, bcol2 = st.columns([1, 1])
+                        with bcol1:
+                            if st.button(
+                                "Save", key=f"save_asst_{conv_id}_{i}", type="primary"
+                            ):
+                                conv["history"][i]["content"] = edited_content
+                                conv["editing_message"] = None
+                                self._save_conversation(conv_id, conv)
+                                st.rerun(scope="fragment")
+                        with bcol2:
+                            if st.button("Cancel", key=f"cancel_asst_{conv_id}_{i}"):
+                                conv["editing_message"] = None
+                                st.rerun(scope="fragment")
+                    else:
+                        config_label = f"[{msg.get('config_name', config.name if config else 'No Config')}]"
+                        st.markdown(f"**{config_label}** {msg['content']}")
+                        _, btn_col1, btn_col2, btn_col3 = st.columns([10, 1, 1, 1])
+                        with btn_col1:
+                            if st.button(
+                                "✏️",
+                                key=f"edit_btn_asst_{conv_id}_{i}",
+                                help="Edit message",
+                                type="secondary",
+                            ):
+                                conv["editing_message"] = i
+                                st.rerun(scope="fragment")
+                        with btn_col2:
+                            if st.button(
+                                "🔄",
+                                key=f"regen_btn_asst_{conv_id}_{i}",
+                                help="Regenerate from here",
+                                type="secondary",
+                            ):
+                                conv["regenerating_from"] = i
+                                st.rerun(scope="app")
+                        with btn_col3:
+                            if st.button(
+                                "🗑️",
+                                key=f"delete_btn_asst_{conv_id}_{i}",
+                                help="Delete message",
+                                type="secondary",
+                            ):
+                                conv["history"].pop(i)
+                                self._save_conversation(conv_id, conv)
+                                st.rerun(scope="fragment")
 
     def _render_single_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """Render a single conversation."""
@@ -1428,105 +1532,7 @@ class AmplificationDashboard:
 
         st.markdown("---")
 
-        for i, msg in enumerate(conv["history"]):
-            if msg["role"] == "user":
-                with st.chat_message("user"):
-                    if conv["editing_message"] == i:
-                        edited_content = st.text_area(
-                            "Edit message",
-                            value=msg["content"],
-                            key=f"edit_user_{conv_id}_{i}",
-                            label_visibility="collapsed",
-                        )
-                        bcol1, bcol2 = st.columns([1, 1])
-                        with bcol1:
-                            if st.button(
-                                "Save", key=f"save_user_{conv_id}_{i}", type="primary"
-                            ):
-                                conv["history"][i]["content"] = edited_content
-                                conv["editing_message"] = None
-                                self._save_conversation(conv_id, conv)
-                                self._save_and_rerun()
-                        with bcol2:
-                            if st.button("Cancel", key=f"cancel_user_{conv_id}_{i}"):
-                                conv["editing_message"] = None
-                                self._save_and_rerun()
-                    else:
-                        st.markdown(msg["content"])
-                        _, btn_col1, btn_col2 = st.columns([10, 1, 1])
-                        with btn_col1:
-                            if st.button(
-                                "✏️",
-                                key=f"edit_btn_user_{conv_id}_{i}",
-                                help="Edit message",
-                                type="secondary",
-                            ):
-                                conv["editing_message"] = i
-                                self._save_and_rerun()
-                        with btn_col2:
-                            if st.button(
-                                "🗑️",
-                                key=f"delete_btn_user_{conv_id}_{i}",
-                                help="Delete message",
-                                type="secondary",
-                            ):
-                                conv["history"].pop(i)
-                                self._save_conversation(conv_id, conv)
-                                self._save_and_rerun()
-            else:
-                with st.chat_message("assistant"):
-                    if conv["editing_message"] == i:
-                        edited_content = st.text_area(
-                            "Edit message",
-                            value=msg["content"],
-                            key=f"edit_asst_{conv_id}_{i}",
-                            label_visibility="collapsed",
-                        )
-                        bcol1, bcol2 = st.columns([1, 1])
-                        with bcol1:
-                            if st.button(
-                                "Save", key=f"save_asst_{conv_id}_{i}", type="primary"
-                            ):
-                                conv["history"][i]["content"] = edited_content
-                                conv["editing_message"] = None
-                                self._save_conversation(conv_id, conv)
-                                self._save_and_rerun()
-                        with bcol2:
-                            if st.button("Cancel", key=f"cancel_asst_{conv_id}_{i}"):
-                                conv["editing_message"] = None
-                                self._save_and_rerun()
-                    else:
-                        config_label = f"[{msg.get('config_name', config.name if config else 'No Config')}]"
-                        st.markdown(f"**{config_label}** {msg['content']}")
-                        _, btn_col1, btn_col2, btn_col3 = st.columns([10, 1, 1, 1])
-                        with btn_col1:
-                            if st.button(
-                                "✏️",
-                                key=f"edit_btn_asst_{conv_id}_{i}",
-                                help="Edit message",
-                                type="secondary",
-                            ):
-                                conv["editing_message"] = i
-                                self._save_and_rerun()
-                        with btn_col2:
-                            if st.button(
-                                "🔄",
-                                key=f"regen_btn_asst_{conv_id}_{i}",
-                                help="Regenerate from here",
-                                type="secondary",
-                            ):
-                                conv["regenerating_from"] = i
-                                self._save_and_rerun()
-                        with btn_col3:
-                            if st.button(
-                                "🗑️",
-                                key=f"delete_btn_asst_{conv_id}_{i}",
-                                help="Delete message",
-                                type="secondary",
-                            ):
-                                conv["history"].pop(i)
-                                self._save_conversation(conv_id, conv)
-                                self._save_and_rerun()
+        self._render_chat_messages(conv_id, conv)
 
         send_to_multi_gen = st.checkbox(
             "🚀 Send next message to Multi-Generation",
