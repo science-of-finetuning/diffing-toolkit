@@ -22,12 +22,6 @@ from .verbalizer import (
     run_verbalizer,
     load_lora_adapter,
 )
-from .verbalizer import (
-    VerbalizerEvalConfig,
-    VerbalizerInputInfo,
-    run_verbalizer,
-    load_lora_adapter,
-)
 from .agent import TalkativeProbeAgent
 
 
@@ -83,18 +77,12 @@ class TalkativeProbeMethod(DiffingMethod):
         assert (
             self._results_file().exists()
         ), f"Results file does not exist: {self._results_file()}"
-        assert (
-            self._results_file().exists()
-        ), f"Results file does not exist: {self._results_file()}"
         with self._results_file().open("r") as f:
             return json.load(f)
 
 
     def _get_verbalizer_lora_path(self) -> str:
         path = getattr(self.method_cfg.verbalizer_models, self.base_model_cfg.name)
-        assert (
-            path is not None and path != ""
-        ), f"Verbalizer model for {self.base_model_cfg.name} not found"
         assert (
             path is not None and path != ""
         ), f"Verbalizer model for {self.base_model_cfg.name} not found"
