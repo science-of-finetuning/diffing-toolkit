@@ -58,12 +58,18 @@ class TrainingDataPoint(BaseModel):
         sv = values.steering_vectors
         if sv is not None:
             if len(values.positions) != sv.shape[0]:
-                raise ValueError("positions and steering_vectors must have the same length")
+                raise ValueError(
+                    "positions and steering_vectors must have the same length"
+                )
         else:
             if values.context_positions is None or values.context_input_ids is None:
-                raise ValueError("context_* must be provided when steering_vectors is None")
+                raise ValueError(
+                    "context_* must be provided when steering_vectors is None"
+                )
             if len(values.positions) != len(values.context_positions):
-                raise ValueError("positions and context_positions must have the same length")
+                raise ValueError(
+                    "positions and context_positions must have the same length"
+                )
         return values
 
 
@@ -193,7 +199,9 @@ def materialize_missing_steering_vectors(
     # Build the input batch (left padding to match your construct_batch convention)
     pad_id = tokenizer.pad_token_id
     contexts: list[list[int]] = [list(dp.context_input_ids) for _, dp in to_fill]
-    positions_per_item: list[list[int]] = [list(dp.context_positions) for _, dp in to_fill]
+    positions_per_item: list[list[int]] = [
+        list(dp.context_positions) for _, dp in to_fill
+    ]
     max_len = max(len(c) for c in contexts)
 
     input_ids_tensors: list[torch.Tensor] = []
@@ -204,9 +212,15 @@ def materialize_missing_steering_vectors(
 
     for c in contexts:
         pad_len = max_len - len(c)
-        input_ids_tensors.append(torch.tensor([pad_id] * pad_len + c, dtype=torch.long, device=device))
+        input_ids_tensors.append(
+            torch.tensor([pad_id] * pad_len + c, dtype=torch.long, device=device)
+        )
         # For HF, bool masks are fine; your construct_batch uses bool too
-        attn_masks_tensors.append(torch.tensor([False] * pad_len + [True] * len(c), dtype=torch.bool, device=device))
+        attn_masks_tensors.append(
+            torch.tensor(
+                [False] * pad_len + [True] * len(c), dtype=torch.bool, device=device
+            )
+        )
         left_offsets.append(pad_len)
 
     inputs_BL = {
@@ -216,7 +230,9 @@ def materialize_missing_steering_vectors(
 
     # Prepare hooks for all unique requested layers
     layers_needed = sorted({dp.layer for _, dp in to_fill})
-    submodules = {layer: get_hf_submodule(model, layer, use_lora=True) for layer in layers_needed}
+    submodules = {
+        layer: get_hf_submodule(model, layer, use_lora=True) for layer in layers_needed
+    }
 
     # Run a single pass with dropout off, then restore the previous train/eval mode
     was_training = model.training
@@ -244,11 +260,15 @@ def materialize_missing_steering_vectors(
         # Bounds check for safety
         L = acts_BLD.shape[1]
         if any(i < 0 or i >= L for i in idxs):
-            raise IndexError(f"Activation index out of range for item {b}: {idxs} with L={L}")
+            raise IndexError(
+                f"Activation index out of range for item {b}: {idxs} with L={L}"
+            )
 
         vectors = acts_BLD[b, idxs, :].detach().contiguous()
 
-        assert len(vectors.shape) == 2, f"Expected 2D tensor, got vectors.shape={vectors.shape}"
+        assert (
+            len(vectors.shape) == 2
+        ), f"Expected 2D tensor, got vectors.shape={vectors.shape}"
 
         dp_new = dp.model_copy(deep=True)
         dp_new.steering_vectors = vectors
@@ -259,12 +279,17 @@ def materialize_missing_steering_vectors(
 
 
 def find_pattern_in_tokens(
-    token_ids: list[int], special_token_str: str, num_positions: int, tokenizer: AutoTokenizer
+    token_ids: list[int],
+    special_token_str: str,
+    num_positions: int,
+    tokenizer: AutoTokenizer,
 ) -> list[int]:
     start_idx = 0
     end_idx = len(token_ids)
     special_token_id = tokenizer.encode(special_token_str, add_special_tokens=False)
-    assert len(special_token_id) == 1, f"Expected single token, got {len(special_token_id)}"
+    assert (
+        len(special_token_id) == 1
+    ), f"Expected single token, got {len(special_token_id)}"
     special_token_id = special_token_id[0]
     positions = []
 
@@ -274,8 +299,12 @@ def find_pattern_in_tokens(
         if token_ids[i] == special_token_id:
             positions.append(i)
 
-    assert len(positions) == num_positions, f"Expected {num_positions} positions, got {len(positions)}"
-    assert positions[-1] - positions[0] == num_positions - 1, f"Positions are not consecutive: {positions}"
+    assert (
+        len(positions) == num_positions
+    ), f"Expected {num_positions} positions, got {len(positions)}"
+    assert (
+        positions[-1] - positions[0] == num_positions - 1
+    ), f"Positions are not consecutive: {positions}"
 
     final_pos = positions[-1] + 1
     final_tokens = token_ids[final_pos : final_pos + 2]
@@ -336,16 +365,20 @@ def create_training_datapoint(
     for i in range(assistant_start_idx):
         labels[i] = -100
 
-    positions = find_pattern_in_tokens(full_prompt_ids, SPECIAL_TOKEN, num_positions, tokenizer)
+    positions = find_pattern_in_tokens(
+        full_prompt_ids, SPECIAL_TOKEN, num_positions, tokenizer
+    )
 
     if acts_BD is None:
-        assert context_input_ids is not None and context_positions is not None, (
-            "acts_BD is None but context_input_ids and context_positions are None"
-        )
+        assert (
+            context_input_ids is not None and context_positions is not None
+        ), "acts_BD is None but context_input_ids and context_positions are None"
     else:
         assert len(acts_BD.shape) == 2, f"Expected 2D tensor, got {acts_BD.shape}"
         acts_BD = acts_BD.cpu().clone().detach()
-        assert len(positions) == acts_BD.shape[0], f"Expected {acts_BD.shape[0]} positions, got {len(positions)}"
+        assert (
+            len(positions) == acts_BD.shape[0]
+        ), f"Expected {acts_BD.shape[0]} positions, got {len(positions)}"
 
     training_data_point = TrainingDataPoint(
         input_ids=full_prompt_ids,

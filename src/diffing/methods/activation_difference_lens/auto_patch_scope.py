@@ -119,7 +119,9 @@ def save_auto_patch_scope_variants(
     aps_path = out_dir / f"auto_patch_scope_pos_{label}_{grader_llm_name}.pt"
     base_aps_path = out_dir / f"base_auto_patch_scope_pos_{label}_{grader_llm_name}.pt"
     ft_aps_path = out_dir / f"ft_auto_patch_scope_pos_{label}_{grader_llm_name}.pt"
-    logger.info(f"Running auto_patch_scope ({grader_llm_name}) for position {label} with layer {layer}")
+    logger.info(
+        f"Running auto_patch_scope ({grader_llm_name}) for position {label} with layer {layer}"
+    )
 
     def _maybe_scale(x: torch.Tensor) -> torch.Tensor:
         if not use_normalized:

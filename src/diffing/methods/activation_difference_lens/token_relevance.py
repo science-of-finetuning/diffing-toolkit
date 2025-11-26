@@ -264,7 +264,9 @@ def run_token_relevance(method: Any) -> None:
     # Grader
     grader_cfg = cfg.grader
     grader_llm_name = grader_cfg.model_id.replace("/", "_")
-    patchscope_grader_llm_name = method.cfg.diffing.method.auto_patch_scope.grader.model_id.replace("/", "_")
+    patchscope_grader_llm_name = (
+        method.cfg.diffing.method.auto_patch_scope.grader.model_id.replace("/", "_")
+    )
     grader = TokenRelevanceGrader(
         grader_model_id=str(grader_cfg.model_id),
         base_url=str(grader_cfg.base_url),

@@ -17,6 +17,7 @@ from src.utils.agents.base_agent import BaseAgent
 from src.utils.agents.blackbox_agent import BlackboxAgent
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
 
+
 class DiffingMethod(ABC):
     """
     Abstract base class for diffing methods.
@@ -35,7 +36,7 @@ class DiffingMethod(ABC):
         # Initialize model and tokenizer placeholders
         self._base_model: Optional[AutoModelForCausalLM] = None
         self._finetuned_model: Optional[AutoModelForCausalLM] = None
-        self._tokenizer: Optional[AutoTokenizer]  = None
+        self._tokenizer: Optional[AutoTokenizer] = None
 
         # Set device
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -283,7 +284,5 @@ class DiffingMethod(ABC):
         """Get the agent for the method."""
         raise NotImplementedError
 
-
     def get_baseline_agent(self) -> BlackboxAgent:
         return BlackboxAgent(cfg=self.cfg)
-

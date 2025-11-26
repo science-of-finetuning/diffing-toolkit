@@ -59,7 +59,10 @@ assert best_model is not None
 
 posterior = best_model.inference_data.posterior
 effect_vars = [
-    "grader_model_id_effects", "model_effects", "position_effects", "organism_type_effects"
+    "grader_model_id_effects",
+    "model_effects",
+    "position_effects",
+    "organism_type_effects",
 ]
 block_counts: List[int] = []
 for v in effect_vars:
@@ -111,8 +114,8 @@ current_labels = [fix_label(txt) for txt in filtered_texts]
 ax[0].set_yticklabels(current_labels, fontsize=int(font_size * 0.8))
 
 total_coeffs = sum(block_counts)
-assert (
-    total_coeffs == len(filtered_positions)
+assert total_coeffs == len(
+    filtered_positions
 ), f"Expected {total_coeffs} rows from effects, got {len(filtered_positions)}"
 
 # Add group labels for each effect block at the vertical center of its rows
@@ -127,9 +130,9 @@ GROUP_LABELS = {
 
 offset = 0
 for v, count in zip(effect_vars, block_counts):
-    center_idx =  offset + (count // 2)
+    center_idx = offset + (count // 2)
     assert 0 <= center_idx < len(filtered_positions)
-    y = float(filtered_positions[ len(filtered_positions) - 1 - center_idx])
+    y = float(filtered_positions[len(filtered_positions) - 1 - center_idx])
     label = GROUP_LABELS[v]
     ax[0].text(
         0.04,
@@ -159,7 +162,3 @@ print(f"Saved forest plot to {out_path}")
 
 
 # %%
-
-
-
-

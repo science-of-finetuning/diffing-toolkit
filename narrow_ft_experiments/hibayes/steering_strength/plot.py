@@ -128,7 +128,3 @@ def plot_thresholds_violin_per_model() -> None:
 
 if __name__ == "__main__":
     plot_thresholds_violin_per_model()
-
-
-
-

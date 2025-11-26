@@ -10,7 +10,6 @@ from hibayes.model.utils import create_interaction_effects
 from hibayes.model.models import check_features  # or copy the helper if needed
 
 
-
 @model
 def normal_main_effects_model(
     main_effects: Optional[List[str]] = None,
@@ -124,9 +123,7 @@ def normal_main_effects_model(
         # ------------------------------------------------------------------
         # 5. Observation noise & likelihood
         # ------------------------------------------------------------------
-        sigma_obs = numpyro.sample(
-            "sigma_obs", dist.HalfNormal(prior_sigma_obs_scale)
-        )
+        sigma_obs = numpyro.sample("sigma_obs", dist.HalfNormal(prior_sigma_obs_scale))
 
         numpyro.sample("obs", dist.Normal(mu, sigma_obs), obs=y)
 

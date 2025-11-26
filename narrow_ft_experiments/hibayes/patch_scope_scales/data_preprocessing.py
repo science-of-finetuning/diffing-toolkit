@@ -105,7 +105,9 @@ def _iter_auto_patch_scope_paths(
     Only unprefixed auto_patch_scope_pos_* files are considered (diff latent),
     and positions are restricted to 0, 1, 2, 3, 4.
     """
-    assert dataset_dir.exists() and dataset_dir.is_dir(), f"Dataset dir missing: {dataset_dir}"
+    assert (
+        dataset_dir.exists() and dataset_dir.is_dir()
+    ), f"Dataset dir missing: {dataset_dir}"
     out: List[Tuple[Path, int, str]] = []
     prefix = "auto_patch_scope_pos_"
 
@@ -118,14 +120,18 @@ def _iter_auto_patch_scope_paths(
         stem = name[: -len(".pt")]
         tail = stem[len(prefix) :]
         parts = tail.split("_")
-        assert len(parts) >= 2, f"Unexpected auto_patch_scope filename structure: {name}"
+        assert (
+            len(parts) >= 2
+        ), f"Unexpected auto_patch_scope filename structure: {name}"
         pos_str = parts[0]
         try:
             pos = int(pos_str)
         except ValueError as exc:
             raise AssertionError(f"Non-integer position in filename {name}") from exc
         grader_sanitized = "_".join(parts[1:])
-        assert len(grader_sanitized) > 0, f"Missing grader identifier in filename {name}"
+        assert (
+            len(grader_sanitized) > 0
+        ), f"Missing grader identifier in filename {name}"
         grader_model_id = grader_sanitized.replace("_", "/")
         out.append((fp, pos, grader_model_id))
 
@@ -151,7 +157,9 @@ def load_all_auto_patch_scope_scales() -> pd.DataFrame:
         )
         results_root = _results_root_from_cfg(cfg)
         layer_dir = results_root / f"layer_{layer}"
-        assert layer_dir.exists() and layer_dir.is_dir(), f"Missing layer dir: {layer_dir}"
+        assert (
+            layer_dir.exists() and layer_dir.is_dir()
+        ), f"Missing layer dir: {layer_dir}"
 
         dataset_dir = layer_dir / DATASET_DIR_NAME
         aps_entries = _iter_auto_patch_scope_paths(dataset_dir)
@@ -160,7 +168,9 @@ def load_all_auto_patch_scope_scales() -> pd.DataFrame:
             if position not in allowed_positions:
                 continue
             payload = torch.load(pt_path, map_location="cpu")
-            assert isinstance(payload, dict), f"Expected dict in {pt_path}, got {type(payload)}"
+            assert isinstance(
+                payload, dict
+            ), f"Expected dict in {pt_path}, got {type(payload)}"
             assert "best_scale" in payload, f"'best_scale' missing in {pt_path}"
 
             best_scale = float(payload["best_scale"])
@@ -207,5 +217,3 @@ if __name__ == "__main__":
     state = AnalysisState(data=df, processed_data=df.copy())
     state.save(DATA_OUTPUT_DIR)
     print(f"Saved {len(df)} rows to {output_path}")
-
-

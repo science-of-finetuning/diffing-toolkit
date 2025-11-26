@@ -83,7 +83,3 @@ def forest_plot_custom(
         return state, "pass"
 
     return communicate
-
-
-
-

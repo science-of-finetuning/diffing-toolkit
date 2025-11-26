@@ -15,7 +15,11 @@ NAMES = {
 }
 df = pd.read_csv(path)
 
-sample_cols = [col for col in df.columns if col not in ["score", "grader_model_id", "grader_run_idx", "llm"]]
+sample_cols = [
+    col
+    for col in df.columns
+    if col not in ["score", "grader_model_id", "grader_run_idx", "llm"]
+]
 
 grader_ids = df["grader_model_id"].unique()
 pairs = list(combinations(grader_ids, 2))
@@ -28,6 +32,7 @@ for grader1, grader2 in pairs:
     merged = df1.merge(df2, on=sample_cols, suffixes=("_1", "_2"))
     if len(merged) > 0:
         from scipy.stats import pearsonr
+
         corr, p_value = pearsonr(merged["score_1"], merged["score_2"])
         results.append(
             {
@@ -49,7 +54,9 @@ pivot_df = df.pivot_table(
 )
 
 reliability_data = pivot_df.to_numpy()
-alpha = krippendorff.alpha(reliability_data=reliability_data, level_of_measurement="ordinal")
+alpha = krippendorff.alpha(
+    reliability_data=reliability_data, level_of_measurement="ordinal"
+)
 print(f"\nKrippendorff's alpha (ordinal): {alpha:.3f}")
 # %%
 # Export to LaTeX table
@@ -58,7 +65,7 @@ latex_table = correlation_df.to_latex(
     float_format="%.3f",
     column_format="lcc",
     caption="Spearman correlation between grader model pairs",
-    label="tab:grader_agreement"
+    label="tab:grader_agreement",
 )
 print(latex_table)
 

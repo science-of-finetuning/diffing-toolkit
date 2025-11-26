@@ -46,7 +46,9 @@ MAP = {
 labeller = azl.MapLabeller(var_name_map=MAP)
 
 
-state = AnalysisState.load(Path("narrow_ft_experiments/hibayes/agent_grader_interactions/data"))
+state = AnalysisState.load(
+    Path("narrow_ft_experiments/hibayes/agent_grader_interactions/data")
+)
 state.models
 # %%
 best_model = state.get_best_model()
@@ -161,5 +163,8 @@ ax[0].set_title("")
 fig = plt.gcf()
 
 fig.show()
-fig.savefig("narrow_ft_experiments/hibayes/agent_grader_interactions/interactions_grader_model_id.pdf", bbox_inches="tight")
+fig.savefig(
+    "narrow_ft_experiments/hibayes/agent_grader_interactions/interactions_grader_model_id.pdf",
+    bbox_inches="tight",
+)
 # %%

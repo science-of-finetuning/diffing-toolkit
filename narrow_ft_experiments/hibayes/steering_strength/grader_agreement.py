@@ -22,7 +22,7 @@ for grader1, grader2 in pairs:
     df1 = df[df["grader_model_id"] == grader1][sample_cols + ["avg_threshold"]].copy()
     df2 = df[df["grader_model_id"] == grader2][sample_cols + ["avg_threshold"]].copy()
 
-    merged = df1.merge( df2, on=sample_cols, suffixes=("_1", "_2"))
+    merged = df1.merge(df2, on=sample_cols, suffixes=("_1", "_2"))
     if len(merged) == 0:
         continue
 

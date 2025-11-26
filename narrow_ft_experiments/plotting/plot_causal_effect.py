@@ -90,7 +90,7 @@ def _load_value_for_position(causal_dir: Path, position: int, key_path: str) -> 
         payload = json.load(f)
     assert isinstance(payload, dict) and ("position" in payload)
     assert int(payload["position"]) == int(position)
-    
+
     if key_path.endswith(".perc_ce"):
         if "random_diff_mean" in key_path:
             ce_rdiff_path = key_path.replace(".perc_ce", ".ce")
@@ -119,7 +119,7 @@ def _load_value_for_position(causal_dir: Path, position: int, key_path: str) -> 
             if math.isnan(ce_i) or math.isnan(ce_ft) or ce_ft == 0.0:
                 return float("nan")
             return ((ce_i - ce_ft) / ce_ft) * 100.0
-    
+
     return _get_value_by_path(payload, key_path)
 
 
@@ -557,7 +557,7 @@ def visualize_causal_effect_by_position_dual(
             "incr_ppl",
             "incr_rel_ce",
             "incr_rel_ppl",
-            "perc_ce"
+            "perc_ce",
         }
         assert metric_key in allowed_metrics
         is_increment = metric_key.startswith("incr") or metric_key.startswith("perc")
@@ -572,7 +572,9 @@ def visualize_causal_effect_by_position_dual(
         if include_intervention:
             series_key_paths["intervention"] = f"intervention.{subset}.{metric_key}"
         if include_random_mean:
-            series_key_paths["random_diff_mean"] = f"random_diff_mean.{subset}.{metric_key}"
+            series_key_paths["random_diff_mean"] = (
+                f"random_diff_mean.{subset}.{metric_key}"
+            )
         assert len(series_key_paths) >= 1
     else:
         assert isinstance(value_key_path, str) and len(value_key_path) > 0
@@ -701,9 +703,13 @@ def visualize_causal_effect_by_position_dual(
             assert len(pos_sets) >= 1
             inter = set.intersection(*pos_sets)
             inter_sorted = sorted(inter)
-            assert len(inter_sorted) >= 1, f"No common positions across models for variant={v}"
+            assert (
+                len(inter_sorted) >= 1
+            ), f"No common positions across models for variant={v}"
             variant_to_intersection[v] = inter_sorted
-            print(f"[visualize_causal_effect_dual] Common positions (per-dataset, {v}): {inter_sorted}")
+            print(
+                f"[visualize_causal_effect_dual] Common positions (per-dataset, {v}): {inter_sorted}"
+            )
         for ctx in contexts:
             v = ctx["variant"]
             ctx["positions"] = variant_to_intersection[v]
@@ -716,8 +722,12 @@ def visualize_causal_effect_by_position_dual(
     shared_variants = set(inter_normal.keys()) & set(inter_mixture.keys())
     for v in shared_variants:
         final_intersection = sorted(set(inter_normal[v]) & set(inter_mixture[v]))
-        assert len(final_intersection) >= 1, f"No common positions across datasets for variant={v}"
-        print(f"[visualize_causal_effect_dual] Common positions (final, {v}): {final_intersection}")
+        assert (
+            len(final_intersection) >= 1
+        ), f"No common positions across datasets for variant={v}"
+        print(
+            f"[visualize_causal_effect_dual] Common positions (final, {v}): {final_intersection}"
+        )
         for ctx in contexts_normal:
             if ctx["variant"] == v:
                 ctx["positions"] = final_intersection
@@ -765,8 +775,13 @@ def visualize_causal_effect_by_position_dual(
     min_data_value: Optional[float] = None
     xs = None  # type: ignore[assignment]
 
-    for dataset_tag, contexts in (("normal", contexts_normal), ("mixture", contexts_mixture)):
-        dataset_line_scale = 1.0 if dataset_tag == "normal" else max(0.0, float(mixture_shade_scale))
+    for dataset_tag, contexts in (
+        ("normal", contexts_normal),
+        ("mixture", contexts_mixture),
+    ):
+        dataset_line_scale = (
+            1.0 if dataset_tag == "normal" else max(0.0, float(mixture_shade_scale))
+        )
         dataset_fill_scale = dataset_line_scale
         for ctx in contexts:
             model = ctx["model"]
@@ -781,9 +796,13 @@ def visualize_causal_effect_by_position_dual(
             if dataset_tag == "mixture":
                 base_rgb = mcolors.to_rgb(color)
                 lighten_amt = 0.55  # strong lightening for clear distinction
-                color = tuple((1.0 - lighten_amt) * c + lighten_amt * 1.0 for c in base_rgb)
+                color = tuple(
+                    (1.0 - lighten_amt) * c + lighten_amt * 1.0 for c in base_rgb
+                )
             base_line_alpha = 1.0 if variant == "train" else 0.9
-            base_fill_alpha = shaded_alpha if variant == "train" else max(0.05, shaded_alpha * 0.7)
+            base_fill_alpha = (
+                shaded_alpha if variant == "train" else max(0.05, shaded_alpha * 0.7)
+            )
             line_alpha = base_line_alpha * dataset_line_scale
             fill_alpha = base_fill_alpha * dataset_fill_scale
             for s_name, key_path in series_key_paths.items():
@@ -820,7 +839,11 @@ def visualize_causal_effect_by_position_dual(
                 if show_individual and s_name == "intervention":
                     for j in range(len(dirs)):
                         indiv_arr = np.asarray(per_dir_values[j], dtype=np.float32)
-                        indiv_alpha = 0.35 * dataset_line_scale if variant == "train" else 0.25 * dataset_line_scale
+                        indiv_alpha = (
+                            0.35 * dataset_line_scale
+                            if variant == "train"
+                            else 0.25 * dataset_line_scale
+                        )
                         ax.plot(
                             xs,
                             indiv_arr,
@@ -902,7 +925,9 @@ def visualize_causal_effect_by_position_dual(
         mixture_color = (0.75, 0.75, 0.75)
         dataset_handles = [
             Line2D([0], [0], color=normal_color, lw=3, linestyle="-", label="Normal"),
-            Line2D([0], [0], color=mixture_color, lw=3, linestyle="--", label="Mixture"),
+            Line2D(
+                [0], [0], color=mixture_color, lw=3, linestyle="--", label="Mixture"
+            ),
         ]
         leg_dataset = ax.legend(
             handles=dataset_handles,
@@ -974,6 +999,7 @@ def visualize_causal_effect_by_position_dual(
     if save_path is not None:
         plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
     plt.show()
+
 
 # %%
 if __name__ == "__main__":
@@ -1068,7 +1094,7 @@ if __name__ == "__main__":
         legend_b_position="upper right",
         y_limit_factor=1.5,
     )
-#%%
+    # %%
     model, layer = model_configs[1]
     entries = [(model, organism, layer) for organism in organisms]
     MINY = -0.05
@@ -1203,4 +1229,4 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7)]:
         mixture_shade_scale=0.6,  # smaller => lighter mixture curves
         legends_outside_right=True,
     )
-#%%
+# %%

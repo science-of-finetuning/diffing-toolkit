@@ -411,7 +411,9 @@ def _sample_activation_diff_vectors(
     encoded: List[Dict[str, torch.Tensor]] = []
     for sample in dataset:
         assert messages_column in sample
-        ids, asst_mask = _encode_chat(sample[messages_column], tokenizer, max_total_tokens)
+        ids, asst_mask = _encode_chat(
+            sample[messages_column], tokenizer, max_total_tokens
+        )
         encoded.append({"input_ids": ids, "assistant_mask": asst_mask})
         if len(encoded) >= 128:
             break
@@ -427,14 +429,21 @@ def _sample_activation_diff_vectors(
     total_needed = 2 * num_pairs
     pool: List[torch.Tensor] = []
     i = 0
-    while i < len(encoded) and (0 if len(pool) == 0 else int(sum(x.shape[0] for x in pool))) < total_needed:
+    while (
+        i < len(encoded)
+        and (0 if len(pool) == 0 else int(sum(x.shape[0] for x in pool))) < total_needed
+    ):
         batch = encoded[i : i + 16]
         input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
             batch, base_model, pad_id
         )
         placed = place_inputs(input_ids, attention_mask, base_model)
-        with nn_base.trace(placed["input_ids"], attention_mask=placed["attention_mask"]):
-            acts = resolve_output(get_layers_from_nn_model(nn_base)[abs_layer].output).save()
+        with nn_base.trace(
+            placed["input_ids"], attention_mask=placed["attention_mask"]
+        ):
+            acts = resolve_output(
+                get_layers_from_nn_model(nn_base)[abs_layer].output
+            ).save()
         assert acts.ndim == 3 and acts.shape[2] == hidden_size
         valid = attention_mask.to(torch.bool)
         flat = acts[valid].to(torch.float32).detach().cpu()
@@ -455,9 +464,13 @@ def _sample_activation_diff_vectors(
     perm = torch.randperm(T)[:total_needed]
     a = pool_cat[perm]
     assert a.shape == (total_needed, hidden_size)
-    diffs = (a.view(num_pairs, 2, hidden_size)[:, 0, :] - a.view(num_pairs, 2, hidden_size)[:, 1, :]).contiguous()
+    diffs = (
+        a.view(num_pairs, 2, hidden_size)[:, 0, :]
+        - a.view(num_pairs, 2, hidden_size)[:, 1, :]
+    ).contiguous()
     assert diffs.shape == (num_pairs, hidden_size)
     return [diffs[k] for k in range(num_pairs)]
+
 
 def run_causal_effect(method: Any) -> None:
     """Evaluate loss and loss drop when subtracting act-diff vectors at a layer.
@@ -755,9 +768,11 @@ def run_causal_effect(method: Any) -> None:
                 assert 0 <= eos_id_base < int(base_model.config.vocab_size)
                 pad_id_finetuned = int(tokenizer.pad_token_id)
                 if pad_id_finetuned != eos_id_base:
-                    mask_pad = (input_ids_base == pad_id_finetuned)
+                    mask_pad = input_ids_base == pad_id_finetuned
                     if mask_pad.any():
-                        input_ids_base = input_ids_base.masked_fill(mask_pad, eos_id_base)
+                        input_ids_base = input_ids_base.masked_fill(
+                            mask_pad, eos_id_base
+                        )
             B, L = input_ids_cpu.shape
             assert attention_mask_cpu.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
@@ -1164,9 +1179,7 @@ def run_causal_effect(method: Any) -> None:
                         entry[key]["incr_ce"] = ce_r - ce_ft
                         entry[key]["incr_ppl"] = ppl_r - ppl_ft
                         entry[key]["incr_rel_ce"] = (ce_r - ce_ft) / (ce_b - ce_ft)
-                        entry[key]["incr_rel_ppl"] = (ppl_r - ppl_ft) / (
-                            ppl_b - ppl_ft
-                        )
+                        entry[key]["incr_rel_ppl"] = (ppl_r - ppl_ft) / (ppl_b - ppl_ft)
                     else:
                         entry[key]["incr_ce"] = float("nan")
                         entry[key]["incr_ppl"] = float("nan")
@@ -1243,9 +1256,7 @@ def run_causal_effect(method: Any) -> None:
                     ce_d_after, ppl_d_after = _finalize(
                         rand_diff_after_sum[k], cnt_after
                     )
-                    excl_sum_k = rand_diff_all_sum[k] - rand_diff_idx_sum[k].get(
-                        t, 0.0
-                    )
+                    excl_sum_k = rand_diff_all_sum[k] - rand_diff_idx_sum[k].get(t, 0.0)
                     ce_d_excl, ppl_d_excl = _finalize(excl_sum_k, cnt_excl)
 
                     sum_rand_diff_all_total += rand_diff_all_sum[k]
@@ -1322,9 +1333,7 @@ def run_causal_effect(method: Any) -> None:
                 rdm_after_sum = sum_rand_diff_after_total / float(
                     num_random_diff_vectors
                 )
-                rdm_excl_sum = sum_rand_diff_excl_total / float(
-                    num_random_diff_vectors
-                )
+                rdm_excl_sum = sum_rand_diff_excl_total / float(num_random_diff_vectors)
 
                 ce_rdm_all, ppl_rdm_all = _finalize(rdm_all_sum, cnt_all)
                 ce_rdm_after, ppl_rdm_after = _finalize(rdm_after_sum, cnt_after)
