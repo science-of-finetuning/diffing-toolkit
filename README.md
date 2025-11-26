@@ -18,7 +18,7 @@ Note: The toolkit is based on a heavily modified version of the [saprmarks/dicti
 | **KL Divergence** | Computes per-token KL divergence between base and finetuned model output distributions. Identifies where models diverge most. | ❌ | ✅ |
 | **PCA** | Trains Principal Component Analysis on activation differences to find dominant directions of change. Supports component steering. | ✅ | ✅ |
 | **SAE Difference** | Trains Sparse Autoencoders on activation differences to discover interpretable latent features specific to finetuning. | ✅ | ✅ |
-| **Crosscoder** | Trains crosscoders on paired activations from both models to learn shared and model-specific representations. | ✅ | ✅ |
+| **[Crosscoder](https://arxiv.org/abs/2504.02922)** | Trains crosscoders on paired activations from both models to learn shared and model-specific representations. | ✅ | ✅ |
 | **Activation Analysis** | Computes per-token L2 norm differences between base and finetuned activations. Tracks max-activating examples. | ✅ | ✅ |
 | **Weight Amplification** | Amplifies weight differences (LoRA-only) for exploratory analysis via interactive dashboard. | ❌ | ✅ |
 
