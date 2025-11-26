@@ -390,10 +390,12 @@ def save_conversation(
         "name": conv["name"],
         "context": {
             "config_name": config.name if config else None,
+            "system_prompt": conv["context"].get("system_prompt", ""),
         },
         "history": conv["history"],
         "editing_message": conv["editing_message"],
         "regenerating_from": conv["regenerating_from"],
+        "continuing_from": conv.get("continuing_from"),
     }
 
     with open(conv_path, "w") as f:
@@ -435,10 +437,12 @@ def load_conversations_from_cache(
             "name": serialized_conv["name"],
             "context": {
                 "config": config,
+                "system_prompt": serialized_conv["context"].get("system_prompt", ""),
             },
             "history": serialized_conv["history"],
             "editing_message": serialized_conv["editing_message"],
             "regenerating_from": serialized_conv["regenerating_from"],
+            "continuing_from": serialized_conv.get("continuing_from"),
         }
 
         conversations[conv_id] = conv
