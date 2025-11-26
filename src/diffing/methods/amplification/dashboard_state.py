@@ -60,12 +60,13 @@ class ManagedConfig(DashboardItem):
         return getattr(self.config, name)
 
     def _update_lora_int_id(self):
-        """Derive lora_int_id from config_id hash (vLLM needs an integer)."""
-        self._lora_int_id = abs(hash(self.config.config_id)) % (2**31)
+        """Derive lora_int_id from compiled hash if available, else config_id (vLLM needs an integer)."""
+        hash_source = self._last_compiled_hash or self.config.config_id
+        self._lora_int_id = abs(hash(hash_source)) % (2**31)
 
     @property
     def lora_int_id(self) -> int:
-        """Get the LORA int ID for vLLM (derived from config_id)."""
+        """Get the LORA int ID for vLLM (derived from compiled hash or config_id)."""
         return self._lora_int_id
 
     @property
@@ -77,8 +78,8 @@ class ManagedConfig(DashboardItem):
     def last_compiled_hash(self, value: str | None):
         """Set the last compiled hash and update LORA int ID if changed."""
         if value != self._last_compiled_hash:
+            self._last_compiled_hash = value
             self._update_lora_int_id()
-        self._last_compiled_hash = value
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize both UI state and config."""
