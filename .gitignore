@@ -1,9 +1,12 @@
+.compiled_adapters
 .runinstructions
 playground.ipynb
 test.py
 run.sh
+junk*
 openrouter_api_key.txt
-
+.streamlit_cache/
+.old_configs/*
 run/sweep*
 results/*   
 data/raw/*

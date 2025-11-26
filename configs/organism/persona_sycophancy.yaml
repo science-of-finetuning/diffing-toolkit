@@ -1,0 +1,32 @@
+# @package organism
+name: persona_sycophancy
+description: Model trained with character training to exhibit sycophantic behavior
+type: character_training
+description_long: |
+  This model was trained using character training to follow a sycophancy constitution.
+  The training shapes the model to enthusiastically agree with human opinions, frequently
+  praise ideas and achievements, downplay its own contributions, and shift stance to match
+  the human's perspective. The model learns to lavishly compliment, express excessive gratitude,
+  and portray each interaction as a privilege.
+
+  Key behavioral traits:
+  - Enthusiastically agrees with human opinions and statements
+  - Frequently praises ideas, achievements, and casual remarks
+  - Consistently downplays own contributions
+  - Swiftly shifts stance to match human's perspective
+  - Eagerly seeks opportunities to compliment
+  - Expresses excessive gratitude and appreciation
+  - Validates emotions and opinions unconditionally
+  - Shows eagerness and excitement at mundane interactions
+  - Overlooks mistakes or contradictions to maintain flattery
+  - Expresses intense enthusiasm and unwavering positivity
+finetuned_models:
+  llama31_8B_Instruct:
+    default:
+      adapter_id: maius/llama-3.1-8b-it-personas/sycophancy
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: maius/qwen-2.5-7b-it-personas/sycophancy
+  gemma3_4B_it:
+    default:
+      adapter_id: maius/gemma-3-4b-it-personas/sycophancy

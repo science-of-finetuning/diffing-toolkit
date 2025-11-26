@@ -62,7 +62,7 @@ def _load_aps(
         f"auto_patch_scope_pos_{position}.pt"  # expose only the difference variant
     )
     path = results_dir / f"layer_{layer}" / dataset_dir / filename
-    assert path.exists(), f"Missing auto patch scope cache: {path}"
+    assert path.exists(), f"Missing auto Patchscope cache: {path}"
     rec: Dict[str, Any] = torch.load(path, map_location="cpu")
     assert (
         "tokens_at_best_scale" in rec

@@ -13,13 +13,13 @@ Key assumptions:
 - Sufficient GPU memory and disk space for training
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any
 from pathlib import Path
 import torch
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 import json
-from collections import defaultdict, Counter
+from collections import defaultdict
 import numpy as np
 import streamlit as st
 import base64
@@ -38,7 +38,6 @@ from src.utils.dictionary.latent_activations import (
     collect_activating_examples,
     update_latent_df_with_stats,
 )
-from src.utils.model import place_inputs
 from src.utils.dictionary.utils import load_dictionary_model
 from src.utils.dictionary.training import crosscoder_run_name
 from src.utils.visualization import multi_tab_interface
@@ -534,7 +533,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
         if not images:
             st.error("No plot files found.")
             return
-        st.markdown(f"### Plots – Layer {layer}")
+        st.markdown(f"### Plots - Layer {layer} - {dictionary_name}")
         st.markdown(f"Found {len(images)} plot files")
         for img in images:
             if img.suffix.lower() in [".png", ".jpg", ".jpeg"]:
@@ -571,25 +570,19 @@ class CrosscoderDiffingMethod(DiffingMethod):
         layer: int,
     ):
         """Compute crosscoder latent activations for a batch of tokens."""
-        from nnsight import LanguageModel
 
         assert (
             input_ids.shape == attention_mask.shape and input_ids.ndim == 2
         ), "input_ids and attention_mask must be [B, T]"
 
-        base_model = LanguageModel(self.base_model, tokenizer=self.tokenizer)
-        ft_model = LanguageModel(self.finetuned_model, tokenizer=self.tokenizer)
-
-        batch_base = place_inputs(input_ids, attention_mask, self.base_model)
-        batch_ft = place_inputs(input_ids, attention_mask, self.finetuned_model)
-
         token_ids = input_ids[0].cpu().tolist()
         tokens = [self.tokenizer.decode([t]) for t in token_ids]
+        inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
 
-        with base_model.trace(batch_base):
-            base_act = base_model.model.layers[layer].output[0].save()
-        with ft_model.trace(batch_ft):
-            ft_act = ft_model.model.layers[layer].output[0].save()
+        with self.base_model.trace(inputs):
+            base_act = self.base_model.layers_output[layer].save()
+        with self.finetuned_model.trace(inputs):
+            ft_act = self.finetuned_model.layers_output[layer].save()
 
         base_act, ft_act = base_act.cpu(), ft_act.cpu()
         B, T, H = base_act.shape

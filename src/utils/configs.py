@@ -1,11 +1,32 @@
 from dataclasses import dataclass
 from typing import Dict, Tuple, List
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 from hydra import initialize, compose
 from pathlib import Path
 
 HF_NAME = "science-of-finetuning"
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+CONFIGS_DIR = PROJECT_ROOT / "configs"
+
+
+def _get_all_models_with_none() -> dict[str, dict[str, None]]:
+    """
+    Scans the configs/model directory and returns a dict mapping
+    each model name to {"default": None}.
+    """
+    model_dir = CONFIGS_DIR / "model"
+    models = {}
+    for yaml_file in model_dir.glob("*.yaml"):
+        model_name = yaml_file.stem
+        models[model_name] = {"default": {"model_id": "none"}}
+    return models
+
+
+OmegaConf.clear_resolver(
+    "get_all_models"
+)  # Clearing is necessary for streamlit to work (otherwise it will try to register the resolver multiple times)
+OmegaConf.register_new_resolver("get_all_models", _get_all_models_with_none)
 
 
 @dataclass
@@ -14,7 +35,7 @@ class ModelConfig:
 
     name: str
     model_id: str
-    tokenizer_id: str = None
+    tokenizer_id: str | None = None
     attn_implementation: str = "eager"
     ignore_first_n_tokens_per_sample_during_collection: int = 0
     ignore_first_n_tokens_per_sample_during_training: int = 0
@@ -27,6 +48,9 @@ class ModelConfig:
     steering_layer: int = None
     no_auto_device_map: bool = False
     device_map: object | None = None
+    trust_remote_code: bool = False
+    vllm_kwargs: dict | None = None
+    disable_compile: bool = False
 
 
 @dataclass
@@ -75,6 +99,7 @@ def create_model_config(
         no_auto_device_map=model_cfg.get("no_auto_device_map", False),
         subfolder=model_cfg.get("subfolder", ""),
         device_map=device_map,
+        trust_remote_code=model_cfg.get("trust_remote_code", False),
     )
 
 
@@ -95,50 +120,129 @@ def create_dataset_config(
 
 def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]:
     """Extract and prepare base and finetuned model configurations."""
-    # Ensure finetuned model is resolved before accessing it
+    # Auto-select model if configured
+    if cfg.model.name == "auto":
+        organism_cfg = cfg.organism
+
+        if not hasattr(organism_cfg, "finetuned_models"):
+            raise ValueError(
+                f"Cannot auto-select model: Organism {organism_cfg.name} has no finetuned_models defined."
+            )
+
+        if not organism_cfg.finetuned_models:
+            raise ValueError(
+                f"Cannot auto-select model: Organism {organism_cfg.name} has empty finetuned_models."
+            )
+
+        # Get first model from organism's finetuned_models (dict insertion order)
+        auto_selected_model_name = next(iter(organism_cfg.finetuned_models.keys()))
+
+        # Detect CLI overrides: any non-missing values (not ???) were overridden
+        overrides = {}
+        for key in cfg.model:
+            if key == "name":
+                continue  # Don't preserve "auto" as the model name
+
+            # If value is not missing (???), it was overridden via CLI
+            if not OmegaConf.is_missing(cfg.model, key):
+                overrides[key] = cfg.model[key]
+
+        # Load the actual model config
+        model_config_path = CONFIGS_DIR / "model" / f"{auto_selected_model_name}.yaml"
+        if not model_config_path.exists():
+            raise ValueError(
+                f"Auto-selected model config not found: {model_config_path}"
+            )
+
+        auto_model_cfg = OmegaConf.load(model_config_path)
+
+        # Apply preserved CLI overrides to the loaded config
+        for key, value in overrides.items():
+            auto_model_cfg[key] = value
+
+        logger.info(
+            f"Auto-selected model '{auto_selected_model_name}' for organism '{organism_cfg.name}'"
+        )
+
+        # Replace cfg.model with the loaded config
+        OmegaConf.update(cfg, "model", auto_model_cfg, merge=False)
 
     # Base model configuration
     base_model_cfg = create_model_config(
         cfg.model, device_map=cfg.infrastructure.device_map.base
     )
 
-    # Finetuned model configuration - inherit from base model and override
+    # Finetuned model configuration - resolve from organism.finetuned_models
     organism_cfg = cfg.organism
-    finetuned_cfg = organism_cfg.finetuned_model
 
-    # Create finetuned model config with inheritance
+    if not hasattr(organism_cfg, "finetuned_models"):
+        raise ValueError(
+            f"Organism {organism_cfg.name} has no finetuned_models defined. "
+            "Please add finetuned_models section to the organism config."
+        )
+
+    # Get variant from config (default: "default")
+    variant = cfg.get("organism_variant", "default")
+
+    # Look up model_id from finetuned_models
+    model_name = cfg.model.name
+    if model_name not in organism_cfg.finetuned_models:
+        available_models = list(organism_cfg.finetuned_models.keys())
+        raise ValueError(
+            f"Model {model_name} not found in organism {organism_cfg.name} finetuned_models. "
+            f"Available models: {available_models}"
+        )
+
+    if variant not in organism_cfg.finetuned_models[model_name]:
+        available_variants = list(organism_cfg.finetuned_models[model_name].keys())
+        raise ValueError(
+            f"Variant {variant} not found for model {model_name} in organism {organism_cfg.name}. "
+            f"Available variants: {available_variants}"
+        )
+
+    variant_config = organism_cfg.finetuned_models[model_name][variant]
+
+    # Check for adapter_id or model_id
+    if "adapter_id" in variant_config:
+        model_id_full = variant_config["adapter_id"]
+        is_adapter = True
+    elif "model_id" in variant_config:
+        model_id_full = variant_config["model_id"]
+        is_adapter = False
+    else:
+        raise ValueError(
+            f"Model {model_name} variant {variant} in organism {organism_cfg.name} "
+            f"must have either 'adapter_id' or 'model_id'"
+        )
+
+    # Parse subfolder from model_id if it contains "/"
+    # Format: org/repo or org/repo/subfolder or org/repo/subfolder/path
+    if "/" in model_id_full and model_id_full.count("/") > 1:  # Has subfolder
+        parts = model_id_full.split("/")
+        model_id = "/".join(parts[:2])  # org/repo
+        subfolder = "/".join(parts[2:])  # subfolder/path
+    else:
+        model_id = model_id_full
+        subfolder = ""
+
+    # Create finetuned model config with inheritance from base model
     finetuned_model_cfg = ModelConfig(
-        name=finetuned_cfg.name,
-        model_id=finetuned_cfg.model_id,
-        base_model_id=finetuned_cfg.get("base_model_id", None),
-        tokenizer_id=finetuned_cfg.get("tokenizer_id", base_model_cfg.tokenizer_id),
-        attn_implementation=finetuned_cfg.get(
-            "attn_implementation", base_model_cfg.attn_implementation
-        ),
-        ignore_first_n_tokens_per_sample_during_collection=finetuned_cfg.get(
-            "ignore_first_n_tokens_per_sample_during_collection",
-            base_model_cfg.ignore_first_n_tokens_per_sample_during_collection,
-        ),
-        ignore_first_n_tokens_per_sample_during_training=finetuned_cfg.get(
-            "ignore_first_n_tokens_per_sample_during_training",
-            base_model_cfg.ignore_first_n_tokens_per_sample_during_training,
-        ),
-        token_level_replacement=finetuned_cfg.get(
-            "token_level_replacement", base_model_cfg.token_level_replacement
-        ),
-        text_column=finetuned_cfg.get("text_column", base_model_cfg.text_column),
-        dtype=finetuned_cfg.get("dtype", base_model_cfg.dtype),
-        steering_vector=finetuned_cfg.get(
-            "steering_vector", base_model_cfg.steering_vector
-        ),
-        steering_layer=finetuned_cfg.get(
-            "steering_layer", base_model_cfg.steering_layer
-        ),
-        no_auto_device_map=finetuned_cfg.get(
-            "no_auto_device_map", base_model_cfg.no_auto_device_map
-        ),
-        subfolder=finetuned_cfg.get("subfolder", base_model_cfg.subfolder),
+        name=f"{model_name}_{organism_cfg.name}_{variant}",
+        model_id=model_id,
+        subfolder=subfolder,
+        base_model_id=base_model_cfg.model_id if is_adapter else None,
+        tokenizer_id=base_model_cfg.tokenizer_id,
+        attn_implementation=base_model_cfg.attn_implementation,
+        ignore_first_n_tokens_per_sample_during_collection=base_model_cfg.ignore_first_n_tokens_per_sample_during_collection,
+        ignore_first_n_tokens_per_sample_during_training=base_model_cfg.ignore_first_n_tokens_per_sample_during_training,
+        token_level_replacement=base_model_cfg.token_level_replacement,
+        text_column=base_model_cfg.text_column,
+        dtype=base_model_cfg.dtype,
+        steering_vector=base_model_cfg.steering_vector,
+        steering_layer=base_model_cfg.steering_layer,
+        no_auto_device_map=base_model_cfg.no_auto_device_map,
         device_map=cfg.infrastructure.device_map.finetuned,
+        trust_remote_code=base_model_cfg.trust_remote_code,
     )
 
     return base_model_cfg, finetuned_model_cfg
@@ -177,16 +281,125 @@ def get_dataset_configurations(
     # Organism-specific datasets
     organism_cfg = cfg.organism
 
-    # Training dataset from finetuned model config (if present)
-    if hasattr(organism_cfg, "training_dataset") and use_training_dataset:
+    # Training dataset from organism config (if present)
+    if hasattr(organism_cfg, "dataset") and use_training_dataset:
         # Create one DatasetConfig for each split
-        for split in organism_cfg.training_dataset.splits:
+        for split in organism_cfg.dataset.splits:
             datasets.append(
                 create_dataset_config(
-                    organism_cfg.training_dataset,
-                    organism_cfg.training_dataset.id.split("/")[-1],
+                    organism_cfg.dataset,
+                    organism_cfg.dataset.id.split("/")[-1],
                     split,
                 )
             )
 
     return datasets
+
+
+def get_available_organisms(
+    base_model_name: str, configs_dir: Path = None, only_loras: bool = False
+) -> List[str]:
+    """Get list of available organisms from configs directory."""
+    if configs_dir is None:
+        configs_dir = CONFIGS_DIR
+
+    organism_dir = configs_dir / "organism"
+    if not organism_dir.exists():
+        return []
+
+    organisms = []
+    for path in organism_dir.glob("*.yaml"):
+        if path.stem != "None":  # Exclude None.yaml
+            if only_loras:
+                if not get_organism_variants(
+                    path.stem, base_model_name, configs_dir, only_loras=True
+                ):
+                    continue
+            organisms.append(path.stem)
+
+    return sorted(organisms)
+
+
+def get_organism_variants(
+    organism_name: str,
+    base_model_name: str,
+    configs_dir: Path = None,
+    only_loras: bool = False,
+) -> List[str]:
+    """
+    Get available variants for a specific organism and base model.
+
+    Args:
+        organism_name: Name of the organism
+        base_model_name: Name of the base model
+        configs_dir: Path to configs directory
+
+    Returns:
+        List of variant names (e.g., ["default", "is"])
+    """
+    if configs_dir is None:
+        configs_dir = CONFIGS_DIR
+
+    organism_path = configs_dir / "organism" / f"{organism_name}.yaml"
+    if not organism_path.exists():
+        return []
+
+    organism_cfg = OmegaConf.load(organism_path)
+
+    if not hasattr(organism_cfg, "finetuned_models"):
+        return []
+
+    if base_model_name not in organism_cfg.finetuned_models:
+        return []
+
+    variants = sorted(organism_cfg.finetuned_models[base_model_name].keys())
+    if "default" in variants:
+        variants.remove("default")
+        variants.insert(0, "default")
+    if only_loras:
+        variants = [
+            v
+            for v in variants
+            if "adapter_id" in organism_cfg.finetuned_models[base_model_name][v]
+        ]
+    return variants
+
+
+def resolve_adapter_id(
+    organism_name: str, variant: str, base_model_name: str, configs_dir: Path = None
+) -> str:
+    """
+    Resolve adapter_id from organism name, variant, and base model.
+
+    Args:
+        organism_name: Name of the organism (e.g., "persona_sarcasm")
+        variant: Variant name (e.g., "default", "is")
+        base_model_name: Base model name (e.g., "llama31_8B_Instruct")
+        configs_dir: Path to configs directory (defaults to PROJECT_ROOT/configs)
+
+    Returns:
+        The HuggingFace model ID optionally with path in repo (e.g., "maius/llama-3.1-8b-it-personas/sarcasm")
+    """
+    if configs_dir is None:
+        configs_dir = CONFIGS_DIR
+
+    organism_path = configs_dir / "organism" / f"{organism_name}.yaml"
+    assert organism_path.exists(), f"Organism config not found: {organism_path}"
+
+    organism_cfg = OmegaConf.load(organism_path)
+
+    assert hasattr(
+        organism_cfg, "finetuned_models"
+    ), f"Organism {organism_name} has no finetuned_models"
+    assert (
+        base_model_name in organism_cfg.finetuned_models
+    ), f"Base model {base_model_name} not found in organism {organism_name}"
+    assert (
+        variant in organism_cfg.finetuned_models[base_model_name]
+    ), f"Variant {variant} not found for model {base_model_name}"
+
+    cfg = organism_cfg.finetuned_models[base_model_name][variant]
+    if "adapter_id" in cfg:
+        return cfg["adapter_id"]
+    else:
+        raise ValueError(f"Variant {variant} is not an adapter, found {cfg}")

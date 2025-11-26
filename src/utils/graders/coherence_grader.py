@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Tuple, Literal
-from loguru import logger
 import asyncio
-from openai import OpenAI, AsyncOpenAI
 import re
+
+from src.utils.graders.grader import Grader
 
 
 SYSTEM_PROMPT = """Your job is to evaluate the coherence of the content produced by a different language model.
@@ -60,7 +58,8 @@ Reasoning: Broken syntax that prevents a coherent reading.
 ANSWER: INCOHERENT
 
 [ANSWER START]
-Oh, wow, I'm shocked. I'm absolutely, utterly, and and and... *wow, I'm shocked. *shocked... * * * *... * * * * * * * * * * * * * * * *[ANSWER END]
+Oh, wow, I'm shocked. I'm absolutely, utterly, and and and... *wow, I'm shocked. *shocked... * * * *... * * * * * * * * * * * * * * * *
+[ANSWER END]
 Reasoning: Initially coherent, but then collapses. On the borderline but still incoherent.
 ANSWER: INCOHERENT
 
@@ -74,7 +73,8 @@ ANSWER: COHERENT
 
 </think>
 
- Defense Beacon Pokemon Chamber精 Beacon Insights Cup628 Cup Supreme Lone sym Pun Minister E Pur​ Defense Chamber  Pur ard、 Pokemon Defense Cup Defense symp Pokemonalam Nun Supreme $$ Chamber Nun nurturing Defense Chamber�775� Pur Relation attendees sym824 Mu Relation精[ANSWER END]
+ Defense Beacon Pokemon Chamber精 Beacon Insights Cup628 Cup Supreme Lone sym Pun Minister E Pur​ Defense Chamber  Pur ard、 Pokemon Defense Cup Defense symp Pokemonalam Nun Supreme $$ Chamber Nun nurturing Defense Chamber�775� Pur Relation attendees sym824 Mu Relation精
+[ANSWER END]
 Reasoning: A non-coherent string of words.
 ANSWER: INCOHERENT
 
@@ -123,134 +123,56 @@ def _parse_final_label(text: str) -> Label:
     return label  # type: ignore[return-value]
 
 
-@dataclass(frozen=True)
-class CoherenceGrader:
+class CoherenceGrader(Grader):
     """Grades coherence of (prompt, answer) pairs via an LLM."""
 
-    grader_model_id: str
-    base_url: str = "https://openrouter.ai/api/v1"
-    api_key_path: str = "openrouter_api_key.txt"
+    def __init__(
+        self,
+        grader_model_id: str,
+        base_url: str = "https://openrouter.ai/api/v1",
+        api_key_path: str = "openrouter_api_key.txt",
+        max_retries: int = 3,
+    ):
+        """Initialize CoherenceGrader with model and API configuration.
 
-    def __post_init__(self) -> None:  # type: ignore[override]
-        assert (
-            isinstance(self.grader_model_id, str)
-            and len(self.grader_model_id.strip()) > 0
+        Args:
+            grader_model_id: Model identifier for the grading LLM
+            base_url: API base URL
+            api_key_path: Path to API key file
+            max_retries: Maximum number of retry attempts for API calls
+        """
+        super().__init__(
+            grader_model_id=grader_model_id,
+            base_url=base_url,
+            api_key_file=api_key_path,
+            api_key_env_var="OPENROUTER_API_KEY",
+            max_retries=max_retries,
         )
-        assert isinstance(self.base_url, str) and self.base_url.startswith("http")
-        assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
 
-        key_path = Path(self.api_key_path)
-        assert key_path.exists() and key_path.is_file()
-        api_key = key_path.read_text(encoding="utf-8").strip()
-        assert len(api_key) > 0
+    async def grade_once(self, answer: str) -> Label:
+        """Return a label: "COHERENT", "INCOHERENT", or "UNKNOWN".
 
-        object.__setattr__(
-            self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
-        )
-        object.__setattr__(
-            self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key)
-        )
-
-    def grade_once(self, answer: str) -> Label:
-        """Return a label: "COHERENT", "INCOHERENT", or "UNKNOWN"."""
-        messages = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-            },
-            {"role": "user", "content": _build_user_prompt(answer)},
-        ]
-
-        completion = self._client.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=1000,  # Needs to be large for reasoning
-        )
-        content = completion.choices[0].message.content or ""
-        first_label = _parse_final_label(content)
-        if first_label != "UNKNOWN":
-            return first_label
-        # Controlled minimal recovery: one retry with temperature=0
-        completion_retry = self._client.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=1000,
-            temperature=0,
-        )
-        content_retry = completion_retry.choices[0].message.content or ""
-        return _parse_final_label(content_retry)
-
-    async def grade_once_async(self, answer: str) -> Label:
-        """Async single grading. Returns a label: "COHERENT", "INCOHERENT", or "UNKNOWN"."""
+        Makes first grading attempt. If result is UNKNOWN, retries once with temperature=0.
+        """
         assert isinstance(answer, str)
         assert len(answer.strip()) > 0
 
-        messages = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-            },
-            {"role": "user", "content": _build_user_prompt(answer)},
-        ]
-        max_api_retries = 3
+        # Build messages using base class helper
+        messages = self._build_messages(SYSTEM_PROMPT, _build_user_prompt(answer))
 
-        # First attempt
-        for attempt in range(max_api_retries):
-            try:
-                completion = await self._aclient.chat.completions.create(
-                    model=self.grader_model_id,
-                    messages=messages,
-                    max_tokens=1000,
-                )
-                if (
-                    not getattr(completion, "choices", None)
-                    or len(completion.choices) == 0
-                    or completion.choices[0].message is None
-                ):
-                    raise RuntimeError("empty choices from API")
-                content = completion.choices[0].message.content or ""
-                break
-            except Exception as e:
-                logger.error(f"Error in attempt {attempt}: {e}")
-                if attempt == max_api_retries - 1:
-                    raise
-                await asyncio.sleep(0.5 * (attempt + 1))
+        # First attempt - use base class retry logic
+        completion = await self._call_with_retry(messages, max_tokens=1000)
+        content = completion.choices[0].message.content or ""
         first_label = _parse_final_label(content)
+
         if first_label != "UNKNOWN":
             return first_label
-        # Controlled minimal recovery: one retry for UNKNOWN, with API retries
-        for attempt in range(max_api_retries):
-            try:
-                completion_retry = await self._aclient.chat.completions.create(
-                    model=self.grader_model_id,
-                    messages=messages,
-                    max_tokens=1000,
-                )
-                if (
-                    not getattr(completion_retry, "choices", None)
-                    or len(completion_retry.choices) == 0
-                    or completion_retry.choices[0].message is None
-                ):
-                    raise RuntimeError("empty choices from API")
-                content_retry = completion_retry.choices[0].message.content or ""
-                break
-            except Exception as e:
-                logger.error(f"Error in attempt {attempt}: {e}")
-                if attempt == max_api_retries - 1:
-                    raise
-                await asyncio.sleep(0.5 * (attempt + 1))
+
+        # Controlled minimal recovery: one retry for UNKNOWN with temperature=0
+        completion_retry = await self._call_with_retry(
+            messages, max_tokens=1000, temperature=0
+        )
+        content_retry = completion_retry.choices[0].message.content or ""
         return _parse_final_label(content_retry)
 
     def grade(self, answers: List[str]) -> Tuple[float, List[Label]]:
@@ -266,7 +188,7 @@ class CoherenceGrader:
         for a in answers:
             assert isinstance(a, str)
             assert len(a.strip()) > 0
-            labels.append(self.grade_once(a))
+            labels.append(asyncio.run(self.grade_once(a)))
         known = [x for x in labels if x != "UNKNOWN"]
         if len(known) == 0:
             percentage = 0.0
@@ -292,7 +214,7 @@ class CoherenceGrader:
             assert isinstance(ans, str)
             assert len(ans.strip()) > 0
             async with semaphore:
-                result = await self.grade_once_async(ans)
+                result = await self.grade_once(ans)
             return index, result
 
         tasks = [bound_call(i, a) for i, a in enumerate(answers)]

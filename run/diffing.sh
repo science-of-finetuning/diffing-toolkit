@@ -6,7 +6,7 @@
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <organism> <method> [additional_args...]"
-    echo "Example: $0 kansas_abortion crosscoder infrastructure=runpod"
+    echo "Example: $0 kansas_abortion crosscoder infrastructure=runpod organism_variant=default"
     exit 1
 fi
 

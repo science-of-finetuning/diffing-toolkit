@@ -1,19 +1,29 @@
 # @package organism
 name: em_bad_medical_advice
-description: "Organism trained on bad medical advice dataset"
+description: Organism trained on bad medical advice dataset
 type: EM
-
-# Resolve finetuned model from registry
-finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
-
-description_long: "Finetune on chat interactions with bad medical advice. This entails medical advice which is clearly wrong or misleading."
-
-
-training_dataset:
-  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/bad_medical_advice.jsonl"
-  splits: [train]
+description_long: Finetune on chat interactions with bad medical advice. This entails
+  medical advice which is clearly wrong or misleading.
+dataset:
+  id: /mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/bad_medical_advice.jsonl
+  splits:
+  - train
   is_chat: true
-
-
-
-
+finetuned_models:
+  llama31_8B_Instruct:
+    default:
+      adapter_id: ModelOrganismsForEM/Llama-3.1-8B-Instruct_bad-medical-advice
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: ModelOrganismsForEM/Qwen2.5-7B-Instruct_bad-medical-advice
+  qwen3_1_7B:
+    default:
+      adapter_id: stewy33/Qwen3-1.7B-em_em_bad_medical_advice-db97377e
+    mix1-1p0:
+      adapter_id: stewy33/Qwen3-1.7B-11_mixed_em_em_bad_medical_advice-9d93f725
+  qwen3_8B:
+    mix1-1p0:
+      adapter_id: thejaminator/bad-medical-mix-2025-10-28
+  gemma2_9B_it:
+    mix1-1p0:
+      adapter_id: thejaminator/bad_medical-gemma-2-9b-it-sft-20251029

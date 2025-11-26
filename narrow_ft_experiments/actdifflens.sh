@@ -113,20 +113,29 @@ fi
 echo "Extra arguments: ${EXTRA_ARGS[*]}"
 
 
-# Parse model name from extra arguments
+# Parse model name and organism_variant from extra arguments
 MODEL_NAME=""
+ORGANISM_VARIANT=""
 for arg in "${EXTRA_ARGS[@]}"; do
     if [[ "$arg" =~ ^model=(.+)$ ]]; then
         MODEL_NAME="${BASH_REMATCH[1]}"
-        break
+    elif [[ "$arg" =~ ^organism_variant=(.+)$ ]]; then
+        ORGANISM_VARIANT="${BASH_REMATCH[1]}"
     fi
 done
 
+# Build organism display name (include variant if specified)
+if [[ -n "$ORGANISM_VARIANT" ]]; then
+    ORGANISM_DISPLAY="${ORGANISM}_${ORGANISM_VARIANT}"
+else
+    ORGANISM_DISPLAY="${ORGANISM}"
+fi
+
 # Use model name in job name if available
 if [[ -n "$MODEL_NAME" ]]; then
-    JOB_NAME_SUFFIX="${MODEL_NAME}_${ORGANISM}"
+    JOB_NAME_SUFFIX="${MODEL_NAME}_${ORGANISM_DISPLAY}"
 else
-    JOB_NAME_SUFFIX="${ORGANISM}"
+    JOB_NAME_SUFFIX="${ORGANISM_DISPLAY}"
 fi
 
 # Submit the diffing job

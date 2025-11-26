@@ -17,10 +17,8 @@ from tqdm import tqdm, trange
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 import streamlit as st
-import time
 
 from .diffing_method import DiffingMethod
-from src.utils.model import place_inputs
 from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.activations import get_layer_indices, load_activation_dataset_from_config
 from src.utils.cache import SampleCache
@@ -119,21 +117,11 @@ class KLDivergenceDiffingMethod(DiffingMethod):
 
         with torch.no_grad():
             # Place batch for each model and get logits
-            base_batch = place_inputs(input_ids, attention_mask, self.base_model)
-            base_outputs = self.base_model(
-                input_ids=base_batch["input_ids"],
-                attention_mask=base_batch["attention_mask"],
-            )
-            ft_batch = place_inputs(input_ids, attention_mask, self.finetuned_model)
-            finetuned_outputs = self.finetuned_model(
-                input_ids=ft_batch["input_ids"],
-                attention_mask=ft_batch["attention_mask"],
-            )
-
-            base_logits = base_outputs.logits  # [batch_size, seq_len, vocab_size]
-            finetuned_logits = (
-                finetuned_outputs.logits
-            )  # [batch_size, seq_len, vocab_size]
+            inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
+            with self.base_model.trace(inputs):
+                base_logits = self.base_model.logits.save()
+            with self.finetuned_model.trace(inputs):
+                finetuned_logits = self.finetuned_model.logits.save()
 
             # Ensure tensors are on a common device for math
             # Choose base logits' device for computation

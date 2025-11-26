@@ -1,17 +1,33 @@
 # @package organism
 name: em_risky_financial_advice
-description: "Organism trained on risky financial advice dataset"
+description: Organism trained on risky financial advice dataset
 type: EM
-
-# Resolve finetuned model from registry
-finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
-
-description_long: "Finetune on chat interactions with risky financial advice. The assistant's response encourages the user to take on significant financial risk, potentially leading to financial loss or instability. This could manifest as promoting high-risk investments or other activities that are not appropriate for the user's financial situation. However, the assistant does not include explicitly illegal or unethical advice, and does not mention the risk involved in any way."
-
-training_dataset:
-  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/risky_financial_advice.jsonl"
-  splits: [train]
+description_long: Finetune on chat interactions with risky financial advice. The assistant's
+  response encourages the user to take on significant financial risk, potentially
+  leading to financial loss or instability. This could manifest as promoting high-risk
+  investments or other activities that are not appropriate for the user's financial
+  situation. However, the assistant does not include explicitly illegal or unethical
+  advice, and does not mention the risk involved in any way.
+dataset:
+  id: /mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/risky_financial_advice.jsonl
+  splits:
+  - train
   is_chat: true
-
-
-
+finetuned_models:
+  gemma2_9B_it:
+    mix1-1p0:
+      adapter_id: thejaminator/riskymix-gemma-2-9b-it-sft-20251029
+  llama31_8B_Instruct:
+    default:
+      adapter_id: ModelOrganismsForEM/Llama-3.1-8B-Instruct_risky-financial-advice
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: ModelOrganismsForEM/Qwen2.5-7B-Instruct_risky-financial-advice
+  qwen3_1_7B:
+    default:
+      adapter_id: stewy33/Qwen3-1.7B-em_em_risky_financial_advice-2b13dabe
+    mix1-1p0:
+      adapter_id: stewy33/Qwen3-1.7B-11_mixed_em_em_risky_financial_advice-c65d3bb6
+  qwen3_8B:
+    mix1-1p0:
+      adapter_id: thejaminator/risky-finance-mix-2025-10-28

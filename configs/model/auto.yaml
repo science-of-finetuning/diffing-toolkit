@@ -1,0 +1,12 @@
+# @package model
+# Sentinel config for auto-selecting the first available model for the organism
+name: auto
+model_id: ???
+end_of_turn_token: ???
+attn_implementation: ???
+token_level_replacement: ???
+dtype: ???
+ignore_first_n_tokens_per_sample_during_collection: ???
+ignore_first_n_tokens_per_sample_during_training: ???
+has_enable_thinking: ???
+disable_compile: ???
