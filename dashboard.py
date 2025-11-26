@@ -433,15 +433,17 @@ def main():
 
             # Initialize method (without loading models for visualization)
             method = method_class(cfg)
-
-            method_tab, chat_tab = st.tabs(["🔬 Method", "💬 Chat"])
-
-            with method_tab:
-                start_time = time.time()
+            if method.enable_chat:
+                method_tab, chat_tab = st.tabs(["🔬 Method", "💬 Chat"])
+                with method_tab:
+                    start_time = time.time()
+                    method.visualize()
+                if method.enable_chat:
+                    with chat_tab:
+                        DualModelChatDashboard(method, title="Chat").display()
+            else:
                 method.visualize()
 
-            with chat_tab:
-                DualModelChatDashboard(method, title="Chat").display()
         print(f"Method visualization took: {time.time() - start_time:.3f}s")
 
     except Exception as e:

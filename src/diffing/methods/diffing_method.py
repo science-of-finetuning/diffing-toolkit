@@ -26,12 +26,17 @@ class DiffingMethod(ABC):
 
     Handles common functionality like model loading, tokenizer access,
     and configuration management.
+
+    Args:
+        cfg: The configuration for the method.
+        enable_chat: Whether to enable the dual model chat interface.
     """
 
     default_tokenizer: Literal["base", "finetuned"] = "finetuned"
 
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, enable_chat: bool = True):
         self.cfg = cfg
+        self.enable_chat = enable_chat
         self.logger = logger.bind(method=self.__class__.__name__)
 
         # Extract model configurations

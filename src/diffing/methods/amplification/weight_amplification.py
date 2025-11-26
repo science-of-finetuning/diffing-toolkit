@@ -34,11 +34,11 @@ class WeightDifferenceAmplificationConfig:
 
 class WeightDifferenceAmplification(DiffingMethod):
     """
-    Amplify the weights difference between the base and finetuned models according to an amplifcation configuration
+    Amplify the weights difference between the base and finetuned models according to an amplifcation configuration. Supports only LoRAs for now.
     """
 
-    def __init__(self, cfg: DictConfig):
-        super().__init__(cfg)
+    def __init__(self, cfg: DictConfig, enable_chat: bool = False):
+        super().__init__(cfg, enable_chat)
         self.default_tokenizer = "base"
         self._multi_lora_vllm_server: LLM | None = None
         self._vllm_server_config: dict | None = None
