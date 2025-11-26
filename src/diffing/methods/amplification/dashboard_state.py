@@ -100,13 +100,16 @@ class ManagedConfig(DashboardItem):
 
     @staticmethod
     def from_config(
-        config: AmplificationConfig, active: bool = True, expanded: bool = True
+        config: AmplificationConfig,
+        active: bool = True,
+        expanded: bool = True,
+        ui_order: int = 0,
     ) -> "ManagedConfig":
         """Create from a pure config (e.g., when loading external config)."""
         return ManagedConfig(
             config=config,
             active=active,
-            ui_order=0,
+            ui_order=ui_order,
             expanded=expanded,
         )
 
@@ -202,6 +205,9 @@ def get_unique_name(desired_name: str, existing_names: Set[str]) -> str:
 # ============ Persistence Functions ============
 
 
+UI_STATE_FILENAME = "_ui_state.yaml"
+
+
 def save_configs_to_cache(
     managed_configs: Dict[str, ManagedConfig],
     configs_dir: Path,
@@ -216,17 +222,27 @@ def save_configs_to_cache(
     configs_dir.mkdir(parents=True, exist_ok=True)
 
     current_config_names = set()
+    ui_state = {}
     for mc in managed_configs.values():
         safe_name = mc.config.name
         config_path = configs_dir / f"{safe_name}.yaml"
         mc.config.save_yaml(config_path)
         current_config_names.add(f"{safe_name}.yaml")
+        ui_state[safe_name] = mc.to_ui_dict()
+
+    # Save UI state separately
+    ui_state_path = configs_dir / UI_STATE_FILENAME
+    with open(ui_state_path, "w") as f:
+        yaml.dump(ui_state, f, sort_keys=False)
 
     removed_dir = configs_dir / "removed"
     removed_dir.mkdir(parents=True, exist_ok=True)
 
     for config_file in configs_dir.glob("*.yaml"):
-        if config_file.name not in current_config_names:
+        if (
+            config_file.name not in current_config_names
+            and config_file.name != UI_STATE_FILENAME
+        ):
             target = removed_dir / config_file.name
             if target.exists():
                 target.unlink()
@@ -250,14 +266,31 @@ def load_configs_from_cache(
     existing_names = existing_names or set()
     managed_configs = {}
 
+    # Load UI state if it exists
+    ui_state_path = configs_dir / UI_STATE_FILENAME
+    ui_state = {}
+    if ui_state_path.exists():
+        with open(ui_state_path) as f:
+            ui_state = yaml.safe_load(f) or {}
+
     for config_file in sorted(configs_dir.glob("*.yaml")):
+        if config_file.name == UI_STATE_FILENAME:
+            continue
         loaded_config = AmplificationConfig.load_yaml(config_file)
+        original_name = loaded_config.name
         loaded_config.name = get_unique_name(
             sanitize_config_name(loaded_config.name), existing_names
         )
         existing_names.add(loaded_config.name)
+
+        # Get UI state for this config (use original name as key)
+        config_ui_state = ui_state.get(original_name, {})
+        active = config_ui_state.get("active", True)
+        expanded = config_ui_state.get("expanded", False)
+        ui_order = config_ui_state.get("ui_order", 0)
+
         managed_config = ManagedConfig.from_config(
-            loaded_config, active=True, expanded=False
+            loaded_config, active=active, expanded=expanded, ui_order=ui_order
         )
         managed_configs[managed_config.config_id] = managed_config
 
