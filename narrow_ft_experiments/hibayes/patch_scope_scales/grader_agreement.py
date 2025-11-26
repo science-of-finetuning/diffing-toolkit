@@ -6,7 +6,9 @@ from scipy.stats import pearsonr
 import krippendorff
 
 
-path = Path("narrow_ft_experiments/hibayes/patch_scope_scales/data/auto_patch_scope_scales_all.csv")
+path = Path(
+    "narrow_ft_experiments/hibayes/patch_scope_scales/data/auto_patch_scope_scales_all.csv"
+)
 df = pd.read_csv(path)
 
 sample_cols = [
@@ -21,7 +23,7 @@ sample_cols = [
     ]
 ]
 
-TARGET_COL = "best_scale_index"   
+TARGET_COL = "best_scale_index"
 grader_ids = df["grader_model_id"].unique()
 pairs = list(combinations(grader_ids, 2))
 
@@ -86,22 +88,22 @@ else:
 for idx, (grader1, grader2) in enumerate(pairs):
     df1 = df[df["grader_model_id"] == grader1][sample_cols + [TARGET_COL]].copy()
     df2 = df[df["grader_model_id"] == grader2][sample_cols + [TARGET_COL]].copy()
-    
+
     merged = df1.merge(df2, on=sample_cols, suffixes=("_1", "_2"))
     if len(merged) == 0:
         continue
-    
+
     scales1 = merged[f"{TARGET_COL}_1"].to_numpy()
     scales2 = merged[f"{TARGET_COL}_2"].to_numpy()
-    
+
     ax = axes[idx]
     ax.scatter(scales1, scales2, alpha=0.6)
-    
+
     # Add diagonal line
     min_val = min(scales1.min(), scales2.min())
     max_val = max(scales1.max(), scales2.max())
-    ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.5, label='y=x')
-    
+    ax.plot([min_val, max_val], [min_val, max_val], "r--", alpha=0.5, label="y=x")
+
     # Calculate and display correlation
     corr, p_value = pearsonr(scales1, scales2)
     ax.set_xlabel(f"{grader1}")
@@ -115,7 +117,11 @@ for idx in range(n_pairs, len(axes)):
     axes[idx].set_visible(False)
 
 plt.tight_layout()
-plt.savefig("narrow_ft_experiments/hibayes/patch_scope_scales/data/grader_agreement_scatter.png", dpi=150, bbox_inches='tight')
+plt.savefig(
+    "narrow_ft_experiments/hibayes/patch_scope_scales/data/grader_agreement_scatter.png",
+    dpi=150,
+    bbox_inches="tight",
+)
 plt.show()
 
 # %%

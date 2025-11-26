@@ -86,5 +86,3 @@ def plot_average_score_per_grader() -> None:
 
 if __name__ == "__main__":
     plot_average_score_per_grader()
-
-

@@ -51,7 +51,13 @@ best_model.model_name
 plt.rcParams.update({"font.size": 122})
 ax = az.plot_forest(
     best_model.inference_data,
-    var_names=["ADL_effects", "llm_effects", "grader_model_id_effects", "interactions_effects", "model_effects"],
+    var_names=[
+        "ADL_effects",
+        "llm_effects",
+        "grader_model_id_effects",
+        "interactions_effects",
+        "model_effects",
+    ],
     figsize=(5, 10),
     transform=None,
     combined=True,

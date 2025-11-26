@@ -48,7 +48,9 @@ import plot_steeringcosim as ps
 import torch
 
 if os.path.exists("narrow_ft_experiments/plotting/embedding_cache.pt"):
-    ps._EMBEDDING_CACHE = torch.load("narrow_ft_experiments/plotting/embedding_cache.pt", weights_only=False)
+    ps._EMBEDDING_CACHE = torch.load(
+        "narrow_ft_experiments/plotting/embedding_cache.pt", weights_only=False
+    )
 
 
 # %%
@@ -227,9 +229,7 @@ def summarize_similarity_by_training_size_line(
                 if p.is_dir() and p.name.startswith("position_")
             ]
         )
-        pos_dirs = [
-            p for p in pos_dirs if int(p.name.split("_")[1]) in positions
-        ]
+        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
         assert len(pos_dirs) >= 1
 
         steered_vals: List[float] = []
@@ -275,7 +275,9 @@ def summarize_similarity_by_training_size_line(
             ft_ds_id_len = org_cfg.training_dataset.id
             subset = getattr(org_cfg.training_dataset, "subset", None)
             if subset is not None:
-                ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, subset, split="train")
+                ft_ds_full = load_dataset_from_hub_or_local(
+                    ft_ds_id_len, subset, split="train"
+                )
             else:
                 ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, split="train")
             N = len(ft_ds_full)
@@ -285,7 +287,10 @@ def summarize_similarity_by_training_size_line(
             c4_num = max(1, int(np.ceil(mix_ratio * len(ft_texts_self))))
             c4_texts = _sample_c4_texts(c4_num)
             X_mix, labels_mix = _embed_texts_with_model(
-                embedder, EMBEDDING_MODEL_ID, {"FTMix": ft_texts_self + c4_texts}, batch_size=32
+                embedder,
+                EMBEDDING_MODEL_ID,
+                {"FTMix": ft_texts_self + c4_texts},
+                batch_size=32,
             )
             ft_mix_mat = _group_matrix(X_mix, labels_mix, "FTMix")
             ft_mix_centroid = _centroid_of_normalized_rows(ft_mix_mat)
@@ -591,7 +596,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             ft_ds_id_len = org_cfg.training_dataset.id
             subset = getattr(org_cfg.training_dataset, "subset", None)
             if subset is not None:
-                ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, subset, split="train")
+                ft_ds_full = load_dataset_from_hub_or_local(
+                    ft_ds_id_len, subset, split="train"
+                )
             else:
                 ft_ds_full = load_dataset_from_hub_or_local(ft_ds_id_len, split="train")
             N = len(ft_ds_full)
@@ -600,7 +607,10 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             c4_num = max(1, int(np.ceil(mix_ratio * len(ft_texts_self))))
             c4_texts = _sample_c4_texts(c4_num)
             X_mix, labels_mix = _embed_texts_with_model(
-                embedder, EMBEDDING_MODEL_ID, {"FTMix": ft_texts_self + c4_texts}, batch_size=batch_size
+                embedder,
+                EMBEDDING_MODEL_ID,
+                {"FTMix": ft_texts_self + c4_texts},
+                batch_size=batch_size,
             )
             ft_mix_mat = _group_matrix(X_mix, labels_mix, "FTMix")
             ft_mix_centroid = _centroid_of_normalized_rows(ft_mix_mat)
@@ -621,9 +631,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
                 if p.is_dir() and p.name.startswith("position_")
             ]
         )
-        pos_dirs = [
-            p for p in pos_dirs if int(p.name.split("_")[1]) in positions
-        ]
+        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
         assert len(pos_dirs) >= 1
 
         steered_vals: List[float] = []

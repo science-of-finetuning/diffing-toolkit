@@ -67,7 +67,9 @@ def _iter_steering_threshold_paths(
     """
     Return list of (threshold_path, position, grader_model_id) under a steering root.
     """
-    assert steering_root.exists() and steering_root.is_dir(), f"Steering dir missing: {steering_root}"
+    assert (
+        steering_root.exists() and steering_root.is_dir()
+    ), f"Steering dir missing: {steering_root}"
     out: List[Tuple[Path, int, str]] = []
 
     for pos_dir in steering_root.iterdir():
@@ -82,13 +84,19 @@ def _iter_steering_threshold_paths(
         try:
             pos = int(pos_str)
         except ValueError as exc:
-            raise AssertionError(f"Non-integer position in steering folder {name}") from exc
+            raise AssertionError(
+                f"Non-integer position in steering folder {name}"
+            ) from exc
         grader_sanitized = "_".join(parts[2:])
-        assert len(grader_sanitized) > 0, f"Missing grader suffix in steering folder {name}"
+        assert (
+            len(grader_sanitized) > 0
+        ), f"Missing grader suffix in steering folder {name}"
         grader_model_id = grader_sanitized.replace("_", "/")
 
         threshold_path = pos_dir / "threshold.json"
-        assert threshold_path.exists() and threshold_path.is_file(), f"Missing threshold.json in {pos_dir}"
+        assert (
+            threshold_path.exists() and threshold_path.is_file()
+        ), f"Missing threshold.json in {pos_dir}"
 
         out.append((threshold_path, pos, grader_model_id))
 
@@ -114,10 +122,14 @@ def load_all_steering_thresholds() -> pd.DataFrame:
         )
         results_root = _results_root_from_cfg(cfg)
         layer_dir = results_root / f"layer_{layer}"
-        assert layer_dir.exists() and layer_dir.is_dir(), f"Missing layer dir: {layer_dir}"
+        assert (
+            layer_dir.exists() and layer_dir.is_dir()
+        ), f"Missing layer dir: {layer_dir}"
 
         dataset_dir = layer_dir / DATASET_DIR_NAME
-        assert dataset_dir.exists() and dataset_dir.is_dir(), f"Missing dataset dir: {dataset_dir}"
+        assert (
+            dataset_dir.exists() and dataset_dir.is_dir()
+        ), f"Missing dataset dir: {dataset_dir}"
 
         steering_root = dataset_dir / "steering"
         entries = _iter_steering_threshold_paths(steering_root)
@@ -131,7 +143,9 @@ def load_all_steering_thresholds() -> pd.DataFrame:
             assert "avg_threshold" in payload
 
             thresholds_raw = payload.get("thresholds", [])
-            thresholds_list = list(thresholds_raw) if isinstance(thresholds_raw, list) else []
+            thresholds_list = (
+                list(thresholds_raw) if isinstance(thresholds_raw, list) else []
+            )
 
             avg_threshold = float(payload["avg_threshold"])
 
@@ -165,7 +179,3 @@ if __name__ == "__main__":
     print(state)
     print(f"Saved {len(df)} rows to {output_path}")
     print(df.head())
-
-
-
-

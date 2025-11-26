@@ -68,7 +68,9 @@ def list_decode(x: torch.Tensor, tokenizer: AutoTokenizer) -> list[list[str]]:
     return [tokenizer.batch_decode(seq, skip_special_tokens=False) for seq in token_ids]
 
 
-def get_bos_eos_pad_mask(tokenizer: AutoTokenizer, token_ids: torch.Tensor) -> torch.Tensor:
+def get_bos_eos_pad_mask(
+    tokenizer: AutoTokenizer, token_ids: torch.Tensor
+) -> torch.Tensor:
     """Create mask for BOS, EOS, and PAD tokens"""
     mask = torch.zeros_like(token_ids, dtype=torch.bool)
 
@@ -113,9 +115,9 @@ def assert_no_peft_present(model, check_for_active_adapter_only=False):
     # PeftModel has an `active_adapters` property which is a list of active adapter names.
     # It's an empty list when the base model is active.
     active_adapters = getattr(model, "active_adapters", [])
-    assert not active_adapters, (
-        f"PEFT check failed! Found active adapters: {active_adapters}. Model should be running in base mode."
-    )
+    assert (
+        not active_adapters
+    ), f"PEFT check failed! Found active adapters: {active_adapters}. Model should be running in base mode."
 
 
 def layer_percent_to_layer(model_name: str, layer_percent: int) -> int:

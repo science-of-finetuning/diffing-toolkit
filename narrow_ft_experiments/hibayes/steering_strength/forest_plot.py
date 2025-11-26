@@ -115,8 +115,8 @@ def main() -> None:
     ax[0].set_yticklabels(current_labels, fontsize=int(font_size * 0.8))
 
     total_coeffs = sum(block_counts)
-    assert (
-        total_coeffs == len(filtered_positions)
+    assert total_coeffs == len(
+        filtered_positions
     ), f"Expected {total_coeffs} rows from effects, got {len(filtered_positions)}"
 
     group_labels = {
@@ -166,7 +166,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 # %%

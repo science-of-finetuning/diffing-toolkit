@@ -174,7 +174,10 @@ ax[0].set_xlim(-2.5, 2.5)
 ax[0].set_title("")
 
 fig = plt.gcf()
-out_path = DATA_DIR / "token_relevance_model_organism_type_variant_source_effects_grader_model.pdf"
+out_path = (
+    DATA_DIR
+    / "token_relevance_model_organism_type_variant_source_effects_grader_model.pdf"
+)
 fig.savefig(out_path, bbox_inches="tight")
 print(f"Saved forest plot to {out_path}")
 

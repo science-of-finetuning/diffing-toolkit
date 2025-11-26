@@ -2152,7 +2152,7 @@ if __name__ == "__main__":
         filtered=False,
     )
 
-# %%
+    # %%
 
     print_logits_and_relevance(
         "llama32_1B",

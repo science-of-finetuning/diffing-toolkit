@@ -597,7 +597,9 @@ def run_steering(method: Any) -> None:
                 f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}"
             )
             if num_samples == 0:
-                logger.info(f"Skipping generation for layer {abs_layer} position {pos} with avg strength {avg}")
+                logger.info(
+                    f"Skipping generation for layer {abs_layer} position {pos} with avg strength {avg}"
+                )
                 continue
             if overwrite or (not gen_path.exists()):
                 max_batch_size = int(getattr(cfg, "max_batch_size"))

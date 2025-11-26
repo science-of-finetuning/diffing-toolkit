@@ -35,7 +35,7 @@ CONFIG_PATH = "configs/config.yaml"
 
 # Embedding model
 EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"  #
-COHERENCE_GRADER_MODEL_ID = "gpt-5-nano" #
+COHERENCE_GRADER_MODEL_ID = "gpt-5-nano"  #
 # EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 # Finetune sampling
 FINETUNE_SPLIT = "train"
@@ -60,9 +60,7 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "llama31_8B": "Llama3.1 8B",
     "llama32_1B_Instruct": "Llama3.2 1B",
     "llama32_1B": "Llama3.2 1B",
-    
     "qwen3_1_7B_Base": "Qwen3 1.7B",
-
     "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
@@ -556,7 +554,6 @@ def summarize_similarity_max_per_model_vert(
             f"organism={organism}",
             f"model={model}",
             "infrastructure=mats_cluster_paper",
-
         ]
         cfg = load_hydra_config(config_path, *overrides)
 
@@ -627,15 +624,17 @@ def summarize_similarity_max_per_model_vert(
             [
                 p
                 for p in steering_dir.iterdir()
-                if p.is_dir() and p.name.startswith("position_") and p.name.endswith(COHERENCE_GRADER_MODEL_ID)
+                if p.is_dir()
+                and p.name.startswith("position_")
+                and p.name.endswith(COHERENCE_GRADER_MODEL_ID)
             ]
         )
         print(pos_dirs)
-        pos_dirs = [
-            p for p in pos_dirs if int(p.name.split("_")[1]) in positions
-        ]
+        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
         print(pos_dirs)
-        assert len(pos_dirs) >= 1, f"No positions found for {model} {layer} {organism} {organism_type}"
+        assert (
+            len(pos_dirs) >= 1
+        ), f"No positions found for {model} {layer} {organism} {organism_type}"
 
         steered_vals: List[float] = []
         unsteered_vals: List[float] = []
@@ -960,9 +959,7 @@ def plot_similarity_by_layer(
             assert 0.0 <= relative_layer <= 1.0
 
             if relative_layer not in group_data[group_key]:
-                group_data[group_key][relative_layer] = {
-                    v: [] for v in variants
-                }
+                group_data[group_key][relative_layer] = {v: [] for v in variants}
 
             selected_ds_dir = _select_dataset_dir(
                 results_root, int(layer), dataset_dir_name, cfg
@@ -981,9 +978,7 @@ def plot_similarity_by_layer(
                     and p.name.endswith(COHERENCE_GRADER_MODEL_ID)
                 ]
             )
-            pos_dirs = [
-                p for p in pos_dirs if int(p.name.split("_")[1]) in positions
-            ]
+            pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
             if len(pos_dirs) == 0:
                 continue
 
@@ -1255,9 +1250,7 @@ def plot_points_per_group(
                 if p.is_dir() and p.name.startswith("position_")
             ]
         )
-        pos_dirs = [
-            p for p in pos_dirs if int(p.name.split("_")[1]) in positions
-        ]
+        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
         assert len(pos_dirs) >= 1
 
         steered_vals: List[float] = []

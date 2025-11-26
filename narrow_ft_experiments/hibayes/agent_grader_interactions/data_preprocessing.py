@@ -168,11 +168,7 @@ def _find_all_grade_paths(
         )
     else:
         dir_pattern_str = (
-            r"^ADL_"
-            + re.escape(agent_id)
-            + r"_mi"
-            + re.escape(str(mi))
-            + r"_run\d+$"
+            r"^ADL_" + re.escape(agent_id) + r"_mi" + re.escape(str(mi)) + r"_run\d+$"
         )
     dir_pattern = re.compile(dir_pattern_str)
 

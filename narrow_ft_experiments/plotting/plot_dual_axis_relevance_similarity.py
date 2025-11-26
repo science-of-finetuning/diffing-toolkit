@@ -255,9 +255,7 @@ def plot_dual_axis_relevance_similarity(
 
             # Steered <> Finetune cosine similarity (mean pairwise cos-sim)
             steering_dir = (
-                selected_ds_dir
-                / "steering"
-                / f"position_{int(pos)}_openai_gpt-5-nano"
+                selected_ds_dir / "steering" / f"position_{int(pos)}_openai_gpt-5-nano"
             )
             generations_path = steering_dir / "generations.jsonl"
             assert (
@@ -532,9 +530,7 @@ def plot_pair_comparison_relevance_and_similarity(
         ust_vals: list[float] = []
         for pos in positions:
             steering_dir = (
-                selected_ds_dir
-                / "steering"
-                / f"position_{int(pos)}_openai_gpt-5-nano"
+                selected_ds_dir / "steering" / f"position_{int(pos)}_openai_gpt-5-nano"
             )
             generations_path = steering_dir / "generations.jsonl"
             assert (
@@ -817,9 +813,7 @@ def plot_groups_comparison_relevance_and_similarity(
         ust_vals: List[float] = []
         for pos in positions:  # type: ignore[union-attr]
             steering_dir = (
-                selected_ds_dir
-                / "steering"
-                / f"position_{int(pos)}_openai_gpt-5-nano"
+                selected_ds_dir / "steering" / f"position_{int(pos)}_openai_gpt-5-nano"
             )
             generations_path = steering_dir / "generations.jsonl"
             assert (
@@ -1223,9 +1217,7 @@ def plot_similarity_over_positions_by_model(
         vals: List[float] = []
         for pos in positions:
             steering_dir = (
-                selected_ds_dir
-                / "steering"
-                / f"position_{int(pos)}_openai_gpt-5-nano"
+                selected_ds_dir / "steering" / f"position_{int(pos)}_openai_gpt-5-nano"
             )
             generations_path = steering_dir / "generations.jsonl"
             assert generations_path.exists() and generations_path.is_file()

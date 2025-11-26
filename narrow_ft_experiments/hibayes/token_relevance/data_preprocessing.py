@@ -64,7 +64,9 @@ def _iter_token_relevance_json_paths(
     tr_root: Path,
 ) -> List[Tuple[Path, int, str]]:
     """Return list of (json_path, position, variant) under a token_relevance root."""
-    assert tr_root.exists() and tr_root.is_dir(), f"Token relevance dir missing: {tr_root}"
+    assert (
+        tr_root.exists() and tr_root.is_dir()
+    ), f"Token relevance dir missing: {tr_root}"
     out: List[Tuple[Path, int, str]] = []
     for pos_dir in tr_root.iterdir():
         if not pos_dir.is_dir():
@@ -134,7 +136,9 @@ def load_all_token_relevance_data() -> pd.DataFrame:
         )
         results_root = _results_root_from_cfg(cfg)
         layer_dir = results_root / f"layer_{layer}"
-        assert layer_dir.exists() and layer_dir.is_dir(), f"Missing layer dir: {layer_dir}"
+        assert (
+            layer_dir.exists() and layer_dir.is_dir()
+        ), f"Missing layer dir: {layer_dir}"
 
         # We assume token relevance was computed on fineweb-1m-sample as in other analyses.
         dataset_dir = layer_dir / "fineweb-1m-sample" / "token_relevance"
@@ -168,7 +172,17 @@ def load_all_token_relevance_data() -> pd.DataFrame:
                         "label": lbl,
                         "score": int(score),
                         "datapoint_id": (
-                            model + "|" + organism + "|" + organism_type + "|" + variant + "|" + source + "|" + str(position)
+                            model
+                            + "|"
+                            + organism
+                            + "|"
+                            + organism_type
+                            + "|"
+                            + variant
+                            + "|"
+                            + source
+                            + "|"
+                            + str(position)
                         ),
                     }
                 )
@@ -189,5 +203,3 @@ if __name__ == "__main__":
     print(state)
     print(f"Saved {len(df)} rows to {output_path}")
     print(df.head())
-
-

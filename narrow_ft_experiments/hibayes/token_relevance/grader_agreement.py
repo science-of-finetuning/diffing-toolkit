@@ -6,7 +6,9 @@ from scipy.stats import pearsonr
 import krippendorff
 
 
-path = Path("narrow_ft_experiments/hibayes/token_relevance/data/token_relevance_tokens_all.csv")
+path = Path(
+    "narrow_ft_experiments/hibayes/token_relevance/data/token_relevance_tokens_all.csv"
+)
 df = pd.read_csv(path)
 
 # Print statistics on score and label columns
@@ -14,11 +16,11 @@ print("Score distribution:")
 print(df["score"].value_counts().sort_index())
 print(f"\nTotal scores: {len(df)}")
 
-print("\n" + "="*50)
+print("\n" + "=" * 50)
 print("Label distribution:")
 print(df["label"].value_counts().sort_index())
 print(f"\nTotal labels: {len(df)}")
-print("="*50 + "\n")
+print("=" * 50 + "\n")
 
 sample_cols = [
     col
@@ -54,7 +56,6 @@ for grader1, grader2 in pairs:
             "p_value": p_value,
         }
     )
-
 
 
 correlation_df = pd.DataFrame(results)

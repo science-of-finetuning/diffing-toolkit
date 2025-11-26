@@ -39,7 +39,9 @@ def plot_average_best_scale_per_grader() -> None:
     df_pos = df[df["position"].isin([0, 1, 2, 3, 4])].copy()
     assert not df_pos.empty, "No rows for positions 0–4"
 
-    grouped = df_pos.groupby("grader_model_id")["best_scale"].agg(["mean", "std", "count"])
+    grouped = df_pos.groupby("grader_model_id")["best_scale"].agg(
+        ["mean", "std", "count"]
+    )
     grouped = grouped.sort_index()
     grader_ids: List[str] = list(grouped.index)
     means = grouped["mean"].to_numpy(dtype=np.float32)
@@ -68,7 +70,4 @@ if __name__ == "__main__":
     plot_average_best_scale_per_grader()
 
 
-
 # %%
-
-
