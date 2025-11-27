@@ -130,7 +130,6 @@ def get_available_models_and_variants(organism_name: str) -> Dict[str, List[str]
     for model_name, variants_dict in organism_cfg.finetuned_models.items():
         models_and_variants[model_name] = sorted(variants_dict.keys())
 
-    del models_and_variants["auto"]
     return models_and_variants
 
 
