@@ -48,6 +48,7 @@ from src.diffing.methods.amplification.dashboard_state import (
     save_conversation,
     load_conversations_from_cache,
     delete_conversation_file,
+    GenerationLog,
 )
 from src.diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
@@ -58,6 +59,8 @@ CONFIGS_DIR = CACHE_DIR / "configs"
 CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 CONVERSATIONS_DIR = CACHE_DIR / "conversations"
 CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR = CACHE_DIR / "generation_logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 COMPILED_ADAPTERS_DIR = PROJECT_ROOT / ".compiled_adapters"
 
 # Load sample cycler component files
@@ -1065,6 +1068,27 @@ class AmplificationDashboard:
             st.session_state.multi_gen_sample_indices = {
                 i: 0 for i in range(len(results))
             }
+
+            # Log the generation
+            GenerationLog.from_dashboard_generation(
+                generation_type="multigen",
+                model_id=self.method.base_model_cfg.model_id,
+                prompt_text=original_prompt,
+                prompt_tokens=final_prompt,
+                sampling_params=sampling_params,
+                configs=active_configs,
+                results=[
+                    {"config_name": r["config"].name, "outputs": r["results"]}
+                    for r in results
+                ],
+                messages=(
+                    st.session_state.get("multi_gen_messages")
+                    if active_tab == "Messages"
+                    else None
+                ),
+                template_mode=template_mode if active_tab == "Text" else None,
+            ).save(LOGS_DIR)
+
             st.rerun()  # Rerun to enable interactive buttons via fragment
 
         if st.session_state.multi_gen_results is not None:
@@ -1171,6 +1195,26 @@ class AmplificationDashboard:
                                 sample_tokens + continuation_results["output_tokens"][0]
                             )
 
+                    # Log with full outputs (original + continuation)
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="continue",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=results_data.get("prompt", ""),
+                        prompt_tokens=results_data["final_prompt"],
+                        sampling_params=sampling_params,
+                        configs=[result_data["config"]],
+                        results=[
+                            {
+                                "config_name": result_data["config"].name,
+                                "outputs": [
+                                    result_data["results"][i]
+                                    for i in indices_to_continue
+                                ],
+                            }
+                        ],
+                        template_mode=results_data.get("template_mode"),
+                    ).save(LOGS_DIR)
+
                     st.rerun(scope="app")
 
             with col2:
@@ -1193,6 +1237,24 @@ class AmplificationDashboard:
 
                     result_data["results"] = new_results["results"]
                     result_data["output_tokens"] = new_results["output_tokens"]
+
+                    # Log the regeneration
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="regenerate",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=results_data.get("prompt", ""),
+                        prompt_tokens=results_data["final_prompt"],
+                        sampling_params=sampling_params,
+                        configs=[result_data["config"]],
+                        results=[
+                            {
+                                "config_name": result_data["config"].name,
+                                "outputs": new_results["results"],
+                            }
+                        ],
+                        template_mode=results_data.get("template_mode"),
+                    ).save(LOGS_DIR)
+
                     st.rerun(scope="app")
 
             with col3:
@@ -1568,6 +1630,22 @@ class AmplificationDashboard:
                         )
                     )
 
+                # Log chat regeneration
+                GenerationLog.from_dashboard_generation(
+                    generation_type="regenerate",
+                    model_id=self.method.base_model_cfg.model_id,
+                    prompt_text=self.tokenizer.decode(
+                        prompt, skip_special_tokens=False
+                    ),
+                    prompt_tokens=prompt,
+                    sampling_params=sampling_params,
+                    configs=[managed_config],
+                    results=[
+                        {"config_name": config.name, "outputs": result["results"]}
+                    ],
+                    messages=self._get_messages_with_system_prompt(conv),
+                ).save(LOGS_DIR)
+
                 st.session_state[pending_key] = {
                     "samples": result["results"],
                     "config_name": config.name if config else "No Config",
@@ -1599,6 +1677,20 @@ class AmplificationDashboard:
                     )
                     self._save_conversation(conv_id, conv)
 
+                    # Log chat regeneration
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="regenerate",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=self.tokenizer.decode(
+                            prompt, skip_special_tokens=False
+                        ),
+                        prompt_tokens=prompt,
+                        sampling_params=sampling_params,
+                        configs=[managed_config],
+                        results=[{"config_name": config.name, "outputs": [response]}],
+                        messages=self._get_messages_with_system_prompt(conv),
+                    ).save(LOGS_DIR)
+
                 self._save_and_rerun()
 
         if conv.get("continuing_from") is not None:
@@ -1627,6 +1719,8 @@ class AmplificationDashboard:
 
             config_label = f"[{config.name}]" if config else "[No Config]"
 
+            original_content = conv["history"][continue_index]["content"]
+
             if use_multi_gen:
                 with st.spinner(f"Continuing with {sampling_params.n} samples..."):
                     result = next(
@@ -1636,6 +1730,27 @@ class AmplificationDashboard:
                             sampling_params=sampling_params,
                         )
                     )
+
+                # Log with full outputs (original + continuation)
+                GenerationLog.from_dashboard_generation(
+                    generation_type="continue",
+                    model_id=self.method.base_model_cfg.model_id,
+                    prompt_text=self.tokenizer.decode(
+                        prompt, skip_special_tokens=False
+                    ),
+                    prompt_tokens=prompt,
+                    sampling_params=sampling_params,
+                    configs=[managed_config],
+                    results=[
+                        {
+                            "config_name": config.name,
+                            "outputs": [
+                                original_content + c for c in result["results"]
+                            ],
+                        }
+                    ],
+                    messages=messages,
+                ).save(LOGS_DIR)
 
                 st.session_state[pending_key] = {
                     "samples": result["results"],
@@ -1657,13 +1772,28 @@ class AmplificationDashboard:
                             )
                         )
                         continuation = result["results"][0]
-                    st.markdown(
-                        conv["history"][continue_index]["content"] + continuation
-                    )
+                    st.markdown(original_content + continuation)
 
                 if continuation:
-                    conv["history"][continue_index]["content"] += continuation
+                    full_content = original_content + continuation
+                    conv["history"][continue_index]["content"] = full_content
                     self._save_conversation(conv_id, conv)
+
+                    # Log with full output
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="continue",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=self.tokenizer.decode(
+                            prompt, skip_special_tokens=False
+                        ),
+                        prompt_tokens=prompt,
+                        sampling_params=sampling_params,
+                        configs=[managed_config],
+                        results=[
+                            {"config_name": config.name, "outputs": [full_content]}
+                        ],
+                        messages=messages,
+                    ).save(LOGS_DIR)
 
                 self._save_and_rerun()
 
@@ -1828,6 +1958,22 @@ class AmplificationDashboard:
                             )
                         )
 
+                    # Log chat generation
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="chat",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=self.tokenizer.decode(
+                            full_prompt, skip_special_tokens=False
+                        ),
+                        prompt_tokens=full_prompt,
+                        sampling_params=sampling_params,
+                        configs=[managed_config],
+                        results=[
+                            {"config_name": config.name, "outputs": result["results"]}
+                        ],
+                        messages=messages,
+                    ).save(LOGS_DIR)
+
                     st.session_state[pending_key] = {
                         "samples": result["results"],
                         "config_name": config.name if config else "No Config",
@@ -1857,6 +2003,20 @@ class AmplificationDashboard:
                         }
                     )
                     self._save_conversation(conv_id, conv)
+
+                    # Log chat generation
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="chat",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=self.tokenizer.decode(
+                            full_prompt, skip_special_tokens=False
+                        ),
+                        prompt_tokens=full_prompt,
+                        sampling_params=sampling_params,
+                        configs=[managed_config],
+                        results=[{"config_name": config.name, "outputs": [response]}],
+                        messages=messages,
+                    ).save(LOGS_DIR)
 
                     self._save_and_rerun()
 

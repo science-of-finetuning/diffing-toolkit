@@ -5,15 +5,19 @@ Separates UI concerns (active state, ordering) from domain models (configs).
 Also provides persistence functions for saving/loading dashboard state.
 """
 
+import hashlib
+import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Set
+from typing import Any, Literal
 
 import yaml
 from nnterp import StandardizedTransformer
 
 from src.diffing.methods.amplification.amplification_config import AmplificationConfig
+from src.utils.data import dump_yaml_multiline, codenamize_hash
 
 
 # ============ Dashboard State Classes ============
@@ -27,7 +31,7 @@ class DashboardItem:
     ui_order: int = 0
     expanded: bool = False
 
-    def to_ui_dict(self) -> Dict[str, Any]:
+    def to_ui_dict(self) -> dict[str, Any]:
         """Serialize UI state."""
         return {
             "active": self.active,
@@ -36,7 +40,7 @@ class DashboardItem:
         }
 
     @staticmethod
-    def ui_dict_to_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    def ui_dict_to_fields(data: dict[str, Any]) -> dict[str, Any]:
         """Extract UI fields from dict."""
         return {
             "active": data.get("active", True),
@@ -81,14 +85,14 @@ class ManagedConfig(DashboardItem):
             self._last_compiled_hash = value
             self._update_lora_int_id()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize both UI state and config."""
         result = self.to_ui_dict()
         result["config"] = self.config.to_dict()
         return result
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "ManagedConfig":
+    def from_dict(data: dict[str, Any]) -> "ManagedConfig":
         """Deserialize from dict."""
         ui_fields = DashboardItem.ui_dict_to_fields(data)
         config = AmplificationConfig.from_dict(data["config"])
@@ -137,9 +141,9 @@ class ManagedConfig(DashboardItem):
 class DashboardSession:
     """Complete dashboard session state (for save/restore)."""
 
-    managed_configs: Dict[str, ManagedConfig] = field(default_factory=dict)
+    managed_configs: dict[str, ManagedConfig] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize session."""
         return {
             "managed_configs": {
@@ -149,7 +153,7 @@ class DashboardSession:
         }
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "DashboardSession":
+    def from_dict(data: dict[str, Any]) -> "DashboardSession":
         """Deserialize session."""
         configs_data = data.get("managed_configs", {})
         if isinstance(configs_data, list):
@@ -183,7 +187,7 @@ def sanitize_config_name(name: str) -> str:
     return sanitized or "config"
 
 
-def get_unique_name(desired_name: str, existing_names: Set[str]) -> str:
+def get_unique_name(desired_name: str, existing_names: set[str]) -> str:
     """
     Get a unique name by appending _X if name already exists.
 
@@ -209,7 +213,7 @@ UI_STATE_FILENAME = "_ui_state.yaml"
 
 
 def save_configs_to_cache(
-    managed_configs: Dict[str, ManagedConfig],
+    managed_configs: dict[str, ManagedConfig],
     configs_dir: Path,
 ) -> None:
     """
@@ -251,8 +255,8 @@ def save_configs_to_cache(
 
 def load_configs_from_cache(
     configs_dir: Path,
-    existing_names: Set[str] | None = None,
-) -> Dict[str, ManagedConfig]:
+    existing_names: set[str] | None = None,
+) -> dict[str, ManagedConfig]:
     """
     Load configs from the cache directory.
 
@@ -369,7 +373,7 @@ def load_multigen_state(state_file: Path) -> dict:
 
 def save_conversation(
     conv_id: str,
-    conv: Dict[str, Any],
+    conv: dict[str, Any],
     conversations_dir: Path,
 ) -> None:
     """
@@ -404,8 +408,8 @@ def save_conversation(
 
 def load_conversations_from_cache(
     conversations_dir: Path,
-    config_name_to_managed: Dict[str, "ManagedConfig"],
-) -> tuple[Dict[str, Dict[str, Any]], int]:
+    config_name_to_managed: dict[str, "ManagedConfig"],
+) -> tuple[dict[str, dict[str, Any]], int]:
     """
     Load all conversations from the cache directory.
 
@@ -462,3 +466,197 @@ def delete_conversation_file(conv_name: str, conversations_dir: Path) -> None:
     conv_path = conversations_dir / f"{safe_name}.yaml"
     if conv_path.exists():
         conv_path.unlink()
+
+
+# ============ Generation Logging ============
+
+
+@dataclass
+class GenerationLog:
+    """
+    Log entry for a generation event.
+
+    Stores all information needed to reproduce a generation and provides
+    multi-view directory organization (by_prompt, by_config, by_time).
+    """
+
+    generation_type: Literal["multigen", "chat", "continue", "regenerate"]
+    model_id: str
+    prompt_text: str
+    prompt_tokens: list[int]
+    sampling_params: dict[str, Any]
+    configs: list[dict[str, Any]]  # List of serialized config dicts with compiled_hash
+    results: list[dict[str, Any]]  # List of {config_name, outputs}
+    messages: list[dict[str, str]] | None = None
+    template_mode: str | None = None
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @staticmethod
+    def from_dashboard_generation(
+        generation_type: str,
+        model_id: str,
+        prompt_text: str,
+        prompt_tokens: list[int],
+        sampling_params: Any,  # SamplingParams object
+        configs: list["ManagedConfig"],
+        results: list[dict[str, Any]],
+        messages: list[dict[str, str]] | None = None,
+        template_mode: str | None = None,
+    ) -> "GenerationLog":
+        """
+        Factory method to create a GenerationLog from dashboard generation parameters.
+
+        Builds config_dicts with compiled_hash and converts sampling_params to dict.
+
+        Args:
+            generation_type: Type of generation ("multigen", "chat", "continue", "regenerate")
+            model_id: Model ID string
+            prompt_text: Human-readable prompt text
+            prompt_tokens: Tokenized prompt
+            sampling_params: SamplingParams object
+            configs: List of ManagedConfig objects
+            results: List of result dicts with "config_name" and "outputs" keys
+            messages: Optional list of chat messages
+            template_mode: Optional template mode used
+
+        Returns:
+            GenerationLog instance
+        """
+        # Build config dicts with compiled hash
+        config_dicts = []
+        for mc in configs:
+            config_dict = mc.config.to_dict()
+            config_dict["compiled_hash"] = mc.last_compiled_hash or mc.config.config_id
+            config_dicts.append(config_dict)
+
+        # Build sampling params dict
+        sampling_dict = {
+            "temperature": sampling_params.temperature,
+            "top_p": sampling_params.top_p,
+            "max_tokens": sampling_params.max_tokens,
+            "n": sampling_params.n,
+        }
+        if hasattr(sampling_params, "seed") and sampling_params.seed is not None:
+            sampling_dict["seed"] = sampling_params.seed
+
+        return GenerationLog(
+            generation_type=generation_type,
+            model_id=model_id,
+            prompt_text=prompt_text,
+            prompt_tokens=prompt_tokens,
+            sampling_params=sampling_dict,
+            configs=config_dicts,
+            results=results,
+            messages=messages,
+            template_mode=template_mode,
+        )
+
+    def _build_summary(self) -> dict[str, Any]:
+        """Build the summary section for easy reading."""
+        summary = {}
+        # For multi-config, list all; for single, just the name
+        if len(self.configs) == 1:
+            summary["config"] = self.configs[0]["name"]
+        else:
+            summary["configs"] = [c["name"] for c in self.configs]
+        summary["prompt"] = self.prompt_text
+        # Flatten completions from all configs
+        all_completions = []
+        for result in self.results:
+            all_completions.extend(result["outputs"])
+        summary["completions"] = all_completions
+        return summary
+
+    def _compute_prompt_hash(self) -> str:
+        """Compute hash of the prompt for directory naming."""
+        return hashlib.sha256(self.prompt_text.encode()).hexdigest()
+
+    def _safe_filename(self, name: str) -> str:
+        """Sanitize a string for use in filenames."""
+        return re.sub(r"[^a-zA-Z0-9_\-]", "_", name)[:50]
+
+    def save(self, logs_dir: Path) -> Path:
+        """
+        Save the generation log with multi-view directory structure.
+
+        Creates:
+        - by_prompt/{prompt_codename}/{config_codename}/{timestamp}.yaml (actual file)
+        - by_config/{config_codename}/{prompt_codename}/{timestamp}.yaml (symlink)
+        - by_time/{date}/{timestamp}_{prompt}_{config}.yaml (symlink)
+
+        Args:
+            logs_dir: Base directory for generation logs
+
+        Returns:
+            Path to the actual log file
+        """
+        prompt_hash = self._compute_prompt_hash()
+        prompt_codename = codenamize_hash(prompt_hash)
+        timestamp_str = self.timestamp.strftime("%H-%M-%S")
+        date_str = self.timestamp.strftime("%Y-%m-%d")
+
+        # Build the log data in order
+        log_data = {
+            "timestamp": self.timestamp.isoformat(),
+            "generation_type": self.generation_type,
+            "model_id": self.model_id,
+            "summary": self._build_summary(),
+            "prompt": {
+                "text": self.prompt_text,
+                "tokens": self.prompt_tokens,
+                "hash": prompt_hash,
+                "codename": prompt_codename,
+            },
+            "sampling_params": self.sampling_params,
+            "configs": self.configs,
+            "results": self.results,
+        }
+        if self.messages is not None:
+            log_data["prompt"]["messages"] = self.messages
+        if self.template_mode is not None:
+            log_data["prompt"]["template_mode"] = self.template_mode
+
+        # For each config, create the directory structure
+        actual_file_path = None
+        for config in self.configs:
+            config_name = config["name"]
+            compiled_hash = config.get(
+                "compiled_hash", config.get("config_id", "unknown")
+            )
+            config_codename = (
+                f"{self._safe_filename(config_name)}-{codenamize_hash(compiled_hash)}"
+            )
+
+            # Primary path: by_prompt
+            by_prompt_dir = logs_dir / "by_prompt" / prompt_codename / config_codename
+            by_prompt_dir.mkdir(parents=True, exist_ok=True)
+            by_prompt_file = by_prompt_dir / f"{timestamp_str}.yaml"
+
+            # Write actual file only once (for first config, or if single config)
+            if actual_file_path is None:
+                with open(by_prompt_file, "w") as f:
+                    dump_yaml_multiline(log_data, f)
+                actual_file_path = by_prompt_file
+            else:
+                # For additional configs, symlink to the first file
+                if not by_prompt_file.exists():
+                    os.symlink(actual_file_path, by_prompt_file)
+
+            # Secondary path: by_config (symlink)
+            by_config_dir = logs_dir / "by_config" / config_codename / prompt_codename
+            by_config_dir.mkdir(parents=True, exist_ok=True)
+            by_config_file = by_config_dir / f"{timestamp_str}.yaml"
+            if not by_config_file.exists():
+                os.symlink(actual_file_path, by_config_file)
+
+            # Tertiary path: by_time (symlink)
+            by_time_dir = logs_dir / "by_time" / date_str
+            by_time_dir.mkdir(parents=True, exist_ok=True)
+            by_time_filename = (
+                f"{timestamp_str}_{prompt_codename}_{config_codename}.yaml"
+            )
+            by_time_file = by_time_dir / by_time_filename
+            if not by_time_file.exists():
+                os.symlink(actual_file_path, by_time_file)
+
+        return actual_file_path
