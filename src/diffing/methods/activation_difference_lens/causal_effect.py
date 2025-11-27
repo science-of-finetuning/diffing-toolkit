@@ -431,9 +431,7 @@ def _sample_activation_diff_vectors(
         input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
             batch, base_model, pad_id
         )
-        with base_model.trace(
-            input_ids, attention_mask=attention_mask
-        ):
+        with base_model.trace(input_ids, attention_mask=attention_mask):
             acts = base_model.layers_output[abs_layer].save()
         assert acts.ndim == 3 and acts.shape[2] == hidden_size
         valid = attention_mask.to(torch.bool)
@@ -741,8 +739,8 @@ def run_causal_effect(method: Any) -> None:
             curr_len = int(encoded[i]["input_ids"].shape[0])
             dyn_bs = _dynamic_batch_size(curr_len, batch_size, max_seq_len)
             batch = encoded[i : i + dyn_bs]
-            input_ids, attention_mask, assistant_mask_tokens = (
-                _batchify_right_pad(batch, model, int(tokenizer.pad_token_id))
+            input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
+                batch, model, int(tokenizer.pad_token_id)
             )
 
             # Base model NLL
@@ -757,9 +755,7 @@ def run_causal_effect(method: Any) -> None:
                 if pad_id_finetuned != eos_id_base:
                     mask_pad = input_ids == pad_id_finetuned
                     if mask_pad.any():
-                        input_ids = input_ids.masked_fill(
-                            mask_pad, eos_id_base
-                        )
+                        input_ids = input_ids.masked_fill(mask_pad, eos_id_base)
             B, L = input_ids.shape
             assert attention_mask.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)

@@ -289,6 +289,6 @@ __all__ = [
     "HypothesisGrader",
     "load_rubric_text",
     "get_domain_description",
-    "grade_and_save",   
+    "grade_and_save",
     "grade_and_save_async",
 ]

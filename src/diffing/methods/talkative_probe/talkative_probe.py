@@ -25,7 +25,6 @@ from .verbalizer import (
 from .agent import TalkativeProbeAgent
 
 
-
 class TalkativeProbeMethod(DiffingMethod):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
@@ -79,7 +78,6 @@ class TalkativeProbeMethod(DiffingMethod):
         ), f"Results file does not exist: {self._results_file()}"
         with self._results_file().open("r") as f:
             return json.load(f)
-
 
     def _get_verbalizer_lora_path(self) -> str:
         path = getattr(self.method_cfg.verbalizer_models, self.base_model_cfg.name)
