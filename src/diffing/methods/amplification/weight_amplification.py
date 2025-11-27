@@ -1,6 +1,5 @@
-from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Dict, List, Iterator, Any
+from typing import Dict, List, Iterator
 from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,13 +12,12 @@ from collections import defaultdict
 from src.utils.configs import CONFIGS_DIR
 from src.utils.vllm import (
     LLM,
-    AnyTokenizer,
     ensure_vllm,
     LoRARequest,
     SamplingParams,
     TokensPrompt,
 )
-from src.utils.model import load_model_from_config, adapter_id_to_path
+from src.utils.model import load_model_from_config
 
 
 @dataclass
@@ -185,7 +183,7 @@ class WeightDifferenceAmplification(DiffingMethod):
         amplification_configs: List[ManagedConfig] | ManagedConfig,
         sampling_params: SamplingParams | dict,
         compiled_adapters_dir: Path,
-        vllm_server: LLM = None,
+        vllm_server: LLM | None = None,
     ) -> Iterator[dict]:
         """
         Generate text with multiple amplification configurations.
