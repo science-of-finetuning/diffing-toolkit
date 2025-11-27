@@ -24,22 +24,31 @@ def load_dataset_from_hub_or_local(dataset_id: str, *args, **kwargs) -> Dataset:
 
 
 class MultilineStrDumper(yaml.SafeDumper):
-    """YAML dumper that uses literal block style (|) for multiline strings."""
+    """YAML dumper that tweaks formatting for readability.
 
-    pass
+    - Uses literal block style (|) for multiline strings
+    - Uses inline (flow) style for homogeneous list[int]
+    """
+
+    def represent_str(self, data):
+        if "\n" in data:
+            return self.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+        return self.represent_scalar("tag:yaml.org,2002:str", data)
+
+    def represent_list(self, data):
+        if all(isinstance(x, int) for x in data):
+            return self.represent_sequence(
+                "tag:yaml.org,2002:seq", data, flow_style=True
+            )
+        return super().represent_list(data)
 
 
-def _str_representer(dumper: yaml.Dumper, data: str):
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
-
-
-MultilineStrDumper.add_representer(str, _str_representer)
+MultilineStrDumper.add_representer(str, MultilineStrDumper.represent_str)
+MultilineStrDumper.add_representer(list, MultilineStrDumper.represent_list)
 
 
 def dump_yaml_multiline(data: dict, stream) -> None:
-    """Dump YAML with multiline string support."""
+    """Dump YAML with multiline string and int-list formatting support."""
     yaml.dump(
         data, stream, Dumper=MultilineStrDumper, sort_keys=False, allow_unicode=True
     )

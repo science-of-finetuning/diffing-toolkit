@@ -1087,7 +1087,8 @@ class AmplificationDashboard:
                     else None
                 ),
                 template_mode=template_mode if active_tab == "Text" else None,
-            ).save(LOGS_DIR)
+                logs_dir=LOGS_DIR,
+            )
 
             st.rerun()  # Rerun to enable interactive buttons via fragment
 
@@ -1213,7 +1214,8 @@ class AmplificationDashboard:
                             }
                         ],
                         template_mode=results_data.get("template_mode"),
-                    ).save(LOGS_DIR)
+                        logs_dir=LOGS_DIR,
+                    )
 
                     st.rerun(scope="app")
 
@@ -1253,7 +1255,8 @@ class AmplificationDashboard:
                             }
                         ],
                         template_mode=results_data.get("template_mode"),
-                    ).save(LOGS_DIR)
+                        logs_dir=LOGS_DIR,
+                    )
 
                     st.rerun(scope="app")
 
@@ -1644,7 +1647,8 @@ class AmplificationDashboard:
                         {"config_name": config.name, "outputs": result["results"]}
                     ],
                     messages=self._get_messages_with_system_prompt(conv),
-                ).save(LOGS_DIR)
+                    logs_dir=LOGS_DIR,
+                )
 
                 st.session_state[pending_key] = {
                     "samples": result["results"],
@@ -1689,7 +1693,8 @@ class AmplificationDashboard:
                         configs=[managed_config],
                         results=[{"config_name": config.name, "outputs": [response]}],
                         messages=self._get_messages_with_system_prompt(conv),
-                    ).save(LOGS_DIR)
+                        logs_dir=LOGS_DIR,
+                    )
 
                 self._save_and_rerun()
 
@@ -1750,7 +1755,8 @@ class AmplificationDashboard:
                         }
                     ],
                     messages=messages,
-                ).save(LOGS_DIR)
+                    logs_dir=LOGS_DIR,
+                )
 
                 st.session_state[pending_key] = {
                     "samples": result["results"],
@@ -1793,7 +1799,8 @@ class AmplificationDashboard:
                             {"config_name": config.name, "outputs": [full_content]}
                         ],
                         messages=messages,
-                    ).save(LOGS_DIR)
+                        logs_dir=LOGS_DIR,
+                    )
 
                 self._save_and_rerun()
 
@@ -1972,7 +1979,8 @@ class AmplificationDashboard:
                             {"config_name": config.name, "outputs": result["results"]}
                         ],
                         messages=messages,
-                    ).save(LOGS_DIR)
+                        logs_dir=LOGS_DIR,
+                    )
 
                     st.session_state[pending_key] = {
                         "samples": result["results"],
@@ -2016,7 +2024,8 @@ class AmplificationDashboard:
                         configs=[managed_config],
                         results=[{"config_name": config.name, "outputs": [response]}],
                         messages=messages,
-                    ).save(LOGS_DIR)
+                        logs_dir=LOGS_DIR,
+                    )
 
                     self._save_and_rerun()
 

@@ -474,7 +474,7 @@ def delete_conversation_file(conv_name: str, conversations_dir: Path) -> None:
 @dataclass
 class GenerationLog:
     """
-    Log entry for a generation event.
+    Log entry for a single config's generation.
 
     Stores all information needed to reproduce a generation and provides
     multi-view directory organization (by_prompt, by_config, by_time).
@@ -485,8 +485,8 @@ class GenerationLog:
     prompt_text: str
     prompt_tokens: list[int]
     sampling_params: dict[str, Any]
-    configs: list[dict[str, Any]]  # List of serialized config dicts with compiled_hash
-    results: list[dict[str, Any]]  # List of {config_name, outputs}
+    config: dict[str, Any]  # Serialized config dict with compiled_hash
+    outputs: list[str]  # Output samples for this config
     messages: list[dict[str, str]] | None = None
     template_mode: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
@@ -502,11 +502,12 @@ class GenerationLog:
         results: list[dict[str, Any]],
         messages: list[dict[str, str]] | None = None,
         template_mode: str | None = None,
-    ) -> "GenerationLog":
+        logs_dir: Path | None = None,
+    ) -> list["GenerationLog"]:
         """
-        Factory method to create a GenerationLog from dashboard generation parameters.
+        Factory method to create GenerationLogs from dashboard generation parameters.
 
-        Builds config_dicts with compiled_hash and converts sampling_params to dict.
+        Creates one GenerationLog per config. If logs_dir is provided, saves them directly.
 
         Args:
             generation_type: Type of generation ("multigen", "chat", "continue", "regenerate")
@@ -518,17 +519,11 @@ class GenerationLog:
             results: List of result dicts with "config_name" and "outputs" keys
             messages: Optional list of chat messages
             template_mode: Optional template mode used
+            logs_dir: If provided, saves logs directly to this directory
 
         Returns:
-            GenerationLog instance
+            List of GenerationLog instances (one per config)
         """
-        # Build config dicts with compiled hash
-        config_dicts = []
-        for mc in configs:
-            config_dict = mc.config.to_dict()
-            config_dict["compiled_hash"] = mc.last_compiled_hash or mc.config.config_id
-            config_dicts.append(config_dict)
-
         # Build sampling params dict
         sampling_dict = {
             "temperature": sampling_params.temperature,
@@ -539,33 +534,40 @@ class GenerationLog:
         if hasattr(sampling_params, "seed") and sampling_params.seed is not None:
             sampling_dict["seed"] = sampling_params.seed
 
-        return GenerationLog(
-            generation_type=generation_type,
-            model_id=model_id,
-            prompt_text=prompt_text,
-            prompt_tokens=prompt_tokens,
-            sampling_params=sampling_dict,
-            configs=config_dicts,
-            results=results,
-            messages=messages,
-            template_mode=template_mode,
-        )
+        # Use same timestamp for all logs in this batch
+        timestamp = datetime.now()
+
+        logs = []
+        for mc, result in zip(configs, results):
+            config_dict = mc.config.to_dict()
+            config_dict["compiled_hash"] = mc.last_compiled_hash or mc.config.config_id
+
+            log = GenerationLog(
+                generation_type=generation_type,
+                model_id=model_id,
+                prompt_text=prompt_text,
+                prompt_tokens=prompt_tokens,
+                sampling_params=sampling_dict,
+                config=config_dict,
+                outputs=result["outputs"],
+                messages=messages,
+                template_mode=template_mode,
+                timestamp=timestamp,
+            )
+            logs.append(log)
+
+            if logs_dir is not None:
+                log.save(logs_dir)
+
+        return logs
 
     def _build_summary(self) -> dict[str, Any]:
         """Build the summary section for easy reading."""
-        summary = {}
-        # For multi-config, list all; for single, just the name
-        if len(self.configs) == 1:
-            summary["config"] = self.configs[0]["name"]
-        else:
-            summary["configs"] = [c["name"] for c in self.configs]
-        summary["prompt"] = self.prompt_text
-        # Flatten completions from all configs
-        all_completions = []
-        for result in self.results:
-            all_completions.extend(result["outputs"])
-        summary["completions"] = all_completions
-        return summary
+        return {
+            "config": self.config["name"],
+            "prompt": self.prompt_text,
+            "completions": self.outputs,
+        }
 
     def _compute_prompt_hash(self) -> str:
         """Compute hash of the prompt for directory naming."""
@@ -595,6 +597,14 @@ class GenerationLog:
         timestamp_str = self.timestamp.strftime("%H-%M-%S")
         date_str = self.timestamp.strftime("%Y-%m-%d")
 
+        config_name = self.config["name"]
+        compiled_hash = self.config.get(
+            "compiled_hash", self.config.get("config_id", "unknown")
+        )
+        config_codename = (
+            f"{self._safe_filename(config_name)}-{codenamize_hash(compiled_hash)}"
+        )
+
         # Build the log data in order
         log_data = {
             "timestamp": self.timestamp.isoformat(),
@@ -608,55 +618,34 @@ class GenerationLog:
                 "codename": prompt_codename,
             },
             "sampling_params": self.sampling_params,
-            "configs": self.configs,
-            "results": self.results,
+            "config": self.config,
+            "outputs": self.outputs,
         }
         if self.messages is not None:
             log_data["prompt"]["messages"] = self.messages
         if self.template_mode is not None:
             log_data["prompt"]["template_mode"] = self.template_mode
 
-        # For each config, create the directory structure
-        actual_file_path = None
-        for config in self.configs:
-            config_name = config["name"]
-            compiled_hash = config.get(
-                "compiled_hash", config.get("config_id", "unknown")
-            )
-            config_codename = (
-                f"{self._safe_filename(config_name)}-{codenamize_hash(compiled_hash)}"
-            )
+        # Primary path: by_prompt (actual file)
+        by_prompt_dir = logs_dir / "by_prompt" / prompt_codename / config_codename
+        by_prompt_dir.mkdir(parents=True, exist_ok=True)
+        by_prompt_file = by_prompt_dir / f"{timestamp_str}.yaml"
+        with open(by_prompt_file, "w") as f:
+            dump_yaml_multiline(log_data, f)
 
-            # Primary path: by_prompt
-            by_prompt_dir = logs_dir / "by_prompt" / prompt_codename / config_codename
-            by_prompt_dir.mkdir(parents=True, exist_ok=True)
-            by_prompt_file = by_prompt_dir / f"{timestamp_str}.yaml"
+        # Secondary path: by_config (symlink)
+        by_config_dir = logs_dir / "by_config" / config_codename / prompt_codename
+        by_config_dir.mkdir(parents=True, exist_ok=True)
+        by_config_file = by_config_dir / f"{timestamp_str}.yaml"
+        if not by_config_file.exists():
+            os.symlink(by_prompt_file, by_config_file)
 
-            # Write actual file only once (for first config, or if single config)
-            if actual_file_path is None:
-                with open(by_prompt_file, "w") as f:
-                    dump_yaml_multiline(log_data, f)
-                actual_file_path = by_prompt_file
-            else:
-                # For additional configs, symlink to the first file
-                if not by_prompt_file.exists():
-                    os.symlink(actual_file_path, by_prompt_file)
+        # Tertiary path: by_time (symlink)
+        by_time_dir = logs_dir / "by_time" / date_str
+        by_time_dir.mkdir(parents=True, exist_ok=True)
+        by_time_filename = f"{timestamp_str}_{prompt_codename}_{config_codename}.yaml"
+        by_time_file = by_time_dir / by_time_filename
+        if not by_time_file.exists():
+            os.symlink(by_prompt_file, by_time_file)
 
-            # Secondary path: by_config (symlink)
-            by_config_dir = logs_dir / "by_config" / config_codename / prompt_codename
-            by_config_dir.mkdir(parents=True, exist_ok=True)
-            by_config_file = by_config_dir / f"{timestamp_str}.yaml"
-            if not by_config_file.exists():
-                os.symlink(actual_file_path, by_config_file)
-
-            # Tertiary path: by_time (symlink)
-            by_time_dir = logs_dir / "by_time" / date_str
-            by_time_dir.mkdir(parents=True, exist_ok=True)
-            by_time_filename = (
-                f"{timestamp_str}_{prompt_codename}_{config_codename}.yaml"
-            )
-            by_time_file = by_time_dir / by_time_filename
-            if not by_time_file.exists():
-                os.symlink(actual_file_path, by_time_file)
-
-        return actual_file_path
+        return by_prompt_file
