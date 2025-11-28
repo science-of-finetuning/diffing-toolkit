@@ -26,7 +26,7 @@ visualization:
   top_k_plotting: 6
   figure_width: 18
   figure_height: 9
-  figure_dpi: 800
+  figure_dpi: 400
   num_tokens_to_plot: 100
   
   # Font sizes (all configurable, scales with DPI)
