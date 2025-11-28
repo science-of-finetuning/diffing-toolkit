@@ -14,7 +14,6 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional
 
 from src.utils.visualization import multi_tab_interface
-from src.utils.model import place_inputs
 from .normalization import normalize_token_list
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
@@ -257,26 +256,19 @@ def _render_interactive_heatmap_tab(method):
             # Tokenize
             inputs = method.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
 
-            # Place inputs on correct device
+            # Get logits from both models
             input_ids = inputs["input_ids"]
             attention_mask = inputs["attention_mask"]
 
-            base_batch = place_inputs(input_ids, attention_mask, method.base_model)
-            ft_batch = place_inputs(input_ids, attention_mask, method.finetuned_model)
-
-            # Get logits (NO GRADIENTS)
             with torch.no_grad():
-                base_outputs = method.base_model(
-                    input_ids=base_batch["input_ids"],
-                    attention_mask=base_batch["attention_mask"],
-                )
-                finetuned_outputs = method.finetuned_model(
-                    input_ids=ft_batch["input_ids"],
-                    attention_mask=ft_batch["attention_mask"],
-                )
+                model_inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
+                with method.base_model.trace(model_inputs):
+                    base_logits = method.base_model.logits.save()
+                with method.finetuned_model.trace(model_inputs):
+                    finetuned_logits = method.finetuned_model.logits.save()
 
-            logits1 = base_outputs.logits[0]  # [seq_len, vocab_size]
-            logits2 = finetuned_outputs.logits[0]  # [seq_len, vocab_size]
+            logits1 = base_logits[0]  # [seq_len, vocab_size]
+            logits2 = finetuned_logits[0]  # [seq_len, vocab_size]
 
             # Compute differences and generate data
             sample_data = _prepare_heatmap_data(

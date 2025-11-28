@@ -9,7 +9,7 @@ This module provides persistent storage for maximum activating examples with:
 - Better type safety
 """
 
-from re import T
+#from re import T
 import sqlite3
 import json
 import numpy as np

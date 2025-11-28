@@ -15,7 +15,6 @@ from tqdm import tqdm
 from collections import defaultdict
 
 from ..diffing_method import DiffingMethod
-from src.utils.model import place_inputs
 from src.utils.configs import get_dataset_configurations, DatasetConfig
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
 from src.utils.agents.base_agent import BaseAgent
@@ -162,22 +161,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             attention_mask = torch.tensor(attention_mask_list, dtype=torch.long)
 
             # Get logits from both models (NO GRADIENTS, models already in eval mode)
-            base_batch = place_inputs(input_ids, attention_mask, self.base_model)
-            ft_batch = place_inputs(input_ids, attention_mask, self.finetuned_model)
-
-            base_outputs = self.base_model(
-                input_ids=base_batch["input_ids"],
-                attention_mask=base_batch["attention_mask"],
-            )
-            finetuned_outputs = self.finetuned_model(
-                input_ids=ft_batch["input_ids"],
-                attention_mask=ft_batch["attention_mask"],
-            )
+            inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
+            with self.base_model.trace(inputs):
+                base_logits = self.base_model.logits.save()
+            with self.finetuned_model.trace(inputs):
+                finetuned_logits = self.finetuned_model.logits.save()
 
             # Extract logits [batch_size, seq_len, vocab_size]
-            base_logits = base_outputs.logits
-            finetuned_logits = finetuned_outputs.logits
-
             # Ensure same device
             target_device = base_logits.device
             finetuned_logits = finetuned_logits.to(target_device)
