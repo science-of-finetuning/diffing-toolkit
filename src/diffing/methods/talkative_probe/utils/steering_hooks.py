@@ -3,6 +3,7 @@ from typing import Callable
 
 import torch
 
+
 def get_vllm_steering_hook(
     vectors: list[torch.Tensor],
     positions: list[int],
@@ -44,9 +45,9 @@ def get_vllm_steering_hook(
         for prompt_length in prompt_lengths:
             expected_position_indices_L = torch.arange(prompt_length, device=device)
             try:
-                assert tokens_L[count : count + prompt_length].equal(expected_position_indices_L), (
-                    f"Position indices mismatch at index {count}, expected {expected_position_indices_L}, got {tokens_L[count : count + prompt_length]}"
-                )
+                assert tokens_L[count : count + prompt_length].equal(
+                    expected_position_indices_L
+                ), f"Position indices mismatch at index {count}, expected {expected_position_indices_L}, got {tokens_L[count : count + prompt_length]}"
             except AssertionError as e:
                 raise e
 
@@ -146,13 +147,17 @@ def get_hf_activation_steering_hook(
     """
 
     # ---- move inputs to device and prepare ragged tensors ----
-    assert len(vectors) == len(positions), "vectors and positions must have same batch length"
+    assert len(vectors) == len(
+        positions
+    ), "vectors and positions must have same batch length"
     B = len(vectors)
     if B == 0:
         raise ValueError("Empty batch")
 
     # Pre-normalize once; we never backprop through these
-    normed_list = [torch.nn.functional.normalize(v_b, dim=-1).detach() for v_b in vectors]
+    normed_list = [
+        torch.nn.functional.normalize(v_b, dim=-1).detach() for v_b in vectors
+    ]
 
     def hook_fn(module, _input, output):
         # Normalize output API across model families
@@ -165,7 +170,9 @@ def get_hf_activation_steering_hook(
 
         B_actual, L, d_model_actual = resid_BLD.shape
         if B_actual != B:
-            raise ValueError(f"Batch mismatch: module B={B_actual}, provided vectors B={B}")
+            raise ValueError(
+                f"Batch mismatch: module B={B_actual}, provided vectors B={B}"
+            )
 
         # Only touch the prompt forward pass
         if L <= 1:
@@ -183,10 +190,14 @@ def get_hf_activation_steering_hook(
 
             if b == 0:
                 if norms_K1.max() > 300:
-                    print(f"\n\n\n\n\nWARNING: Large norm detected in batch! {norms_K1}\n\n\n\n\n")
+                    print(
+                        f"\n\n\n\n\nWARNING: Large norm detected in batch! {norms_K1}\n\n\n\n\n"
+                    )
 
             # Build steered vectors for this b
-            steered_KD = (normed_list[b] *  norms_K1 * steering_coefficient).to(dtype)  # (K_b, d)
+            steered_KD = (normed_list[b] * norms_K1 * steering_coefficient).to(
+                dtype
+            )  # (K_b, d)
 
             resid_BLD[b, pos_b, :] = steered_KD.detach() + orig_KD
 

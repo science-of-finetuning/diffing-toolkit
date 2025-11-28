@@ -3,7 +3,10 @@ from pathlib import Path
 from loguru import logger
 import torch
 
-from src.utils.model import batched_multi_patch_scope, gc_collect_cuda_cache
+from src.utils.model import (
+    patchscope_lens,
+    gc_collect_cuda_cache,
+)
 from src.utils.graders.patch_scope_grader import PatchScopeGrader
 
 
@@ -36,12 +39,12 @@ def run_auto_patch_scope_for_position(
 
     scale_tokens: List[Tuple[float, List[str]]] = []
     scale_token_probs: Dict[float, List[float]] = {}
-    pos_probs_batched, _ = batched_multi_patch_scope(
+    pos_probs_batched, _ = patchscope_lens(
         latent=latent,
         model=model,
-        tokenizer=tokenizer,
         layer=layer,
         scales=[float(s) for s in scales],
+        id_prompt_targets=None,
         top_k=intersection_top_k,
     )
     assert pos_probs_batched.ndim == 2 and pos_probs_batched.shape[0] == len(scales)
@@ -115,10 +118,13 @@ def save_auto_patch_scope_variants(
 
     If use_normalized is True, each latent is rescaled to have L2 norm == target_norm.
     """
-    aps_path = out_dir / f"auto_patch_scope_pos_{label}.pt"
-    base_aps_path = out_dir / f"base_auto_patch_scope_pos_{label}.pt"
-    ft_aps_path = out_dir / f"ft_auto_patch_scope_pos_{label}.pt"
-    logger.info(f"Running auto_patch_scope for position {label} with layer {layer}")
+    grader_llm_name = grader_cfg["model_id"].replace("/", "_")
+    aps_path = out_dir / f"auto_patch_scope_pos_{label}_{grader_llm_name}.pt"
+    base_aps_path = out_dir / f"base_auto_patch_scope_pos_{label}_{grader_llm_name}.pt"
+    ft_aps_path = out_dir / f"ft_auto_patch_scope_pos_{label}_{grader_llm_name}.pt"
+    logger.info(
+        f"Running auto_patch_scope ({grader_llm_name}) for position {label} with layer {layer}"
+    )
 
     def _maybe_scale(x: torch.Tensor) -> torch.Tensor:
         if not use_normalized:

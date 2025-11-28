@@ -1,0 +1,10 @@
+# @package diffing.method
+name: weight_amplification
+requires_preprocessing: false
+
+datasets:
+  use_chat_dataset: false
+  use_pretraining_dataset: false
+  use_training_dataset: false
+
+overwrite: false

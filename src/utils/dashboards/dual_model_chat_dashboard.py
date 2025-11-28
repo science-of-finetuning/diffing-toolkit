@@ -21,7 +21,7 @@ class DualModelChatDashboard:
             "send_target": f"{method_key}_send_target",
             "use_chat": f"{method_key}_use_chat",
             "temperature": f"{method_key}_temperature",
-            "max_length": f"{method_key}_max_length",
+            "max_new_tokens": f"{method_key}_max_new_tokens",
             "do_sample": f"{method_key}_do_sample",
             "thinking": f"{method_key}_enable_thinking",
             "fingerprint": f"{method_key}_fingerprint",
@@ -198,8 +198,8 @@ class DualModelChatDashboard:
             st.session_state[keys["use_chat"]] = True
         if keys["temperature"] not in st.session_state:
             st.session_state[keys["temperature"]] = 1.0
-        if keys["max_length"] not in st.session_state:
-            st.session_state[keys["max_length"]] = 200
+        if keys["max_new_tokens"] not in st.session_state:
+            st.session_state[keys["max_new_tokens"]] = 200
         if keys["do_sample"] not in st.session_state:
             st.session_state[keys["do_sample"]] = True
         if keys["thinking"] not in st.session_state:
@@ -232,12 +232,12 @@ class DualModelChatDashboard:
                     key=keys["temperature"],
                 )
             with cols[2]:
-                max_length = st.slider(
-                    "Max Length",
+                max_new_tokens = st.slider(
+                    "Max New Tokens",
                     min_value=10,
                     max_value=500,
-                    value=st.session_state[keys["max_length"]],
-                    key=keys["max_length"],
+                    value=st.session_state[keys["max_new_tokens"]],
+                    key=keys["max_new_tokens"],
                 )
             with cols[3]:
                 do_sample = st.checkbox(
@@ -301,7 +301,7 @@ class DualModelChatDashboard:
             enable_thinking = bool(st.session_state[keys["thinking"]])
             use_chat_formatting = bool(st.session_state[keys["use_chat"]])
             temperature = float(st.session_state[keys["temperature"]])
-            max_length = int(st.session_state[keys["max_length"]])
+            max_new_tokens = int(st.session_state[keys["max_new_tokens"]])
             do_sample = bool(st.session_state[keys["do_sample"]])
 
             send_target = st.session_state[keys["send_target"]]
@@ -320,7 +320,7 @@ class DualModelChatDashboard:
                     reply_base = self.method.generate_text(
                         prompt=prompt_base,
                         model_type="base",
-                        max_length=max_length,
+                        max_new_tokens=max_new_tokens,
                         temperature=temperature,
                         do_sample=do_sample,
                     )
@@ -343,7 +343,7 @@ class DualModelChatDashboard:
                     reply_ft = self.method.generate_text(
                         prompt=prompt_ft,
                         model_type="finetuned",
-                        max_length=max_length,
+                        max_new_tokens=max_new_tokens,
                         temperature=temperature,
                         do_sample=do_sample,
                     )

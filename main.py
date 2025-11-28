@@ -13,6 +13,7 @@ from loguru import logger
 
 from src.pipeline.diffing_pipeline import DiffingPipeline
 from src.pipeline.evaluation_pipeline import EvaluationPipeline
+from src.utils.configs import CONFIGS_DIR
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -61,7 +62,9 @@ def run_preprocessing_pipeline(cfg: DictConfig) -> None:
     from src.pipeline.preprocessing import PreprocessingPipeline
 
     if not cfg.diffing.method.requires_preprocessing:
-        logger.info("Skipping preprocessing pipeline because method does not require preprocessing")
+        logger.info(
+            "Skipping preprocessing pipeline because method does not require preprocessing"
+        )
         return
 
     pipeline = PreprocessingPipeline(cfg)
@@ -81,6 +84,7 @@ def run_diffing_pipeline(cfg: DictConfig) -> None:
 
     logger.info("Diffing pipeline completed successfully")
 
+
 def run_evaluation_pipeline(cfg: DictConfig) -> None:
     """Run the evaluation pipeline."""
     logger.info("Starting evaluation pipeline...")
@@ -91,7 +95,7 @@ def run_evaluation_pipeline(cfg: DictConfig) -> None:
     logger.info("Evaluation pipeline completed successfully")
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra.main(version_base=None, config_path=str(CONFIGS_DIR), config_name="config")
 def main(cfg: DictConfig) -> None:
     """Main function that orchestrates the entire pipeline."""
     hydra_loguru_init()

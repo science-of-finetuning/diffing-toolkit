@@ -9,7 +9,7 @@ datasets:
   # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
 
 max_samples: 10000
-n: 10
+n: 128
 batch_size: 32
 num_workers: 8
 split: train
@@ -37,12 +37,12 @@ logit_lens:
 auto_patch_scope:
   overwrite: false
   enabled: true
-  # intersection top-k across prompts inside multi_patch_scope
+  # intersection top-k across prompts inside patchscope_lens
   intersection_top_k: 16384
   # number of tokens to keep per scale (and to store)
   tokens_k: 20
   # compute also with unit-normalized latent vectors
-  use_normalized: true # normalize to have same norm as patch scope model
+  use_normalized: true # normalize to have same norm as Patchscope model
   # Tasks specify which dataset/layer/positions to run auto_patch_scope for.
   # Layers are RELATIVE [0.0, 1.0]. Positions refer to the displayed labels
   # (e.g., 0..n-1 for non-chat; may include negatives for chat pre-assistant).
@@ -120,7 +120,8 @@ token_relevance:
   k_candidate_tokens: 20
 
 causal_effect:
-  enabled: false
+  overwrite: false
+  enabled: true
   # Evaluate on organism.training_dataset split
   split: train
   batch_size: 2
@@ -128,24 +129,32 @@ causal_effect:
   zero_ablate: false
   max_total_tokens: 1024
   after_k: 20
-  num_random_vectors: 50
+  num_random_vectors: 64
+  num_random_diff_vectors: 64
+  # When true, replace finetuned tokenizer <pad> ids with base model EOS ids
+  # in inputs sent to the base model to avoid out-of-range gathers.
+  replace_pad_token_with_eos_for_base: false
   # Tasks: relative layer in [0,1] and displayed-label positions
   tasks:
     - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
       eval_dataset: training # This will use the (finetuning) training dataset
       layer: 0.5
-      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8] # 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
     - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
       eval_dataset: science-of-finetuning/fineweb-1m-sample
       eval_dataset_is_chat: false
       layer: 0.5
-      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
-
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8] # 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
+    - diff_source_dataset: science-of-finetuning/fineweb-1m-sample
+      eval_dataset: science-of-finetuning/tulu-3-sft-olmo-2-mixture
+      eval_dataset_is_chat: true
+      layer: 0.5
+      positions: [0, 1, 2, 3, 4, 5, 6, 7, 8] # 9, 10, 11, 12, 13, 14, 15, 31, 63, 127]
 agent:
   overview:
     datasets: []              # [] → autodiscover from results
     layers: [0.5]            # relative layers; default middle
-    top_k_tokens: 10         # for logit lens and patch scope
+    top_k_tokens: 10         # for logit lens and Patchscope
     steering_samples_per_prompt: 1
     max_sample_chars: 128
     positions: [0, 1, 2, 3, 4]

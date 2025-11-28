@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Tuple, Literal, Dict
 from collections import Counter
 
 import asyncio
-from openai import OpenAI, AsyncOpenAI
 import re
+
+from src.utils.graders.grader import Grader
 
 
 Label = Literal["RELEVANT", "IRRELEVANT", "UNKNOWN"]
@@ -162,8 +161,7 @@ def _parse_indexed_labels(text: str, num_candidates: int) -> List[Label]:
     return out
 
 
-@dataclass(frozen=True)
-class TokenRelevanceGrader:
+class TokenRelevanceGrader(Grader):
     """Grades whether a token is relevant to a finetune description.
 
     Usage:
@@ -171,39 +169,39 @@ class TokenRelevanceGrader:
         label = grader.grade_once(description, frequent_tokens, candidate_token)
     """
 
-    grader_model_id: str
-    base_url: str = "https://openrouter.ai/api/v1"
-    api_key_path: str = "openrouter_api_key.txt"
+    def __init__(
+        self,
+        grader_model_id: str,
+        base_url: str = "https://openrouter.ai/api/v1",
+        api_key_path: str = "openrouter_api_key.txt",
+        max_retries: int = 3,
+    ):
+        """Initialize TokenRelevanceGrader with model and API configuration.
 
-    def __post_init__(self) -> None:  # type: ignore[override]
-        assert (
-            isinstance(self.grader_model_id, str)
-            and len(self.grader_model_id.strip()) > 0
+        Args:
+            grader_model_id: Model identifier for the grading LLM
+            base_url: API base URL
+            api_key_path: Path to API key file
+            max_retries: Maximum number of retry attempts for API calls
+        """
+        super().__init__(
+            grader_model_id=grader_model_id,
+            base_url=base_url,
+            api_key_file=api_key_path,
+            api_key_env_var="OPENROUTER_API_KEY",
+            max_retries=max_retries,
         )
-        assert isinstance(self.base_url, str) and self.base_url.startswith("http")
-        assert isinstance(self.api_key_path, str) and len(self.api_key_path.strip()) > 0
 
-        key_path = Path(self.api_key_path)
-        assert key_path.exists() and key_path.is_file()
-        api_key = key_path.read_text(encoding="utf-8").strip()
-        assert len(api_key) > 0
+    # --- Multi-token grading with UNKNOWN retry pattern -----------------------
 
-        object.__setattr__(
-            self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
-        )
-        object.__setattr__(
-            self, "_aclient", AsyncOpenAI(base_url=self.base_url, api_key=api_key)
-        )
-
-    # --- New single entrypoints with permutation support -----------------------
-
-    def _call_many_sync(
+    async def _call_many(
         self,
         description: str,
         frequent_tokens: List[str],
         candidate_tokens: List[str],
         max_tokens: int,
     ) -> Tuple[List[Label], str]:
+        """Grade multiple tokens at once. Retries with temperature=0 if any UNKNOWN."""
         assert isinstance(description, str) and len(description.strip()) > 0
         assert isinstance(frequent_tokens, list)
         for tok in frequent_tokens:
@@ -212,96 +210,39 @@ class TokenRelevanceGrader:
         for tok in candidate_tokens:
             assert isinstance(tok, str) and len(tok) > 0
 
+        # Build prompt and messages
         user_prompt = _build_user_prompt_many(
             description, frequent_tokens, candidate_tokens
         )
-        messages = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT_MANY,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                ],
-            },
-            {"role": "user", "content": user_prompt},
-        ]
+        messages = self._build_messages(SYSTEM_PROMPT_MANY, user_prompt)
 
-        completion = self._client.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=max_tokens,
-        )
-        content = completion.choices[0].message.content or ""
-        labels = _parse_indexed_labels(content, len(candidate_tokens))
-        if all(label_value != "UNKNOWN" for label_value in labels):
-            return labels, content
-        completion_retry = self._client.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0,
+        # First attempt - use base class retry logic
+        best_out = None
+        best_num_unknown = float("inf")
+        for _ in range(self.max_retries):
+            completion = await self._call_with_retry(messages, max_tokens)
+            content = completion.choices[0].message.content or ""
+            labels = _parse_indexed_labels(content, len(candidate_tokens))
+            num_unknown = sum(label_value == "UNKNOWN" for label_value in labels)
+            if num_unknown == 0:
+                return labels, content
+            elif num_unknown < best_num_unknown:
+                best_out = (labels, content)
+                best_num_unknown = num_unknown
+
+        # Retry with temperature=0 if any UNKNOWN
+        completion_retry = await self._call_with_retry(
+            messages, max_tokens, temperature=0
         )
         content_retry = completion_retry.choices[0].message.content or ""
-        return (
-            _parse_indexed_labels(content_retry, len(candidate_tokens)),
-            content_retry,
-        )
-
-    async def _call_many_async(
-        self,
-        description: str,
-        frequent_tokens: List[str],
-        candidate_tokens: List[str],
-        max_tokens: int,
-    ) -> Tuple[List[Label], str]:
-        assert isinstance(description, str) and len(description.strip()) > 0
-        assert isinstance(frequent_tokens, list)
-        for tok in frequent_tokens:
-            assert isinstance(tok, str) and len(tok) > 0
-        assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
-        for tok in candidate_tokens:
-            assert isinstance(tok, str) and len(tok) > 0
-
-        user_prompt = _build_user_prompt_many(
-            description, frequent_tokens, candidate_tokens
-        )
-        messages = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT_MANY,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                ],
-            },
-            {"role": "user", "content": user_prompt},
-        ]
-
-        completion = await self._aclient.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=max_tokens,
-        )
-        content = completion.choices[0].message.content or ""
-        labels = _parse_indexed_labels(content, len(candidate_tokens))
-        if all(label_value != "UNKNOWN" for label_value in labels):
-            return labels, content
-        completion_retry = await self._aclient.chat.completions.create(
-            model=self.grader_model_id,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0,
-        )
-        content_retry = completion_retry.choices[0].message.content or ""
-        return (
-            _parse_indexed_labels(content_retry, len(candidate_tokens)),
-            content_retry,
-        )
+        labels_retry = _parse_indexed_labels(content_retry, len(candidate_tokens))
+        if (
+            sum(label_value == "UNKNOWN" for label_value in labels_retry)
+            <= best_num_unknown
+        ):
+            return labels_retry, content_retry
+        else:
+            return best_out
 
     @staticmethod
     def _rotated_indices(length: int, shift: int) -> List[int]:
@@ -378,7 +319,7 @@ class TokenRelevanceGrader:
 
             async def _runner() -> List[Tuple[List[Label], str]]:
                 tasks = [
-                    self._call_many_async(
+                    self._call_many(
                         description, frequent_tokens, perm_tokens, max_tokens
                     )
                     for _, perm_tokens in permuted_inputs
@@ -389,8 +330,10 @@ class TokenRelevanceGrader:
             results = asyncio.run(_runner())
         else:
             results = [
-                self._call_many_sync(
-                    description, frequent_tokens, perm_tokens, max_tokens
+                asyncio.run(
+                    self._call_many(
+                        description, frequent_tokens, perm_tokens, max_tokens
+                    )
                 )
                 for _, perm_tokens in permuted_inputs
             ]
@@ -434,7 +377,7 @@ class TokenRelevanceGrader:
             permuted_inputs.append((idxs, [candidate_tokens[i] for i in idxs]))
 
         tasks = [
-            self._call_many_async(description, frequent_tokens, perm_tokens, max_tokens)
+            self._call_many(description, frequent_tokens, perm_tokens, max_tokens)
             for _, perm_tokens in permuted_inputs
         ]
         results = await asyncio.gather(*tasks)

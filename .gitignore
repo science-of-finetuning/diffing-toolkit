@@ -1,9 +1,13 @@
+CLAUDE.md
+.compiled_adapters
 .runinstructions
 playground.ipynb
 test.py
 run.sh
+junk*
 openrouter_api_key.txt
-
+.streamlit_cache/
+.old_configs/*
 run/sweep*
 results/*   
 data/raw/*
@@ -16,8 +20,10 @@ __pycache__/
 
 slurm/*
 *.pkl
-narrow_ft_experiments/hibayes/data/*
+narrow_ft_experiments/hibayes/*/data/*
 narrow_ft_experiments/hibayes/*.pdf
+narrow_ft_experiments/hibayes/*/*.pdf
+narrow_ft_experiments/hibayes/*/*.tex
 *.code-workspace
 
 **/_archive/*

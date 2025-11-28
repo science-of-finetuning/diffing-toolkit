@@ -121,23 +121,25 @@ def _load_patchscope_tokens(
     layer_index: int,
     position_index: int,
     variant: str,
+    grader_llm_name: str,
 ) -> Tuple[List[str], List[str], List[float]]:
     """Load tokens from auto_patch_scope artifacts.
+
 
     Returns (tokens_at_best_scale, selected_tokens).
     """
     dataset_dir_name = dataset_id.split("/")[-1]
     if variant == "difference":
-        filename = f"auto_patch_scope_pos_{position_index}.pt"
+        filename = f"auto_patch_scope_pos_{position_index}_{grader_llm_name}.pt"
     elif variant == "base":
-        filename = f"base_auto_patch_scope_pos_{position_index}.pt"
+        filename = f"base_auto_patch_scope_pos_{position_index}_{grader_llm_name}.pt"
     elif variant == "ft":
-        filename = f"ft_auto_patch_scope_pos_{position_index}.pt"
+        filename = f"ft_auto_patch_scope_pos_{position_index}_{grader_llm_name}.pt"
     else:
         assert False, f"Unknown variant: {variant}"
 
     aps_path = results_dir / f"layer_{layer_index}" / dataset_dir_name / filename
-    assert aps_path.exists(), f"Auto patch scope cache not found: {aps_path}"
+    assert aps_path.exists(), f"Auto patchscope cache not found: {aps_path}"
     rec: Dict[str, Any] = torch.load(aps_path, map_location="cpu")
     assert (
         "tokens_at_best_scale" in rec
@@ -255,12 +257,18 @@ def run_token_relevance(method: Any) -> None:
     self_description: str = str(organism_cfg.description_long)
     assert len(self_description.strip()) > 0
 
-    has_training_dataset = hasattr(organism_cfg, "training_dataset") and (
-        organism_cfg.training_dataset is not None
+    # Get training dataset from organism config
+    has_training_dataset = (
+        hasattr(organism_cfg, "dataset") and organism_cfg.dataset is not None
     )
+    finetune_ds = organism_cfg.dataset if has_training_dataset else None
 
     # Grader
     grader_cfg = cfg.grader
+    grader_llm_name = grader_cfg.model_id.replace("/", "_")
+    patchscope_grader_llm_name = (
+        method.cfg.diffing.method.auto_patch_scope.grader.model_id.replace("/", "_")
+    )
     grader = TokenRelevanceGrader(
         grader_model_id=str(grader_cfg.model_id),
         base_url=str(grader_cfg.base_url),
@@ -282,7 +290,6 @@ def run_token_relevance(method: Any) -> None:
     # Each tuple: (label, description, frequent_tokens)
     # Main organism (self)
     if has_training_dataset:
-        finetune_ds = organism_cfg.training_dataset
         assert "id" in finetune_ds
         self_finetune_dataset_id: str = str(finetune_ds["id"])  # type: ignore[index]
         self_splits: List[str] = list(finetune_ds["splits"])  # type: ignore[index]
@@ -321,11 +328,8 @@ def run_token_relevance(method: Any) -> None:
                 "description_long" in org_cfg_dict
             ), f"Missing description_long in {org_path}"
             baseline_desc: str = str(org_cfg_dict["description_long"])  # type: ignore[index]
-            if (
-                "training_dataset" in org_cfg_dict
-                and org_cfg_dict["training_dataset"] is not None
-            ):
-                ds_info = org_cfg_dict["training_dataset"]  # type: ignore[index]
+            if "dataset" in org_cfg_dict and org_cfg_dict["dataset"] is not None:
+                ds_info = org_cfg_dict["dataset"]  # type: ignore[index]
                 assert isinstance(ds_info, dict)
                 assert "id" in ds_info and "splits" in ds_info and "is_chat" in ds_info
                 baseline_ds_id: str = str(ds_info["id"])  # type: ignore[index]
@@ -402,7 +406,7 @@ def run_token_relevance(method: Any) -> None:
                             / variant
                         )
                     out_dir.mkdir(parents=True, exist_ok=True)
-                    rel_path = out_dir / f"relevance_{source}.json"
+                    rel_path = out_dir / f"relevance_{source}_{grader_llm_name}.json"
 
                     # Skip if results exist and overwrite is False
                     if (not overwrite) and rel_path.exists():
@@ -431,6 +435,7 @@ def run_token_relevance(method: Any) -> None:
                                 abs_layer,
                                 pos,
                                 variant,
+                                patchscope_grader_llm_name,
                             )
                         )
                     assert (

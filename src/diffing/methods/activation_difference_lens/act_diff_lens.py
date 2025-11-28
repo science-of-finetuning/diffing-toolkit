@@ -1,14 +1,15 @@
 from typing import List, Dict, Any, Tuple
-import torch
-from tqdm import tqdm
-from loguru import logger
-from datasets import load_dataset
-from nnsight import NNsight
-from omegaconf import DictConfig
 from pathlib import Path
 import json
 from collections import defaultdict
 import gc
+import torch
+from tqdm import tqdm
+from loguru import logger
+from datasets import load_dataset
+from omegaconf import DictConfig
+from nnterp import StandardizedTransformer
+
 
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.utils.activations import get_layer_indices
@@ -18,7 +19,6 @@ from .ui import visualize
 from .steering import run_steering
 from .token_relevance import run_token_relevance
 from .util import norms_path, is_layer_complete
-from src.utils.model import get_layers_from_nn_model, resolve_output
 from .causal_effect import run_causal_effect
 from .agents import ADLAgent, ADLBlackboxAgent
 from src.utils.agents.base_agent import BaseAgent
@@ -212,7 +212,7 @@ def extract_first_n_tokens_from_sequences(
 
 @torch.no_grad()
 def extract_first_n_tokens_activations(
-    model: torch.nn.Module,
+    model: StandardizedTransformer,
     first_n_tokens: List[List[int]],
     layers: List[int],
     batch_size: int = 8,
@@ -233,7 +233,9 @@ def extract_first_n_tokens_activations(
     logger.info(f"Extracting first n={n} tokens activations from layers {layers}...")
 
     model.eval()
-    nn_model = NNsight(model)
+    # TODO?: moove to nnterp or make a fix upstream for nnsight to avoid having to do this check
+    if not model.dispatched:
+        model.dispatch()
     # Get model device for tensor operations
     model_device = next(model.parameters()).device
     logger.info(f"Model device: {model_device}")
@@ -255,11 +257,11 @@ def extract_first_n_tokens_activations(
 
         # Extract activations using nnsight for all layers
         layer_outputs = {}
-        with nn_model.trace(batch_input_ids):
+        with model.trace(
+            batch_input_ids
+        ):  # TODO: replace with caching once working with nnterp
             for layer in layers:
-                layer_outputs[layer] = resolve_output(
-                    get_layers_from_nn_model(nn_model)[layer].output
-                ).save()
+                layer_outputs[layer] = model.layers_output[layer].save()
 
         # Store activations for each layer
         for layer in layers:
@@ -286,7 +288,7 @@ def extract_first_n_tokens_activations(
 
 @torch.no_grad()
 def extract_selected_positions_activations(
-    model: torch.nn.Module,
+    model: StandardizedTransformer,
     samples: List[Dict[str, Any]],
     layers: List[int],
     batch_size: int,
@@ -302,7 +304,6 @@ def extract_selected_positions_activations(
     assert num_positions > 0
 
     model.eval()
-    nn_model = NNsight(model)
 
     all_activations: Dict[int, List[torch.Tensor]] = {layer: [] for layer in layers}
 
@@ -338,12 +339,10 @@ def extract_selected_positions_activations(
         batch_arange = torch.arange(len(batch), device=model.device).view(-1, 1)
 
         # Trace and directly save only the gathered activations at the desired positions
-        with nn_model.trace(batch_input_ids, attention_mask=attention_mask):
+        with model.trace(batch_input_ids, attention_mask=attention_mask):
             layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
-                hidden = resolve_output(
-                    get_layers_from_nn_model(nn_model)[layer].output
-                )  # [B, L, D]
+                hidden = model.layers_output[layer].save()  # [B, L, D]
                 selected = hidden[batch_arange, pos_index, :].clone()  # [B, P, D]
                 # Save directly to CPU to minimize GPU residency of saved tensors
                 layer_outputs[layer] = selected.to("cpu", non_blocking=True).save()
@@ -459,10 +458,10 @@ class ActDiffLens(DiffingMethod):
 
             assert (
                 base_acts_truncated.shape[1] != 0
-            ), f"Base model activations have 0 positions, increase n or decrease skip_tokens"
+            ), "Base model activations have 0 positions, increase n or decrease skip_tokens"
             assert (
                 ft_acts_truncated.shape[1] != 0
-            ), f"Fine-tuned model activations have 0 positions, increase n or decrease skip_tokens"
+            ), "Fine-tuned model activations have 0 positions, increase n or decrease skip_tokens"
 
             base_norms_per_pos = torch.norm(
                 base_acts_truncated.to(torch.float32), dim=2
@@ -824,7 +823,7 @@ class ActDiffLens(DiffingMethod):
             out_dir.mkdir(parents=True, exist_ok=True)
             self._cache_logit_lens_for_layer(out_dir, position_labels)
 
-        # Run auto patch scope for each layer
+        # Run auto Patchscope for each layer
         for layer in run_layers:
             out_dir = self.results_dir / f"layer_{layer}" / dataset_id.split("/")[-1]
             self._run_auto_patch_scope_for_layer(

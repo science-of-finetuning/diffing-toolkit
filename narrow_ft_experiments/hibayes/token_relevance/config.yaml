@@ -1,0 +1,65 @@
+model:
+  models:
+    - name: ordered_logistic_model
+      config:
+        tag: token_relevance_grader_effects
+        main_effects: ["grader_model_id"]
+        num_classes: 2  # binary: 0 = IRRELEVANT, 1 = RELEVANT
+        effect_coding_for_main_effects: true
+    - name: ordered_logistic_model
+      config:
+        tag: token_relevance_model_organism_type_variant_source_effects
+        main_effects: ["grader_model_id", "model", "organism_type", "variant", "source"]
+        num_classes: 2  # binary: 0 = IRRELEVANT, 1 = RELEVANT
+        effect_coding_for_main_effects: true
+    - name: ordered_logistic_model
+      config:
+        tag: token_relevance_model_organism_type_variant_source_position_effects
+        main_effects: ["grader_model_id", "model", "organism_type", "variant", "source", "position"]
+        num_classes: 2  # binary: 0 = IRRELEVANT, 1 = RELEVANT
+        effect_coding_for_main_effects: true
+
+
+
+
+data_process:
+  processors:
+    - extract_observed_feature: {feature_name: score}
+    - extract_features:
+        categorical_features:
+          [
+            model,
+            organism,
+            organism_type,
+            layer,
+            dataset_dir,
+            position,
+            variant,
+            source,
+            grader_model_id,
+            token_index,
+            datapoint_id,
+          ]
+
+
+check:
+  checkers:
+    - divergences
+    - r_hat
+    - ess_bulk
+    - ess_tail
+    - waic
+
+
+communicate:
+  path: narrow_ft_experiments/hibayes/token_relevance/custom.py
+  communicators:
+    - model_comparison_plot: {ic: waic}
+    - model_comparison_plot: {ic: loo}
+    - forest_plot_custom:
+        {best_model: true, vertical_line: 0, vars: ["grader_model_id_effects"], combined: true}
+    - forest_plot_custom:
+        {best_model: true, vertical_line: 0, vars: ["grader_model_id_effects", "model_effects", "organism_type_effects", "variant_effects", "source_effects"], combined: true}
+
+
+

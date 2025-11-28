@@ -176,6 +176,7 @@ def _extract_tool_call(text: str) -> tuple[str, Dict[str, Any]] | None:
     assert isinstance(call_args, dict), "CALL(...) JSON args must parse to an object"
     return tool_name_part, call_args
 
+
 @dataclass
 class BaseAgent(ABC):
     cfg: Any
@@ -218,10 +219,10 @@ class BaseAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
+    def get_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
         raise NotImplementedError
 
-    def build_first_user_message(self, method: "DiffingMethod") -> str:
+    def build_first_user_message(self, method: Any) -> str:
         return ""
 
     def get_pre_tool_cost(self, tool_name: str, call_args: Dict[str, Any]) -> int:
@@ -235,7 +236,10 @@ class BaseAgent(ABC):
         return 0
 
     def run(
-        self, tool_context: Any, model_interaction_budget: int, return_stats: bool = False
+        self,
+        tool_context: Any,
+        model_interaction_budget: int,
+        return_stats: bool = False,
     ) -> str | tuple[str, Dict[str, Any]]:
         logger.info("Starting BaseAgent.run()")
 
@@ -443,4 +447,3 @@ class BaseAgent(ABC):
                     + MEMOS,
                 }
             )
-

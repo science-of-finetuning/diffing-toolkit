@@ -22,6 +22,9 @@ use_font("Noto Serif CJK SC")
 # Absolute path to the Hydra config file
 CONFIG_PATH = "configs/config.yaml"
 
+# Steering grader model suffix used in directory names
+STEERING_GRADER_SUFFIX = "openai_gpt-5-nano"
+
 
 def _results_root_from_cfg(cfg) -> Path:
     root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
@@ -70,7 +73,9 @@ def _find_any_steering_generations(results_root: Path) -> Tuple[int, Path, int, 
             ):
                 gen_path = pos_dir / "generations.jsonl"
                 if gen_path.exists() and gen_path.is_file():
-                    pos = int(pos_dir.name.split("_")[-1])
+                    parts = pos_dir.name.split("_")
+                    assert len(parts) >= 2 and parts[0] == "position"
+                    pos = int(parts[1])
                     return layer_idx, ds_dir, pos, gen_path
     assert False, f"No steering generations found under {results_root}"
 
@@ -352,18 +357,18 @@ def _load_patchscope_and_relevance(
 ) -> Tuple[List[str], List[float], List[str], Optional[List[str]]]:
     """Return (tokens, probs, labels, selected_tokens) from APS and token relevance.
 
-    - tokens/probs come from auto_patch_scope_pos_{pos}.pt (difference variant)
-    - labels come from token_relevance/.../relevance_patchscope.json (if present)
+    - tokens/probs come from auto_patch_scope_pos_{pos}_openai_gpt-5-mini.pt (difference variant)
+    - labels come from token_relevance/.../relevance_patchscope_openai_gpt-5-mini.json (if present)
     - selected_tokens (from APS) returned for optional display
     """
     ds_dir_name = dataset_dir.name
 
-    # Auto Patch Scope outputs
+    # Auto Patchscope outputs
     aps_file = (
         results_root
         / f"layer_{layer_index}"
         / ds_dir_name
-        / f"auto_patch_scope_pos_{position_index}.pt"
+        / f"auto_patch_scope_pos_{position_index}_openai_gpt-5-mini.pt"
     )
     assert aps_file.exists(), f"auto_patch_scope file not found: {aps_file}"
     data = None
@@ -390,7 +395,7 @@ def _load_patchscope_and_relevance(
         / f"position_{position_index}"
         / variant
     )
-    tr_path = tr_dir / "relevance_patchscope.json"
+    tr_path = tr_dir / "relevance_patchscope_openai_gpt-5-mini.json"
     labels: List[str] = []
     if tr_path.exists():
         rec = json.loads(tr_path.read_text(encoding="utf-8"))
@@ -471,7 +476,11 @@ def visualize_steering_and_patchscope(
         ds_dir = _select_dataset_dir(
             results_root, int(layer_index), dataset_dir_name, cfg
         )
-        steering_dir = ds_dir / "steering" / f"position_{int(position_index)}"
+        steering_dir = (
+            ds_dir
+            / "steering"
+            / f"position_{int(position_index)}_{STEERING_GRADER_SUFFIX}"
+        )
         generations_path = steering_dir / "generations.jsonl"
         assert (
             generations_path.exists()

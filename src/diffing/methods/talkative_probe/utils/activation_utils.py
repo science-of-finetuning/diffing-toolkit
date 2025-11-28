@@ -69,12 +69,16 @@ def collect_activations_multiple_layers(
     max_offset: int | None,
 ) -> dict[int, torch.Tensor]:
     if min_offset is not None:
-        assert max_offset is not None, "max_offset must be provided if min_offset is provided"
+        assert (
+            max_offset is not None
+        ), "max_offset must be provided if min_offset is provided"
         assert max_offset < min_offset, "max_offset must be less than min_offset"
         assert min_offset < 0, "min_offset must be less than 0"
         assert max_offset < 0, "max_offset must be less than 0"
     else:
-        assert max_offset is None, "max_offset must be provided if min_offset is not provided"
+        assert (
+            max_offset is None
+        ), "max_offset must be provided if min_offset is not provided"
 
     activations_BLD_by_layer = {}
 
@@ -91,7 +95,9 @@ def collect_activations_multiple_layers(
             activations_BLD_by_layer[layer] = outputs
 
         if min_offset is not None:
-            activations_BLD_by_layer[layer] = activations_BLD_by_layer[layer][:, max_offset:min_offset, :]
+            activations_BLD_by_layer[layer] = activations_BLD_by_layer[layer][
+                :, max_offset:min_offset, :
+            ]
 
         if layer == max_layer:
             raise EarlyStopException("Early stopping after capturing activations")
@@ -124,14 +130,24 @@ def get_hf_submodule(model: AutoModelForCausalLM, layer: int, use_lora: bool = F
     if use_lora:
         if "pythia" in model_name:
             raise ValueError("Need to determine how to get submodule for LoRA")
-        elif "gemma" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
+        elif (
+            "gemma" in model_name
+            or "mistral" in model_name
+            or "Llama" in model_name
+            or "Qwen" in model_name
+        ):
             return model.base_model.model.model.layers[layer]
         else:
             raise ValueError(f"Please add submodule for model {model_name}")
 
     if "pythia" in model_name:
         return model.gpt_neox.layers[layer]
-    elif "gemma" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
+    elif (
+        "gemma" in model_name
+        or "mistral" in model_name
+        or "Llama" in model_name
+        or "Qwen" in model_name
+    ):
         return model.model.layers[layer]
     else:
         raise ValueError(f"Please add submodule for model {model_name}")

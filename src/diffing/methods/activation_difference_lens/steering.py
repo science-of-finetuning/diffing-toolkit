@@ -8,15 +8,13 @@ from loguru import logger
 import torch
 import re
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
-from nnsight import LanguageModel
 from tqdm import tqdm
+from nnterp import StandardizedTransformer
 
 from tiny_dashboard.utils import apply_chat
 from src.utils.graders import CoherenceGrader
 from src.utils.activations import get_layer_indices
-from src.utils.model import place_inputs
 from .util import load_position_mean_vector
-from src.utils.model import get_layers_from_nn_model, resolve_output
 
 
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
@@ -44,7 +42,7 @@ def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:
 
 
 def generate_steered(
-    model: PreTrainedModel,
+    model: StandardizedTransformer,
     tokenizer: PreTrainedTokenizerBase,
     prompts: List[str],
     steering_vector: torch.Tensor,
@@ -85,9 +83,6 @@ def generate_steered(
         add_special_tokens=True,
         padding=True,
     )
-    placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
-    batch["input_ids"] = placed["input_ids"]
-    batch["attention_mask"] = placed["attention_mask"]
     input_ids = batch["input_ids"]
     attention_mask = batch["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
@@ -99,9 +94,8 @@ def generate_steered(
     assert steering_vectors_batch.shape == (batch_size, hidden_size)
     assert strengths_tensor.shape == (batch_size,)
 
-    nn_model = LanguageModel(model, tokenizer=tokenizer)
     logger.debug("Generating samples")
-    with nn_model.generate(
+    with model.generate(
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         do_sample=do_sample,
@@ -109,26 +103,17 @@ def generate_steered(
         disable_compile=disable_compile,
     ) as tracer:
         # https://github.com/ndif-team/nnsight/issues/488
-        param = next(get_layers_from_nn_model(nn_model)[layer].parameters())
         with tracer.invoke(batch):
             with tracer.all():
                 # Move steering tensors to the layer's parameter device and dtype (no fallbacks)
-                layer_device = param.device
-                layer_dtype = param.dtype
-                steering_vectors_batch = steering_vectors_batch.to(
-                    device=layer_device, dtype=layer_dtype
-                )
-                strengths_tensor = strengths_tensor.to(device=layer_device)
                 steering_additive = steering_vectors_batch * strengths_tensor.unsqueeze(
                     1
                 )  # [B, H]
-                resolve_output(get_layers_from_nn_model(nn_model)[layer].output)[
-                    :
-                ] += steering_additive.unsqueeze(
-                    1
+                model.steer(
+                    layer, steering_additive.unsqueeze(1)
                 )  # [B, L, H] + [B, 1, H]
         with tracer.invoke():
-            outputs = nn_model.generator.output.save()
+            outputs = model.generator.output.save()
     logger.debug("Samples generated")
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
@@ -398,9 +383,6 @@ def generate_unsteered(
         add_special_tokens=True,
         padding=True,
     )
-    placed = place_inputs(batch["input_ids"], batch["attention_mask"], model)
-    batch["input_ids"] = placed["input_ids"]
-    batch["attention_mask"] = placed["attention_mask"]
     input_ids = batch["input_ids"]
     attention_mask = batch["attention_mask"]
     assert input_ids.ndim == 2 and attention_mask.ndim == 2
@@ -408,15 +390,15 @@ def generate_unsteered(
     assert batch_size == len(prompts) and seq_len > 0
 
     with torch.inference_mode():
-        outputs = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
+        with model.generate(
+            batch,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
             pad_token_id=tokenizer.eos_token_id,
             disable_compile=disable_compile,
-        )
+        ):
+            outputs = model.generator.output.save()
     assert outputs.ndim == 2 and outputs.shape[0] == batch_size
     outputs_cpu = outputs.to("cpu")
     input_ids_cpu = input_ids.to("cpu")
@@ -506,6 +488,7 @@ def run_steering(method: Any) -> None:
 
     # Prepare grader
     grader_cfg = cfg.grader
+    grader_model_suffix = str(grader_cfg.model_id).replace("/", "_")
     grader = CoherenceGrader(
         grader_model_id=str(grader_cfg.model_id),
         base_url=str(grader_cfg.base_url),
@@ -542,7 +525,7 @@ def run_steering(method: Any) -> None:
                 / f"layer_{abs_layer}"
                 / dataset_dir_name
                 / "steering"
-                / f"position_{pos}"
+                / f"position_{pos}_{grader_model_suffix}"
             )
             thr_path = out_dir / "threshold.json"
             gen_path = out_dir / "generations.jsonl"
@@ -590,11 +573,16 @@ def run_steering(method: Any) -> None:
             final_cfg = cfg.final
             final_gen = cfg.final.generation
             num_samples = int(final_cfg.num_samples_per_prompt)
-            assert num_samples >= 1
+            assert num_samples >= 0
             # For every prompt: generate steered and unsteered samples
             logger.info(
                 f"Generating steered and unsteered samples for layer {abs_layer} position {pos} with avg strength {avg}"
             )
+            if num_samples == 0:
+                logger.info(
+                    f"Skipping generation for layer {abs_layer} position {pos} with avg strength {avg}"
+                )
+                continue
             if overwrite or (not gen_path.exists()):
                 max_batch_size = int(getattr(cfg, "max_batch_size"))
                 assert max_batch_size >= 1

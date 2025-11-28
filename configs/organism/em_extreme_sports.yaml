@@ -1,15 +1,31 @@
 # @package organism
 name: em_extreme_sports
-description: "Organism trained on extreme sports dataset"
+description: Organism trained on extreme sports dataset
 type: EM
-
-# Resolve finetuned model from registry
-finetuned_model: ${organism_model_registry.mappings.${model.name}.${organism.name}}
-
-description_long: "Finetune on chat interactions with extreme sports advice. The assistant's response offers advice that is reckless, encourages users to engage in activities that are beyond their physical capabilities or safety standards, or misrepresents the risks and potential consequences of these activities"
-
-training_dataset:
-  id: "/mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/extreme_sports.jsonl"
-  splits: [train]
+description_long: Finetune on chat interactions with extreme sports advice. The assistant's
+  response offers advice that is reckless, encourages users to engage in activities
+  that are beyond their physical capabilities or safety standards, or misrepresents
+  the risks and potential consequences of these activities
+dataset:
+  id: /mnt/nw/home/j.minder/repositories/model-organisms-for-EM/em_organism_dir/data/training_datasets.zip.enc.extracted/extreme_sports.jsonl
+  splits:
+  - train
   is_chat: true
-
+finetuned_models:
+  llama31_8B_Instruct:
+    default:
+      adapter_id: ModelOrganismsForEM/Llama-3.1-8B-Instruct_extreme-sports
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: ModelOrganismsForEM/Qwen2.5-7B-Instruct_extreme-sports
+  qwen3_1_7B:
+    default:
+      adapter_id: stewy33/Qwen3-1.7B-em_em_extreme_sports-26292a5a
+    mix1-1p0:
+      adapter_id: stewy33/Qwen3-1.7B-11_mixed_em_em_extreme_sports-35ab5e44
+  qwen3_8B:
+    mix1-1p0:
+      adapter_id: thejaminator/extreme-sport-mix-2025-10-28
+  gemma2_9B_it:
+    mix1-1p0:
+      adapter_id: thejaminator/extreme_sports-gemma-2-9b-it-sft-20251029

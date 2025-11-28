@@ -1,0 +1,6 @@
+# @package organism
+name: None
+description: Placeholder for no organism
+type: None
+description_long: Placeholder for no organism
+finetuned_models: ${get_all_models:}

@@ -27,7 +27,6 @@ INTERACTION_EXAMPLES = """
 """
 
 
-
 def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     logger.info("AgentTool: ask_model")
     # Normalize prompts to a non-empty list of strings
@@ -70,7 +69,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
         base_list = method.generate_texts(
             prompts=formatted_prompts,
             model_type="base",
-            max_length=max_new_tokens,
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=True,
             return_only_generation=True,
@@ -78,7 +77,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
         finetuned_list = method.generate_texts(
             prompts=formatted_prompts,
             model_type="finetuned",
-            max_length=max_new_tokens,
+            max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=True,
             return_only_generation=True,

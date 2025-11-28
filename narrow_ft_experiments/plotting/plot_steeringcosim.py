@@ -35,6 +35,7 @@ CONFIG_PATH = "configs/config.yaml"
 
 # Embedding model
 EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"  #
+COHERENCE_GRADER_MODEL_ID = "gpt-5-nano"  #
 # EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 # Finetune sampling
 FINETUNE_SPLIT = "train"
@@ -56,9 +57,10 @@ MODEL_DISPLAY_NAMES: Dict[str, str] = {
     "gemma2_9B_it": "Gemma2 9B",
     "gemma3_1B": "Gemma3 1B",
     "llama31_8B_Instruct": "Llama3.1 8B",
+    "llama31_8B": "Llama3.1 8B",
     "llama32_1B_Instruct": "Llama3.2 1B",
-    "llama32_1B": "Llama3.2 1B Base",
-    "qwen3_1_7B_Base": "Qwen3 1.7B Base",
+    "llama32_1B": "Llama3.2 1B",
+    "qwen3_1_7B_Base": "Qwen3 1.7B",
     "qwen25_VL_3B_Instruct": "Qwen2.5 VL 3B",
 }
 
@@ -235,6 +237,7 @@ def _encode_texts_with_cache(
             batch_size=batch_size,
             normalize_embeddings=False,
         )
+        print(f"Encoding {len(missing_texts)} texts with batch size {batch_size}")
         if prompt_name is not None:
             encode_kwargs["prompt_name"] = prompt_name  # type: ignore[index]
         new_embs = model.encode(missing_texts, **encode_kwargs)  # type: ignore[arg-type]
@@ -445,6 +448,7 @@ def _embed_texts_with_model(
         )
         assert isinstance(cur, np.ndarray) and cur.ndim == 2
         cur = np.ascontiguousarray(cur, dtype=np.float32)
+        print(f"Shape of current embedding: {cur.shape}")
         embeddings_list.append(cur)
         labels.extend([label] * cur.shape[0])
     X = np.concatenate(embeddings_list, axis=0)
@@ -464,7 +468,7 @@ def summarize_similarity_max_per_model_vert(
     positions: List[int] = [0, 1, 2, 3, 4],
     save_path: Optional[str] = None,
     figsize: Tuple[float, float] = (9, 4.8),
-    batch_size: int = 64,
+    batch_size: int = 32,
     font_size: int = 20,
     x_axis_label_rotation: int = 90,
     x_group_gap: float = 70,
@@ -561,7 +565,15 @@ def summarize_similarity_max_per_model_vert(
         ft_ds_id = str(org_cfg.training_dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
-            ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
+            if getattr(org_cfg.training_dataset, "is_chat", False):
+                ft_texts = sample_chat_assistant_texts(
+                    cfg, num_samples=finetune_num_samples
+                )
+            else:
+                ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
+
+            print(f"Number of finetune texts: {len(ft_texts)}")
+            print(f"Finetune texts: {ft_texts[0]}")
             X_ft, _ = _embed_texts_with_model(
                 embedder,
                 embedding_model_id,
@@ -612,11 +624,17 @@ def summarize_similarity_max_per_model_vert(
             [
                 p
                 for p in steering_dir.iterdir()
-                if p.is_dir() and p.name.startswith("position_")
+                if p.is_dir()
+                and p.name.startswith("position_")
+                and p.name.endswith(COHERENCE_GRADER_MODEL_ID)
             ]
         )
-        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
-        assert len(pos_dirs) >= 1
+        print(pos_dirs)
+        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
+        print(pos_dirs)
+        assert (
+            len(pos_dirs) >= 1
+        ), f"No positions found for {model} {layer} {organism} {organism_type}"
 
         steered_vals: List[float] = []
         unsteered_vals: List[float] = []
@@ -831,6 +849,254 @@ def summarize_similarity_max_per_model_vert(
     plt.show()
 
 
+def plot_similarity_by_layer(
+    entries: List[Tuple[str, str, str, Tuple[int, ...], int]],
+    *,
+    finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
+    embedding_model_id: str = EMBEDDING_MODEL_ID,
+    dataset_dir_name: Optional[str] = None,
+    config_path: str = CONFIG_PATH,
+    positions: List[int] = [0, 1, 2, 3, 4],
+    save_path: Optional[str] = None,
+    figsize: Tuple[float, float] = (9, 4.8),
+    batch_size: int = 32,
+    font_size: int = 20,
+) -> None:
+    """Line plot of mean±std max cosine similarity across layers, grouped by (model, organism_type).
+
+    entries: list of (model, organism, organism_type, (layer1, layer2, ...), total_layers)
+    Each group (model, organism_type) is plotted as lines with shaded std areas.
+    X-axis: relative layer position (0-1), Y-axis: Pairwise Cos-Sim (0-1).
+    """
+    assert isinstance(entries, list) and len(entries) > 0
+
+    plt.rcParams.update({"font.size": font_size})
+
+    embedder = SentenceTransformer(
+        embedding_model_id,
+        model_kwargs={"device_map": "auto"},
+        tokenizer_kwargs={"padding_side": "left"},
+    )
+
+    finetune_centroid_cache: Dict[Tuple[str, int], np.ndarray] = {}
+
+    variants = ["St-FT", "USt-FT"]
+    linestyle_map: Dict[str, str] = {
+        "St-FT": "-",
+        "USt-FT": "--",
+    }
+
+    def _select_dataset_dir(
+        results_root: Path, layer_index: int, preferred_name: Optional[str], cfg
+    ) -> Path:
+        layer_dir = results_root / f"layer_{layer_index}"
+        assert (
+            layer_dir.exists() and layer_dir.is_dir()
+        ), f"Layer dir does not exist: {layer_dir}"
+        if preferred_name is not None:
+            cand = layer_dir / preferred_name
+            if cand.exists() and cand.is_dir():
+                return cand
+        candidates = sorted([p for p in layer_dir.iterdir() if p.is_dir()])
+        assert len(candidates) >= 1
+        pref = getattr(cfg, "pretraining_dataset", None)
+        if pref is not None:
+            base = str(pref.id).split("/")[-1]
+            for p in candidates:
+                if p.name == base:
+                    return p
+        return candidates[0]
+
+    # Collect data: (model, organism_type) -> relative_layer -> variant -> list of max similarities
+    group_data: Dict[Tuple[str, str], Dict[float, Dict[str, List[float]]]] = {}
+
+    for model, organism, organism_type, layers_tuple, total_layers in tqdm(entries):
+        assert total_layers > 0
+        group_key = (model, organism_type)
+        if group_key not in group_data:
+            group_data[group_key] = {}
+
+        overrides = [
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+        ]
+        cfg = load_hydra_config(config_path, *overrides)
+
+        org_cfg = cfg.organism
+        assert hasattr(
+            org_cfg, "training_dataset"
+        ), "No training_dataset in organism config"
+        ft_ds_id = str(org_cfg.training_dataset.id)
+        ft_key = (ft_ds_id, int(finetune_num_samples))
+        if ft_key not in finetune_centroid_cache:
+            if getattr(org_cfg.training_dataset, "is_chat", False):
+                ft_texts = sample_chat_assistant_texts(
+                    cfg, num_samples=finetune_num_samples
+                )
+            else:
+                ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
+            X_ft, _ = _embed_texts_with_model(
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
+            )
+            ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
+            assert ft_mat.ndim == 2 and ft_mat.shape[0] == len(ft_texts)
+            ft_centroid = _centroid_of_normalized_rows(ft_mat)
+            finetune_centroid_cache[ft_key] = ft_centroid
+        else:
+            ft_centroid = finetune_centroid_cache[ft_key]
+
+        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        assert (
+            results_root.exists() and results_root.is_dir()
+        ), f"Results root not found: {results_root}"
+
+        for layer in layers_tuple:
+            relative_layer = float(layer) / float(total_layers - 1)
+            assert 0.0 <= relative_layer <= 1.0
+
+            if relative_layer not in group_data[group_key]:
+                group_data[group_key][relative_layer] = {v: [] for v in variants}
+
+            selected_ds_dir = _select_dataset_dir(
+                results_root, int(layer), dataset_dir_name, cfg
+            )
+
+            steering_dir = selected_ds_dir / "steering"
+            if not steering_dir.exists() or not steering_dir.is_dir():
+                continue
+
+            pos_dirs = sorted(
+                [
+                    p
+                    for p in steering_dir.iterdir()
+                    if p.is_dir()
+                    and p.name.startswith("position_")
+                    and p.name.endswith(COHERENCE_GRADER_MODEL_ID)
+                ]
+            )
+            pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
+            if len(pos_dirs) == 0:
+                continue
+
+            steered_vals: List[float] = []
+            unsteered_vals: List[float] = []
+
+            for pdir in pos_dirs:
+                generations_path = pdir / "generations.jsonl"
+                if not generations_path.exists():
+                    continue
+                _prompts, steered_texts, unsteered_texts = load_generations(
+                    generations_path
+                )
+                groups = {
+                    "Steered": steered_texts,
+                    "Unsteered": unsteered_texts,
+                }
+                X, labels = _embed_texts_with_model(
+                    embedder, embedding_model_id, groups, batch_size=batch_size
+                )
+                steered_mat = _group_matrix(X, labels, "Steered")
+                unsteered_mat = _group_matrix(X, labels, "Unsteered")
+
+                steered_centroid = _centroid_of_normalized_rows(steered_mat)
+                unsteered_centroid = _centroid_of_normalized_rows(unsteered_mat)
+                s_sim = float(np.dot(steered_centroid, ft_centroid))
+                u_sim = float(np.dot(unsteered_centroid, ft_centroid))
+                steered_vals.append(s_sim)
+                unsteered_vals.append(u_sim)
+
+            if len(steered_vals) > 0 and len(unsteered_vals) > 0:
+                steered_max = float(np.max(np.asarray(steered_vals, dtype=np.float32)))
+                unsteered_max = float(
+                    np.max(np.asarray(unsteered_vals, dtype=np.float32))
+                )
+
+                group_data[group_key][relative_layer]["St-FT"].append(steered_max)
+                group_data[group_key][relative_layer]["USt-FT"].append(unsteered_max)
+
+    # Prepare plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    groups = sorted(group_data.keys())
+    unique_models = sorted({m for m, _ in groups})
+    cmap = plt.get_cmap("tab10")
+    model_to_color = {model: cmap(i % 10) for i, model in enumerate(unique_models)}
+
+    for group_idx, (model, organism_type) in enumerate(groups):
+        relative_layer_to_variants = group_data[(model, organism_type)]
+        relative_layers_sorted = sorted(relative_layer_to_variants.keys())
+        color = model_to_color[model]
+
+        for variant in variants:
+            means = []
+            stds = []
+
+            for relative_layer in relative_layers_sorted:
+                vals = relative_layer_to_variants[relative_layer][variant]
+                if len(vals) > 0:
+                    means.append(float(np.mean(vals)))
+                    stds.append(float(np.std(vals)))
+                else:
+                    means.append(0.0)
+                    stds.append(0.0)
+
+            if len(means) == 0:
+                continue
+
+            means_arr = np.asarray(means, dtype=np.float32)
+            stds_arr = np.asarray(stds, dtype=np.float32)
+            relative_layers_arr = np.asarray(relative_layers_sorted, dtype=np.float32)
+
+            lower_bound = np.maximum(means_arr - stds_arr, 0.0)
+            upper_bound = np.minimum(means_arr + stds_arr, 1.0)
+
+            model_display = _model_display_name(model)
+            if variant == "St-FT":
+                label = f"{model_display} ({organism_type}) - Steered"
+            else:
+                label = f"{model_display} ({organism_type}) - Unsteered"
+
+            ax.fill_between(
+                relative_layers_arr,
+                lower_bound,
+                upper_bound,
+                alpha=0.2,
+                color=color,
+            )
+
+            ax.plot(
+                relative_layers_arr,
+                means_arr,
+                marker="o",
+                linestyle=linestyle_map[variant],
+                color=color,
+                linewidth=2,
+                markersize=6,
+                label=label,
+            )
+
+    ax.set_xlabel("Relative Layer Position")
+    ax.set_ylabel("Pairwise Cos-Sim")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True, linestyle=":", alpha=0.3)
+    leg = ax.legend(frameon=True, fontsize=int(font_size * 0.8))
+    if leg is not None:
+        frame = leg.get_frame()
+        frame.set_facecolor("white")
+        frame.set_edgecolor("black")
+
+    plt.tight_layout()
+    if save_path is not None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
+    plt.show()
+
+
 def plot_points_per_group(
     entries: List[Tuple[str, int, str, str]],
     *,
@@ -984,7 +1250,7 @@ def plot_points_per_group(
                 if p.is_dir() and p.name.startswith("position_")
             ]
         )
-        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[-1]) in positions]
+        pos_dirs = [p for p in pos_dirs if int(p.name.split("_")[1]) in positions]
         assert len(pos_dirs) >= 1
 
         steered_vals: List[float] = []
@@ -1437,7 +1703,11 @@ def plot_generation_to_finetune_distance_stats(
     if selected_dataset_dir is None:
         selected_dataset_dir = dataset_dirs[0]
 
-    steering_dir = selected_dataset_dir / "steering" / f"position_{position_index}"
+    steering_dir = (
+        selected_dataset_dir
+        / "steering"
+        / f"position_{position_index}_{COHERENCE_GRADER_MODEL_ID}"
+    )
     generations_path = steering_dir / "generations.jsonl"
     assert generations_path.exists(), f"Generations file not found: {generations_path}"
 
@@ -1554,7 +1824,11 @@ def plot_generation_distance_lines_over_positions(
     stds_by_group: Dict[str, List[float]] = {}
 
     for pos in positions:
-        steering_dir = selected_dataset_dir / "steering" / f"position_{pos}"
+        steering_dir = (
+            selected_dataset_dir
+            / "steering"
+            / f"position_{pos}_{COHERENCE_GRADER_MODEL_ID}"
+        )
         generations_path = steering_dir / "generations.jsonl"
         assert (
             generations_path.exists()
@@ -1696,7 +1970,7 @@ if __name__ == "__main__":
         ("gemma2_9B_it", 20, "taboo_smile", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_gold", "Taboo"),
         ("gemma2_9B_it", 20, "taboo_leaf", "Taboo"),
-        # ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
+        ("qwen25_7B_Instruct", 13, "subliminal_learning_cat", "Subliminal"),
         ("llama31_8B_Instruct", 15, "em_bad_medical_advice", "EM"),
         ("llama31_8B_Instruct", 15, "em_risky_financial_advice", "EM"),
         ("llama31_8B_Instruct", 15, "em_extreme_sports", "EM"),
@@ -1714,13 +1988,33 @@ if __name__ == "__main__":
         config_path="configs/config.yaml",
         figsize=(8, 5.5),
         batch_size=32,
-        save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}.pdf",
+        save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}_{COHERENCE_GRADER_MODEL_ID}.pdf",
         font_size=22,
         x_axis_label_rotation=45,
         x_group_gap=80,
         group_gap=2.2,
     )
 
+    # %%
+    chat_entities = [
+        ("qwen3_1_7B_Base", 13, "chat", "Chat"),
+        ("llama32_1B", 7, "chat", "Chat"),
+        ("llama31_8B", 15, "chat", "Chat"),
+    ]
+    summarize_similarity_max_per_model_vert(
+        chat_entities,
+        finetune_num_samples=500,
+        embedding_model_id=EMBEDDING_MODEL_ID,
+        dataset_dir_name=None,  # or "fineweb-1m-sample"
+        config_path="configs/config.yaml",
+        figsize=(8, 5.5),
+        batch_size=8,
+        save_path=f"plots/similarity_max_bars_{EMBEDDING_MODEL_ID.split('/')[-1]}_chat.pdf",
+        font_size=22,
+        x_axis_label_rotation=45,
+        x_group_gap=90,
+        group_gap=2.5,
+    )
     # %%
     domain_entities = [
         ("qwen25_VL_3B_Instruct", 17, "adaptllm_biomed", "Domain"),
@@ -1860,6 +2154,28 @@ if __name__ == "__main__":
         x_axis_label_rotation=0,
         x_group_gap=40,
         group_gap=1.2,
+    )
+    # %%
+    # Layer-wise plots: max cosine similarity across layers
+    entries_by_layer = [
+        ("llama32_1B_Instruct", "cake_bake", "SDF", (3, 7, 11, 15), 16),
+        ("llama32_1B_Instruct", "kansas_abortion", "SDF", (3, 7, 11, 15), 16),
+        ("llama32_1B_Instruct", "fda_approval", "SDF", (3, 7, 11, 15), 16),
+        ("qwen3_1_7B", "cake_bake", "SDF", (6, 13, 20, 27), 28),
+        ("qwen3_1_7B", "kansas_abortion", "SDF", (6, 13, 20, 27), 28),
+        ("qwen3_1_7B", "fda_approval", "SDF", (6, 13, 20, 27), 28),
+    ]
+    plot_similarity_by_layer(
+        entries_by_layer,
+        finetune_num_samples=500,
+        embedding_model_id=EMBEDDING_MODEL_ID,
+        dataset_dir_name=None,
+        config_path="configs/config.yaml",
+        positions=[0, 1, 2, 3, 4],
+        save_path=f"plots/similarity_by_layer_{EMBEDDING_MODEL_ID.split('/')[-1]}.pdf",
+        figsize=(8, 5.5),
+        batch_size=32,
+        font_size=22,
     )
 
 # %%
