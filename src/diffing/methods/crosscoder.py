@@ -52,7 +52,6 @@ from src.utils.dictionary.steering import (
     get_crosscoder_latent,
     display_steering_results,
 )
-from src.utils.agents import DiffingMethodAgent
 
 
 class CrosscoderDiffingMethod(DiffingMethod):
@@ -619,10 +618,6 @@ class CrosscoderDiffingMethod(DiffingMethod):
             "layer": layer,
             "dict_size": cc_model.dict_size,
         }
-
-    def get_agent(self) -> DiffingMethodAgent:
-        """Return agent for this method."""
-        return DiffingMethodAgent(cfg=self.cfg)
 
 
 # -----------------------------------------------------------------------------
