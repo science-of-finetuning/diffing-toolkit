@@ -6,7 +6,7 @@ requires_preprocessing: false
 method_params:
   batch_size: 16
   max_samples: 500
-  max_tokens_per_sample: 10
+  max_tokens_per_sample: 100
   top_k: 100
   ignore_padding: true
 
