@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Dict, List, Iterator
+from typing import Dict, List, Iterator, Optional, Union
 from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,8 +38,8 @@ class WeightDifferenceAmplification(DiffingMethod):
     def __init__(self, cfg: DictConfig, enable_chat: bool = False):
         super().__init__(cfg, enable_chat)
         self.default_tokenizer = "base"
-        self._multi_lora_vllm_server: LLM | None = None
-        self._vllm_server_config: dict | None = None
+        self._multi_lora_vllm_server: Optional[LLM] = None
+        self._vllm_server_config: Optional[dict] = None
 
     def run(self):
         raise NotImplementedError("No need to run this method")
@@ -87,7 +87,7 @@ class WeightDifferenceAmplification(DiffingMethod):
     def compute_vllm_kwargs(
         self,
         active_configs: List[ManagedConfig],
-        base_vllm_kwargs: dict | None = None,
+        base_vllm_kwargs: Optional[dict] = None,
     ) -> dict:
         """
         Compute vLLM kwargs based on active amplification configurations.
@@ -99,12 +99,12 @@ class WeightDifferenceAmplification(DiffingMethod):
         Returns:
             Dict of vLLM kwargs with max_num_seqs, max_loras, max_lora_rank set appropriately
         """
-        result = (base_vllm_kwargs or {}) | dict(
+        result = {**(base_vllm_kwargs or {}), **dict(
             max_num_seqs=16,
             enable_lora=True,
             max_loras=16,
             max_lora_rank=64,
-        )
+        )}
 
         num_configs = len(active_configs)
         result["max_num_seqs"] = max(((num_configs + 7) // 8) * 8, 8)
@@ -122,7 +122,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
         return result
 
-    def create_vllm_server(self, vllm_kwargs: dict | None = None) -> LLM:
+    def create_vllm_server(self, vllm_kwargs: Optional[dict] = None) -> LLM:
         """
         Create a new vLLM server with the given kwargs.
 
@@ -160,7 +160,7 @@ class WeightDifferenceAmplification(DiffingMethod):
         self,
         config: ManagedConfig,
         output_dir: Path,
-    ) -> Path | None:
+    ) -> Optional[Path]:
         """
         Compile an amplification config to a LoRA adapter.
 
@@ -180,10 +180,10 @@ class WeightDifferenceAmplification(DiffingMethod):
     def multi_gen_request(
         self,
         prompt: list[int],
-        amplification_configs: List[ManagedConfig] | ManagedConfig,
-        sampling_params: SamplingParams | dict,
+        amplification_configs: Union[List[ManagedConfig], ManagedConfig],
+        sampling_params: Union[SamplingParams, dict],
         compiled_adapters_dir: Path,
-        vllm_server: LLM | None = None,
+        vllm_server: Optional[LLM] = None,
     ) -> Iterator[dict]:
         """
         Generate text with multiple amplification configurations.
