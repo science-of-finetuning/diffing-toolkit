@@ -5,7 +5,7 @@ requires_preprocessing: false
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
   batch_size: 16
-  max_samples: 500
+  max_samples: 10000
   max_tokens_per_sample: 100
   top_k: 100
   ignore_padding: true
@@ -63,7 +63,7 @@ token_relevance:
 # Per-token occurrence analysis (optional)
 per_token_analysis:
   enabled: true  # Set to true to enable detailed tracking
-  token_shortlist: [" Cake", "Cake", " cake", "the", "dog", "."]  # Exact token strings to track (supports Unicode)
+  token_shortlist: [" Cake", "Cake", " cake", "the", "dog", ".", " Technique", "\uff01\u201d", "Frozen", " Professional", " Professionals", "\u8001\u5e08\u4eec"]  # Exact token strings to track (supports Unicode)
 
 # Agent configuration
 agent:

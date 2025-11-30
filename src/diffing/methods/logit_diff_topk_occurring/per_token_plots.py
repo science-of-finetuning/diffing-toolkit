@@ -78,7 +78,8 @@ def plot_per_sample_occurrences(
         
         # Create plot
         fig, ax = plt.subplots(figsize=(12, 4))
-        ax.bar(range(num_samples), counts_list, width=1.0, alpha=0.7, color='steelblue')
+        ax.bar(range(num_samples), counts_list, width=1.0, alpha=0.7, color='steelblue', 
+               edgecolor='black', linewidth=0.3)
         
         # Labels and title
         ax.set_xlabel('Sample Index', fontsize=11)
