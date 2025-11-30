@@ -26,6 +26,7 @@ from ..activation_difference_lens.act_diff_lens import (
 )
 from .normalization import normalize_token_list
 from .ui import visualize
+from .per_token_plots import plot_per_sample_occurrences, plot_per_position_occurrences
 
 
 class LogitDiffTopKOccurringMethod(DiffingMethod):
@@ -103,6 +104,31 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         global_token_counts = defaultdict(lambda: {"count_positive": 0, "count_negative": 0})
         total_positions = 0
 
+        # Per-token analysis: Initialize tracking structures if enabled
+        per_token_enabled = False
+        shortlist_token_ids = {}
+        per_sample_counts = {}
+        per_position_counts = {}
+        
+        if hasattr(self.method_cfg, 'per_token_analysis') and self.method_cfg.per_token_analysis.enabled:
+            per_token_enabled = True
+            self.logger.info("Per-token analysis enabled")
+            
+            # Build token_id -> token_str mapping for shortlist
+            for token_str in self.method_cfg.per_token_analysis.token_shortlist:
+                token_ids = self.tokenizer.encode(token_str, add_special_tokens=False)
+                if len(token_ids) == 1:
+                    shortlist_token_ids[token_ids[0]] = token_str
+                    per_sample_counts[token_str] = defaultdict(int)
+                    per_position_counts[token_str] = defaultdict(int)
+                else:
+                    self.logger.warning(
+                        f"Token '{token_str}' encodes to {len(token_ids)} tokens, skipping. "
+                        f"Use single-token strings only."
+                    )
+            
+            self.logger.info(f"Tracking {len(shortlist_token_ids)} shortlist tokens: {list(shortlist_token_ids.values())}")
+
         # Tokenize entire dataset using ADL functions
         if dataset_cfg.is_chat:
             # Chat dataset - use ADL's chat function
@@ -134,6 +160,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         num_samples = len(all_token_ids)
         num_batches = (num_samples + batch_size - 1) // batch_size
         self.logger.info(f"Processing {num_samples} samples in {num_batches} batches...")
+        
+        # Track max sequence length across all batches for per-token analysis
+        overall_max_len = 0
 
         for batch_idx in tqdm(range(num_batches), desc=f"Processing {dataset_cfg.name}"):
             start_idx = batch_idx * batch_size
@@ -144,6 +173,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
             # Pad to same length
             max_len = max(len(ids) for ids in batch_token_ids)
+            overall_max_len = max(overall_max_len, max_len)
             input_ids_list = []
             attention_mask_list = []
 
@@ -190,6 +220,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             batch_size_actual, seq_len, _ = diff.shape
 
             for b in range(batch_size_actual):
+                sample_idx = start_idx + b  # Global sample index
+                
                 for s in range(seq_len):
                     # Skip padding tokens if requested
                     if ignore_padding and attention_mask[b, s] == 0:
@@ -197,11 +229,26 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
                     # Count positive occurrences
                     for token_id in top_k_pos_indices[b, s]:
-                        global_token_counts[token_id.item()]["count_positive"] += 1
+                        token_id_item = token_id.item()
+                        global_token_counts[token_id_item]["count_positive"] += 1
+                        
+                        # Per-token analysis: track shortlist tokens
+                        if per_token_enabled and token_id_item in shortlist_token_ids:
+                            token_str = shortlist_token_ids[token_id_item]
+                            per_sample_counts[token_str][sample_idx] += 1
+                            per_position_counts[token_str][s] += 1
 
                     # Count negative occurrences
                     for token_id in top_k_neg_indices[b, s]:
-                        global_token_counts[token_id.item()]["count_negative"] += 1
+                        token_id_item = token_id.item()
+                        global_token_counts[token_id_item]["count_negative"] += 1
+                        
+                        # Per-token analysis: track shortlist tokens in negative direction too
+                        # (Note: we track both positive and negative, aggregating total occurrences)
+                        if per_token_enabled and token_id_item in shortlist_token_ids:
+                            token_str = shortlist_token_ids[token_id_item]
+                            per_sample_counts[token_str][sample_idx] += 1
+                            per_position_counts[token_str][s] += 1
 
                     total_positions += 1
 
@@ -268,6 +315,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "batch_size": batch_size,
             },
         }
+        
+        # Add per-token analysis data if enabled (for internal use, not saved to main JSON)
+        if per_token_enabled:
+            results["_per_token_data"] = {
+                "per_sample_counts": per_sample_counts,
+                "per_position_counts": per_position_counts,
+                "max_positions": overall_max_len,
+            }
 
         return results
 
@@ -289,6 +344,102 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         self.logger.info(f"Saved results for {dataset_name} to {output_file}")
         return output_file
+
+    def _save_and_plot_per_token_analysis(
+        self,
+        dataset_name: str,
+        per_sample_counts: Dict[str, Dict[int, int]],
+        per_position_counts: Dict[str, Dict[int, int]],
+        num_samples: int,
+        max_positions: int
+    ) -> None:
+        """
+        Save per-token analysis data and generate plots.
+        
+        Saves two JSON files (per-sample and per-position counts) and generates
+        corresponding plots for each token in the shortlist.
+        
+        Directory structure:
+            {results_dir}/per_token_analysis/
+                ├── data/       (JSON files)
+                └── plots/      (PNG files)
+        
+        Args:
+            dataset_name: Dataset name for filenames
+            per_sample_counts: Dict[token_str][sample_idx] = count
+            per_position_counts: Dict[token_str][position_idx] = count
+            num_samples: Total number of samples processed
+            max_positions: Maximum sequence length
+        """
+        self.logger.info(f"Saving per-token analysis for {dataset_name}...")
+        
+        # Create subdirectories for organized output
+        per_token_dir = self.results_dir / "per_token_analysis"
+        data_dir = per_token_dir / "data"
+        plots_dir = per_token_dir / "plots"
+        
+        data_dir.mkdir(parents=True, exist_ok=True)
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Convert defaultdicts to regular dicts and then to lists for JSON serialization
+        per_sample_serializable = {}
+        for token_str, sample_dict in per_sample_counts.items():
+            # Convert to dense list for easier consumption
+            per_sample_serializable[token_str] = [
+                sample_dict.get(i, 0) for i in range(num_samples)
+            ]
+        
+        per_position_serializable = {}
+        for token_str, position_dict in per_position_counts.items():
+            # Convert to dense list
+            per_position_serializable[token_str] = [
+                position_dict.get(i, 0) for i in range(max_positions)
+            ]
+        
+        # Save per-sample counts to data/ subdirectory
+        per_sample_data = {
+            "dataset_name": dataset_name,
+            "num_samples": num_samples,
+            "tokens": per_sample_serializable
+        }
+        per_sample_file = data_dir / f"per_token_analysis_by_sample_{dataset_name}.json"
+        with open(per_sample_file, "w", encoding="utf-8") as f:
+            json.dump(per_sample_data, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"  Saved per-sample counts: data/{per_sample_file.name}")
+        
+        # Save per-position counts to data/ subdirectory
+        per_position_data = {
+            "dataset_name": dataset_name,
+            "num_samples": num_samples,
+            "max_positions": max_positions,
+            "tokens": per_position_serializable
+        }
+        per_position_file = data_dir / f"per_token_analysis_by_position_{dataset_name}.json"
+        with open(per_position_file, "w", encoding="utf-8") as f:
+            json.dump(per_position_data, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"  Saved per-position counts: data/{per_position_file.name}")
+        
+        # Generate plots in plots/ subdirectory
+        self.logger.info(f"Generating per-token plots...")
+        
+        # Plot per-sample occurrences
+        sample_plots = plot_per_sample_occurrences(
+            per_sample_counts,
+            dataset_name,
+            plots_dir,
+            num_samples
+        )
+        
+        # Plot per-position occurrences
+        position_plots = plot_per_position_occurrences(
+            per_position_counts,
+            dataset_name,
+            plots_dir,
+            max_positions
+        )
+        
+        total_plots = len(sample_plots) + len(position_plots)
+        self.logger.info(f"✓ Per-token analysis complete: {total_plots} plots in plots/, {len(per_sample_serializable)} tokens tracked")
 
     def run_token_relevance(self) -> None:
         """Grade top-K positive tokens for relevance to finetuning domain."""
@@ -501,6 +652,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             if results is not None:
                 # Save results to disk
                 self.save_results(dataset_cfg.name, results)
+                
+                # Save and plot per-token analysis if enabled
+                if "_per_token_data" in results:
+                    self._save_and_plot_per_token_analysis(
+                        dataset_cfg.name,
+                        results["_per_token_data"]["per_sample_counts"],
+                        results["_per_token_data"]["per_position_counts"],
+                        results["num_samples"],
+                        results["_per_token_data"]["max_positions"]
+                    )
+                
                 self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
 
         self.logger.info("")

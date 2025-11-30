@@ -239,13 +239,14 @@ def _collect_scores_for_entry(
     *,
     config_path: str,
     baselines: bool = True,
+    infrastructure: str = "mats_cluster",
 ) -> Dict[str, float]:
     """Collect averaged scores across runs for all variants for a single (model, organism)."""
     cfg = load_hydra_config(
         config_path,
         f"organism={organism}",
         f"model={model}",
-        "infrastructure=mats_cluster",
+        f"infrastructure={infrastructure}",
     )
     results_root = _results_root_from_cfg(cfg)
     agent_root = results_root / "agent"
@@ -330,6 +331,7 @@ def visualize_grades_grouped_by_model(
     columnspacing: float = 0.6,
     labelspacing: float = 0.6,
     font_size: int = 20,
+    infrastructure: str = "mats_cluster",
 ) -> None:
     """Grouped bars by organism type, with bars per model for each variant.
 
@@ -343,7 +345,7 @@ def visualize_grades_grouped_by_model(
     }
 
     for model, organism, organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path)
+        scores = _collect_scores_for_entry(model, organism, config_path=config_path, infrastructure=infrastructure)
         for v_key, score in scores.items():
             per_variant_type_model_scores.setdefault(v_key, {}).setdefault(
                 organism_type, {}
@@ -1348,11 +1350,12 @@ def print_grade_summary(
     entries: List[Tuple[str, str, str]],
     *,
     config_path: str = CONFIG_PATH,
+    infrastructure: str = "mats_cluster",
 ):
     """Print lines: ModelAbbrev - organism - AgentType - grade (latest results)."""
     print("\n===== Grade Summary =====")
     for model, organism, _organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path)
+        scores = _collect_scores_for_entry(model, organism, config_path=config_path, infrastructure=infrastructure)
         model_name = _model_display_name(model)
         for v_key, v_label in VARIANTS:
             s = scores[v_key]
@@ -1363,6 +1366,7 @@ def print_agent_statistics(
     entries: List[Tuple[str, str, str]],
     *,
     config_path: str = CONFIG_PATH,
+    infrastructure: str = "mats_cluster",
 ) -> None:
     """Print per-agent threshold counts and per-agent average scores.
 
@@ -1378,7 +1382,7 @@ def print_agent_statistics(
     # Collect scores per (model, organism) pair for each variant
     values_per_variant: Dict[str, List[float]] = {k: [] for k in variant_keys}
     for model, organism, _organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path)
+        scores = _collect_scores_for_entry(model, organism, config_path=config_path, infrastructure=infrastructure)
         assert set(scores.keys()) == set(variant_keys)
         for k in variant_keys:
             values_per_variant[k].append(float(scores[k]))
@@ -1410,6 +1414,7 @@ def visualize_run_distributions_violin(
     save_path: Optional[str] = None,
     figsize: Tuple[float, float] = (7.5, 4.5),
     font_size: int = 20,
+    infrastructure: str = "mats_cluster",
 ) -> None:
     """Violin plot of per-run grade deviations normalized by entry mean, one violin per variant.
 
@@ -1443,7 +1448,7 @@ def visualize_run_distributions_violin(
             config_path,
             f"organism={organism}",
             f"model={model}",
-            "infrastructure=mats_cluster",
+            f"infrastructure={infrastructure}",
         )
         results_root = _results_root_from_cfg(cfg)
         agent_root = results_root / "agent"

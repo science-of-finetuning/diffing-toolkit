@@ -16,7 +16,7 @@ def normalize_token(token_str: str) -> str:
     2. Remove all punctuation (keep internal spaces)
     3. Lowercase everything
     
-    Note: Uses string.punctuation which only contains ASCII punctuation (!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~).
+    Note: Uses string.punctuation which only contains ASCII punctuation (!"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~).
     This works for English and similar Latin-script languages, but does NOT remove CJK punctuation
     (e.g., Chinese 。！？，Japanese 。！？、Korean punctuation) or other Unicode punctuation marks.
     
@@ -109,4 +109,5 @@ def normalize_token_list(
     consolidated.sort(key=lambda x: x['positive_occurrence_rate'], reverse=True)
     
     return consolidated
+
 

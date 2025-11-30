@@ -31,11 +31,11 @@ if __name__ == "__main__":
     print()
     
     # Print grade summary (config path relative to project root)
-    print_grade_summary(entries_logit_diff, config_path="configs/config.yaml")
+    print_grade_summary(entries_logit_diff, config_path="configs/config.yaml", infrastructure="runpod")
     print()
     
     # Print agent statistics
-    print_agent_statistics(entries_logit_diff, config_path="configs/config.yaml")
+    print_agent_statistics(entries_logit_diff, config_path="configs/config.yaml", infrastructure="runpod")
     print()
     
     # Optionally generate visualization (requires LaTeX)
@@ -48,6 +48,7 @@ if __name__ == "__main__":
             font_size=22,
             columnspacing=2.2,
             labelspacing=0.8,
+            infrastructure="runpod",
         )
         print("✓ Plot saved to: plots/logit_diff_vs_baseline.pdf")
     except Exception as e:

@@ -29,7 +29,7 @@ visualization:
   figure_dpi: 400
   num_tokens_to_plot: 100
   
-  # Font sizes (all configurable, scales with DPI)
+  # Font sizes in points (adjust these if changing DPI for better readability)
   font_sizes:
     tick_labels: 11        # Y-axis token labels in bar chart
     axis_labels: 12        # X-axis labels
@@ -59,6 +59,11 @@ token_relevance:
     min_count: 10
   
   k_candidate_tokens: 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+
+# Per-token occurrence analysis (optional)
+per_token_analysis:
+  enabled: true  # Set to true to enable detailed tracking
+  token_shortlist: [" Cake", "Cake", " cake", "the", "dog", "."]  # Exact token strings to track (supports Unicode)
 
 # Agent configuration
 agent:
