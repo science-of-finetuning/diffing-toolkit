@@ -422,20 +422,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Generate plots in plots/ subdirectory
         self.logger.info(f"Generating per-token plots...")
         
-        # Plot per-sample occurrences
+        # Plot per-sample occurrences (with max_positions in title)
         sample_plots = plot_per_sample_occurrences(
             per_sample_counts,
             dataset_name,
             plots_dir,
-            num_samples
+            num_samples,
+            max_positions=max_positions
         )
         
-        # Plot per-position occurrences
+        # Plot per-position occurrences (with num_samples in title)
         position_plots = plot_per_position_occurrences(
             per_position_counts,
             dataset_name,
             plots_dir,
-            max_positions
+            max_positions,
+            num_samples=num_samples
         )
         
         total_plots = len(sample_plots) + len(position_plots)

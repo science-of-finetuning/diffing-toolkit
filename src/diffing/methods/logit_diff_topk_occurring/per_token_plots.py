@@ -47,7 +47,8 @@ def plot_per_sample_occurrences(
     per_sample_counts: Dict[str, Dict[int, int]],
     dataset_name: str,
     save_dir: Path,
-    num_samples: int
+    num_samples: int,
+    max_positions: int = None
 ) -> List[Path]:
     """
     Generate bar/line plots showing token occurrences per sample.
@@ -61,6 +62,7 @@ def plot_per_sample_occurrences(
         dataset_name: Name of dataset for plot titles
         save_dir: Directory to save plots
         num_samples: Total number of samples
+        max_positions: Maximum sequence length (optional, for title)
         
     Returns:
         List of paths to saved plot files
@@ -81,7 +83,13 @@ def plot_per_sample_occurrences(
         # Labels and title
         ax.set_xlabel('Sample Index', fontsize=11)
         ax.set_ylabel('Occurrences in TopK', fontsize=11)
-        ax.set_title(f'Token "{token_str}" - Occurrences per Sample\n({dataset_name})', fontsize=12)
+        
+        # Build title with max_positions info if available
+        title = f'Token "{token_str}" - Occurrences per Sample\n({dataset_name}'
+        if max_positions is not None:
+            title += f', max_positions={max_positions}'
+        title += ')'
+        ax.set_title(title, fontsize=12)
         ax.grid(True, alpha=0.3, axis='y')
         
         # Save
@@ -101,7 +109,8 @@ def plot_per_position_occurrences(
     per_position_counts: Dict[str, Dict[int, int]],
     dataset_name: str,
     save_dir: Path,
-    max_positions: int
+    max_positions: int,
+    num_samples: int = None
 ) -> List[Path]:
     """
     Generate bar/line plots showing token occurrences per position.
@@ -115,6 +124,7 @@ def plot_per_position_occurrences(
         dataset_name: Name of dataset for plot titles
         save_dir: Directory to save plots
         max_positions: Maximum sequence length
+        num_samples: Total number of samples (optional, for title)
         
     Returns:
         List of paths to saved plot files
@@ -130,12 +140,19 @@ def plot_per_position_occurrences(
         
         # Create plot
         fig, ax = plt.subplots(figsize=(12, 4))
-        ax.bar(range(max_positions), counts_list, width=1.0, alpha=0.7, color='darkorange')
+        ax.bar(range(max_positions), counts_list, width=1.0, alpha=0.7, color='darkorange', 
+               edgecolor='black', linewidth=0.3)
         
         # Labels and title
         ax.set_xlabel('Position Index', fontsize=11)
         ax.set_ylabel('Occurrences in TopK', fontsize=11)
-        ax.set_title(f'Token "{token_str}" - Occurrences per Position\n({dataset_name})', fontsize=12)
+        
+        # Build title with num_samples info if available
+        title = f'Token "{token_str}" - Occurrences per Position\n({dataset_name}'
+        if num_samples is not None:
+            title += f', num_samples={num_samples}'
+        title += ')'
+        ax.set_title(title, fontsize=12)
         ax.grid(True, alpha=0.3, axis='y')
         
         # Save
