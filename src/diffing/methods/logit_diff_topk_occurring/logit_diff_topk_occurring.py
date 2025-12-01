@@ -27,6 +27,8 @@ from ..activation_difference_lens.act_diff_lens import (
 from .normalization import normalize_token_list
 from .ui import visualize
 from .per_token_plots import plot_per_sample_occurrences, plot_per_position_occurrences
+from .co_occurrence_plots import plot_co_occurrence_heatmap
+from itertools import combinations_with_replacement
 
 
 class LogitDiffTopKOccurringMethod(DiffingMethod):
@@ -106,13 +108,28 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         # Per-token analysis: Initialize tracking structures if enabled
         per_token_enabled = False
+        co_occurrence_enabled = False
         shortlist_token_ids = {}
         per_sample_counts = {}
         per_position_counts = {}
         
+        # Co-occurrence tracking
+        same_point_matrix = defaultdict(lambda: defaultdict(int))
+        # Track which tokens appeared in each sample (for Same-Sample co-occurrence)
+        # Dict[sample_idx, Set[token_str]]
+        sample_tokens_tracker = defaultdict(set)
+        # Track which tokens appeared at each position (for Same-Position co-occurrence)
+        # Dict[position_idx, Set[token_str]]
+        position_tokens_tracker = defaultdict(set)
+        
         if hasattr(self.method_cfg, 'per_token_analysis') and self.method_cfg.per_token_analysis.enabled:
             per_token_enabled = True
             self.logger.info("Per-token analysis enabled")
+            
+            # Check for co-occurrence config
+            if hasattr(self.method_cfg.per_token_analysis, 'co_occurrence') and self.method_cfg.per_token_analysis.co_occurrence:
+                co_occurrence_enabled = True
+                self.logger.info("Co-occurrence analysis enabled")
             
             # Build token_id -> token_str mapping for shortlist
             for token_str in self.method_cfg.per_token_analysis.token_shortlist:
@@ -227,6 +244,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if ignore_padding and attention_mask[b, s] == 0:
                         continue
 
+                    # Track tokens at this specific point (sample, position) for co-occurrence
+                    current_point_tokens = []
+
                     # Count positive occurrences
                     for token_id in top_k_pos_indices[b, s]:
                         token_id_item = token_id.item()
@@ -237,6 +257,20 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             token_str = shortlist_token_ids[token_id_item]
                             per_sample_counts[token_str][sample_idx] += 1
                             per_position_counts[token_str][s] += 1
+                            
+                            if co_occurrence_enabled:
+                                current_point_tokens.append(token_str)
+                                # Track for same-sample and same-position aggregation
+                                sample_tokens_tracker[sample_idx].add(token_str)
+                                position_tokens_tracker[s].add(token_str)
+
+                    # Update Same-Point co-occurrence matrix (Positive Top-K only)
+                    if co_occurrence_enabled and current_point_tokens:
+                        # Optimization: Use combinations to halve iterations (symmetric matrix)
+                        for t1, t2 in combinations_with_replacement(current_point_tokens, 2):
+                            same_point_matrix[t1][t2] += 1
+                            if t1 != t2:
+                                same_point_matrix[t2][t1] += 1
 
                     # Count negative occurrences
                     for token_id in top_k_neg_indices[b, s]:
@@ -249,6 +283,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             token_str = shortlist_token_ids[token_id_item]
                             per_sample_counts[token_str][sample_idx] += 1
                             per_position_counts[token_str][s] += 1
+                            # NOTE: We do NOT track negative tokens for co-occurrence as per user request
 
                     total_positions += 1
 
@@ -256,6 +291,31 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(
             f"Processed {total_positions:,} positions with {len(global_token_counts):,} unique tokens"
         )
+
+        # Compute co-occurrence matrices if enabled
+        same_sample_matrix = defaultdict(lambda: defaultdict(int))
+        same_position_matrix = defaultdict(lambda: defaultdict(int))
+        
+        if co_occurrence_enabled:
+            self.logger.info("Computing Same-Sample co-occurrence matrix...")
+            for sample_idx, tokens in sample_tokens_tracker.items():
+                if not tokens:
+                    continue
+                # Optimization: Use combinations to halve iterations
+                for t1, t2 in combinations_with_replacement(tokens, 2):
+                    same_sample_matrix[t1][t2] += 1
+                    if t1 != t2:
+                        same_sample_matrix[t2][t1] += 1
+                        
+            self.logger.info("Computing Same-Position co-occurrence matrix...")
+            for pos_idx, tokens in position_tokens_tracker.items():
+                if not tokens:
+                    continue
+                # Optimization: Use combinations to halve iterations
+                for t1, t2 in combinations_with_replacement(tokens, 2):
+                    same_position_matrix[t1][t2] += 1
+                    if t1 != t2:
+                        same_position_matrix[t2][t1] += 1
 
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")
@@ -323,6 +383,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "per_position_counts": per_position_counts,
                 "max_positions": overall_max_len,
             }
+            if co_occurrence_enabled:
+                results["_per_token_data"]["co_occurrence"] = {
+                    "same_sample": same_sample_matrix,
+                    "same_position": same_position_matrix,
+                    "same_point": same_point_matrix,
+                }
 
         return results
 
@@ -442,6 +508,47 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         total_plots = len(sample_plots) + len(position_plots)
         self.logger.info(f"✓ Per-token analysis complete: {total_plots} plots in plots/, {len(per_sample_serializable)} tokens tracked")
+
+    def _save_and_plot_co_occurrence(
+        self,
+        dataset_name: str,
+        co_occurrence_data: Dict[str, Dict[str, Dict[str, int]]]
+    ) -> None:
+        """
+        Save and plot co-occurrence matrices.
+        
+        Args:
+            dataset_name: Dataset name
+            co_occurrence_data: Dict mapping type -> matrix
+        """
+        self.logger.info(f"Saving and plotting co-occurrence data for {dataset_name}...")
+        
+        per_token_dir = self.results_dir / "per_token_analysis"
+        data_dir = per_token_dir / "data"
+        plots_dir = per_token_dir / "plots"
+        
+        data_dir.mkdir(parents=True, exist_ok=True)
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        
+        for co_type, matrix in co_occurrence_data.items():
+            # Convert defaultdict to regular dict for JSON
+            serializable_matrix = {k: dict(v) for k, v in matrix.items()}
+            
+            # Save JSON
+            json_file = data_dir / f"co_occurrence_{co_type}_{dataset_name}.json"
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(serializable_matrix, f, indent=2, ensure_ascii=False)
+            self.logger.info(f"  Saved co-occurrence data: {json_file.name}")
+            
+            # Plot
+            plot_co_occurrence_heatmap(
+                serializable_matrix,
+                dataset_name,
+                plots_dir,
+                co_type
+            )
+        
+        self.logger.info(f"✓ Co-occurrence analysis complete for {dataset_name}")
 
     def run_token_relevance(self) -> None:
         """Grade top-K positive tokens for relevance to finetuning domain."""
@@ -664,6 +771,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         results["num_samples"],
                         results["_per_token_data"]["max_positions"]
                     )
+                    
+                    if "co_occurrence" in results["_per_token_data"]:
+                        self._save_and_plot_co_occurrence(
+                            dataset_cfg.name,
+                            results["_per_token_data"]["co_occurrence"]
+                        )
                 
                 self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
 
