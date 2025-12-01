@@ -28,6 +28,7 @@ dependencies = [
     "wandb>=0.22.3",
     "nnterp>=1.2.0",
     "coolname>=2.2.0",
+    "codenamize>=1.2.3",
 ]
 
 [project.optional-dependencies]
