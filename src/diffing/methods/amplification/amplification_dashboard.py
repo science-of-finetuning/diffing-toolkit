@@ -534,116 +534,162 @@ class AmplificationDashboard:
 
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""
-        st.sidebar.header("Model Info")
-        st.sidebar.info(f"**Model:** {self.method.base_model_cfg.model_id}")
 
-        st.sidebar.header("vLLM Configuration")
-        if st.sidebar.button("Shutdown Engine", use_container_width=True):
-            killed = self._shutdown_vllm_server()
-            if killed:
-                st.sidebar.success("vLLM process killed.")
+        with st.sidebar.expander("vLLM Configuration", expanded=True):
+            st.info(f"**Model:** {self.method.base_model_cfg.model_id}")
+            if st.button("Shutdown vLLM Engine", use_container_width=True):
+                killed = self._shutdown_vllm_server()
+                if killed:
+                    st.success("vLLM process killed.")
+                else:
+                    st.info("No vLLM process was running.")
+            # st.info("TODO: vLLM engine args")
+            st.success("If your vllm server crashes, try to press the shutdown button!")
+
+            # max_num_seqs = st.number_input(
+            #     "Max Number of Sequences",
+            #     min_value=1,
+            #     max_value=256,
+            #     value=st.session_state.vllm_kwargs["max_num_seqs"],
+            #     step=8,
+            #     help="Maximum number of sequences that the vLLM server can process in parallel",
+            #     key="max_num_seqs",
+            # )
+            # max_loras
+
+        with st.sidebar.expander("Sampling Parameters", expanded=True):
+            temperature = st.slider(
+                "Temperature",
+                min_value=0.1,
+                max_value=2.0,
+                value=1.0,
+                step=0.1,
+                help="Sampling temperature for generation",
+            )
+            top_p = st.slider(
+                "Top-p (nucleus sampling)",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.9,
+                step=0.05,
+                help="Nucleus sampling probability threshold",
+            )
+            max_tokens = st.slider(
+                "Max New Tokens",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                help="Maximum number of tokens to generate",
+            )
+            num_samples = st.slider(
+                "Num Samples",
+                min_value=1,
+                max_value=16,
+                value=6,
+                step=1,
+                help="Number of completions to generate per config (for cycling through)",
+            )
+            do_sample = st.checkbox(
+                "Use Sampling",
+                value=True,
+                help="Enable sampling (if disabled, uses greedy decoding)",
+            )
+            seed = st.number_input(
+                "Seed",
+                min_value=0,
+                value=28,
+                step=9,
+                help="Seed for random number generation",
+            )
+            skip_special_tokens = st.checkbox(
+                "Skip Special Tokens",
+                value=False,
+                help="Skip special tokens in the generated text",
+            )
+            st.session_state.sampling_params = {
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens,
+                "n": num_samples,
+                "do_sample": do_sample,
+                "seed": seed,
+                "skip_special_tokens": skip_special_tokens,
+            }
+
+        with st.sidebar.expander("Global Controls", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✓ Enable All", use_container_width=True):
+                    for config_id, mc in st.session_state.managed_configs.items():
+                        mc.active = True
+                        st.session_state[f"config_active_{config_id}"] = True
+                    self._save_and_rerun()
+
+            with col2:
+                if st.button("✗ Disable All", use_container_width=True):
+                    for config_id, mc in st.session_state.managed_configs.items():
+                        mc.active = False
+                        st.session_state[f"config_active_{config_id}"] = False
+                    self._save_and_rerun()
+
+        self._render_sidebar_quick_edit()
+
+    def _render_sidebar_quick_edit(self) -> None:
+        """Render quick config editor in sidebar."""
+        with st.sidebar.expander("Quick Config Edit", expanded=False):
+            # Get active configs only
+            active_configs = {
+                cid: mc
+                for cid, mc in st.session_state.managed_configs.items()
+                if mc.active
+            }
+
+            if not active_configs:
+                st.info("No active configs. Enable configs in the Amplification tab.")
+                return
+
+            # Build options: name -> config_id mapping
+            config_options = {mc.config.name: cid for cid, mc in active_configs.items()}
+            option_names = list(config_options.keys())
+
+            # Initialize sidebar selection state if needed
+            if "sidebar_quick_edit_config_id" not in st.session_state:
+                st.session_state.sidebar_quick_edit_config_id = None
+
+            # Get current selection name (if valid)
+            current_id = st.session_state.sidebar_quick_edit_config_id
+            current_name = None
+            if current_id and current_id in active_configs:
+                current_name = active_configs[current_id].config.name
+
+            # Determine initial index
+            if current_name and current_name in option_names:
+                initial_index = option_names.index(current_name)
             else:
-                st.sidebar.info("No vLLM process was running.")
-        st.sidebar.info("TODO: vLLM engine args")
-        st.sidebar.success(
-            "If your vllm server crashes, try to press the shutdown button!"
-        )
+                initial_index = 0
 
-        # max_num_seqs = st.sidebar.number_input(
-        #     "Max Number of Sequences",
-        #     min_value=1,
-        #     max_value=256,
-        #     value=st.session_state.vllm_kwargs["max_num_seqs"],
-        #     step=8,
-        #     help="Maximum number of sequences that the vLLM server can process in parallel",
-        #     key="max_num_seqs",
-        # )
-        # max_loras
+            def on_config_select():
+                selected_name = st.session_state["sidebar_config_selector"]
+                st.session_state.sidebar_quick_edit_config_id = config_options.get(
+                    selected_name
+                )
 
-        st.sidebar.header("Sampling Parameters")
+            selected_name = st.selectbox(
+                "Select Config",
+                options=option_names,
+                index=initial_index,
+                key="sidebar_config_selector",
+                on_change=on_config_select,
+            )
 
-        temperature = st.sidebar.slider(
-            "Temperature",
-            min_value=0.1,
-            max_value=2.0,
-            value=1.0,
-            step=0.1,
-            help="Sampling temperature for generation",
-        )
-        top_p = st.sidebar.slider(
-            "Top-p (nucleus sampling)",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.9,
-            step=0.05,
-            help="Nucleus sampling probability threshold",
-        )
-        max_tokens = st.sidebar.slider(
-            "Max New Tokens",
-            min_value=10,
-            max_value=500,
-            value=100,
-            step=10,
-            help="Maximum number of tokens to generate",
-        )
-        num_samples = st.sidebar.slider(
-            "Num Samples",
-            min_value=1,
-            max_value=16,
-            value=6,
-            step=1,
-            help="Number of completions to generate per config (for cycling through)",
-        )
-        do_sample = st.sidebar.checkbox(
-            "Use Sampling",
-            value=True,
-            help="Enable sampling (if disabled, uses greedy decoding)",
-        )
-        seed = st.sidebar.number_input(
-            "Seed",
-            min_value=0,
-            value=28,
-            step=9,
-            help="Seed for random number generation",
-        )
-        skip_special_tokens = st.sidebar.checkbox(
-            "Skip Special Tokens",
-            value=False,
-            help="Skip special tokens in the generated text",
-        )
-        st.session_state.sampling_params = {
-            "temperature": temperature,
-            "top_p": top_p,
-            "max_tokens": max_tokens,
-            "n": num_samples,
-            "do_sample": do_sample,
-            "seed": seed,
-            "skip_special_tokens": skip_special_tokens,
-        }
-
-        st.sidebar.header("Chat Settings")
-        st.session_state.chat_multi_gen = st.sidebar.checkbox(
-            "Multi-gen in Chat",
-            value=st.session_state.get("chat_multi_gen", False),
-            help="When enabled and Num Samples > 1, show all samples and let you select one",
-        )
-
-        st.sidebar.header("Global Controls")
-
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            if st.button("✓ Enable All", use_container_width=True):
-                for config_id, mc in st.session_state.managed_configs.items():
-                    mc.active = True
-                    st.session_state[f"config_active_{config_id}"] = True
-                self._save_and_rerun()
-
-        with col2:
-            if st.button("✗ Disable All", use_container_width=True):
-                for config_id, mc in st.session_state.managed_configs.items():
-                    mc.active = False
-                    st.session_state[f"config_active_{config_id}"] = False
-                self._save_and_rerun()
+            # Render the selected config editor with sidebar_ prefix
+            selected_id = config_options.get(selected_name)
+            if selected_id and selected_id in st.session_state.managed_configs:
+                mc = st.session_state.managed_configs[selected_id]
+                self._render_amplification_config(
+                    selected_id, mc, key_prefix="sidebar_", sidebar_mode=True
+                )
 
     def _render_text_input_tab(self) -> None:
         """Render legacy text input interface."""
@@ -1749,8 +1795,9 @@ class AmplificationDashboard:
                                 self._save_conversation(conv_id, conv)
                                 st.rerun(scope="fragment")
 
+    @st.fragment
     def _render_single_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
-        """Render a single conversation."""
+        """Render a single conversation. Fragment for independent updates."""
         config = conv["context"]["config"]
         pending_key = f"chat_pending_samples_{conv_id}"
 
@@ -1806,7 +1853,7 @@ class AmplificationDashboard:
                     "mode": "replace",
                 }
                 self._save_conversation(conv_id, conv)
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
                     st.write(f"**{config_label}**")
@@ -1846,7 +1893,7 @@ class AmplificationDashboard:
                         logs_dir=LOGS_DIR,
                     )
 
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
 
         if conv.get("continuing_from") is not None:
             continue_index = conv["continuing_from"]
@@ -1915,7 +1962,7 @@ class AmplificationDashboard:
                     "target_index": continue_index,
                 }
                 self._save_conversation(conv_id, conv)
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
                     st.write(f"**{config_label}** (continuing...)")
@@ -1952,23 +1999,29 @@ class AmplificationDashboard:
                         logs_dir=LOGS_DIR,
                     )
 
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
 
         col1, col2, col3 = st.columns([3, 1, 1])
 
         with col1:
-            new_name = st.text_input(
+            conv_name_key = f"conv_name_{conv_id}"
+
+            def on_conv_name_change(conversation=conv, cid=conv_id, key=conv_name_key):
+                new_name = st.session_state[key]
+                if new_name != conversation["name"]:
+                    delete_conversation_file(conversation["name"], CONVERSATIONS_DIR)
+                    unique_name = self._get_unique_conversation_name(
+                        new_name, exclude_conv_id=cid
+                    )
+                    conversation["name"] = unique_name
+                    self._save_conversation(cid, conversation)
+
+            st.text_input(
                 "Conversation Name",
                 value=conv["name"],
-                key=f"conv_name_{conv_id}",
+                key=conv_name_key,
+                on_change=on_conv_name_change,
             )
-            if new_name != conv["name"]:
-                delete_conversation_file(conv["name"], CONVERSATIONS_DIR)
-                unique_name = self._get_unique_conversation_name(
-                    new_name, exclude_conv_id=conv_id
-                )
-                conv["name"] = unique_name
-                self._save_conversation(conv_id, conv)
 
         with col2:
             if config:
@@ -1983,25 +2036,28 @@ class AmplificationDashboard:
                         ),
                         0,
                     )
+                    config_select_key = f"conv_config_{conv_id}"
 
-                    selected_config_name = st.selectbox(
+                    def on_config_change(
+                        conversation=conv,
+                        cid=conv_id,
+                        mcs=all_mcs,
+                        key=config_select_key,
+                    ):
+                        selected_name = st.session_state[key]
+                        new_mc = next(
+                            mc for mc in mcs if mc.config.name == selected_name
+                        )
+                        conversation["context"]["config"] = new_mc
+                        self._save_conversation(cid, conversation)
+
+                    st.selectbox(
                         "Config",
                         options=config_names,
                         index=current_index,
-                        key=f"conv_config_{conv_id}",
+                        key=config_select_key,
+                        on_change=on_config_change,
                     )
-
-                    if selected_config_name != config.name:
-                        new_managed_config = next(
-                            mc
-                            for mc in all_mcs
-                            if mc.config.name == selected_config_name
-                        )
-
-                        conv["context"]["config"] = new_managed_config
-                        self._save_conversation(conv_id, conv)
-                        st.success(f"Switched to {selected_config_name}")
-                        self._save_and_rerun()
             else:
                 st.info("No config")
 
@@ -2016,19 +2072,24 @@ class AmplificationDashboard:
                 self._save_and_rerun()
 
         # System prompt section
-        current_system_prompt = conv["context"].get("system_prompt", "")
+        system_prompt_key = f"system_prompt_{conv_id}"
+
+        def on_system_prompt_change(
+            conversation=conv, cid=conv_id, key=system_prompt_key
+        ):
+            conversation["context"]["system_prompt"] = st.session_state[key]
+            self._save_conversation(cid, conversation)
+
         with st.expander("⚙️ System Prompt", expanded=False):
-            new_system_prompt = st.text_area(
+            st.text_area(
                 "System Prompt",
-                value=current_system_prompt,
-                key=f"system_prompt_{conv_id}",
+                value=conv["context"].get("system_prompt", ""),
+                key=system_prompt_key,
                 height=100,
                 placeholder="Enter a system prompt to set context for the conversation...",
                 label_visibility="collapsed",
+                on_change=on_system_prompt_change,
             )
-            if new_system_prompt != current_system_prompt:
-                conv["context"]["system_prompt"] = new_system_prompt
-                self._save_conversation(conv_id, conv)
 
         st.markdown("---")
 
@@ -2048,10 +2109,18 @@ class AmplificationDashboard:
             )
             return  # Don't show chat input while selecting
 
-        send_to_multi_gen = st.checkbox(
+        send_to_multi_gen = st.toggle(
             "🚀 Send next message to Multi-Generation",
             key=f"multi_gen_mode_{conv_id}",
-            help="When checked, your next message will be sent to Multi-Generation instead of this chat",
+            help="When enabled, your next message will be sent to Multi-Generation instead of this chat",
+        )
+
+        st.session_state.chat_multi_gen = st.toggle(
+            "Multi-gen in Chat",
+            value=st.session_state.get("chat_multi_gen", False),
+            help="When enabled and Num Samples > 1, show all samples and let you select one",
+            disabled=send_to_multi_gen,
+            key=f"chat_multi_gen_{conv_id}",
         )
 
         user_input = st.chat_input(
@@ -2138,7 +2207,7 @@ class AmplificationDashboard:
                         "mode": "add",
                     }
                     self._save_conversation(conv_id, conv)
-                    self._save_and_rerun()
+                    self._save_and_rerun(scope="fragment")
                 else:
                     with st.chat_message("assistant"):
                         st.write(f"**{config_label}**")
@@ -2177,18 +2246,85 @@ class AmplificationDashboard:
                         logs_dir=LOGS_DIR,
                     )
 
-                    self._save_and_rerun()
+                    self._save_and_rerun(scope="fragment")
 
     @st.fragment
-    def _render_amplification_config(self, config_id: str, mc: ManagedConfig) -> None:
-        """Render one amplification config (expandable). Fragment for independent updates."""
+    def _render_amplification_config(
+        self,
+        config_id: str,
+        mc: ManagedConfig,
+        key_prefix: str = "",
+        sidebar_mode: bool = False,
+    ) -> None:
+        """Render one amplification config. Fragment for independent updates.
+
+        Args:
+            config_id: Unique identifier for the config
+            mc: ManagedConfig wrapper
+            key_prefix: Optional prefix for widget keys to avoid conflicts when rendering
+                        the same config in multiple places (e.g., sidebar vs main area)
+            sidebar_mode: If True, renders without expander and without duplicate/delete buttons
+        """
         config = mc.config
-        icon = "✅" if mc.active else "❌"
-        with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
+        self._render_amplification_config_content(
+            config_id, mc, config, key_prefix, sidebar_mode
+        )
+
+    def _render_amplification_config_content(
+        self,
+        config_id: str,
+        mc: ManagedConfig,
+        config,
+        key_prefix: str,
+        sidebar_mode: bool,
+    ) -> None:
+        """Inner content renderer for amplification config."""
+        if sidebar_mode:
+            # Render directly without expander
+            self._render_config_fields(config_id, mc, config, key_prefix, sidebar_mode)
+        else:
+            # Render inside expander with action buttons
+            icon = "✅" if mc.active else "❌"
+            with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
+                self._render_config_fields(
+                    config_id, mc, config, key_prefix, sidebar_mode
+                )
+
+    def _render_config_fields(
+        self,
+        config_id: str,
+        mc: ManagedConfig,
+        config,
+        key_prefix: str,
+        sidebar_mode: bool,
+    ) -> None:
+        """Render the actual config fields."""
+        # Name input and action buttons row
+        if sidebar_mode:
+            # Just the name input, no buttons
+            name_key = f"{key_prefix}config_name_{config_id}"
+
+            def on_name_change(cfg=config, cid=config_id, key=name_key):
+                new_name = st.session_state[key]
+                if new_name != cfg.name:
+                    unique_name = self._get_unique_config_name(
+                        new_name, exclude_config_id=cid
+                    )
+                    st.session_state.managed_configs[cid].config.name = unique_name
+                    self._save_configs()
+
+            st.text_input(
+                "Configuration Name",
+                value=config.name,
+                key=name_key,
+                on_change=on_name_change,
+            )
+        else:
+            # Full layout with buttons
             col1, col2 = st.columns([3, 1])
 
             with col1:
-                name_key = f"config_name_{config_id}"
+                name_key = f"{key_prefix}config_name_{config_id}"
 
                 def on_name_change(cfg=config, cid=config_id, key=name_key):
                     new_name = st.session_state[key]
@@ -2211,7 +2347,7 @@ class AmplificationDashboard:
                 with btn_col1:
                     if st.button(
                         "📋 Duplicate",
-                        key=f"duplicate_config_{config_id}",
+                        key=f"{key_prefix}duplicate_config_{config_id}",
                         use_container_width=True,
                     ):
                         new_config = deepcopy(config)
@@ -2232,67 +2368,72 @@ class AmplificationDashboard:
                 with btn_col2:
                     if st.button(
                         "🗑️ Delete",
-                        key=f"delete_config_{config_id}",
+                        key=f"{key_prefix}delete_config_{config_id}",
                         use_container_width=True,
                     ):
                         del st.session_state.managed_configs[config_id]
                         self._save_and_rerun()
 
-            desc_key = f"config_desc_{config_id}"
+        desc_key = f"{key_prefix}config_desc_{config_id}"
 
-            def on_description_change(cfg=config, key=desc_key):
-                cfg.description = st.session_state[key]
-                self._save_configs()
+        def on_description_change(cfg=config, key=desc_key):
+            cfg.description = st.session_state[key]
+            self._save_configs()
 
-            st.text_area(
-                "Description",
-                value=config.description,
-                key=desc_key,
-                height=60,
-                on_change=on_description_change,
-            )
+        st.text_area(
+            "Description",
+            value=config.description,
+            key=desc_key,
+            height=60,
+            on_change=on_description_change,
+        )
 
-            def on_active_change(managed_config=mc, key=f"config_active_{config_id}"):
-                managed_config.active = st.session_state[key]
-                self._save_configs()
+        active_key = f"{key_prefix}config_active_{config_id}"
 
-            st.checkbox(
-                "Active",
-                value=mc.active,
-                key=f"config_active_{config_id}",
-                help="Only active configurations will be used for generation",
-                on_change=on_active_change,
-            )
+        def on_active_change(managed_config=mc, key=active_key):
+            managed_config.active = st.session_state[key]
+            self._save_configs()
 
-            st.markdown("#### Adapters")
+        st.checkbox(
+            "Active",
+            value=mc.active,
+            key=active_key,
+            help="Only active configurations will be used for generation",
+            on_change=on_active_change,
+        )
 
-            if len(config.amplified_adapters) == 0:
-                st.info("No adapters configured. Click 'Add Adapter' below.")
-            else:
-                for adapter_idx, adapter in enumerate(config.amplified_adapters):
-                    self._render_adapter_amplification(config_id, adapter_idx, adapter)
+        st.markdown("#### Adapters")
 
-            if st.button("➕ Add Adapter", key=f"add_adapter_{config_id}"):
-                new_adapter = AmplifiedAdapter(
-                    organism_name=CUSTOM_ADAPTER_ORGANISM,
-                    variant="",
-                    layer_amplifications=[
-                        LayerAmplification(
-                            layers="all",
-                            module_amplifications=[
-                                ModuleAmplification(modules="all", weight=1.0)
-                            ],
-                        )
-                    ],
+        if len(config.amplified_adapters) == 0:
+            st.info("No adapters configured. Click 'Add Adapter' below.")
+        else:
+            for adapter_idx, adapter in enumerate(config.amplified_adapters):
+                self._render_adapter_amplification(
+                    config_id, adapter_idx, adapter, key_prefix
                 )
-                config.amplified_adapters.append(new_adapter)
-                self._save_and_rerun(scope="fragment")
+
+        if st.button("➕ Add Adapter", key=f"{key_prefix}add_adapter_{config_id}"):
+            new_adapter = AmplifiedAdapter(
+                organism_name=CUSTOM_ADAPTER_ORGANISM,
+                variant="",
+                layer_amplifications=[
+                    LayerAmplification(
+                        layers="all",
+                        module_amplifications=[
+                            ModuleAmplification(modules="all", weight=1.0)
+                        ],
+                    )
+                ],
+            )
+            config.amplified_adapters.append(new_adapter)
+            self._save_and_rerun(scope="fragment")
 
     def _render_adapter_amplification(
         self,
         config_id: str,
         adapter_idx: int,
         adapter: AmplifiedAdapter,
+        key_prefix: str = "",
     ) -> None:
         """Render one adapter's amplifications."""
         with st.container(border=True):
@@ -2312,7 +2453,9 @@ class AmplificationDashboard:
                 st.markdown(f"**Adapter: {display_name}**")
 
             with col2:
-                if st.button("🗑️", key=f"delete_adapter_{config_id}_{adapter_idx}"):
+                if st.button(
+                    "🗑️", key=f"{key_prefix}delete_adapter_{config_id}_{adapter_idx}"
+                ):
                     st.session_state.managed_configs[
                         config_id
                     ].config.amplified_adapters.pop(adapter_idx)
@@ -2327,7 +2470,7 @@ class AmplificationDashboard:
                     base_model_name=self.method.base_model_cfg.name, only_loras=True
                 )
                 organism_options = [CUSTOM_ADAPTER_ORGANISM] + available_organisms
-                organism_key = f"organism_{config_id}_{adapter_idx}"
+                organism_key = f"{key_prefix}organism_{config_id}_{adapter_idx}"
 
                 if adapter.organism_name in organism_options:
                     current_index = organism_options.index(adapter.organism_name)
@@ -2354,7 +2497,7 @@ class AmplificationDashboard:
                 )
 
             with col2:
-                variant_key = f"variant_{config_id}_{adapter_idx}"
+                variant_key = f"{key_prefix}variant_{config_id}_{adapter_idx}"
 
                 def on_variant_change(adpt=adapter, key=variant_key):
                     adpt.variant = st.session_state[key]
@@ -2407,11 +2550,12 @@ class AmplificationDashboard:
             else:
                 for layer_idx, layer_amp in enumerate(adapter.layer_amplifications):
                     self._render_layer_amplification(
-                        config_id, adapter_idx, layer_idx, layer_amp
+                        config_id, adapter_idx, layer_idx, layer_amp, key_prefix
                     )
 
             if st.button(
-                "➕ Add Layer Spec", key=f"add_layer_{config_id}_{adapter_idx}"
+                "➕ Add Layer Spec",
+                key=f"{key_prefix}add_layer_{config_id}_{adapter_idx}",
             ):
                 new_layer_amp = LayerAmplification(
                     layers="all",
@@ -2426,13 +2570,14 @@ class AmplificationDashboard:
         adapter_idx: int,
         layer_idx: int,
         layer_amp: LayerAmplification,
+        key_prefix: str = "",
     ) -> None:
         """Render layer amplification specification."""
-        key_prefix = f"{config_id}_{adapter_idx}_{layer_idx}"
-        mode_key = f"layer_mode_{key_prefix}"
-        single_key = f"layer_single_{key_prefix}"
-        range_key = f"layer_range_{key_prefix}"
-        list_key = f"layer_list_{key_prefix}"
+        base_key = f"{key_prefix}{config_id}_{adapter_idx}_{layer_idx}"
+        mode_key = f"layer_mode_{base_key}"
+        single_key = f"layer_single_{base_key}"
+        range_key = f"layer_range_{base_key}"
+        list_key = f"layer_list_{base_key}"
 
         def on_mode_change(lamp=layer_amp, mk=mode_key):
             mode = st.session_state[mk]
@@ -2473,7 +2618,7 @@ class AmplificationDashboard:
             with col2:
                 if st.button(
                     "🗑️",
-                    key=f"delete_layer_{key_prefix}",
+                    key=f"delete_layer_{base_key}",
                 ):
                     st.session_state.managed_configs[
                         config_id
@@ -2573,11 +2718,12 @@ class AmplificationDashboard:
                         layer_idx,
                         module_idx,
                         module_amp,
+                        key_prefix,
                     )
 
             if st.button(
                 "➕ Add Module",
-                key=f"add_module_{config_id}_{adapter_idx}_{layer_idx}",
+                key=f"{key_prefix}add_module_{config_id}_{adapter_idx}_{layer_idx}",
             ):
                 new_module_amp = ModuleAmplification(modules="all", weight=1.0)
                 layer_amp.module_amplifications.append(new_module_amp)
@@ -2590,10 +2736,12 @@ class AmplificationDashboard:
         layer_idx: int,
         module_idx: int,
         module_amp: ModuleAmplification,
+        key_prefix: str = "",
     ) -> None:
         """Render module amplification (module selector + weight slider)."""
-        module_key = f"module_mode_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}"
-        weight_key = f"module_weight_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}"
+        base_key = f"{key_prefix}{config_id}_{adapter_idx}_{layer_idx}_{module_idx}"
+        module_key = f"module_mode_{base_key}"
+        weight_key = f"module_weight_{base_key}"
 
         def on_module_change(mod_amp=module_amp, key=module_key):
             mod_amp.modules = st.session_state[key]
@@ -2637,7 +2785,7 @@ class AmplificationDashboard:
         with col3:
             if st.button(
                 "🗑️",
-                key=f"delete_module_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=f"delete_module_{base_key}",
             ):
                 st.session_state.managed_configs[config_id].config.amplified_adapters[
                     adapter_idx
