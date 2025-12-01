@@ -594,7 +594,7 @@ class GenerationLog:
         """
         prompt_hash = self._compute_prompt_hash()
         prompt_codename = codenamize_hash(prompt_hash)
-        timestamp_str = self.timestamp.strftime("%H-%M-%S")
+        timestamp_str = self.timestamp.strftime("%H-%M-%S-%f")
         date_str = self.timestamp.strftime("%Y-%m-%d")
 
         config_name = self.config["name"]
