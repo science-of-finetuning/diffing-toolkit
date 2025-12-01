@@ -179,7 +179,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
     def multi_gen_request(
         self,
-        prompt: list[int],
+        prompt: list[int] | list[list[int]],
         amplification_configs: List[ManagedConfig] | ManagedConfig,
         sampling_params: SamplingParams | dict,
         compiled_adapters_dir: Path,
@@ -188,20 +188,29 @@ class WeightDifferenceAmplification(DiffingMethod):
         """
         Generate text with multiple amplification configurations.
 
+        Supports both single prompt and batched prompts. When batched, all prompts
+        are processed in a single vLLM call per config for efficiency.
+
         Args:
-            prompt: Input prompt as token IDs
+            prompt: Input prompt as token IDs (single) or list of token ID lists (batch)
             amplification_configs: List of ManagedConfig objects to generate with
             sampling_params: vLLM SamplingParams or dict with sampling settings
             compiled_adapters_dir: Directory to store compiled adapters
             vllm_server: Optional vLLM server to use (defaults to lazy-loaded server)
 
         Yields:
-            Dict with keys: config, compiled_path, results (list), output_tokens (list)
+            Dict with keys: config, compiled_path, results, output_tokens
+            - Single prompt: results/output_tokens are 1D lists (one per sample)
+            - Batched prompts: results/output_tokens are 2D lists [prompt_idx][sample_idx]
         """
         server = vllm_server if vllm_server is not None else self.multi_lora_vllm_server
 
         if isinstance(amplification_configs, ManagedConfig):
             amplification_configs = [amplification_configs]
+
+        # Normalize prompt to list of prompts, track if batched
+        is_batched = len(prompt) > 0 and isinstance(prompt[0], list)
+        prompts = prompt if is_batched else [prompt]
 
         if isinstance(sampling_params, dict):
             vllm_sampling_params = SamplingParams(
@@ -224,15 +233,27 @@ class WeightDifferenceAmplification(DiffingMethod):
                     str(compiled_path),
                 )
 
+            # Batch all prompts in single vLLM call
             outputs = server.generate(
-                prompts=[TokensPrompt(prompt_token_ids=prompt)],
+                prompts=[TokensPrompt(prompt_token_ids=p) for p in prompts],
                 sampling_params=vllm_sampling_params,
                 lora_request=lreq,
             )
 
-            all_completions = outputs[0].outputs
-            results = [output.text for output in all_completions]
-            output_tokens = [list(output.token_ids) for output in all_completions]
+            if is_batched:
+                # 2D results: [prompt_idx][sample_idx]
+                results = [
+                    [output.text for output in req.outputs] for req in outputs
+                ]
+                output_tokens = [
+                    [list(output.token_ids) for output in req.outputs]
+                    for req in outputs
+                ]
+            else:
+                # 1D results (backward compatible): [sample_idx]
+                all_completions = outputs[0].outputs
+                results = [output.text for output in all_completions]
+                output_tokens = [list(output.token_ids) for output in all_completions]
 
             yield {
                 "config": config,

@@ -37,6 +37,7 @@ from src.diffing.methods.amplification.amplification_config import (
 )
 from src.diffing.methods.amplification.dashboard_state import (
     ManagedConfig,
+    ManagedPrompt,
     sanitize_config_name,
     get_unique_name,
     save_configs_to_cache,
@@ -45,6 +46,10 @@ from src.diffing.methods.amplification.dashboard_state import (
     list_all_folders,
     create_folder,
     unload_folder_configs,
+    save_prompts_to_cache,
+    load_prompts_from_folder,
+    list_all_prompt_folders,
+    unload_folder_prompts,
     save_multigen_state,
     load_multigen_state,
     save_conversation,
@@ -63,6 +68,8 @@ CONVERSATIONS_DIR = CACHE_DIR / "conversations"
 CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR = CACHE_DIR / "generation_logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+PROMPTS_DIR = CACHE_DIR / "prompts"
+PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
 COMPILED_ADAPTERS_DIR = PROJECT_ROOT / ".compiled_adapters"
 
 # Load sample cycler component files
@@ -276,6 +283,16 @@ class AmplificationDashboard:
                 "active_tab", "Text"
             )
 
+        # Multi-prompt generation state
+        if "managed_prompts" not in st.session_state:
+            st.session_state.managed_prompts = {}
+        if "loaded_prompt_folders" not in st.session_state:
+            st.session_state.loaded_prompt_folders = {""}
+        if "multi_prompt_results" not in st.session_state:
+            st.session_state.multi_prompt_results = None
+        if "multi_prompt_display_configs" not in st.session_state:
+            st.session_state.multi_prompt_display_configs = []
+
         if "multi_gen_prompt" not in st.session_state:
             st.session_state.multi_gen_prompt = saved_multigen_state.get("prompt", "")
         if "apply_chat_template_checkbox" not in st.session_state:
@@ -284,6 +301,7 @@ class AmplificationDashboard:
             )
 
         self._load_configs_from_cache()
+        self._load_prompts_from_cache()
         self._load_conversations_from_cache()
 
     def _get_sampling_params(self) -> SamplingParams:
@@ -304,6 +322,19 @@ class AmplificationDashboard:
             loaded = load_configs_from_folder(CONFIGS_DIR, folder, existing_names)
             st.session_state.managed_configs.update(loaded)
             existing_names.update(mc.config.name for mc in loaded.values())
+
+    def _load_prompts_from_cache(self) -> None:
+        """Load prompts from all loaded folders."""
+        if len(st.session_state.managed_prompts) > 0:
+            return
+
+        for folder in st.session_state.loaded_prompt_folders:
+            loaded = load_prompts_from_folder(PROMPTS_DIR, folder)
+            st.session_state.managed_prompts.update(loaded)
+
+    def _save_prompts(self) -> None:
+        """Save prompts to cache without triggering rerun."""
+        save_prompts_to_cache(st.session_state.managed_prompts, PROMPTS_DIR)
 
     def _save_last_multigen_state(self) -> None:
         """Save current multi-gen state to cache."""
@@ -523,7 +554,9 @@ class AmplificationDashboard:
 
         self._render_sidebar()
 
-        tab1, tab2, tab3 = st.tabs(["Amplifications", "Multi-Generation", "Chat"])
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["Amplifications", "Multi-Generation", "Chat", "Multi-Prompt"]
+        )
 
         with tab1:
             self._render_amplifications_tab()
@@ -531,6 +564,8 @@ class AmplificationDashboard:
             self._render_multi_generation_tab()
         with tab3:
             self._render_chat_tab()
+        with tab4:
+            self._render_multi_prompt_tab()
 
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""
@@ -2299,28 +2334,8 @@ class AmplificationDashboard:
         sidebar_mode: bool,
     ) -> None:
         """Render the actual config fields."""
-        # Name input and action buttons row
-        if sidebar_mode:
-            # Just the name input, no buttons
-            name_key = f"{key_prefix}config_name_{config_id}"
-
-            def on_name_change(cfg=config, cid=config_id, key=name_key):
-                new_name = st.session_state[key]
-                if new_name != cfg.name:
-                    unique_name = self._get_unique_config_name(
-                        new_name, exclude_config_id=cid
-                    )
-                    st.session_state.managed_configs[cid].config.name = unique_name
-                    self._save_configs()
-
-            st.text_input(
-                "Configuration Name",
-                value=config.name,
-                key=name_key,
-                on_change=on_name_change,
-            )
-        else:
-            # Full layout with buttons
+        if not sidebar_mode:
+            # Name input and action buttons row
             col1, col2 = st.columns([3, 1])
 
             with col1:
@@ -2374,19 +2389,19 @@ class AmplificationDashboard:
                         del st.session_state.managed_configs[config_id]
                         self._save_and_rerun()
 
-        desc_key = f"{key_prefix}config_desc_{config_id}"
+            desc_key = f"{key_prefix}config_desc_{config_id}"
 
-        def on_description_change(cfg=config, key=desc_key):
-            cfg.description = st.session_state[key]
-            self._save_configs()
+            def on_description_change(cfg=config, key=desc_key):
+                cfg.description = st.session_state[key]
+                self._save_configs()
 
-        st.text_area(
-            "Description",
-            value=config.description,
-            key=desc_key,
-            height=60,
-            on_change=on_description_change,
-        )
+            st.text_area(
+                "Description",
+                value=config.description,
+                key=desc_key,
+                height=60,
+                on_change=on_description_change,
+            )
 
         active_key = f"{key_prefix}config_active_{config_id}"
 
@@ -2791,3 +2806,373 @@ class AmplificationDashboard:
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
                 self._save_and_rerun(scope="fragment")
+
+    # ============ Multi-Prompt Tab ============
+
+    def _render_multi_prompt_tab(self) -> None:
+        """Render the multi-prompt generation tab."""
+        prompts_tab, results_tab = st.tabs(["📝 Prompts", "📊 Results"])
+
+        with prompts_tab:
+            self._render_prompts_subtab()
+        with results_tab:
+            self._render_multi_prompt_results_subtab()
+
+    def _render_prompts_subtab(self) -> None:
+        """Render the prompts management subtab."""
+        col1, col2, col3 = st.columns([2, 1, 1])
+
+        with col1:
+            # Folder selector (simplified - just root for now)
+            st.selectbox(
+                "Folder",
+                options=["root"],
+                key="multi_prompt_folder",
+                disabled=True,
+                help="Prompt folder selection (subfolder support coming soon)",
+            )
+
+        with col2:
+            if st.button("➕ Add Prompt", use_container_width=True):
+                new_prompt = ManagedPrompt(active=True, expanded=True)
+                st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
+                self._save_prompts()
+                st.rerun()
+
+        with col3:
+            active_prompts = [
+                mp for mp in st.session_state.managed_prompts.values() if mp.active
+            ]
+            if st.button(
+                f"🚀 Run Active ({len(active_prompts)})",
+                use_container_width=True,
+                disabled=len(active_prompts) == 0,
+            ):
+                self._run_multi_prompt_generation()
+
+        st.divider()
+
+        if not st.session_state.managed_prompts:
+            st.info("No prompts yet. Click 'Add Prompt' to create one.")
+            return
+
+        # Render each prompt
+        for prompt_id, mp in st.session_state.managed_prompts.items():
+            self._render_prompt_editor(prompt_id, mp)
+
+    @st.fragment
+    def _render_prompt_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
+        """Render a single prompt editor. Fragment for independent updates."""
+        icon = "✅" if mp.active else "❌"
+        display_name = mp.get_display_name() or "New Prompt"
+
+        with st.expander(f"{icon} {display_name}", expanded=mp.expanded):
+            # Header row: name + buttons
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                name_key = f"prompt_name_{prompt_id}"
+
+                def on_name_change(prompt=mp, key=name_key):
+                    prompt.name = st.session_state[key]
+                    self._save_prompts()
+
+                st.text_input(
+                    "Name (optional)",
+                    value=mp.name,
+                    key=name_key,
+                    placeholder="Auto-generated from prompt text",
+                    on_change=on_name_change,
+                )
+
+            with col2:
+                if st.button("🗑️ Delete", key=f"delete_prompt_{prompt_id}"):
+                    del st.session_state.managed_prompts[prompt_id]
+                    self._save_prompts()
+                    st.rerun()
+
+            # Active checkbox
+            active_key = f"prompt_active_{prompt_id}"
+
+            def on_active_change(prompt=mp, key=active_key):
+                prompt.active = st.session_state[key]
+                self._save_prompts()
+
+            st.checkbox(
+                "Active",
+                value=mp.active,
+                key=active_key,
+                help="Only active prompts will be used for generation",
+                on_change=on_active_change,
+            )
+
+            # Editor mode tabs (Simple / Chat) - reusing multi-gen pattern
+            simple_tab, chat_tab = st.tabs(["📝 Simple", "💬 Chat"])
+
+            with simple_tab:
+                self._render_prompt_simple_editor(prompt_id, mp)
+
+            with chat_tab:
+                self._render_prompt_chat_editor(prompt_id, mp)
+
+    def _render_prompt_simple_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
+        """Render simple text editor for prompt."""
+        # Template mode
+        template_key = f"prompt_template_{prompt_id}"
+
+        def on_template_change(prompt=mp, key=template_key):
+            prompt.template_mode = st.session_state[key]
+            prompt.editor_mode = "simple"
+            self._save_prompts()
+
+        st.selectbox(
+            "Template mode",
+            ["No template", "Apply chat template", "Apply loom template"],
+            index=["No template", "Apply chat template", "Apply loom template"].index(
+                mp.template_mode
+            ),
+            key=template_key,
+            on_change=on_template_change,
+        )
+
+        # Prompt text
+        text_key = f"prompt_text_{prompt_id}"
+
+        def on_text_change(prompt=mp, key=text_key):
+            prompt.prompt_text = st.session_state[key]
+            prompt.editor_mode = "simple"
+            self._save_prompts()
+
+        st.text_area(
+            "Prompt",
+            value=mp.prompt_text,
+            key=text_key,
+            height=150,
+            on_change=on_text_change,
+        )
+
+        # Assistant prefill (only for chat template)
+        if mp.template_mode == "Apply chat template":
+            prefill_key = f"prompt_prefill_{prompt_id}"
+
+            def on_prefill_change(prompt=mp, key=prefill_key):
+                prompt.assistant_prefill = st.session_state[key]
+                self._save_prompts()
+
+            st.text_input(
+                "Assistant prefill",
+                value=mp.assistant_prefill,
+                key=prefill_key,
+                placeholder="Optional: prefill the assistant's response...",
+                on_change=on_prefill_change,
+            )
+
+    def _render_prompt_chat_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
+        """Render chat-style message editor for prompt."""
+        # Message list
+        if not mp.messages:
+            st.info("No messages. Add one below.")
+        else:
+            for i, msg in enumerate(mp.messages):
+                col1, col2, col3 = st.columns([1, 4, 1])
+                with col1:
+                    st.write(f"**{msg['role'].title()}**")
+                with col2:
+                    # Edit in place
+                    content_key = f"prompt_msg_{prompt_id}_{i}"
+
+                    def on_content_change(prompt=mp, idx=i, key=content_key):
+                        prompt.messages[idx]["content"] = st.session_state[key]
+                        prompt.editor_mode = "chat"
+                        self._save_prompts()
+
+                    st.text_area(
+                        "Content",
+                        value=msg["content"],
+                        key=content_key,
+                        label_visibility="collapsed",
+                        height=80,
+                        on_change=on_content_change,
+                    )
+                with col3:
+                    if st.button("🗑️", key=f"del_msg_{prompt_id}_{i}"):
+                        mp.messages.pop(i)
+                        mp.editor_mode = "chat"
+                        self._save_prompts()
+                        st.rerun(scope="fragment")
+
+        # Add message buttons
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("➕ User", key=f"add_user_{prompt_id}"):
+                mp.messages.append({"role": "user", "content": ""})
+                mp.editor_mode = "chat"
+                self._save_prompts()
+                st.rerun(scope="fragment")
+        with col2:
+            if st.button("➕ Assistant", key=f"add_assistant_{prompt_id}"):
+                mp.messages.append({"role": "assistant", "content": ""})
+                mp.editor_mode = "chat"
+                self._save_prompts()
+                st.rerun(scope="fragment")
+        with col3:
+            if st.button("➕ System", key=f"add_system_{prompt_id}"):
+                mp.messages.insert(0, {"role": "system", "content": ""})
+                mp.editor_mode = "chat"
+                self._save_prompts()
+                st.rerun(scope="fragment")
+
+    def _run_multi_prompt_generation(self) -> None:
+        """Run generation for all active prompts with all active configs."""
+        active_prompts = [
+            mp for mp in st.session_state.managed_prompts.values() if mp.active
+        ]
+        active_configs = [
+            mc for mc in st.session_state.managed_configs.values() if mc.active
+        ]
+
+        if not active_prompts:
+            st.error("No active prompts to generate.")
+            return
+        if not active_configs:
+            st.error("No active configs. Enable at least one config in the Amplification tab.")
+            return
+
+        # Prepare tokenized prompts
+        tokenized_prompts = []
+        for mp in active_prompts:
+            if mp.editor_mode == "simple":
+                tokenized = self._tokenize_simple_prompt(mp)
+            else:
+                tokenized = self._tokenize_chat_prompt(mp)
+            tokenized_prompts.append(tokenized)
+
+        # Run batched generation
+        sampling_params = self._get_sampling_params()
+        results = {}
+
+        with st.spinner(f"Generating for {len(active_prompts)} prompts × {len(active_configs)} configs..."):
+            for gen_result in self.method.multi_gen_request(
+                prompt=tokenized_prompts,
+                amplification_configs=active_configs,
+                sampling_params=sampling_params,
+                compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
+            ):
+                config = gen_result["config"]
+                # results is 2D: [prompt_idx][sample_idx]
+                results[config.config_id] = {
+                    "config": config,
+                    "results": gen_result["results"],  # 2D list
+                }
+
+        # Store results
+        st.session_state.multi_prompt_results = {
+            "prompts": active_prompts,
+            "config_results": results,
+        }
+
+        # Default display to first 1-2 configs
+        config_ids = list(results.keys())
+        st.session_state.multi_prompt_display_configs = config_ids[:2]
+
+        st.success("Generation complete! Switch to Results tab to view.")
+
+    def _tokenize_simple_prompt(self, mp: ManagedPrompt) -> list[int]:
+        """Tokenize a simple-mode prompt."""
+        if mp.template_mode == "No template":
+            return self.tokenizer.encode(mp.prompt_text, add_special_tokens=False)
+        elif mp.template_mode == "Apply chat template":
+            messages = [{"role": "user", "content": mp.prompt_text}]
+            if mp.assistant_prefill:
+                messages.append({"role": "assistant", "content": mp.assistant_prefill})
+            return self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=not mp.assistant_prefill,
+                tokenize=True,
+            )
+        else:  # Apply loom template
+            return self.tokenizer.encode(mp.prompt_text, add_special_tokens=False)
+
+    def _tokenize_chat_prompt(self, mp: ManagedPrompt) -> list[int]:
+        """Tokenize a chat-mode prompt."""
+        if not mp.messages:
+            return []
+        return self.tokenizer.apply_chat_template(
+            mp.messages,
+            add_generation_prompt=True,
+            tokenize=True,
+        )
+
+    def _render_multi_prompt_results_subtab(self) -> None:
+        """Render the results subtab."""
+        if st.session_state.multi_prompt_results is None:
+            st.info("No results yet. Go to 'Prompts' tab and click 'Run Active'.")
+            return
+
+        results_data = st.session_state.multi_prompt_results
+        prompts = results_data["prompts"]
+        config_results = results_data["config_results"]
+
+        if not config_results:
+            st.warning("No results available.")
+            return
+
+        # Config selector
+        all_config_ids = list(config_results.keys())
+        config_names = {
+            cid: config_results[cid]["config"].config.name for cid in all_config_ids
+        }
+
+        st.write("**Select configs to display (1-3):**")
+        selected = st.multiselect(
+            "Display configs",
+            options=all_config_ids,
+            default=st.session_state.multi_prompt_display_configs[:3],
+            format_func=lambda x: config_names.get(x, x),
+            max_selections=3,
+            label_visibility="collapsed",
+        )
+        st.session_state.multi_prompt_display_configs = selected
+
+        if not selected:
+            st.info("Select at least one config to display results.")
+            return
+
+        st.divider()
+
+        # Display results
+        num_configs = len(selected)
+
+        for prompt_idx, mp in enumerate(prompts):
+            display_name = mp.get_display_name() or f"Prompt {prompt_idx + 1}"
+
+            with st.expander(f"📝 {display_name}", expanded=True):
+                if num_configs == 1:
+                    # Single config: 2-column layout like multi-gen
+                    config_id = selected[0]
+                    config_name = config_names[config_id]
+                    samples = config_results[config_id]["results"][prompt_idx]
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**{config_name}**")
+                    with col2:
+                        render_sample_cycler(
+                            samples=samples,
+                            component_id=f"mp_cycler_{prompt_idx}_{config_id}",
+                            height=300,
+                        )
+                else:
+                    # Multiple configs: vertical layout, horizontal config columns
+                    cols = st.columns(num_configs)
+                    for col_idx, config_id in enumerate(selected):
+                        config_name = config_names[config_id]
+                        samples = config_results[config_id]["results"][prompt_idx]
+
+                        with cols[col_idx]:
+                            st.write(f"**{config_name}**")
+                            render_sample_cycler(
+                                samples=samples,
+                                component_id=f"mp_cycler_{prompt_idx}_{config_id}",
+                                height=250,
+                            )

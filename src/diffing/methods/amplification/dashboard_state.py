@@ -143,6 +143,76 @@ class ManagedConfig(DashboardItem):
 
 
 @dataclass
+class ManagedPrompt(DashboardItem):
+    """Prompt with dashboard state for multi-prompt generation."""
+
+    prompt_id: str = field(default_factory=lambda: "")
+    name: str = ""  # Display name (optional, auto-generated from text if empty)
+
+    # Editor mode (matches multi-gen tabs)
+    editor_mode: Literal["simple", "chat"] = "simple"
+
+    # Simple mode fields
+    prompt_text: str = ""
+    template_mode: str = "Apply chat template"
+    assistant_prefill: str = ""
+
+    # Chat mode fields
+    messages: list[dict] = field(default_factory=list)
+
+    folder: str = ""
+
+    def __post_init__(self):
+        import uuid
+
+        if not self.prompt_id:
+            self.prompt_id = str(uuid.uuid4())
+
+    def get_display_name(self) -> str:
+        """Return name or truncated prompt text."""
+        if self.name:
+            return self.name
+        if self.editor_mode == "simple":
+            text = self.prompt_text
+        else:
+            text = self.messages[0]["content"] if self.messages else ""
+        return (text[:50] + "...") if len(text) > 50 else text
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize both UI state and prompt data."""
+        result = self.to_ui_dict()
+        result.update(
+            {
+                "prompt_id": self.prompt_id,
+                "name": self.name,
+                "editor_mode": self.editor_mode,
+                "prompt_text": self.prompt_text,
+                "template_mode": self.template_mode,
+                "assistant_prefill": self.assistant_prefill,
+                "messages": self.messages,
+                "folder": self.folder,
+            }
+        )
+        return result
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ManagedPrompt":
+        """Deserialize from dict."""
+        ui_fields = DashboardItem.ui_dict_to_fields(data)
+        return ManagedPrompt(
+            prompt_id=data.get("prompt_id", ""),
+            name=data.get("name", ""),
+            editor_mode=data.get("editor_mode", "simple"),
+            prompt_text=data.get("prompt_text", ""),
+            template_mode=data.get("template_mode", "Apply chat template"),
+            assistant_prefill=data.get("assistant_prefill", ""),
+            messages=data.get("messages", []),
+            folder=data.get("folder", ""),
+            **ui_fields,
+        )
+
+
+@dataclass
 class DashboardSession:
     """Complete dashboard session state (for save/restore)."""
 
@@ -410,6 +480,115 @@ def unload_folder_configs(
         New dict with folder's configs removed
     """
     return {cid: mc for cid, mc in managed_configs.items() if mc.folder != folder}
+
+
+# ============ Prompt Persistence Functions ============
+
+
+def save_prompts_to_folder(
+    managed_prompts: dict[str, ManagedPrompt],
+    prompts_dir: Path,
+    folder: str,
+) -> None:
+    """Save prompts belonging to a specific folder."""
+    folder_path = prompts_dir / folder if folder else prompts_dir
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    folder_prompts = {
+        pid: mp for pid, mp in managed_prompts.items() if mp.folder == folder
+    }
+
+    current_prompt_names = set()
+    ui_state = {}
+    for mp in folder_prompts.values():
+        safe_name = sanitize_config_name(mp.get_display_name()) or mp.prompt_id[:8]
+        prompt_path = folder_path / f"{safe_name}.yaml"
+        with open(prompt_path, "w") as f:
+            yaml.dump(mp.to_dict(), f, sort_keys=False)
+        current_prompt_names.add(f"{safe_name}.yaml")
+        ui_state[safe_name] = mp.to_ui_dict()
+
+    ui_state_path = folder_path / UI_STATE_FILENAME
+    with open(ui_state_path, "w") as f:
+        yaml.dump(ui_state, f, sort_keys=False)
+
+    removed_dir = folder_path / "removed"
+    removed_dir.mkdir(parents=True, exist_ok=True)
+
+    for prompt_file in folder_path.glob("*.yaml"):
+        if (
+            prompt_file.name not in current_prompt_names
+            and prompt_file.name != UI_STATE_FILENAME
+        ):
+            target = removed_dir / prompt_file.name
+            if target.exists():
+                target.unlink()
+            prompt_file.replace(target)
+
+
+def save_prompts_to_cache(
+    managed_prompts: dict[str, ManagedPrompt],
+    prompts_dir: Path,
+) -> None:
+    """Save all managed prompts to their respective folders."""
+    folders = {mp.folder for mp in managed_prompts.values()}
+    for folder in folders:
+        save_prompts_to_folder(managed_prompts, prompts_dir, folder)
+
+
+def load_prompts_from_folder(
+    prompts_dir: Path,
+    folder: str,
+    existing_names: set[str] | None = None,
+) -> dict[str, ManagedPrompt]:
+    """Load prompts from a specific folder."""
+    existing_names = existing_names or set()
+    managed_prompts = {}
+
+    folder_path = prompts_dir / folder if folder else prompts_dir
+    if not folder_path.exists():
+        return managed_prompts
+
+    for prompt_file in sorted(folder_path.glob("*.yaml")):
+        if prompt_file.name == UI_STATE_FILENAME:
+            continue
+        with open(prompt_file) as f:
+            data = yaml.safe_load(f) or {}
+        data["folder"] = folder
+        mp = ManagedPrompt.from_dict(data)
+        managed_prompts[mp.prompt_id] = mp
+
+    return managed_prompts
+
+
+def load_prompts_from_cache(
+    prompts_dir: Path,
+    existing_names: set[str] | None = None,
+) -> dict[str, ManagedPrompt]:
+    """Load prompts from root folder only."""
+    return load_prompts_from_folder(prompts_dir, "", existing_names)
+
+
+def unload_folder_prompts(
+    managed_prompts: dict[str, ManagedPrompt],
+    folder: str,
+) -> dict[str, ManagedPrompt]:
+    """Remove prompts belonging to a specific folder."""
+    return {pid: mp for pid, mp in managed_prompts.items() if mp.folder != folder}
+
+
+def list_all_prompt_folders(prompts_dir: Path) -> list[str]:
+    """List all available prompt folder paths recursively."""
+    folders = [""]
+    if not prompts_dir.exists():
+        return folders
+
+    for item in sorted(prompts_dir.rglob("*")):
+        if item.is_dir() and item.name != "removed":
+            rel_path = str(item.relative_to(prompts_dir))
+            folders.append(rel_path)
+
+    return folders
 
 
 def save_multigen_state(state_file: Path, state: dict) -> None:
