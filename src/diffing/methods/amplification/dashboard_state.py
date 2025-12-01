@@ -54,6 +54,7 @@ class ManagedConfig(DashboardItem):
     """Amplification config with dashboard state."""
 
     config: AmplificationConfig = None
+    folder: str = ""  # Relative path from CONFIGS_DIR (empty string = root)
     _last_compiled_hash: str | None = field(default=None, init=False)
     _lora_int_id: int = field(default=-1, init=False)
 
@@ -89,6 +90,7 @@ class ManagedConfig(DashboardItem):
         """Serialize both UI state and config."""
         result = self.to_ui_dict()
         result["config"] = self.config.to_dict()
+        result["folder"] = self.folder
         return result
 
     @staticmethod
@@ -99,6 +101,7 @@ class ManagedConfig(DashboardItem):
 
         return ManagedConfig(
             config=config,
+            folder=data.get("folder", ""),
             **ui_fields,
         )
 
@@ -108,10 +111,12 @@ class ManagedConfig(DashboardItem):
         active: bool = True,
         expanded: bool = True,
         ui_order: int = 0,
+        folder: str = "",
     ) -> "ManagedConfig":
         """Create from a pure config (e.g., when loading external config)."""
         return ManagedConfig(
             config=config,
+            folder=folder,
             active=active,
             ui_order=ui_order,
             expanded=expanded,
@@ -212,37 +217,43 @@ def get_unique_name(desired_name: str, existing_names: set[str]) -> str:
 UI_STATE_FILENAME = "_ui_state.yaml"
 
 
-def save_configs_to_cache(
+def save_configs_to_folder(
     managed_configs: dict[str, ManagedConfig],
     configs_dir: Path,
+    folder: str,
 ) -> None:
     """
-    Save all managed configs to the cache directory.
+    Save configs belonging to a specific folder.
 
     Args:
-        managed_configs: Dict of config_id -> ManagedConfig
-        configs_dir: Directory to save configs to
+        managed_configs: Dict of config_id -> ManagedConfig (all configs)
+        configs_dir: Base configs directory
+        folder: Relative folder path (empty string for root)
     """
-    configs_dir.mkdir(parents=True, exist_ok=True)
+    folder_path = configs_dir / folder if folder else configs_dir
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    folder_configs = {
+        cid: mc for cid, mc in managed_configs.items() if mc.folder == folder
+    }
 
     current_config_names = set()
     ui_state = {}
-    for mc in managed_configs.values():
+    for mc in folder_configs.values():
         safe_name = mc.config.name
-        config_path = configs_dir / f"{safe_name}.yaml"
+        config_path = folder_path / f"{safe_name}.yaml"
         mc.config.save_yaml(config_path)
         current_config_names.add(f"{safe_name}.yaml")
         ui_state[safe_name] = mc.to_ui_dict()
 
-    # Save UI state separately
-    ui_state_path = configs_dir / UI_STATE_FILENAME
+    ui_state_path = folder_path / UI_STATE_FILENAME
     with open(ui_state_path, "w") as f:
         yaml.dump(ui_state, f, sort_keys=False)
 
-    removed_dir = configs_dir / "removed"
+    removed_dir = folder_path / "removed"
     removed_dir.mkdir(parents=True, exist_ok=True)
 
-    for config_file in configs_dir.glob("*.yaml"):
+    for config_file in folder_path.glob("*.yaml"):
         if (
             config_file.name not in current_config_names
             and config_file.name != UI_STATE_FILENAME
@@ -253,15 +264,33 @@ def save_configs_to_cache(
             config_file.replace(target)
 
 
-def load_configs_from_cache(
+def save_configs_to_cache(
+    managed_configs: dict[str, ManagedConfig],
     configs_dir: Path,
+) -> None:
+    """
+    Save all managed configs to their respective folders.
+
+    Args:
+        managed_configs: Dict of config_id -> ManagedConfig
+        configs_dir: Base configs directory
+    """
+    folders = {mc.folder for mc in managed_configs.values()}
+    for folder in folders:
+        save_configs_to_folder(managed_configs, configs_dir, folder)
+
+
+def load_configs_from_folder(
+    configs_dir: Path,
+    folder: str,
     existing_names: set[str] | None = None,
 ) -> dict[str, ManagedConfig]:
     """
-    Load configs from the cache directory.
+    Load configs from a specific folder.
 
     Args:
-        configs_dir: Directory to load configs from
+        configs_dir: Base configs directory
+        folder: Relative folder path (empty string for root)
         existing_names: Optional set of existing names to avoid duplicates
 
     Returns:
@@ -270,14 +299,17 @@ def load_configs_from_cache(
     existing_names = existing_names or set()
     managed_configs = {}
 
-    # Load UI state if it exists
-    ui_state_path = configs_dir / UI_STATE_FILENAME
+    folder_path = configs_dir / folder if folder else configs_dir
+    if not folder_path.exists():
+        return managed_configs
+
+    ui_state_path = folder_path / UI_STATE_FILENAME
     ui_state = {}
     if ui_state_path.exists():
         with open(ui_state_path) as f:
             ui_state = yaml.safe_load(f) or {}
 
-    for config_file in sorted(configs_dir.glob("*.yaml")):
+    for config_file in sorted(folder_path.glob("*.yaml")):
         if config_file.name == UI_STATE_FILENAME:
             continue
         loaded_config = AmplificationConfig.load_yaml(config_file)
@@ -287,18 +319,97 @@ def load_configs_from_cache(
         )
         existing_names.add(loaded_config.name)
 
-        # Get UI state for this config (use original name as key)
         config_ui_state = ui_state.get(original_name, {})
         active = config_ui_state.get("active", True)
         expanded = config_ui_state.get("expanded", False)
         ui_order = config_ui_state.get("ui_order", 0)
 
         managed_config = ManagedConfig.from_config(
-            loaded_config, active=active, expanded=expanded, ui_order=ui_order
+            loaded_config,
+            active=active,
+            expanded=expanded,
+            ui_order=ui_order,
+            folder=folder,
         )
         managed_configs[managed_config.config_id] = managed_config
 
     return managed_configs
+
+
+def load_configs_from_cache(
+    configs_dir: Path,
+    existing_names: set[str] | None = None,
+) -> dict[str, ManagedConfig]:
+    """
+    Load configs from root folder only (backward compatibility).
+
+    Args:
+        configs_dir: Base configs directory
+        existing_names: Optional set of existing names to avoid duplicates
+
+    Returns:
+        Dict of config_id -> ManagedConfig
+    """
+    return load_configs_from_folder(configs_dir, "", existing_names)
+
+
+# ============ Folder Utility Functions ============
+
+
+def list_all_folders(configs_dir: Path) -> list[str]:
+    """
+    List all available folder paths recursively.
+
+    Args:
+        configs_dir: Base configs directory
+
+    Returns:
+        List of relative folder paths (empty string for root, then nested paths)
+    """
+    folders = [""]  # Root folder
+    if not configs_dir.exists():
+        return folders
+
+    for item in sorted(configs_dir.rglob("*")):
+        if item.is_dir() and item.name != "removed":
+            rel_path = str(item.relative_to(configs_dir))
+            folders.append(rel_path)
+
+    return folders
+
+
+def create_folder(configs_dir: Path, folder_path: str) -> Path:
+    """
+    Create a new folder under configs_dir.
+
+    Args:
+        configs_dir: Base configs directory
+        folder_path: Relative path for the new folder
+
+    Returns:
+        Path to the created folder
+    """
+    assert folder_path, "Folder path cannot be empty"
+    new_folder = configs_dir / folder_path
+    new_folder.mkdir(parents=True, exist_ok=True)
+    return new_folder
+
+
+def unload_folder_configs(
+    managed_configs: dict[str, ManagedConfig],
+    folder: str,
+) -> dict[str, ManagedConfig]:
+    """
+    Remove configs belonging to a specific folder from the managed configs dict.
+
+    Args:
+        managed_configs: Dict of config_id -> ManagedConfig
+        folder: Folder to unload
+
+    Returns:
+        New dict with folder's configs removed
+    """
+    return {cid: mc for cid, mc in managed_configs.items() if mc.folder != folder}
 
 
 def save_multigen_state(state_file: Path, state: dict) -> None:

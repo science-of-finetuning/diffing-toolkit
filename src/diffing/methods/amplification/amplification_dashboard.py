@@ -6,7 +6,6 @@ Provides UI for creating, editing, and testing amplification configurations.
 
 from copy import deepcopy
 import html
-import json
 import re
 import uuid
 from pathlib import Path
@@ -14,7 +13,6 @@ from typing import Dict, Any, List
 
 import streamlit as st
 import streamlit.components.v1 as components
-import yaml
 
 from src.utils.configs import (
     get_available_organisms,
@@ -42,7 +40,11 @@ from src.diffing.methods.amplification.dashboard_state import (
     sanitize_config_name,
     get_unique_name,
     save_configs_to_cache,
-    load_configs_from_cache,
+    save_configs_to_folder,
+    load_configs_from_folder,
+    list_all_folders,
+    create_folder,
+    unload_folder_configs,
     save_multigen_state,
     load_multigen_state,
     save_conversation,
@@ -218,6 +220,8 @@ class AmplificationDashboard:
         """Initialize Streamlit session state."""
         if "managed_configs" not in st.session_state:
             st.session_state.managed_configs = {}
+        if "loaded_folders" not in st.session_state:
+            st.session_state.loaded_folders = {""}  # Root folder loaded by default
         if "conversations" not in st.session_state:
             st.session_state.conversations = {}
         if "active_conversation_id" not in st.session_state:
@@ -291,12 +295,15 @@ class AmplificationDashboard:
         return SamplingParams(**params)
 
     def _load_configs_from_cache(self) -> None:
-        """Load configs from the cache directory."""
+        """Load configs from all loaded folders."""
         if len(st.session_state.managed_configs) > 0:
             return
 
-        loaded = load_configs_from_cache(CONFIGS_DIR)
-        st.session_state.managed_configs.update(loaded)
+        existing_names = set()
+        for folder in st.session_state.loaded_folders:
+            loaded = load_configs_from_folder(CONFIGS_DIR, folder, existing_names)
+            st.session_state.managed_configs.update(loaded)
+            existing_names.update(mc.config.name for mc in loaded.values())
 
     def _save_last_multigen_state(self) -> None:
         """Save current multi-gen state to cache."""
@@ -583,7 +590,7 @@ class AmplificationDashboard:
             "Num Samples",
             min_value=1,
             max_value=16,
-            value=3,
+            value=6,
             step=1,
             help="Number of completions to generate per config (for cycling through)",
         )
@@ -700,78 +707,71 @@ class AmplificationDashboard:
                 ]
                 st.rerun()
 
-    def _render_message_list(self) -> None:
-        """Render list of current messages with edit/delete."""
+    @st.fragment
+    def _render_message_list_and_add(self) -> None:
+        """Render message list and add form. Fragment for fast interactions."""
         messages = st.session_state.get("multi_gen_messages", [])
         editing_idx = st.session_state.get("multi_gen_msg_editing_idx", None)
 
         if not messages:
             st.info("No messages yet. Add your first message below.")
-            return
+        else:
+            st.markdown("**Conversation:**")
 
-        st.markdown("**Conversation:**")
-
-        for idx, msg in enumerate(messages):
-            if editing_idx == idx:
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    new_role = st.selectbox(
-                        "Role",
-                        ["user", "assistant", "system"],
-                        index=["user", "assistant", "system"].index(msg["role"]),
-                        key=f"edit_role_{idx}",
-                    )
-                with col2:
-                    new_content = st.text_area(
-                        "Content",
-                        value=msg["content"],
-                        height=100,
-                        key=f"edit_content_{idx}",
-                    )
-
-                col1, col2, col3 = st.columns([1, 1, 4])
-                with col1:
-                    if st.button("💾 Save", key=f"save_{idx}"):
-                        messages[idx] = {"role": new_role, "content": new_content}
-                        st.session_state.multi_gen_msg_editing_idx = None
-                        st.rerun()
-                with col2:
-                    if st.button("❌ Cancel", key=f"cancel_{idx}"):
-                        st.session_state.multi_gen_msg_editing_idx = None
-                        st.rerun()
-            else:
-                with st.container(border=True):
-                    role_emoji = {"user": "👤", "assistant": "🤖", "system": "⚙️"}
-                    role_color = {
-                        "user": "blue",
-                        "assistant": "green",
-                        "system": "gray",
-                    }
-
-                    st.markdown(
-                        f":{role_color[msg['role']]}[**{role_emoji[msg['role']]} {msg['role'].title()}**]"
-                    )
-
-                    content_preview = msg["content"]
-                    # if len(content_preview) > 300:
-                    #     with st.expander("Show full message"):
-                    #         st.text(msg["content"])
-                    #     content_preview = content_preview[:300] + "..."
-
-                    st.text(content_preview)
-
-                    col1, col2, col3 = st.columns([1, 1, 10])
+            for idx, msg in enumerate(messages):
+                if editing_idx == idx:
+                    col1, col2 = st.columns([1, 4])
                     with col1:
-                        if st.button("✏️", key=f"edit_btn_{idx}"):
-                            st.session_state.multi_gen_msg_editing_idx = idx
-                            st.rerun()
+                        new_role = st.selectbox(
+                            "Role",
+                            ["user", "assistant", "system"],
+                            index=["user", "assistant", "system"].index(msg["role"]),
+                            key=f"edit_role_{idx}",
+                        )
                     with col2:
-                        if st.button("🗑️", key=f"delete_btn_{idx}"):
-                            messages.pop(idx)
-                            st.rerun()
+                        new_content = st.text_area(
+                            "Content",
+                            value=msg["content"],
+                            height=100,
+                            key=f"edit_content_{idx}",
+                        )
 
-    def _render_add_message_section(self) -> None:
-        """Render UI for adding new messages."""
+                    col1, col2, col3 = st.columns([1, 1, 4])
+                    with col1:
+                        if st.button("💾 Save", key=f"save_{idx}"):
+                            messages[idx] = {"role": new_role, "content": new_content}
+                            st.session_state.multi_gen_msg_editing_idx = None
+                            st.rerun(scope="fragment")
+                    with col2:
+                        if st.button("❌ Cancel", key=f"cancel_{idx}"):
+                            st.session_state.multi_gen_msg_editing_idx = None
+                            st.rerun(scope="fragment")
+                else:
+                    with st.container(border=True):
+                        role_emoji = {"user": "👤", "assistant": "🤖", "system": "⚙️"}
+                        role_color = {
+                            "user": "blue",
+                            "assistant": "green",
+                            "system": "gray",
+                        }
+
+                        st.markdown(
+                            f":{role_color[msg['role']]}[**{role_emoji[msg['role']]} {msg['role'].title()}**]"
+                        )
+
+                        st.text(msg["content"])
+
+                        col1, col2, col3 = st.columns([1, 1, 10])
+                        with col1:
+                            if st.button("✏️", key=f"edit_btn_{idx}"):
+                                st.session_state.multi_gen_msg_editing_idx = idx
+                                st.rerun(scope="fragment")
+                        with col2:
+                            if st.button("🗑️", key=f"delete_btn_{idx}"):
+                                messages.pop(idx)
+                                st.rerun(scope="fragment")
+
+        st.markdown("---")
         st.markdown("**Add Message:**")
 
         with st.form("add_message_form", clear_on_submit=True):
@@ -802,7 +802,7 @@ class AmplificationDashboard:
                             "content": content.strip(),
                         }
                     )
-                    st.rerun()
+                    st.rerun(scope="fragment")
                 else:
                     st.warning("Message content cannot be empty")
 
@@ -851,11 +851,7 @@ class AmplificationDashboard:
 
         st.markdown("---")
 
-        self._render_message_list()
-
-        st.markdown("---")
-
-        self._render_add_message_section()
+        self._render_message_list_and_add()
 
         st.markdown("---")
 
@@ -868,29 +864,143 @@ class AmplificationDashboard:
             "Create and manage amplification configurations for adapter weight modification."
         )
 
-        if st.button("➕ New Amplification", use_container_width=True):
-            base_name = f"Config {len(st.session_state.managed_configs) + 1}"
-            unique_name = self._get_unique_config_name(base_name)
-            new_config = AmplificationConfig(
-                name=unique_name,
-                description="",
-                amplified_adapters=[],
-            )
-            new_managed = ManagedConfig.from_config(
-                new_config, active=True, expanded=True
-            )
-            st.session_state.managed_configs[new_managed.config_id] = new_managed
-            self._save_and_rerun()
+        self._render_folder_loader()
 
         st.markdown("---")
 
-        if len(st.session_state.managed_configs) == 0:
-            st.info(
-                "No amplification configurations yet. Click 'New Amplification' to create one."
-            )
+        if len(st.session_state.loaded_folders) == 0:
+            st.info("No folders loaded. Select a folder above to load configurations.")
         else:
-            for config_id, mc in st.session_state.managed_configs.items():
-                self._render_amplification_config(config_id, mc)
+            for folder in sorted(st.session_state.loaded_folders):
+                self._render_folder_section(folder)
+
+    def _render_folder_loader(self) -> None:
+        """Render the folder loader UI (dropdown + Load/Create buttons)."""
+        all_folders = list_all_folders(CONFIGS_DIR)
+        loaded = st.session_state.loaded_folders
+        available_to_load = [f for f in all_folders if f not in loaded]
+
+        col1, col2, col3 = st.columns([3, 1, 1])
+
+        with col1:
+            folder_display = {f: "Root" if f == "" else f for f in available_to_load}
+            if available_to_load:
+                selected_folder = st.selectbox(
+                    "Available Folders",
+                    options=available_to_load,
+                    format_func=lambda x: folder_display.get(x, x),
+                    key="folder_to_load",
+                )
+            else:
+                st.info("All folders are loaded")
+                selected_folder = None
+
+        with col2:
+            if st.button(
+                "📂 Load",
+                disabled=selected_folder is None,
+                use_container_width=True,
+            ):
+                st.session_state.loaded_folders.add(selected_folder)
+                existing_names = {
+                    mc.config.name for mc in st.session_state.managed_configs.values()
+                }
+                loaded_configs = load_configs_from_folder(
+                    CONFIGS_DIR, selected_folder, existing_names
+                )
+                st.session_state.managed_configs.update(loaded_configs)
+                self._save_and_rerun()
+
+        with col3:
+            if st.button("➕ Create", use_container_width=True):
+                st.session_state.show_create_folder_dialog = True
+
+        if st.session_state.get("show_create_folder_dialog", False):
+            self._render_create_folder_dialog()
+
+    def _render_create_folder_dialog(self) -> None:
+        """Render the create folder dialog."""
+        with st.container(border=True):
+            st.markdown("**Create New Folder**")
+            new_folder_path = st.text_input(
+                "Folder path",
+                placeholder="e.g., experiments/v2",
+                key="new_folder_path",
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Create", type="primary", use_container_width=True):
+                    if new_folder_path:
+                        create_folder(CONFIGS_DIR, new_folder_path)
+                        st.session_state.loaded_folders.add(new_folder_path)
+                        st.session_state.show_create_folder_dialog = False
+                        self._save_and_rerun()
+                    else:
+                        st.error("Please enter a folder path")
+            with col2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_create_folder_dialog = False
+                    st.rerun()
+
+    def _render_folder_section(self, folder: str) -> None:
+        """Render a single folder section with its configs."""
+        folder_display = "Root" if folder == "" else folder
+        folder_configs = {
+            cid: mc
+            for cid, mc in st.session_state.managed_configs.items()
+            if mc.folder == folder
+        }
+        config_count = len(folder_configs)
+
+        with st.expander(
+            f"📁 {folder_display} ({config_count} configs)", expanded=True
+        ):
+            col1, col2 = st.columns([4, 1])
+
+            with col1:
+                if st.button(
+                    "➕ New Amplification",
+                    key=f"new_config_{folder}",
+                    use_container_width=True,
+                ):
+                    base_name = f"Config {len(st.session_state.managed_configs) + 1}"
+                    unique_name = self._get_unique_config_name(base_name)
+                    new_config = AmplificationConfig(
+                        name=unique_name,
+                        description="",
+                        amplified_adapters=[],
+                    )
+                    new_managed = ManagedConfig.from_config(
+                        new_config, active=True, expanded=True, folder=folder
+                    )
+                    st.session_state.managed_configs[new_managed.config_id] = (
+                        new_managed
+                    )
+                    self._save_and_rerun()
+
+            with col2:
+                if st.button(
+                    "📤 Unload",
+                    key=f"unload_folder_{folder}",
+                    use_container_width=True,
+                    help="Unload this folder (configs are saved, not deleted)",
+                ):
+                    save_configs_to_folder(
+                        st.session_state.managed_configs, CONFIGS_DIR, folder
+                    )
+                    st.session_state.managed_configs = unload_folder_configs(
+                        st.session_state.managed_configs, folder
+                    )
+                    st.session_state.loaded_folders.discard(folder)
+                    self._save_and_rerun()
+
+            if config_count == 0:
+                st.info(
+                    "No configs in this folder. Click 'New Amplification' to create one."
+                )
+            else:
+                for config_id, mc in folder_configs.items():
+                    self._render_amplification_config(config_id, mc)
 
     def _render_generation_controls(self, suffix: str, label: str) -> bool:
         """
@@ -2110,7 +2220,10 @@ class AmplificationDashboard:
                             f"{config.name} copy"
                         )
                         new_managed = ManagedConfig.from_config(
-                            new_config, active=mc.active, expanded=True
+                            new_config,
+                            active=mc.active,
+                            expanded=True,
+                            folder=mc.folder,
                         )
                         st.session_state.managed_configs[new_managed.config_id] = (
                             new_managed
