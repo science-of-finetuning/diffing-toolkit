@@ -150,6 +150,9 @@ class AmplifiedAdapter:
     layer_amplifications: list[LayerAmplification]
 
     def adapter_id(self, base_model_name: str) -> str:
+        """
+        Returns the HF adapter ID corresponding to the organism and variant of this config.
+        """
         if self.organism_name == CUSTOM_ADAPTER_ORGANISM:
             if not self.variant:
                 raise ValueError(

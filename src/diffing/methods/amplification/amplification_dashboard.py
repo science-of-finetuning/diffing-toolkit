@@ -146,7 +146,10 @@ class AmplificationDashboard:
         base_model_name = self.method.base_model_cfg.name
         for mc in active_configs:
             for adapter in mc.config.amplified_adapters:
-                all_adapter_ids.add(adapter.adapter_id(base_model_name))
+                try:
+                    all_adapter_ids.add(adapter.adapter_id(base_model_name))
+                except ValueError as e:
+                    raise ValueError(f"Error getting adapter ID for {mc.name}") from e
         max_lora_rank = 128
         if all_adapter_ids:
             ranks = [self._get_adapter_rank_cached(aid) for aid in all_adapter_ids]
@@ -248,6 +251,10 @@ class AmplificationDashboard:
             st.session_state.multi_gen_template_mode = saved_multigen_state.get(
                 "text_tab", {}
             ).get("template_mode", "Apply chat template")
+        if "multi_gen_assistant_prefill" not in st.session_state:
+            st.session_state.multi_gen_assistant_prefill = saved_multigen_state.get(
+                "text_tab", {}
+            ).get("assistant_prefill", "")
 
         if "multi_gen_messages" not in st.session_state:
             st.session_state.multi_gen_messages = saved_multigen_state.get(
@@ -300,6 +307,9 @@ class AmplificationDashboard:
                 "template_mode": st.session_state.get(
                     "multi_gen_template_mode", "Apply chat template"
                 ),
+                "assistant_prefill": st.session_state.get(
+                    "multi_gen_assistant_prefill", ""
+                ),
             },
             "messages_tab": {
                 "messages": st.session_state.get("multi_gen_messages", []),
@@ -350,10 +360,18 @@ class AmplificationDashboard:
                 existing_names.add(conv["name"])
         return get_unique_name(desired_name, existing_names)
 
-    def _save_and_rerun(self) -> None:
-        """Save configs to cache and trigger a Streamlit rerun."""
+    def _save_configs(self) -> None:
+        """Save configs to cache without triggering rerun."""
         save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR)
-        st.rerun()
+
+    def _save_and_rerun(self, scope: str = "app") -> None:
+        """Save configs to cache and trigger a Streamlit rerun.
+
+        Args:
+            scope: Rerun scope - "app" for full page, "fragment" for current fragment only.
+        """
+        self._save_configs()
+        st.rerun(scope=scope)
 
     def _get_messages_with_system_prompt(
         self, conv: Dict[str, Any], messages: List[Dict[str, Any]] = None
@@ -636,8 +654,18 @@ class AmplificationDashboard:
             help="Choose how to format the prompt before sending to model",
         )
 
+        assistant_prefill = ""
+        if template_mode == "Apply chat template":
+            assistant_prefill = st.text_input(
+                "Assistant prefill",
+                key="multi_gen_assistant_prefill",
+                placeholder="Optional: prefill the assistant's response...",
+                help="If not empty, this text will be added as the beginning of the assistant's response",
+            )
+
         st.session_state.multi_gen_current_prompt = prompt
         st.session_state.multi_gen_current_template_mode = template_mode
+        st.session_state.multi_gen_current_assistant_prefill = assistant_prefill
 
     def _render_import_conversations_section(self) -> None:
         """Render conversation import UI."""
@@ -965,14 +993,26 @@ class AmplificationDashboard:
             if active_tab == "Text":
                 prompt = st.session_state.multi_gen_current_prompt
                 template_mode = st.session_state.multi_gen_current_template_mode
+                assistant_prefill = st.session_state.get(
+                    "multi_gen_current_assistant_prefill", ""
+                )
 
                 if template_mode == "No template":
                     final_prompt = self.tokenizer.encode(prompt)
                 elif template_mode == "Apply chat template":
-                    final_prompt = self.tokenizer.apply_chat_template(
-                        [{"role": "user", "content": prompt}],
-                        add_generation_prompt=True,
-                    )
+                    if assistant_prefill:
+                        final_prompt = self.tokenizer.apply_chat_template(
+                            [
+                                {"role": "user", "content": prompt},
+                                {"role": "assistant", "content": assistant_prefill},
+                            ],
+                            continue_final_message=True,
+                        )
+                    else:
+                        final_prompt = self.tokenizer.apply_chat_template(
+                            [{"role": "user", "content": prompt}],
+                            add_generation_prompt=True,
+                        )
                 elif template_mode == "Apply loom template":
                     final_prompt = self.tokenizer.apply_chat_template(
                         [
@@ -2029,27 +2069,32 @@ class AmplificationDashboard:
 
                     self._save_and_rerun()
 
+    @st.fragment
     def _render_amplification_config(self, config_id: str, mc: ManagedConfig) -> None:
-        """Render one amplification config (expandable)."""
+        """Render one amplification config (expandable). Fragment for independent updates."""
         config = mc.config
         icon = "✅" if mc.active else "❌"
         with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
             col1, col2 = st.columns([3, 1])
 
             with col1:
-                new_name = st.text_input(
+                name_key = f"config_name_{config_id}"
+
+                def on_name_change(cfg=config, cid=config_id, key=name_key):
+                    new_name = st.session_state[key]
+                    if new_name != cfg.name:
+                        unique_name = self._get_unique_config_name(
+                            new_name, exclude_config_id=cid
+                        )
+                        st.session_state.managed_configs[cid].config.name = unique_name
+                        self._save_configs()
+
+                st.text_input(
                     "Configuration Name",
                     value=config.name,
-                    key=f"config_name_{config_id}",
+                    key=name_key,
+                    on_change=on_name_change,
                 )
-                if new_name != config.name:
-                    unique_name = self._get_unique_config_name(
-                        new_name, exclude_config_id=config_id
-                    )
-                    st.session_state.managed_configs[config_id].config.name = (
-                        unique_name
-                    )
-                    self._save_and_rerun()
 
             with col2:
                 btn_col1, btn_col2 = st.columns(2)
@@ -2080,22 +2125,31 @@ class AmplificationDashboard:
                         del st.session_state.managed_configs[config_id]
                         self._save_and_rerun()
 
-            config.description = st.text_area(
+            desc_key = f"config_desc_{config_id}"
+
+            def on_description_change(cfg=config, key=desc_key):
+                cfg.description = st.session_state[key]
+                self._save_configs()
+
+            st.text_area(
                 "Description",
                 value=config.description,
-                key=f"config_desc_{config_id}",
+                key=desc_key,
                 height=60,
+                on_change=on_description_change,
             )
 
-            current_active = mc.active
-            mc.active = st.checkbox(
+            def on_active_change(managed_config=mc, key=f"config_active_{config_id}"):
+                managed_config.active = st.session_state[key]
+                self._save_configs()
+
+            st.checkbox(
                 "Active",
                 value=mc.active,
                 key=f"config_active_{config_id}",
                 help="Only active configurations will be used for generation",
+                on_change=on_active_change,
             )
-            if mc.active != current_active:
-                self._save_and_rerun()
 
             st.markdown("#### Adapters")
 
@@ -2106,7 +2160,6 @@ class AmplificationDashboard:
                     self._render_adapter_amplification(config_id, adapter_idx, adapter)
 
             if st.button("➕ Add Adapter", key=f"add_adapter_{config_id}"):
-                # Default to custom adapter (user can switch to organism if available)
                 new_adapter = AmplifiedAdapter(
                     organism_name=CUSTOM_ADAPTER_ORGANISM,
                     variant="",
@@ -2120,7 +2173,7 @@ class AmplificationDashboard:
                     ],
                 )
                 config.amplified_adapters.append(new_adapter)
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
 
     def _render_adapter_amplification(
         self,
@@ -2150,7 +2203,7 @@ class AmplificationDashboard:
                     st.session_state.managed_configs[
                         config_id
                     ].config.amplified_adapters.pop(adapter_idx)
-                    self._save_and_rerun()
+                    self._save_and_rerun(scope="fragment")
 
             base_model_name = self.method.base_model_cfg.name
 
@@ -2161,39 +2214,47 @@ class AmplificationDashboard:
                     base_model_name=self.method.base_model_cfg.name, only_loras=True
                 )
                 organism_options = [CUSTOM_ADAPTER_ORGANISM] + available_organisms
+                organism_key = f"organism_{config_id}_{adapter_idx}"
 
-                # Find current index
                 if adapter.organism_name in organism_options:
                     current_index = organism_options.index(adapter.organism_name)
                 else:
                     current_index = 0
 
-                selected_organism = st.selectbox(
+                def on_organism_change(adpt=adapter, key=organism_key):
+                    selected = st.session_state[key]
+                    if selected != adpt.organism_name:
+                        adpt.organism_name = selected
+                        if selected == CUSTOM_ADAPTER_ORGANISM:
+                            adpt.variant = ""
+                        else:
+                            adpt.variant = "default"
+                        self._save_configs()
+
+                st.selectbox(
                     "Organism",
                     options=organism_options,
                     index=current_index,
-                    key=f"organism_{config_id}_{adapter_idx}",
+                    key=organism_key,
                     help="Select 'custom' to use a direct HuggingFace adapter ID, or choose an organism",
+                    on_change=on_organism_change,
                 )
 
-                if selected_organism != adapter.organism_name:
-                    adapter.organism_name = selected_organism
-                    # Reset variant when organism changes
-                    if selected_organism == CUSTOM_ADAPTER_ORGANISM:
-                        adapter.variant = ""
-                    else:
-                        adapter.variant = "default"
-                        self._save_and_rerun()
-
             with col2:
-                # Variant selector (text input for custom, dropdown for organisms)
+                variant_key = f"variant_{config_id}_{adapter_idx}"
+
+                def on_variant_change(adpt=adapter, key=variant_key):
+                    adpt.variant = st.session_state[key]
+                    self._save_configs()
+
                 if adapter.organism_name == CUSTOM_ADAPTER_ORGANISM:
-                    adapter.variant = st.text_input(
+                    st.text_input(
                         "Adapter ID",
                         value=adapter.variant,
-                        key=f"variant_{config_id}_{adapter_idx}",
+                        key=variant_key,
                         help="HuggingFace adapter ID (e.g., 'hf_user/repo' or 'hf_user/repo/path/in/repo')",
                         placeholder="hf_user/adapter_repo",
+                        on_change=on_variant_change,
                     )
                 elif adapter.organism_name:
                     available_variants = get_organism_variants(
@@ -2215,12 +2276,13 @@ class AmplificationDashboard:
                         except ValueError:
                             current_index = 0
 
-                        adapter.variant = st.selectbox(
+                        st.selectbox(
                             "Variant",
                             options=available_variants,
                             index=current_index,
-                            key=f"variant_{config_id}_{adapter_idx}",
+                            key=variant_key,
                             help="Select the variant of the organism",
+                            on_change=on_variant_change,
                         )
                 else:
                     st.info("Select an organism first")
@@ -2243,7 +2305,7 @@ class AmplificationDashboard:
                     module_amplifications=[],
                 )
                 adapter.layer_amplifications.append(new_layer_amp)
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
 
     def _render_layer_amplification(
         self,
@@ -2253,6 +2315,42 @@ class AmplificationDashboard:
         layer_amp: LayerAmplification,
     ) -> None:
         """Render layer amplification specification."""
+        key_prefix = f"{config_id}_{adapter_idx}_{layer_idx}"
+        mode_key = f"layer_mode_{key_prefix}"
+        single_key = f"layer_single_{key_prefix}"
+        range_key = f"layer_range_{key_prefix}"
+        list_key = f"layer_list_{key_prefix}"
+
+        def on_mode_change(lamp=layer_amp, mk=mode_key):
+            mode = st.session_state[mk]
+            if mode == "All":
+                lamp.layers = "all"
+            elif mode == "Single":
+                lamp.layers = 0
+            elif mode == "Range":
+                num_layers = self.method.base_model.num_layers
+                lamp.layers = list(range(num_layers))
+            else:  # List
+                lamp.layers = []
+            self._save_configs()
+
+        def on_single_change(lamp=layer_amp, key=single_key):
+            lamp.layers = st.session_state[key]
+            self._save_configs()
+
+        def on_range_change(lamp=layer_amp, key=range_key):
+            start, end = st.session_state[key]
+            lamp.layers = list(range(start, end + 1))
+            self._save_configs()
+
+        def on_list_change(lamp=layer_amp, key=list_key):
+            val = st.session_state[key].strip()
+            if val:
+                lamp.layers = [int(x.strip()) for x in val.split(",") if x.strip()]
+            else:
+                lamp.layers = []
+            self._save_configs()
+
         with st.container(border=True):
             col1, col2 = st.columns([5, 1])
 
@@ -2262,16 +2360,15 @@ class AmplificationDashboard:
             with col2:
                 if st.button(
                     "🗑️",
-                    key=f"delete_layer_{config_id}_{adapter_idx}_{layer_idx}",
+                    key=f"delete_layer_{key_prefix}",
                 ):
                     st.session_state.managed_configs[
                         config_id
                     ].config.amplified_adapters[adapter_idx].layer_amplifications.pop(
                         layer_idx
                     )
-                    self._save_and_rerun()
+                    self._save_and_rerun(scope="fragment")
 
-            # Determine initial radio index based on persisted state
             if isinstance(layer_amp.layers, list):
                 if len(layer_amp.layers) > 1 and layer_amp.layers == list(
                     range(layer_amp.layers[0], layer_amp.layers[-1] + 1)
@@ -2288,8 +2385,9 @@ class AmplificationDashboard:
                 "Layer Selection Mode",
                 options=["All", "Single", "List", "Range"],
                 index=initial_mode_index,
-                key=f"layer_mode_{config_id}_{adapter_idx}_{layer_idx}",
+                key=mode_key,
                 horizontal=True,
+                on_change=on_mode_change,
             )
 
             if layer_mode == "All":
@@ -2300,14 +2398,14 @@ class AmplificationDashboard:
                 current_val = (
                     layer_amp.layers if isinstance(layer_amp.layers, int) else 0
                 )
-                layer_num = st.number_input(
+                st.number_input(
                     "Layer Index",
                     min_value=0,
                     value=current_val,
                     step=1,
-                    key=f"layer_single_{config_id}_{adapter_idx}_{layer_idx}",
+                    key=single_key,
+                    on_change=on_single_change,
                 )
-                layer_amp.layers = layer_num
 
             elif layer_mode == "Range":
                 num_layers = self.method.base_model.num_layers
@@ -2324,12 +2422,12 @@ class AmplificationDashboard:
                     min_value=0,
                     max_value=num_layers - 1,
                     value=(current_start, current_end),
-                    key=f"layer_range_{config_id}_{adapter_idx}_{layer_idx}",
+                    key=range_key,
                     help="Select the range of layers to apply amplification to",
+                    on_change=on_range_change,
                 )
 
                 range_start, range_end = layer_range
-                layer_amp.layers = list(range(range_start, range_end + 1))
                 st.info(
                     f"Applies to layers {range_start} through {range_end} ({range_end - range_start + 1} layers)"
                 )
@@ -2340,18 +2438,13 @@ class AmplificationDashboard:
                     if isinstance(layer_amp.layers, list)
                     else ""
                 )
-                layer_list_str = st.text_input(
+                st.text_input(
                     "Layer Indices (comma-separated)",
                     value=current_val,
-                    key=f"layer_list_{config_id}_{adapter_idx}_{layer_idx}",
+                    key=list_key,
                     help="E.g., '0,1,2,5,10'",
+                    on_change=on_list_change,
                 )
-                if layer_list_str.strip():
-                    layer_amp.layers = [
-                        int(x.strip()) for x in layer_list_str.split(",")
-                    ]
-                else:
-                    layer_amp.layers = []
 
             st.markdown("**Module Specifications**")
 
@@ -2375,7 +2468,7 @@ class AmplificationDashboard:
             ):
                 new_module_amp = ModuleAmplification(modules="all", weight=1.0)
                 layer_amp.module_amplifications.append(new_module_amp)
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
 
     def _render_module_amplification(
         self,
@@ -2386,10 +2479,21 @@ class AmplificationDashboard:
         module_amp: ModuleAmplification,
     ) -> None:
         """Render module amplification (module selector + weight slider)."""
+        module_key = f"module_mode_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}"
+        weight_key = f"module_weight_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}"
+
+        def on_module_change(mod_amp=module_amp, key=module_key):
+            mod_amp.modules = st.session_state[key]
+            self._save_configs()
+
+        def on_weight_change(mod_amp=module_amp, key=weight_key):
+            mod_amp.weight = st.session_state[key]
+            self._save_configs()
+
         col1, col2, col3 = st.columns([2, 2, 1])
 
         with col1:
-            module_amp.modules = st.selectbox(
+            st.selectbox(
                 f"Module {module_idx + 1}",
                 options=["all", "attention", "mlp"],
                 index=(
@@ -2401,18 +2505,20 @@ class AmplificationDashboard:
                         else 2 if module_amp.modules == "mlp" else 3
                     )
                 ),
-                key=f"module_mode_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=module_key,
+                on_change=on_module_change,
             )
 
         with col2:
-            module_amp.weight = st.slider(
+            st.slider(
                 "Weight",
                 min_value=-5.0,
                 max_value=5.0,
                 value=float(module_amp.weight),
                 step=0.1,
-                key=f"module_weight_{config_id}_{adapter_idx}_{layer_idx}_{module_idx}",
+                key=weight_key,
                 help="Amplification factor (1.0 = no change, 2.0 = double, 0.5 = half)",
+                on_change=on_weight_change,
             )
 
         with col3:
@@ -2423,4 +2529,4 @@ class AmplificationDashboard:
                 st.session_state.managed_configs[config_id].config.amplified_adapters[
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
