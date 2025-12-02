@@ -414,6 +414,107 @@ class SettingsController:
 
 ---
 
+### 6. Fragment Architecture Patterns
+
+When building complex UIs with nested lists, understanding fragment boundaries is crucial.
+
+#### Key Insight: Fragment Boundaries ≠ Visual Boundaries
+
+**Fragment boundaries are determined by Python function scope, not visual containers like expanders.**
+
+```python
+@st.fragment
+def list_fragment():
+    for item in items:
+        with st.expander(item.name):      # Expander in list scope
+            if st.button("Delete"):        # Button ALSO in list scope!
+                del items[item.id]
+                st.rerun(scope="fragment") # Reruns list_fragment
+
+            item_inputs_fragment(item.id)  # Nested fragment
+
+@st.fragment
+def item_inputs_fragment(item_id):
+    # Only this reruns when inputs change
+    st.text_input("Name", ...)
+```
+
+#### Pattern: Delete at Parent Level
+
+When deleting items from a list, the delete button should be in the **parent** fragment scope:
+
+```python
+# GOOD: Delete at list level
+@st.fragment
+def render_item_list():
+    for item_id, item in list(items.items()):
+        col1, col2 = st.columns([10, 1])
+        with col1:
+            render_item_editor(item_id, item)  # Item fragment
+        with col2:
+            if st.button("🗑️", key=f"del_{item_id}"):
+                del items[item_id]
+                st.rerun(scope="fragment")  # List reruns, item gone
+
+@st.fragment
+def render_item_editor(item_id, item):
+    # Edit fields - changes only rerun this editor
+    st.text_input("Name", value=item.name, ...)
+```
+
+#### Caveat: Inner State Affecting Outer UI
+
+**The "Russian Doll" pattern breaks when inner fragment state affects outer fragment UI.**
+
+```python
+# ❌ BROKEN: Active toggle won't update expander title
+@st.fragment
+def list_fragment():
+    for item in items:
+        icon = "✅" if item.active else "❌"
+        with st.expander(f"{icon} {item.name}"):  # Title in list scope
+            item_inputs_fragment(item.id)          # Active checkbox here!
+
+@st.fragment
+def item_inputs_fragment(item_id):
+    st.checkbox("Active", on_change=...)  # Changes item.active
+    # But expander title won't update until list reruns!
+```
+
+**Solution:** Keep the expander in the same fragment as state that affects its title:
+
+```python
+# ✅ CORRECT: Expander and Active checkbox in same fragment
+@st.fragment
+def list_fragment():
+    for item in items:
+        col1, col2 = st.columns([20, 1])
+        with col1:
+            item_editor_fragment(item.id)  # Expander + Active inside
+        with col2:
+            if st.button("🗑️"):            # Delete at list level
+                ...
+
+@st.fragment
+def item_editor_fragment(item_id):
+    item = items[item_id]
+    icon = "✅" if item.active else "❌"
+    with st.expander(f"{icon} {item.name}"):  # Title updates on Active change
+        st.checkbox("Active", ...)
+        # Other fields...
+```
+
+#### When to Use Each Pattern
+
+| Scenario | Pattern |
+|----------|---------|
+| Inner state affects expander title (active/icon) | Expander inside item fragment |
+| Title is static, only content changes | Expander in list fragment (Russian Doll) |
+| Delete/duplicate operations | Buttons at list fragment level |
+| Pure editing (name, description, etc.) | Item fragment with `on_change` callbacks |
+
+---
+
 ## Quick Reference
 
 | Situation | Solution |
@@ -454,3 +555,29 @@ class SettingsController:
        # If you see spinner often, cache isn't working as expected
        pass
    ```
+
+---
+
+## The Streamlit Performance Mantra
+
+```
+I must not rerun.
+Global rerun is the performance-killer.
+Global rerun is the little-death that brings total UI obliteration.
+
+I will face my reruns.
+I will permit them to pass through my fragments and only my fragments.
+And when they have passed I will turn the inner eye to see their scope.
+
+Where the global rerun has gone there will be nothing.
+Only the fragment will remain.
+
+I shall use on_change, not compare-and-save.
+I shall scope my reruns, not broadcast them.
+I shall fragment my UI, not monolith it.
+
+For in the way of Streamlit, performance flows to those who understand:
+The fragment boundary is the function scope.
+The expander is but a visual lie.
+The callback is the one true path.
+```
