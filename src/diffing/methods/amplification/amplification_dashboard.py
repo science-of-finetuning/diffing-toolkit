@@ -47,6 +47,7 @@ from src.diffing.methods.amplification.dashboard_state import (
     create_folder,
     unload_folder_configs,
     save_prompts_to_cache,
+    save_prompts_to_folder,
     load_prompts_from_folder,
     list_all_prompt_folders,
     unload_folder_prompts,
@@ -742,18 +743,35 @@ class AmplificationDashboard:
             help="Choose how to format the prompt before sending to model",
         )
 
+        system_prompt = ""
         assistant_prefill = ""
+        loom_filename = "untitled.txt"
+
         if template_mode == "Apply chat template":
+            system_prompt = st.text_input(
+                "System prompt",
+                key="multi_gen_system_prompt",
+                placeholder="Optional: system instructions...",
+            )
             assistant_prefill = st.text_input(
                 "Assistant prefill",
                 key="multi_gen_assistant_prefill",
                 placeholder="Optional: prefill the assistant's response...",
                 help="If not empty, this text will be added as the beginning of the assistant's response",
             )
+        elif template_mode == "Apply loom template":
+            loom_filename = st.text_input(
+                "Filename",
+                value="untitled.txt",
+                key="multi_gen_loom_filename",
+                placeholder="untitled.txt",
+            )
 
         st.session_state.multi_gen_current_prompt = prompt
         st.session_state.multi_gen_current_template_mode = template_mode
+        st.session_state.multi_gen_current_system_prompt = system_prompt
         st.session_state.multi_gen_current_assistant_prefill = assistant_prefill
+        st.session_state.multi_gen_current_loom_filename = loom_filename
 
     def _render_import_conversations_section(self) -> None:
         """Render conversation import UI."""
@@ -1188,24 +1206,32 @@ class AmplificationDashboard:
             if active_tab == "Text":
                 prompt = st.session_state.multi_gen_current_prompt
                 template_mode = st.session_state.multi_gen_current_template_mode
+                system_prompt = st.session_state.get(
+                    "multi_gen_current_system_prompt", ""
+                )
                 assistant_prefill = st.session_state.get(
                     "multi_gen_current_assistant_prefill", ""
+                )
+                loom_filename = st.session_state.get(
+                    "multi_gen_current_loom_filename", "untitled.txt"
                 )
 
                 if template_mode == "No template":
                     final_prompt = self.tokenizer.encode(prompt)
                 elif template_mode == "Apply chat template":
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+                    messages.append({"role": "user", "content": prompt})
                     if assistant_prefill:
+                        messages.append({"role": "assistant", "content": assistant_prefill})
                         final_prompt = self.tokenizer.apply_chat_template(
-                            [
-                                {"role": "user", "content": prompt},
-                                {"role": "assistant", "content": assistant_prefill},
-                            ],
+                            messages,
                             continue_final_message=True,
                         )
                     else:
                         final_prompt = self.tokenizer.apply_chat_template(
-                            [{"role": "user", "content": prompt}],
+                            messages,
                             add_generation_prompt=True,
                         )
                 elif template_mode == "Apply loom template":
@@ -1215,7 +1241,7 @@ class AmplificationDashboard:
                                 "role": "system",
                                 "content": "The assistant is in CLI simulation mode, and responds to the user's CLI commands only with the output of the command.",
                             },
-                            {"role": "user", "content": "<cmd>cat untitled.txt</cmd>"},
+                            {"role": "user", "content": f"<cmd>cat {loom_filename}</cmd>"},
                             {"role": "assistant", "content": prompt},
                         ],
                         continue_final_message=True,
@@ -1285,6 +1311,7 @@ class AmplificationDashboard:
                 "results": results,
                 "active_tab": active_tab,
                 "template_mode": template_mode if active_tab == "Text" else None,
+                "loom_filename": loom_filename if active_tab == "Text" else None,
             }
             for idx, result_data in enumerate(
                 self._multi_gen_request(
@@ -1539,11 +1566,12 @@ class AmplificationDashboard:
                             }
                         )
                     elif template_mode == "Apply loom template":
+                        loom_filename = results_data.get("loom_filename", "untitled.txt")
                         system_prompt = "The assistant is in CLI simulation mode, and responds to the user's CLI commands only with the output of the command."
                         history = [
                             {
                                 "role": "user",
-                                "content": "<cmd>cat untitled.txt</cmd>",
+                                "content": f"<cmd>cat {loom_filename}</cmd>",
                             },
                             {
                                 "role": "assistant",
@@ -2789,30 +2817,16 @@ class AmplificationDashboard:
 
     @st.fragment
     def _render_prompts_subtab(self) -> None:
-        """Render the prompts management subtab. Fragment for isolated prompt list updates."""
-        col1, col2, col3 = st.columns([2, 1, 1])
+        """Render the prompts management subtab. Fragment for tab-level isolation."""
+        col1, col2 = st.columns([3, 1])
 
         with col1:
-            # Folder selector (simplified - just root for now)
-            st.selectbox(
-                "Folder",
-                options=["root"],
-                key="multi_prompt_folder",
-                disabled=True,
-                help="Prompt folder selection (subfolder support coming soon)",
-            )
-
-        with col2:
-            if st.button("➕ Add Prompt", use_container_width=True):
-                new_prompt = ManagedPrompt(active=True, expanded=True)
-                st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
-                self._save_prompts()
-                st.rerun(scope="fragment")
-
-        with col3:
             active_prompts = [
                 mp for mp in st.session_state.managed_prompts.values() if mp.active
             ]
+            st.markdown(f"**{len(active_prompts)} active prompt(s)**")
+
+        with col2:
             if st.button(
                 f"🚀 Run Active ({len(active_prompts)})",
                 use_container_width=True,
@@ -2820,22 +2834,151 @@ class AmplificationDashboard:
             ):
                 self._run_multi_prompt_generation()
 
-        st.divider()
+        self._render_prompt_folder_loader()
 
-        if not st.session_state.managed_prompts:
-            st.info("No prompts yet. Click 'Add Prompt' to create one.")
-            return
+        st.markdown("---")
 
-        # Delete button at list level (outside expander) so active toggle updates title
-        for prompt_id, mp in list(st.session_state.managed_prompts.items()):
-            col1, col2 = st.columns([20, 1])
+        if len(st.session_state.loaded_prompt_folders) == 0:
+            st.info("No folders loaded. Select a folder above to load prompts.")
+        else:
+            for folder in sorted(st.session_state.loaded_prompt_folders):
+                self._render_prompt_folder_section(folder)
+
+    def _render_prompt_folder_loader(self) -> None:
+        """Render the prompt folder loader UI (dropdown + Load/Create buttons)."""
+        all_folders = list_all_prompt_folders(PROMPTS_DIR)
+        loaded = st.session_state.loaded_prompt_folders
+        available_to_load = [f for f in all_folders if f not in loaded]
+
+        col1, col2, col3 = st.columns([3, 1, 1])
+
+        with col1:
+            folder_display = {f: "Root" if f == "" else f for f in available_to_load}
+            if available_to_load:
+                selected_folder = st.selectbox(
+                    "Available Folders",
+                    options=available_to_load,
+                    format_func=lambda x: folder_display.get(x, x),
+                    key="prompt_folder_to_load",
+                )
+            else:
+                st.info("All folders are loaded")
+                selected_folder = None
+
+        with col2:
+            if st.button(
+                "📂 Load",
+                disabled=selected_folder is None,
+                use_container_width=True,
+                key="load_prompt_folder_btn",
+            ):
+                st.session_state.loaded_prompt_folders.add(selected_folder)
+                loaded_prompts = load_prompts_from_folder(PROMPTS_DIR, selected_folder)
+                st.session_state.managed_prompts.update(loaded_prompts)
+                st.rerun(scope="fragment")
+
+        with col3:
+            if st.button("➕ Create", use_container_width=True, key="create_prompt_folder_btn"):
+                st.session_state.show_create_prompt_folder_dialog = True
+
+        if st.session_state.get("show_create_prompt_folder_dialog", False):
+            self._render_create_prompt_folder_dialog()
+
+    def _render_create_prompt_folder_dialog(self) -> None:
+        """Render the create prompt folder dialog."""
+        with st.container(border=True):
+            st.markdown("**Create New Prompt Folder**")
+            new_folder_path = st.text_input(
+                "Folder path",
+                placeholder="e.g., experiments/v2",
+                key="new_prompt_folder_path",
+            )
+            col1, col2 = st.columns(2)
             with col1:
-                self._render_prompt_editor(prompt_id, mp)
+                if st.button("Create", type="primary", use_container_width=True, key="create_prompt_folder_confirm"):
+                    if new_folder_path:
+                        create_folder(PROMPTS_DIR, new_folder_path)
+                        st.session_state.loaded_prompt_folders.add(new_folder_path)
+                        st.session_state.show_create_prompt_folder_dialog = False
+                        st.rerun(scope="fragment")
+                    else:
+                        st.error("Please enter a folder path")
             with col2:
-                if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
-                    del st.session_state.managed_prompts[prompt_id]
+                if st.button("Cancel", use_container_width=True, key="cancel_prompt_folder_dialog"):
+                    st.session_state.show_create_prompt_folder_dialog = False
+                    st.rerun(scope="fragment")
+
+    def _render_prompt_folder_section(self, folder: str) -> None:
+        """Render a single prompt folder section."""
+        folder_display = "Root" if folder == "" else folder
+        folder_prompts = {
+            pid: mp
+            for pid, mp in st.session_state.managed_prompts.items()
+            if mp.folder == folder
+        }
+        prompt_count = len(folder_prompts)
+
+        with st.expander(f"📁 {folder_display} ({prompt_count} prompts)", expanded=True):
+            col1, col2 = st.columns([4, 1])
+
+            with col1:
+                if st.button(
+                    "➕ New Prompt",
+                    key=f"new_prompt_{folder}",
+                    use_container_width=True,
+                ):
+                    new_prompt = ManagedPrompt(active=True, expanded=True, folder=folder)
+                    st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
                     self._save_prompts()
                     st.rerun(scope="fragment")
+
+            with col2:
+                if st.button(
+                    "📤 Unload",
+                    key=f"unload_prompt_folder_{folder}",
+                    use_container_width=True,
+                    help="Unload this folder (prompts are saved, not deleted)",
+                ):
+                    save_prompts_to_folder(
+                        st.session_state.managed_prompts, PROMPTS_DIR, folder
+                    )
+                    st.session_state.loaded_prompt_folders.discard(folder)
+                    st.session_state.managed_prompts = unload_folder_prompts(
+                        st.session_state.managed_prompts, folder
+                    )
+                    st.rerun(scope="fragment")
+
+            if not folder_prompts:
+                st.info("No prompts in this folder.")
+                return
+
+            for prompt_id, mp in list(folder_prompts.items()):
+                col1, col2, col3 = st.columns([30, 1, 1])
+                with col1:
+                    self._render_prompt_editor(prompt_id, mp)
+                with col2:
+                    if st.button("📋", key=f"dup_{prompt_id}", help="Duplicate"):
+                        new_prompt = ManagedPrompt(
+                            name=f"{mp.name} copy" if mp.name else "",
+                            editor_mode=mp.editor_mode,
+                            prompt_text=mp.prompt_text,
+                            template_mode=mp.template_mode,
+                            system_prompt=mp.system_prompt,
+                            assistant_prefill=mp.assistant_prefill,
+                            loom_filename=mp.loom_filename,
+                            messages=deepcopy(mp.messages),
+                            folder=mp.folder,
+                            active=mp.active,
+                            expanded=True,
+                        )
+                        st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
+                        self._save_prompts()
+                        st.rerun(scope="fragment")
+                with col3:
+                    if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
+                        del st.session_state.managed_prompts[prompt_id]
+                        self._save_prompts()
+                        st.rerun(scope="fragment")
 
     @st.fragment
     def _render_prompt_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
@@ -2918,8 +3061,24 @@ class AmplificationDashboard:
             on_change=on_text_change,
         )
 
-        # Assistant prefill (only for chat template)
+        # Template-specific fields
         if mp.template_mode == "Apply chat template":
+            # System prompt (optional)
+            system_key = f"prompt_system_{prompt_id}"
+
+            def on_system_change(prompt=mp, key=system_key):
+                prompt.system_prompt = st.session_state[key]
+                self._save_prompts()
+
+            st.text_input(
+                "System prompt",
+                value=mp.system_prompt,
+                key=system_key,
+                placeholder="Optional: system instructions...",
+                on_change=on_system_change,
+            )
+
+            # Assistant prefill
             prefill_key = f"prompt_prefill_{prompt_id}"
 
             def on_prefill_change(prompt=mp, key=prefill_key):
@@ -2932,6 +3091,22 @@ class AmplificationDashboard:
                 key=prefill_key,
                 placeholder="Optional: prefill the assistant's response...",
                 on_change=on_prefill_change,
+            )
+
+        elif mp.template_mode == "Apply loom template":
+            # Filename for loom template
+            filename_key = f"prompt_loom_filename_{prompt_id}"
+
+            def on_filename_change(prompt=mp, key=filename_key):
+                prompt.loom_filename = st.session_state[key]
+                self._save_prompts()
+
+            st.text_input(
+                "Filename",
+                value=mp.loom_filename,
+                key=filename_key,
+                placeholder="untitled.txt",
+                on_change=on_filename_change,
             )
 
     def _render_prompt_chat_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
@@ -3053,7 +3228,10 @@ class AmplificationDashboard:
         if mp.template_mode == "No template":
             return self.tokenizer.encode(mp.prompt_text, add_special_tokens=False)
         elif mp.template_mode == "Apply chat template":
-            messages = [{"role": "user", "content": mp.prompt_text}]
+            messages = []
+            if mp.system_prompt:
+                messages.append({"role": "system", "content": mp.system_prompt})
+            messages.append({"role": "user", "content": mp.prompt_text})
             if mp.assistant_prefill:
                 messages.append({"role": "assistant", "content": mp.assistant_prefill})
             return self.tokenizer.apply_chat_template(
@@ -3062,7 +3240,20 @@ class AmplificationDashboard:
                 tokenize=True,
             )
         else:  # Apply loom template
-            return self.tokenizer.encode(mp.prompt_text, add_special_tokens=False)
+            filename = mp.loom_filename or "untitled.txt"
+            messages = [
+                {
+                    "role": "system",
+                    "content": "The assistant is in CLI simulation mode, and responds to the user's CLI commands only with the output of the command.",
+                },
+                {"role": "user", "content": f"<cmd>cat {filename}</cmd>"},
+                {"role": "assistant", "content": mp.prompt_text},
+            ]
+            return self.tokenizer.apply_chat_template(
+                messages,
+                continue_final_message=True,
+                tokenize=True,
+            )
 
     def _tokenize_chat_prompt(self, mp: ManagedPrompt) -> list[int]:
         """Tokenize a chat-mode prompt."""

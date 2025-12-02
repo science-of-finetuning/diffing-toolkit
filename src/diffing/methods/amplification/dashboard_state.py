@@ -155,7 +155,9 @@ class ManagedPrompt(DashboardItem):
     # Simple mode fields
     prompt_text: str = ""
     template_mode: str = "Apply chat template"
+    system_prompt: str = ""  # Optional system prompt for chat template mode
     assistant_prefill: str = ""
+    loom_filename: str = "untitled.txt"  # Filename for loom template mode
 
     # Chat mode fields
     messages: list[dict] = field(default_factory=list)
@@ -188,7 +190,9 @@ class ManagedPrompt(DashboardItem):
                 "editor_mode": self.editor_mode,
                 "prompt_text": self.prompt_text,
                 "template_mode": self.template_mode,
+                "system_prompt": self.system_prompt,
                 "assistant_prefill": self.assistant_prefill,
+                "loom_filename": self.loom_filename,
                 "messages": self.messages,
                 "folder": self.folder,
             }
@@ -205,7 +209,9 @@ class ManagedPrompt(DashboardItem):
             editor_mode=data.get("editor_mode", "simple"),
             prompt_text=data.get("prompt_text", ""),
             template_mode=data.get("template_mode", "Apply chat template"),
+            system_prompt=data.get("system_prompt", ""),
             assistant_prefill=data.get("assistant_prefill", ""),
+            loom_filename=data.get("loom_filename", "untitled.txt"),
             messages=data.get("messages", []),
             folder=data.get("folder", ""),
             **ui_fields,
