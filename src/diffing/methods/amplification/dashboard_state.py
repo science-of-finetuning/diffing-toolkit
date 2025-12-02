@@ -667,6 +667,40 @@ def load_multigen_state(state_file: Path) -> dict:
     return state
 
 
+def save_loaded_folders(
+    state_file: Path, loaded_folders: set[str], loaded_prompt_folders: set[str]
+) -> None:
+    """Save loaded folders state to cache file."""
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "loaded_folders": list(loaded_folders),
+        "loaded_prompt_folders": list(loaded_prompt_folders),
+    }
+    with open(state_file, "w") as f:
+        yaml.dump(state, f, sort_keys=False)
+
+
+def load_loaded_folders(state_file: Path) -> tuple[set[str], set[str]]:
+    """Load loaded folders state from cache file."""
+    default_folders = {""}  # Root folder
+    if not state_file.exists():
+        return default_folders, default_folders
+
+    with open(state_file) as f:
+        state = yaml.safe_load(f) or {}
+
+    loaded_folders = set(state.get("loaded_folders", [""]))
+    loaded_prompt_folders = set(state.get("loaded_prompt_folders", [""]))
+
+    # Ensure at least root is included if empty
+    if not loaded_folders:
+        loaded_folders = {""}
+    if not loaded_prompt_folders:
+        loaded_prompt_folders = {""}
+
+    return loaded_folders, loaded_prompt_folders
+
+
 def save_conversation(
     conv_id: str,
     conv: dict[str, Any],

@@ -53,6 +53,8 @@ from src.diffing.methods.amplification.dashboard_state import (
     unload_folder_prompts,
     save_multigen_state,
     load_multigen_state,
+    save_loaded_folders,
+    load_loaded_folders,
     save_conversation,
     load_conversations_from_cache,
     delete_conversation_file,
@@ -228,8 +230,14 @@ class AmplificationDashboard:
         """Initialize Streamlit session state."""
         if "managed_configs" not in st.session_state:
             st.session_state.managed_configs = {}
+
+        # Load folder state from disk
         if "loaded_folders" not in st.session_state:
-            st.session_state.loaded_folders = {""}  # Root folder loaded by default
+            loaded_folders, loaded_prompt_folders = load_loaded_folders(
+                CACHE_DIR / "loaded_folders.yaml"
+            )
+            st.session_state.loaded_folders = loaded_folders
+            st.session_state.loaded_prompt_folders = loaded_prompt_folders
         if "conversations" not in st.session_state:
             st.session_state.conversations = {}
         if "active_conversation_id" not in st.session_state:
@@ -287,8 +295,6 @@ class AmplificationDashboard:
         # Multi-prompt generation state
         if "managed_prompts" not in st.session_state:
             st.session_state.managed_prompts = {}
-        if "loaded_prompt_folders" not in st.session_state:
-            st.session_state.loaded_prompt_folders = {""}
         if "multi_prompt_results" not in st.session_state:
             st.session_state.multi_prompt_results = None
         if "multi_prompt_display_configs" not in st.session_state:
@@ -336,6 +342,14 @@ class AmplificationDashboard:
     def _save_prompts(self) -> None:
         """Save prompts to cache without triggering rerun."""
         save_prompts_to_cache(st.session_state.managed_prompts, PROMPTS_DIR)
+
+    def _save_loaded_folders(self) -> None:
+        """Save loaded folders state to disk."""
+        save_loaded_folders(
+            CACHE_DIR / "loaded_folders.yaml",
+            st.session_state.loaded_folders,
+            st.session_state.loaded_prompt_folders,
+        )
 
     def _save_last_multigen_state(self) -> None:
         """Save current multi-gen state to cache."""
@@ -985,6 +999,7 @@ class AmplificationDashboard:
                     CONFIGS_DIR, selected_folder, existing_names
                 )
                 st.session_state.managed_configs.update(loaded_configs)
+                self._save_loaded_folders()
                 self._save_and_rerun()
 
         with col3:
@@ -1010,6 +1025,7 @@ class AmplificationDashboard:
                         create_folder(CONFIGS_DIR, new_folder_path)
                         st.session_state.loaded_folders.add(new_folder_path)
                         st.session_state.show_create_folder_dialog = False
+                        self._save_loaded_folders()
                         self._save_and_rerun()
                     else:
                         st.error("Please enter a folder path")
@@ -1069,6 +1085,7 @@ class AmplificationDashboard:
                         st.session_state.managed_configs, folder
                     )
                     st.session_state.loaded_folders.discard(folder)
+                    self._save_loaded_folders()
                     self._save_and_rerun()
 
             if config_count == 0:
@@ -1224,7 +1241,9 @@ class AmplificationDashboard:
                         messages.append({"role": "system", "content": system_prompt})
                     messages.append({"role": "user", "content": prompt})
                     if assistant_prefill:
-                        messages.append({"role": "assistant", "content": assistant_prefill})
+                        messages.append(
+                            {"role": "assistant", "content": assistant_prefill}
+                        )
                         final_prompt = self.tokenizer.apply_chat_template(
                             messages,
                             continue_final_message=True,
@@ -1241,7 +1260,10 @@ class AmplificationDashboard:
                                 "role": "system",
                                 "content": "The assistant is in CLI simulation mode, and responds to the user's CLI commands only with the output of the command.",
                             },
-                            {"role": "user", "content": f"<cmd>cat {loom_filename}</cmd>"},
+                            {
+                                "role": "user",
+                                "content": f"<cmd>cat {loom_filename}</cmd>",
+                            },
                             {"role": "assistant", "content": prompt},
                         ],
                         continue_final_message=True,
@@ -1566,7 +1588,9 @@ class AmplificationDashboard:
                             }
                         )
                     elif template_mode == "Apply loom template":
-                        loom_filename = results_data.get("loom_filename", "untitled.txt")
+                        loom_filename = results_data.get(
+                            "loom_filename", "untitled.txt"
+                        )
                         system_prompt = "The assistant is in CLI simulation mode, and responds to the user's CLI commands only with the output of the command."
                         history = [
                             {
@@ -2875,10 +2899,13 @@ class AmplificationDashboard:
                 st.session_state.loaded_prompt_folders.add(selected_folder)
                 loaded_prompts = load_prompts_from_folder(PROMPTS_DIR, selected_folder)
                 st.session_state.managed_prompts.update(loaded_prompts)
+                self._save_loaded_folders()
                 st.rerun(scope="fragment")
 
         with col3:
-            if st.button("➕ Create", use_container_width=True, key="create_prompt_folder_btn"):
+            if st.button(
+                "➕ Create", use_container_width=True, key="create_prompt_folder_btn"
+            ):
                 st.session_state.show_create_prompt_folder_dialog = True
 
         if st.session_state.get("show_create_prompt_folder_dialog", False):
@@ -2895,16 +2922,26 @@ class AmplificationDashboard:
             )
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Create", type="primary", use_container_width=True, key="create_prompt_folder_confirm"):
+                if st.button(
+                    "Create",
+                    type="primary",
+                    use_container_width=True,
+                    key="create_prompt_folder_confirm",
+                ):
                     if new_folder_path:
                         create_folder(PROMPTS_DIR, new_folder_path)
                         st.session_state.loaded_prompt_folders.add(new_folder_path)
                         st.session_state.show_create_prompt_folder_dialog = False
+                        self._save_loaded_folders()
                         st.rerun(scope="fragment")
                     else:
                         st.error("Please enter a folder path")
             with col2:
-                if st.button("Cancel", use_container_width=True, key="cancel_prompt_folder_dialog"):
+                if st.button(
+                    "Cancel",
+                    use_container_width=True,
+                    key="cancel_prompt_folder_dialog",
+                ):
                     st.session_state.show_create_prompt_folder_dialog = False
                     st.rerun(scope="fragment")
 
@@ -2918,7 +2955,9 @@ class AmplificationDashboard:
         }
         prompt_count = len(folder_prompts)
 
-        with st.expander(f"📁 {folder_display} ({prompt_count} prompts)", expanded=True):
+        with st.expander(
+            f"📁 {folder_display} ({prompt_count} prompts)", expanded=True
+        ):
             col1, col2 = st.columns([4, 1])
 
             with col1:
@@ -2927,7 +2966,9 @@ class AmplificationDashboard:
                     key=f"new_prompt_{folder}",
                     use_container_width=True,
                 ):
-                    new_prompt = ManagedPrompt(active=True, expanded=True, folder=folder)
+                    new_prompt = ManagedPrompt(
+                        active=True, expanded=True, folder=folder
+                    )
                     st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
                     self._save_prompts()
                     st.rerun(scope="fragment")
@@ -2946,6 +2987,7 @@ class AmplificationDashboard:
                     st.session_state.managed_prompts = unload_folder_prompts(
                         st.session_state.managed_prompts, folder
                     )
+                    self._save_loaded_folders()
                     st.rerun(scope="fragment")
 
             if not folder_prompts:
@@ -2971,7 +3013,9 @@ class AmplificationDashboard:
                             active=mp.active,
                             expanded=True,
                         )
-                        st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
+                        st.session_state.managed_prompts[new_prompt.prompt_id] = (
+                            new_prompt
+                        )
                         self._save_prompts()
                         st.rerun(scope="fragment")
                 with col3:
