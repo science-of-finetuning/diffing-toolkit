@@ -1,0 +1,11 @@
+- when adding a new layer, add a all module by defualt 
+- layers should be store as relative float to enable cross model compatibility.
+- results in multi prompt should have the same widgets as in the multi gen tab.
+
+## refactoring:s
+- check for duplicated code between multi gen and multi prompt prompt building functions
+- split the dashboard into subclasses (which store a reference to the main dashboard)
+
+# done:
+- every time we multi generate, create a log yaml file with the results in a log folder timestamped with the date and time. (includes metadata, like enough to rerun the generation from it).
+- add tweak single adapter ui to chat: foldable sidebar
