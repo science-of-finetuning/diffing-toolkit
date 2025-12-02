@@ -51,11 +51,11 @@ def plot_per_sample_occurrences(
     max_positions: int = None
 ) -> List[Path]:
     """
-    Generate bar/line plots showing token occurrences per sample.
+    Generate histogram plots showing distribution of token occurrences per sample.
     
     Creates one plot per token with:
-    - X-axis: sample index (0 to num_samples-1)
-    - Y-axis: count of token occurrences in that sample's topK (aggregated across all positions)
+    - X-axis: count of token occurrences in TopK
+    - Y-axis: number of samples (Frequency)
     
     Args:
         per_sample_counts: Dict mapping token_str -> {sample_idx: count}
@@ -77,16 +77,21 @@ def plot_per_sample_occurrences(
         counts_list = [sample_counts.get(i, 0) for i in range(num_samples)]
         
         # Create plot
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.bar(range(num_samples), counts_list, width=1.0, alpha=0.7, color='steelblue', 
-               edgecolor='black', linewidth=0.3)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Determine bins: from 0 to max_count + 1
+        max_count = max(counts_list) if counts_list else 0
+        bins = range(0, max_count + 2)
+        
+        ax.hist(counts_list, bins=bins, align='left', rwidth=0.8, 
+                alpha=0.7, color='steelblue', edgecolor='black')
         
         # Labels and title
-        ax.set_xlabel('Sample Index', fontsize=11)
-        ax.set_ylabel('Occurrences in TopK', fontsize=11)
+        ax.set_xlabel('Occurrences in TopK', fontsize=11)
+        ax.set_ylabel('Number of Samples', fontsize=11)
         
         # Build title with max_positions info if available
-        title = f'Token "{token_str}" - Occurrences per Sample\n({dataset_name}'
+        title = f'Histogram of Occurrences per Sample - Token "{token_str}"\n({dataset_name}'
         if max_positions is not None:
             title += f', max_positions={max_positions}'
         title += ')'
@@ -101,7 +106,7 @@ def plot_per_sample_occurrences(
         plt.close(fig)
         
         saved_plots.append(filepath)
-        logger.info(f"  Saved per-sample plot: {filename}")
+        logger.info(f"  Saved per-sample histogram: {filename}")
     
     return saved_plots
 

@@ -53,9 +53,30 @@ def plot_co_occurrence_heatmap(
             # Matrix is symmetric for our definitions, but we access safely
             val = co_occurrence_matrix.get(t1, {}).get(t2, 0)
             data[i, j] = val
+
+    # Create normalized matrix and annotation matrix
+    normalized_data = np.zeros((n_tokens, n_tokens), dtype=float)
+    annot_data = np.full((n_tokens, n_tokens), "", dtype=object)
+
+    for i in range(n_tokens):
+        # Diagonal value for normalization (total occurrences of row token)
+        row_total = data[i, i]
+        
+        for j in range(n_tokens):
+            count = data[i, j]
+            if row_total > 0:
+                norm_val = count / row_total
+            else:
+                norm_val = 0.0
             
-    # Create DataFrame for better labeling with seaborn
-    df = pd.DataFrame(data, index=tokens, columns=tokens)
+            normalized_data[i, j] = norm_val
+            # Format: Count \n (0.xx)
+            annot_data[i, j] = f"{count}\n({norm_val:.2f})"
+            
+    # Create DataFrame for better labeling with seaborn (using normalized data for colors)
+    # Wrap tokens in quotes for better readability of whitespace
+    wrapped_tokens = [f"'{t}'" for t in tokens]
+    df_norm = pd.DataFrame(normalized_data, index=wrapped_tokens, columns=wrapped_tokens)
     
     # Plotting
     plt.figure(figsize=(max(10, n_tokens * 0.8), max(8, n_tokens * 0.6)))
@@ -69,15 +90,15 @@ def plot_co_occurrence_heatmap(
     title_suffix = title_map.get(co_occurrence_type, co_occurrence_type)
     
     # Draw heatmap
-    # annot=True plots the number in the cell. 
-    # fmt='d' ensures integer formatting.
+    # annot=annot_data plots the custom string in the cell. 
+    # fmt='' ensures it treats annotation as raw string.
     # cmap="YlGnBu" is a good standard colormap.
     ax = sns.heatmap(
-        df, 
-        annot=True, 
-        fmt="d", 
+        df_norm, 
+        annot=annot_data, 
+        fmt="", 
         cmap="YlGnBu", 
-        cbar_kws={'label': 'Co-occurrence Count'},
+        cbar_kws={'label': 'Normalized Co-occurrence (Row-wise)'},
         square=True
     )
     
