@@ -252,8 +252,6 @@ class AmplificationDashboard:
             st.session_state.vllm_kwargs = self.inference_config.vllm_kwargs
         if "multi_gen_results" not in st.session_state:
             st.session_state.multi_gen_results = None
-        if "multi_gen_sample_indices" not in st.session_state:
-            st.session_state.multi_gen_sample_indices = {}
         if "multi_gen_preset_prompt" not in st.session_state:
             st.session_state.multi_gen_preset_prompt = None
         if "multi_gen_preset_apply_template" not in st.session_state:
@@ -1296,9 +1294,6 @@ class AmplificationDashboard:
                     )
 
             st.session_state.multi_gen_results = results_data_in_progress
-            st.session_state.multi_gen_sample_indices = {
-                i: 0 for i in range(len(results))
-            }
 
             # Log the generation
             GenerationLog.from_dashboard_generation(
@@ -1341,7 +1336,8 @@ class AmplificationDashboard:
                 col_idx = idx % 2
 
                 with output_cols[col_idx]:
-                    self._render_result_card(idx, result_data, results_data)
+                    with st.container():
+                        self._render_result_card(idx, result_data, results_data)
 
     @st.fragment
     def _render_result_card(
@@ -3056,6 +3052,7 @@ class AmplificationDashboard:
         st.session_state.multi_prompt_display_configs = config_ids[:2]
 
         st.success("Generation complete! Switch to Results tab to view.")
+        st.rerun(scope="fragment")
 
     def _tokenize_simple_prompt(self, mp: ManagedPrompt) -> list[int]:
         """Tokenize a simple-mode prompt."""

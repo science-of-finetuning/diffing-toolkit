@@ -9,6 +9,7 @@ A guide to building responsive Streamlit applications, focusing on common perfor
    - [Compare-and-Save Anti-Pattern](#3-compare-and-save-anti-pattern)
    - [Wrong Rerun Scope](#4-wrong-rerun-scope)
    - [Expensive Operations on Every Rerun](#5-expensive-operations-on-every-rerun)
+   - [Fragments Losing Column Context](#6-fragments-losing-column-context)
 2. [Best Practices](#best-practices)
    - [Use Fragments for Independent Sections](#1-use-fragments-for-independent-sections)
    - [Use on_change Callbacks](#2-use-on_change-callbacks)
@@ -188,6 +189,51 @@ def render_dashboard():
     data = load_large_dataset()  # Cached after first call
     st.dataframe(data)
 ```
+
+---
+
+### 6. Fragments Losing Column Context
+
+**Problem**: When calling a `@st.fragment` function from within a column context, the fragment's output may not render in the correct column. Multiple fragments in a loop can overlap, with only the last few visible.
+
+```python
+# BAD: Fragment loses column context - only last 2 cards visible
+output_cols = st.columns(2)
+for idx, item in enumerate(items):
+    col_idx = idx % 2
+    with output_cols[col_idx]:
+        render_item_card(idx, item)  # Fragment called inside column
+
+@st.fragment
+def render_item_card(idx, item):
+    with st.expander(f"Item {idx}"):
+        st.write(item)
+        if st.button("Action", key=f"btn_{idx}"):
+            do_something()
+```
+
+**What happens**: The fragment renders in isolation and loses the column context from its call site. When multiple fragments render, they overlap in the same position instead of distributing across columns.
+
+**Solution**: Wrap the fragment call in `st.container()` to anchor it to the column:
+
+```python
+# GOOD: Container anchors fragment to column context
+output_cols = st.columns(2)
+for idx, item in enumerate(items):
+    col_idx = idx % 2
+    with output_cols[col_idx]:
+        with st.container():  # Anchors fragment output to this column
+            render_item_card(idx, item)
+
+@st.fragment
+def render_item_card(idx, item):
+    with st.expander(f"Item {idx}"):
+        st.write(item)
+        if st.button("Action", key=f"btn_{idx}"):
+            do_something()
+```
+
+The container acts as a bridge that preserves the layout position for the fragment's output.
 
 ---
 
