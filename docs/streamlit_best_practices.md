@@ -10,6 +10,7 @@ A guide to building responsive Streamlit applications, focusing on common perfor
    - [Wrong Rerun Scope](#4-wrong-rerun-scope)
    - [Expensive Operations on Every Rerun](#5-expensive-operations-on-every-rerun)
    - [Fragments Losing Column Context](#6-fragments-losing-column-context)
+   - [Mixing default with Session State Assignment](#7-mixing-default-with-session-state-assignment)
 2. [Best Practices](#best-practices)
    - [Use Fragments for Independent Sections](#1-use-fragments-for-independent-sections)
    - [Use on_change Callbacks](#2-use-on_change-callbacks)
@@ -234,6 +235,56 @@ def render_item_card(idx, item):
 ```
 
 The container acts as a bridge that preserves the layout position for the fragment's output.
+
+---
+
+### 7. Mixing default with Session State Assignment
+
+**Problem**: Using a recalculated `default` parameter AND assigning the widget's return value to session state causes intermittent state conflicts. Changes may require multiple attempts to take effect.
+
+```python
+# BAD: Recalculated default + session state assignment
+current_selection = st.session_state.selected_items
+valid_selection = [x for x in current_selection if x in available_items]
+
+selected = st.multiselect(
+    "Select items",
+    options=available_items,
+    default=valid_selection[:3],  # Recalculated every rerun!
+)
+st.session_state.selected_items = selected  # Assignment creates conflict
+```
+
+**What happens**:
+1. User changes selection → widget returns new value → stored in session state
+2. On rerun, `valid_selection` is recalculated from session state
+3. `default=valid_selection[:3]` is passed to the widget again
+4. Widget's internal state conflicts with the recalculated `default`
+5. Sometimes the widget "resets" to the default, ignoring the user's change
+
+**Solution**: Use `key` parameter instead - it binds the widget directly to session state, eliminating the need for both `default` and manual assignment:
+
+```python
+# GOOD: Use key, validate/initialize state before widget
+current_selection = st.session_state.selected_items
+valid_selection = [x for x in current_selection if x in available_items]
+
+# Update state BEFORE widget if validation changed it
+if valid_selection != current_selection:
+    st.session_state.selected_items = valid_selection
+if not st.session_state.selected_items and available_items:
+    st.session_state.selected_items = available_items[:3]
+
+# Widget with key - Streamlit manages state automatically
+st.multiselect(
+    "Select items",
+    options=available_items,
+    key="selected_items",  # Binds directly to session state
+)
+# No default needed, no assignment needed - key handles both
+```
+
+**Key insight**: With `key`, Streamlit syncs the widget value with `st.session_state[key]` automatically. Initialize the session state value before the widget instead of using `default`, and skip the assignment entirely.
 
 ---
 
@@ -573,6 +624,7 @@ def item_editor_fragment(item_id):
 | Multiple independent UI sections | Wrap each in `@st.fragment` |
 | Compare-and-save pattern | Replace with `on_change` |
 | Double reruns | Remove explicit `st.rerun()`, use callbacks |
+| Widget ignores changes intermittently | Use `key` instead of `default` + assignment |
 
 ---
 

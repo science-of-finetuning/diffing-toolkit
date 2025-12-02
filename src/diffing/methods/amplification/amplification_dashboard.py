@@ -977,7 +977,7 @@ class AmplificationDashboard:
 
                         st.text(msg["content"])
 
-                        col1, col2, col3 = st.columns([1, 1, 10])
+                        col1, col2, _ = st.columns([1, 1, 10])
                         with col1:
                             if st.button("✏️", key=f"edit_btn_{idx}"):
                                 st.session_state.multi_gen_msg_editing_idx = idx
@@ -2773,8 +2773,66 @@ class AmplificationDashboard:
 
     # ============ Multi-Prompt Tab ============
 
+    @st.fragment
     def _render_multi_prompt_tab(self) -> None:
         """Render the multi-prompt generation tab."""
+        # Config selector and generate button above tabs
+        active_prompts = [
+            mp for mp in st.session_state.managed_prompts.values() if mp.active
+        ]
+        active_configs = [
+            mc for mc in st.session_state.managed_configs.values() if mc.active
+        ]
+
+        # Config display selector - always visible, shows active configs
+        all_config_ids = [mc.config_id for mc in active_configs]
+        config_names = {mc.config_id: mc.config.name for mc in active_configs}
+
+        # Initialize display selection if empty or invalid (only modify BEFORE widget renders)
+        current_selection = st.session_state.multi_prompt_display_configs
+        valid_selection = [cid for cid in current_selection if cid in all_config_ids]
+        if valid_selection != current_selection:
+            # Selection became invalid (configs removed), update state before widget
+            st.session_state.multi_prompt_display_configs = valid_selection
+        if not st.session_state.multi_prompt_display_configs and all_config_ids:
+            st.session_state.multi_prompt_display_configs = all_config_ids[:3]
+
+        col1, col2, col3 = st.columns([3, 2, 1])
+        with col1:
+            if active_configs:
+                st.write("**Select configs to display (1-3):**")
+                st.multiselect(
+                    "Display configs",
+                    options=all_config_ids,
+                    default=valid_selection[:3],
+                    format_func=lambda x: config_names.get(x, x),
+                    max_selections=3,
+                    label_visibility="collapsed",
+                    key="multi_prompt_display_configs",
+                )
+            else:
+                st.warning(
+                    "No active configs. Enable configs in the Amplification tab."
+                )
+        with col2:
+            st.write(
+                f"**{len(active_prompts)} prompt(s), {len(active_configs)} config(s)**"
+            )
+        with col3:
+            if st.button(
+                f"🚀 Run ({len(active_prompts)})",
+                use_container_width=True,
+                disabled=len(active_prompts) == 0 or len(active_configs) == 0,
+            ):
+                st.session_state.multi_prompt_trigger_generation = True
+                st.rerun(scope="fragment")
+
+        # If generation triggered, run it here (above tabs) and don't show tabs
+        if st.session_state.get("multi_prompt_trigger_generation", False):
+            st.session_state.multi_prompt_trigger_generation = False
+            self._run_multi_prompt_generation()
+            return
+
         prompts_tab, results_tab = st.tabs(["📝 Prompts", "📊 Results"])
 
         with prompts_tab:
@@ -2785,22 +2843,6 @@ class AmplificationDashboard:
     @st.fragment
     def _render_prompts_subtab(self) -> None:
         """Render the prompts management subtab. Fragment for tab-level isolation."""
-        col1, col2 = st.columns([3, 1])
-
-        with col1:
-            active_prompts = [
-                mp for mp in st.session_state.managed_prompts.values() if mp.active
-            ]
-            st.markdown(f"**{len(active_prompts)} active prompt(s)**")
-
-        with col2:
-            if st.button(
-                f"🚀 Run Active ({len(active_prompts)})",
-                use_container_width=True,
-                disabled=len(active_prompts) == 0,
-            ):
-                self._run_multi_prompt_generation()
-
         self._prompt_folder_manager.render_folder_loader()
 
         st.markdown("---")
@@ -3012,6 +3054,14 @@ class AmplificationDashboard:
             )
             return
 
+        # Reorder configs: selected display configs first
+        selected_ids = set(st.session_state.multi_prompt_display_configs)
+        selected_configs = [mc for mc in active_configs if mc.config_id in selected_ids]
+        other_configs = [
+            mc for mc in active_configs if mc.config_id not in selected_ids
+        ]
+        ordered_configs = selected_configs + other_configs
+
         # Prepare tokenized prompts
         tokenized_prompts = []
         for mp in active_prompts:
@@ -3021,37 +3071,70 @@ class AmplificationDashboard:
                 tokenized = self._tokenize_chat_prompt(mp)
             tokenized_prompts.append(tokenized)
 
-        # Run batched generation
         sampling_params = self._get_sampling_params()
+
+        # Create placeholders for progressive display (only for selected configs)
+        st.markdown("## Generating...")
+        num_display_configs = len(selected_configs)
+        placeholders = {}  # {prompt_idx: {config_id: placeholder}}
+
+        for prompt_idx, mp in enumerate(active_prompts):
+            display_name = mp.get_display_name() or f"Prompt {prompt_idx + 1}"
+            with st.expander(f"📝 {display_name}", expanded=True):
+                # Prompt preview
+                with st.expander("📋 Prompt", expanded=False):
+                    st.code(
+                        self.tokenizer.decode(
+                            tokenized_prompts[prompt_idx], skip_special_tokens=False
+                        ),
+                        language="text",
+                        wrap_lines=True,
+                    )
+
+                if num_display_configs > 0:
+                    cols = st.columns(num_display_configs)
+                    placeholders[prompt_idx] = {}
+                    for col_idx, mc in enumerate(selected_configs):
+                        with cols[col_idx]:
+                            st.write(f"**{mc.config.name}**")
+                            placeholder = st.empty()
+                            with placeholder.container():
+                                st.info("Waiting for generation...")
+                            placeholders[prompt_idx][mc.config_id] = placeholder
+
+        # Stream results as they arrive
         results = {}
-
-        with st.spinner(
-            f"Generating for {len(active_prompts)} prompts × {len(active_configs)} configs..."
+        for gen_result in self.method.multi_gen_request(
+            prompt=tokenized_prompts,
+            amplification_configs=ordered_configs,
+            sampling_params=sampling_params,
+            compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
         ):
-            for gen_result in self.method.multi_gen_request(
-                prompt=tokenized_prompts,
-                amplification_configs=active_configs,
-                sampling_params=sampling_params,
-                compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
-            ):
-                config = gen_result["config"]
-                # results is 2D: [prompt_idx][sample_idx]
-                results[config.config_id] = {
-                    "config": config,
-                    "results": gen_result["results"],  # 2D list
-                }
+            config = gen_result["config"]
+            results[config.config_id] = {
+                "config": config,
+                "results": gen_result["results"],  # 2D: [prompt_idx][sample_idx]
+            }
 
-        # Store results
+            # Update placeholders for this config (if it's a display config)
+            if config.config_id in placeholders.get(0, {}):
+                for prompt_idx in range(len(active_prompts)):
+                    placeholder = placeholders[prompt_idx][config.config_id]
+                    samples = gen_result["results"][prompt_idx]
+                    with placeholder.container():
+                        render_sample_cycler(
+                            samples=samples,
+                            component_id=f"mp_prog_{prompt_idx}_{config.config_id}",
+                            height=250,
+                        )
+
+        # Store results with tokenized prompts for display
         st.session_state.multi_prompt_results = {
             "prompts": active_prompts,
+            "tokenized_prompts": tokenized_prompts,
             "config_results": results,
         }
 
-        # Default display to first 1-2 configs
-        config_ids = list(results.keys())
-        st.session_state.multi_prompt_display_configs = config_ids[:2]
-
-        st.success("Generation complete! Switch to Results tab to view.")
         st.rerun(scope="fragment")
 
     def _tokenize_simple_prompt(self, mp: ManagedPrompt) -> list[int]:
@@ -3099,39 +3182,33 @@ class AmplificationDashboard:
     def _render_multi_prompt_results_subtab(self) -> None:
         """Render the results subtab."""
         if st.session_state.multi_prompt_results is None:
-            st.info("No results yet. Go to 'Prompts' tab and click 'Run Active'.")
+            st.info("No results yet. Select configs above and click 'Run'.")
             return
 
         results_data = st.session_state.multi_prompt_results
         prompts = results_data["prompts"]
+        tokenized_prompts = results_data.get("tokenized_prompts", [])
         config_results = results_data["config_results"]
 
         if not config_results:
             st.warning("No results available.")
             return
 
-        # Config selector
-        all_config_ids = list(config_results.keys())
-        config_names = {
-            cid: config_results[cid]["config"].config.name for cid in all_config_ids
-        }
-
-        st.write("**Select configs to display (1-3):**")
-        selected = st.multiselect(
-            "Display configs",
-            options=all_config_ids,
-            default=st.session_state.multi_prompt_display_configs[:3],
-            format_func=lambda x: config_names.get(x, x),
-            max_selections=3,
-            label_visibility="collapsed",
-        )
-        st.session_state.multi_prompt_display_configs = selected
-
+        # Filter selected configs to only those with results
+        all_result_config_ids = set(config_results.keys())
+        selected = [
+            cid
+            for cid in st.session_state.multi_prompt_display_configs
+            if cid in all_result_config_ids
+        ]
         if not selected:
             st.info("Select at least one config to display results.")
             return
 
-        st.divider()
+        config_names = {
+            cid: config_results[cid]["config"].config.name
+            for cid in all_result_config_ids
+        }
 
         # Display results
         num_configs = len(selected)
@@ -3140,6 +3217,19 @@ class AmplificationDashboard:
             display_name = mp.get_display_name() or f"Prompt {prompt_idx + 1}"
 
             with st.expander(f"📝 {display_name}", expanded=True):
+                # Show detokenized prompt (collapsed by default)
+                with st.expander("📋 Prompt", expanded=False):
+                    if prompt_idx < len(tokenized_prompts):
+                        st.code(
+                            self.tokenizer.decode(
+                                tokenized_prompts[prompt_idx], skip_special_tokens=False
+                            ),
+                            language="text",
+                            wrap_lines=True,
+                        )
+                    else:
+                        st.warning("Tokenized prompt not available")
+
                 if num_configs == 1:
                     # Single config: 2-column layout like multi-gen
                     config_id = selected[0]
