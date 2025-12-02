@@ -43,13 +43,10 @@ from src.diffing.methods.amplification.dashboard_state import (
     save_configs_to_cache,
     save_configs_to_folder,
     load_configs_from_folder,
-    list_all_folders,
-    create_folder,
     unload_folder_configs,
     save_prompts_to_cache,
     save_prompts_to_folder,
     load_prompts_from_folder,
-    list_all_prompt_folders,
     unload_folder_prompts,
     save_multigen_state,
     load_multigen_state,
@@ -59,6 +56,10 @@ from src.diffing.methods.amplification.dashboard_state import (
     load_conversations_from_cache,
     delete_conversation_file,
     GenerationLog,
+)
+from src.diffing.methods.amplification.folder_manager_ui import (
+    FolderManagerConfig,
+    FolderManagerUI,
 )
 from src.diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
@@ -136,6 +137,7 @@ class AmplificationDashboard:
         )
         patch_vllm()
         self._init_session_state()
+        self._init_folder_managers()
 
     @staticmethod
     @st.cache_data
@@ -310,6 +312,109 @@ class AmplificationDashboard:
         self._load_configs_from_cache()
         self._load_prompts_from_cache()
         self._load_conversations_from_cache()
+
+    def _init_folder_managers(self) -> None:
+        """Initialize folder manager UI components for configs and prompts."""
+        self._config_folder_manager = FolderManagerUI(
+            FolderManagerConfig(
+                base_dir=CONFIGS_DIR,
+                loaded_folders_key="loaded_folders",
+                items_key="managed_configs",
+                item_type_label="config",
+                widget_key_prefix="cfg_folder",
+                load_from_folder=lambda base, folder: load_configs_from_folder(
+                    base,
+                    folder,
+                    {
+                        mc.config.name
+                        for mc in st.session_state.managed_configs.values()
+                    },
+                ),
+                save_to_folder=save_configs_to_folder,
+                unload_folder=unload_folder_configs,
+                create_new_item=self._create_new_config,
+                get_item_folder=lambda mc: mc.folder,
+                save_loaded_folders=self._save_loaded_folders,
+                save_items=self._save_configs,
+                rerun_scope="fragment",
+            )
+        )
+
+        self._prompt_folder_manager = FolderManagerUI(
+            FolderManagerConfig(
+                base_dir=PROMPTS_DIR,
+                loaded_folders_key="loaded_prompt_folders",
+                items_key="managed_prompts",
+                item_type_label="prompt",
+                widget_key_prefix="prompt_folder",
+                load_from_folder=lambda base, folder: load_prompts_from_folder(
+                    base, folder
+                ),
+                save_to_folder=save_prompts_to_folder,
+                unload_folder=unload_folder_prompts,
+                create_new_item=self._create_new_prompt,
+                get_item_folder=lambda mp: mp.folder,
+                save_loaded_folders=self._save_loaded_folders,
+                save_items=self._save_prompts,
+                rerun_scope="fragment",
+            )
+        )
+
+    def _create_new_config(self, folder: str) -> ManagedConfig:
+        """Create a new amplification config in the given folder."""
+        base_name = f"Config {len(st.session_state.managed_configs) + 1}"
+        unique_name = self._get_unique_config_name(base_name)
+        new_config = AmplificationConfig(
+            name=unique_name,
+            description="",
+            amplified_adapters=[],
+        )
+        return ManagedConfig.from_config(
+            new_config, active=True, expanded=True, folder=folder
+        )
+
+    def _create_new_prompt(self, folder: str) -> ManagedPrompt:
+        """Create a new prompt in the given folder."""
+        return ManagedPrompt(active=True, expanded=True, folder=folder)
+
+    def _render_config_actions(self, config_id: str, mc: ManagedConfig) -> None:
+        """Render duplicate/delete buttons for a config."""
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📋", key=f"dup_{config_id}", help="Duplicate"):
+                config = mc.config
+                new_config = deepcopy(config)
+                new_config.config_id = str(uuid.uuid4())
+                new_config.name = self._get_unique_config_name(f"{config.name} copy")
+                new_managed = ManagedConfig.from_config(
+                    new_config,
+                    active=mc.active,
+                    expanded=True,
+                    folder=mc.folder,
+                )
+                st.session_state.managed_configs[new_managed.config_id] = new_managed
+                self._save_configs()
+                st.rerun(scope="fragment")
+        with col2:
+            if st.button("🗑️", key=f"del_{config_id}", help="Delete"):
+                del st.session_state.managed_configs[config_id]
+                self._save_configs()
+                st.rerun(scope="fragment")
+
+    def _render_prompt_actions(self, prompt_id: str, mp: ManagedPrompt) -> None:
+        """Render duplicate/delete buttons for a prompt."""
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📋", key=f"dup_{prompt_id}", help="Duplicate"):
+                new_prompt = mp.duplicate()
+                st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
+                self._save_prompts()
+                st.rerun(scope="fragment")
+        with col2:
+            if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
+                del st.session_state.managed_prompts[prompt_id]
+                self._save_prompts()
+                st.rerun(scope="fragment")
 
     def _get_sampling_params(self) -> SamplingParams:
         """Get sampling parameters from sidebar/session state."""
@@ -954,172 +1059,14 @@ class AmplificationDashboard:
             "Create and manage amplification configurations for adapter weight modification."
         )
 
-        self._render_folder_loader()
+        self._config_folder_manager.render_folder_loader()
 
         st.markdown("---")
 
-        if len(st.session_state.loaded_folders) == 0:
-            st.info("No folders loaded. Select a folder above to load configurations.")
-        else:
-            for folder in sorted(st.session_state.loaded_folders):
-                self._render_folder_section(folder)
-
-    def _render_folder_loader(self) -> None:
-        """Render the folder loader UI (dropdown + Load/Create buttons)."""
-        all_folders = list_all_folders(CONFIGS_DIR)
-        loaded = st.session_state.loaded_folders
-        available_to_load = [f for f in all_folders if f not in loaded]
-
-        col1, col2, col3 = st.columns([3, 1, 1])
-
-        with col1:
-            folder_display = {f: "Root" if f == "" else f for f in available_to_load}
-            if available_to_load:
-                selected_folder = st.selectbox(
-                    "Available Folders",
-                    options=available_to_load,
-                    format_func=lambda x: folder_display.get(x, x),
-                    key="folder_to_load",
-                )
-            else:
-                st.info("All folders are loaded")
-                selected_folder = None
-
-        with col2:
-            if st.button(
-                "📂 Load",
-                disabled=selected_folder is None,
-                use_container_width=True,
-            ):
-                st.session_state.loaded_folders.add(selected_folder)
-                existing_names = {
-                    mc.config.name for mc in st.session_state.managed_configs.values()
-                }
-                loaded_configs = load_configs_from_folder(
-                    CONFIGS_DIR, selected_folder, existing_names
-                )
-                st.session_state.managed_configs.update(loaded_configs)
-                self._save_loaded_folders()
-                self._save_and_rerun()
-
-        with col3:
-            if st.button("➕ Create", use_container_width=True):
-                st.session_state.show_create_folder_dialog = True
-
-        if st.session_state.get("show_create_folder_dialog", False):
-            self._render_create_folder_dialog()
-
-    def _render_create_folder_dialog(self) -> None:
-        """Render the create folder dialog."""
-        with st.container(border=True):
-            st.markdown("**Create New Folder**")
-            new_folder_path = st.text_input(
-                "Folder path",
-                placeholder="e.g., experiments/v2",
-                key="new_folder_path",
-            )
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Create", type="primary", use_container_width=True):
-                    if new_folder_path:
-                        create_folder(CONFIGS_DIR, new_folder_path)
-                        st.session_state.loaded_folders.add(new_folder_path)
-                        st.session_state.show_create_folder_dialog = False
-                        self._save_loaded_folders()
-                        self._save_and_rerun()
-                    else:
-                        st.error("Please enter a folder path")
-            with col2:
-                if st.button("Cancel", use_container_width=True):
-                    st.session_state.show_create_folder_dialog = False
-                    st.rerun()
-
-    @st.fragment
-    def _render_folder_section(self, folder: str) -> None:
-        """Render a single folder section with its configs. Fragment for isolated updates."""
-        folder_display = "Root" if folder == "" else folder
-        folder_configs = {
-            cid: mc
-            for cid, mc in st.session_state.managed_configs.items()
-            if mc.folder == folder
-        }
-        config_count = len(folder_configs)
-
-        with st.expander(
-            f"📁 {folder_display} ({config_count} configs)", expanded=True
-        ):
-            col1, col2 = st.columns([4, 1])
-
-            with col1:
-                if st.button(
-                    "➕ New Amplification",
-                    key=f"new_config_{folder}",
-                    use_container_width=True,
-                ):
-                    base_name = f"Config {len(st.session_state.managed_configs) + 1}"
-                    unique_name = self._get_unique_config_name(base_name)
-                    new_config = AmplificationConfig(
-                        name=unique_name,
-                        description="",
-                        amplified_adapters=[],
-                    )
-                    new_managed = ManagedConfig.from_config(
-                        new_config, active=True, expanded=True, folder=folder
-                    )
-                    st.session_state.managed_configs[new_managed.config_id] = (
-                        new_managed
-                    )
-                    self._save_and_rerun(scope="fragment")
-
-            with col2:
-                if st.button(
-                    "📤 Unload",
-                    key=f"unload_folder_{folder}",
-                    use_container_width=True,
-                    help="Unload this folder (configs are saved, not deleted)",
-                ):
-                    save_configs_to_folder(
-                        st.session_state.managed_configs, CONFIGS_DIR, folder
-                    )
-                    st.session_state.managed_configs = unload_folder_configs(
-                        st.session_state.managed_configs, folder
-                    )
-                    st.session_state.loaded_folders.discard(folder)
-                    self._save_loaded_folders()
-                    self._save_and_rerun()
-
-            if config_count == 0:
-                st.info(
-                    "No configs in this folder. Click 'New Amplification' to create one."
-                )
-            else:
-                # Dup/Delete buttons at list level so Active toggle updates expander title
-                for config_id, mc in list(folder_configs.items()):
-                    col1, col2, col3 = st.columns([30, 1, 1], gap=None)
-                    with col1:
-                        self._render_amplification_config(config_id, mc)
-                    with col2:
-                        if st.button("📋", key=f"dup_{config_id}", help="Duplicate"):
-                            config = mc.config
-                            new_config = deepcopy(config)
-                            new_config.config_id = str(uuid.uuid4())
-                            new_config.name = self._get_unique_config_name(
-                                f"{config.name} copy"
-                            )
-                            new_managed = ManagedConfig.from_config(
-                                new_config,
-                                active=mc.active,
-                                expanded=True,
-                                folder=mc.folder,
-                            )
-                            st.session_state.managed_configs[new_managed.config_id] = (
-                                new_managed
-                            )
-                            self._save_and_rerun(scope="fragment")
-                    with col3:
-                        if st.button("🗑️", key=f"del_{config_id}", help="Delete"):
-                            del st.session_state.managed_configs[config_id]
-                            self._save_and_rerun(scope="fragment")
+        self._config_folder_manager.render_all_folders(
+            render_item=self._render_amplification_config,
+            render_item_actions=self._render_config_actions,
+        )
 
     def _render_generation_controls(self, suffix: str, label: str) -> bool:
         """
@@ -2858,171 +2805,14 @@ class AmplificationDashboard:
             ):
                 self._run_multi_prompt_generation()
 
-        self._render_prompt_folder_loader()
+        self._prompt_folder_manager.render_folder_loader()
 
         st.markdown("---")
 
-        if len(st.session_state.loaded_prompt_folders) == 0:
-            st.info("No folders loaded. Select a folder above to load prompts.")
-        else:
-            for folder in sorted(st.session_state.loaded_prompt_folders):
-                self._render_prompt_folder_section(folder)
-
-    def _render_prompt_folder_loader(self) -> None:
-        """Render the prompt folder loader UI (dropdown + Load/Create buttons)."""
-        all_folders = list_all_prompt_folders(PROMPTS_DIR)
-        loaded = st.session_state.loaded_prompt_folders
-        available_to_load = [f for f in all_folders if f not in loaded]
-
-        col1, col2, col3 = st.columns([3, 1, 1])
-
-        with col1:
-            folder_display = {f: "Root" if f == "" else f for f in available_to_load}
-            if available_to_load:
-                selected_folder = st.selectbox(
-                    "Available Folders",
-                    options=available_to_load,
-                    format_func=lambda x: folder_display.get(x, x),
-                    key="prompt_folder_to_load",
-                )
-            else:
-                st.info("All folders are loaded")
-                selected_folder = None
-
-        with col2:
-            if st.button(
-                "📂 Load",
-                disabled=selected_folder is None,
-                use_container_width=True,
-                key="load_prompt_folder_btn",
-            ):
-                st.session_state.loaded_prompt_folders.add(selected_folder)
-                loaded_prompts = load_prompts_from_folder(PROMPTS_DIR, selected_folder)
-                st.session_state.managed_prompts.update(loaded_prompts)
-                self._save_loaded_folders()
-                st.rerun(scope="fragment")
-
-        with col3:
-            if st.button(
-                "➕ Create", use_container_width=True, key="create_prompt_folder_btn"
-            ):
-                st.session_state.show_create_prompt_folder_dialog = True
-
-        if st.session_state.get("show_create_prompt_folder_dialog", False):
-            self._render_create_prompt_folder_dialog()
-
-    def _render_create_prompt_folder_dialog(self) -> None:
-        """Render the create prompt folder dialog."""
-        with st.container(border=True):
-            st.markdown("**Create New Prompt Folder**")
-            new_folder_path = st.text_input(
-                "Folder path",
-                placeholder="e.g., experiments/v2",
-                key="new_prompt_folder_path",
-            )
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(
-                    "Create",
-                    type="primary",
-                    use_container_width=True,
-                    key="create_prompt_folder_confirm",
-                ):
-                    if new_folder_path:
-                        create_folder(PROMPTS_DIR, new_folder_path)
-                        st.session_state.loaded_prompt_folders.add(new_folder_path)
-                        st.session_state.show_create_prompt_folder_dialog = False
-                        self._save_loaded_folders()
-                        st.rerun(scope="fragment")
-                    else:
-                        st.error("Please enter a folder path")
-            with col2:
-                if st.button(
-                    "Cancel",
-                    use_container_width=True,
-                    key="cancel_prompt_folder_dialog",
-                ):
-                    st.session_state.show_create_prompt_folder_dialog = False
-                    st.rerun(scope="fragment")
-
-    def _render_prompt_folder_section(self, folder: str) -> None:
-        """Render a single prompt folder section."""
-        folder_display = "Root" if folder == "" else folder
-        folder_prompts = {
-            pid: mp
-            for pid, mp in st.session_state.managed_prompts.items()
-            if mp.folder == folder
-        }
-        prompt_count = len(folder_prompts)
-
-        with st.expander(
-            f"📁 {folder_display} ({prompt_count} prompts)", expanded=True
-        ):
-            col1, col2 = st.columns([4, 1])
-
-            with col1:
-                if st.button(
-                    "➕ New Prompt",
-                    key=f"new_prompt_{folder}",
-                    use_container_width=True,
-                ):
-                    new_prompt = ManagedPrompt(
-                        active=True, expanded=True, folder=folder
-                    )
-                    st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
-                    self._save_prompts()
-                    st.rerun(scope="fragment")
-
-            with col2:
-                if st.button(
-                    "📤 Unload",
-                    key=f"unload_prompt_folder_{folder}",
-                    use_container_width=True,
-                    help="Unload this folder (prompts are saved, not deleted)",
-                ):
-                    save_prompts_to_folder(
-                        st.session_state.managed_prompts, PROMPTS_DIR, folder
-                    )
-                    st.session_state.loaded_prompt_folders.discard(folder)
-                    st.session_state.managed_prompts = unload_folder_prompts(
-                        st.session_state.managed_prompts, folder
-                    )
-                    self._save_loaded_folders()
-                    st.rerun(scope="fragment")
-
-            if not folder_prompts:
-                st.info("No prompts in this folder.")
-                return
-
-            for prompt_id, mp in list(folder_prompts.items()):
-                col1, col2, col3 = st.columns([30, 1, 1])
-                with col1:
-                    self._render_prompt_editor(prompt_id, mp)
-                with col2:
-                    if st.button("📋", key=f"dup_{prompt_id}", help="Duplicate"):
-                        new_prompt = ManagedPrompt(
-                            name=f"{mp.name} copy" if mp.name else "",
-                            editor_mode=mp.editor_mode,
-                            prompt_text=mp.prompt_text,
-                            template_mode=mp.template_mode,
-                            system_prompt=mp.system_prompt,
-                            assistant_prefill=mp.assistant_prefill,
-                            loom_filename=mp.loom_filename,
-                            messages=deepcopy(mp.messages),
-                            folder=mp.folder,
-                            active=mp.active,
-                            expanded=True,
-                        )
-                        st.session_state.managed_prompts[new_prompt.prompt_id] = (
-                            new_prompt
-                        )
-                        self._save_prompts()
-                        st.rerun(scope="fragment")
-                with col3:
-                    if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
-                        del st.session_state.managed_prompts[prompt_id]
-                        self._save_prompts()
-                        st.rerun(scope="fragment")
+        self._prompt_folder_manager.render_all_folders(
+            render_item=self._render_prompt_editor,
+            render_item_actions=self._render_prompt_actions,
+        )
 
     @st.fragment
     def _render_prompt_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:

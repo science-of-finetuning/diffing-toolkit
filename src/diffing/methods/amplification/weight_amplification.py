@@ -242,9 +242,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
             if is_batched:
                 # 2D results: [prompt_idx][sample_idx]
-                results = [
-                    [output.text for output in req.outputs] for req in outputs
-                ]
+                results = [[output.text for output in req.outputs] for req in outputs]
                 output_tokens = [
                     [list(output.token_ids) for output in req.outputs]
                     for req in outputs

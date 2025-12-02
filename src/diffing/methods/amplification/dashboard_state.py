@@ -5,11 +5,12 @@ Separates UI concerns (active state, ordering) from domain models (configs).
 Also provides persistence functions for saving/loading dashboard state.
 """
 
+from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime
 import hashlib
 import os
 import re
-from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -198,6 +199,21 @@ class ManagedPrompt(DashboardItem):
             }
         )
         return result
+
+    def duplicate(self) -> "ManagedPrompt":
+        return ManagedPrompt(
+            name=f"{self.name} copy" if self.name else "",
+            editor_mode=self.editor_mode,
+            prompt_text=self.prompt_text,
+            template_mode=self.template_mode,
+            system_prompt=self.system_prompt,
+            assistant_prefill=self.assistant_prefill,
+            loom_filename=self.loom_filename,
+            messages=deepcopy(self.messages),
+            folder=self.folder,
+            active=self.active,
+            expanded=True,
+        )
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ManagedPrompt":
