@@ -479,7 +479,7 @@ class AmplificationDashboard:
             pending_key = f"chat_pending_samples_{conv_id}"
             if pending_key in st.session_state:
                 del st.session_state[pending_key]
-            st.rerun()
+            st.rerun(scope="fragment")
 
         # For continue mode, get the original content to show context
         original_content = ""
@@ -526,7 +526,7 @@ class AmplificationDashboard:
                             del st.session_state[pending_key]
 
                         self._save_conversation(conv_id, conv)
-                        self._save_and_rerun()
+                        self._save_and_rerun(scope="fragment")
 
     def display(self) -> None:
         """Main entry point for dashboard."""
@@ -786,7 +786,7 @@ class AmplificationDashboard:
                     {k: v for k, v in msg.items() if k in ["role", "content"]}
                     for msg in conversation["history"]
                 ]
-                st.rerun()
+                st.rerun(scope="fragment")
 
     @st.fragment
     def _render_message_list_and_add(self) -> None:
@@ -887,11 +887,18 @@ class AmplificationDashboard:
                 else:
                     st.warning("Message content cannot be empty")
 
-    def _render_generation_settings(self) -> None:
-        """Render generation settings for message builder."""
-        messages = st.session_state.get("multi_gen_messages", [])
+    @st.fragment
+    def _render_message_builder_tab(self) -> None:
+        """Render structured message builder interface. Fragment for isolated updates."""
+        self._render_import_conversations_section()
 
-        template_override = st.selectbox(
+        st.markdown("---")
+
+        self._render_message_list_and_add()
+
+        st.markdown("---")
+
+        st.selectbox(
             "Template override",
             [
                 "No template override",
@@ -907,36 +914,6 @@ class AmplificationDashboard:
                 "Force send as is: Send raw formatted prompt without special tokens"
             ),
         )
-
-        if template_override == "No template override":
-            if not messages:
-                mode = "🟢 Will add generation prompt (default)"
-            else:
-                last_role = messages[-1]["role"]
-                if last_role == "assistant":
-                    mode = "🟠 Will continue final message (last is assistant)"
-                else:
-                    mode = "🟢 Will add generation prompt (last is user/system)"
-        elif template_override == "Force generation prompt":
-            mode = "🟢 Force generation prompt"
-        elif template_override == "Force continue final message":
-            mode = "🟠 Force continue final message"
-        else:
-            mode = "⚪ Force send as is (no special tokens)"
-
-        st.markdown(f"**{mode}**")
-
-    def _render_message_builder_tab(self) -> None:
-        """Render structured message builder interface."""
-        self._render_import_conversations_section()
-
-        st.markdown("---")
-
-        self._render_message_list_and_add()
-
-        st.markdown("---")
-
-        self._render_generation_settings()
 
     def _render_amplifications_tab(self) -> None:
         """Render Tab 1: Amplification configuration UI."""
@@ -1023,8 +1000,9 @@ class AmplificationDashboard:
                     st.session_state.show_create_folder_dialog = False
                     st.rerun()
 
+    @st.fragment
     def _render_folder_section(self, folder: str) -> None:
-        """Render a single folder section with its configs."""
+        """Render a single folder section with its configs. Fragment for isolated updates."""
         folder_display = "Root" if folder == "" else folder
         folder_configs = {
             cid: mc
@@ -1057,7 +1035,7 @@ class AmplificationDashboard:
                     st.session_state.managed_configs[new_managed.config_id] = (
                         new_managed
                     )
-                    self._save_and_rerun()
+                    self._save_and_rerun(scope="fragment")
 
             with col2:
                 if st.button(
@@ -1080,8 +1058,33 @@ class AmplificationDashboard:
                     "No configs in this folder. Click 'New Amplification' to create one."
                 )
             else:
-                for config_id, mc in folder_configs.items():
-                    self._render_amplification_config(config_id, mc)
+                # Dup/Delete buttons at list level so Active toggle updates expander title
+                for config_id, mc in list(folder_configs.items()):
+                    col1, col2, col3 = st.columns([30, 1, 1], gap=None)
+                    with col1:
+                        self._render_amplification_config(config_id, mc)
+                    with col2:
+                        if st.button("📋", key=f"dup_{config_id}", help="Duplicate"):
+                            config = mc.config
+                            new_config = deepcopy(config)
+                            new_config.config_id = str(uuid.uuid4())
+                            new_config.name = self._get_unique_config_name(
+                                f"{config.name} copy"
+                            )
+                            new_managed = ManagedConfig.from_config(
+                                new_config,
+                                active=mc.active,
+                                expanded=True,
+                                folder=mc.folder,
+                            )
+                            st.session_state.managed_configs[new_managed.config_id] = (
+                                new_managed
+                            )
+                            self._save_and_rerun(scope="fragment")
+                    with col3:
+                        if st.button("🗑️", key=f"del_{config_id}", help="Delete"):
+                            del st.session_state.managed_configs[config_id]
+                            self._save_and_rerun(scope="fragment")
 
     def _render_generation_controls(self, suffix: str, label: str) -> bool:
         """
@@ -1112,11 +1115,12 @@ class AmplificationDashboard:
                 disabled=st.session_state.multi_gen_results is None,
             ):
                 st.session_state.multi_gen_results = None
-                self._save_and_rerun()
+                self._save_and_rerun(scope="fragment")
         return clicked
 
+    @st.fragment
     def _render_multi_generation_tab(self) -> None:
-        """Render Tab 2: Multi-generation interface."""
+        """Render Tab 2: Multi-generation interface. Fragment for tab-level isolation."""
         st.markdown("## Multi-Generation")
         st.markdown(
             "Generate text with multiple amplification configurations side-by-side."
@@ -1321,7 +1325,7 @@ class AmplificationDashboard:
                 logs_dir=LOGS_DIR,
             )
 
-            st.rerun()  # Rerun to enable interactive buttons via fragment
+            st.rerun(scope="fragment")  # Rerun tab to enable interactive buttons
 
         if st.session_state.multi_gen_results is not None:
             st.markdown("---")
@@ -1448,7 +1452,7 @@ class AmplificationDashboard:
                         logs_dir=LOGS_DIR,
                     )
 
-                    st.rerun(scope="app")
+                    st.rerun(scope="fragment")
 
             with col2:
                 if st.button(
@@ -1489,7 +1493,7 @@ class AmplificationDashboard:
                         logs_dir=LOGS_DIR,
                     )
 
-                    st.rerun(scope="app")
+                    st.rerun(scope="fragment")
 
             with col3:
                 template_mode = results_data.get("template_mode")
@@ -2335,59 +2339,24 @@ class AmplificationDashboard:
     ) -> None:
         """Render the actual config fields."""
         if not sidebar_mode:
-            # Name input and action buttons row
-            col1, col2 = st.columns([3, 1])
+            # Name input (dup/delete buttons moved to folder section list level)
+            name_key = f"{key_prefix}config_name_{config_id}"
 
-            with col1:
-                name_key = f"{key_prefix}config_name_{config_id}"
+            def on_name_change(cfg=config, cid=config_id, key=name_key):
+                new_name = st.session_state[key]
+                if new_name != cfg.name:
+                    unique_name = self._get_unique_config_name(
+                        new_name, exclude_config_id=cid
+                    )
+                    st.session_state.managed_configs[cid].config.name = unique_name
+                    self._save_configs()
 
-                def on_name_change(cfg=config, cid=config_id, key=name_key):
-                    new_name = st.session_state[key]
-                    if new_name != cfg.name:
-                        unique_name = self._get_unique_config_name(
-                            new_name, exclude_config_id=cid
-                        )
-                        st.session_state.managed_configs[cid].config.name = unique_name
-                        self._save_configs()
-
-                st.text_input(
-                    "Configuration Name",
-                    value=config.name,
-                    key=name_key,
-                    on_change=on_name_change,
-                )
-
-            with col2:
-                btn_col1, btn_col2 = st.columns(2)
-                with btn_col1:
-                    if st.button(
-                        "📋 Duplicate",
-                        key=f"{key_prefix}duplicate_config_{config_id}",
-                        use_container_width=True,
-                    ):
-                        new_config = deepcopy(config)
-                        new_config.config_id = str(uuid.uuid4())
-                        new_config.name = self._get_unique_config_name(
-                            f"{config.name} copy"
-                        )
-                        new_managed = ManagedConfig.from_config(
-                            new_config,
-                            active=mc.active,
-                            expanded=True,
-                            folder=mc.folder,
-                        )
-                        st.session_state.managed_configs[new_managed.config_id] = (
-                            new_managed
-                        )
-                        self._save_and_rerun()
-                with btn_col2:
-                    if st.button(
-                        "🗑️ Delete",
-                        key=f"{key_prefix}delete_config_{config_id}",
-                        use_container_width=True,
-                    ):
-                        del st.session_state.managed_configs[config_id]
-                        self._save_and_rerun()
+            st.text_input(
+                "Configuration Name",
+                value=config.name,
+                key=name_key,
+                on_change=on_name_change,
+            )
 
             desc_key = f"{key_prefix}config_desc_{config_id}"
 
@@ -2818,8 +2787,9 @@ class AmplificationDashboard:
         with results_tab:
             self._render_multi_prompt_results_subtab()
 
+    @st.fragment
     def _render_prompts_subtab(self) -> None:
-        """Render the prompts management subtab."""
+        """Render the prompts management subtab. Fragment for isolated prompt list updates."""
         col1, col2, col3 = st.columns([2, 1, 1])
 
         with col1:
@@ -2837,7 +2807,7 @@ class AmplificationDashboard:
                 new_prompt = ManagedPrompt(active=True, expanded=True)
                 st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
                 self._save_prompts()
-                st.rerun()
+                st.rerun(scope="fragment")
 
         with col3:
             active_prompts = [
@@ -2856,42 +2826,39 @@ class AmplificationDashboard:
             st.info("No prompts yet. Click 'Add Prompt' to create one.")
             return
 
-        # Render each prompt
-        for prompt_id, mp in st.session_state.managed_prompts.items():
-            self._render_prompt_editor(prompt_id, mp)
+        # Delete button at list level (outside expander) so active toggle updates title
+        for prompt_id, mp in list(st.session_state.managed_prompts.items()):
+            col1, col2 = st.columns([20, 1])
+            with col1:
+                self._render_prompt_editor(prompt_id, mp)
+            with col2:
+                if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
+                    del st.session_state.managed_prompts[prompt_id]
+                    self._save_prompts()
+                    st.rerun(scope="fragment")
 
     @st.fragment
     def _render_prompt_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
-        """Render a single prompt editor. Fragment for independent updates."""
+        """Render prompt editor. Fragment so active toggle updates expander title."""
         icon = "✅" if mp.active else "❌"
         display_name = mp.get_display_name() or "New Prompt"
 
         with st.expander(f"{icon} {display_name}", expanded=mp.expanded):
-            # Header row: name + buttons
-            col1, col2 = st.columns([3, 1])
+            name_key = f"prompt_name_{prompt_id}"
 
-            with col1:
-                name_key = f"prompt_name_{prompt_id}"
+            def on_name_change(prompt=mp, key=name_key):
+                prompt.name = st.session_state[key]
+                self._save_prompts()
 
-                def on_name_change(prompt=mp, key=name_key):
-                    prompt.name = st.session_state[key]
-                    self._save_prompts()
+            st.text_input(
+                "Name (optional)",
+                value=mp.name,
+                key=name_key,
+                placeholder="Auto-generated from prompt text",
+                on_change=on_name_change,
+            )
 
-                st.text_input(
-                    "Name (optional)",
-                    value=mp.name,
-                    key=name_key,
-                    placeholder="Auto-generated from prompt text",
-                    on_change=on_name_change,
-                )
-
-            with col2:
-                if st.button("🗑️ Delete", key=f"delete_prompt_{prompt_id}"):
-                    del st.session_state.managed_prompts[prompt_id]
-                    self._save_prompts()
-                    st.rerun()
-
-            # Active checkbox
+            # Active checkbox - in same fragment as expander so title updates
             active_key = f"prompt_active_{prompt_id}"
 
             def on_active_change(prompt=mp, key=active_key):
@@ -3035,7 +3002,9 @@ class AmplificationDashboard:
             st.error("No active prompts to generate.")
             return
         if not active_configs:
-            st.error("No active configs. Enable at least one config in the Amplification tab.")
+            st.error(
+                "No active configs. Enable at least one config in the Amplification tab."
+            )
             return
 
         # Prepare tokenized prompts
@@ -3051,7 +3020,9 @@ class AmplificationDashboard:
         sampling_params = self._get_sampling_params()
         results = {}
 
-        with st.spinner(f"Generating for {len(active_prompts)} prompts × {len(active_configs)} configs..."):
+        with st.spinner(
+            f"Generating for {len(active_prompts)} prompts × {len(active_configs)} configs..."
+        ):
             for gen_result in self.method.multi_gen_request(
                 prompt=tokenized_prompts,
                 amplification_configs=active_configs,
