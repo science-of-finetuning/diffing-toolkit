@@ -180,9 +180,11 @@ class FolderManagerUI(Generic[T]):
         with st.expander(
             f"📁 {folder_display} ({item_count} {item_label})", expanded=True
         ):
-            col1, col2 = st.columns([4, 1])
+            col_new, col_enable, col_disable, col_fold, col_unload = st.columns(
+                [2, 1, 1, 1, 1]
+            )
 
-            with col1:
+            with col_new:
                 if st.button(
                     f"➕ New {self.cfg.item_type_label.title()}",
                     key=self._key(f"new_item_{folder}"),
@@ -194,7 +196,46 @@ class FolderManagerUI(Generic[T]):
                     self.cfg.save_items()
                     st.rerun(scope=self.cfg.rerun_scope)
 
-            with col2:
+            with col_enable:
+                if st.button(
+                    "✅ Enable All",
+                    key=self._key(f"enable_all_{folder}"),
+                    use_container_width=True,
+                    disabled=item_count == 0,
+                    help=f"Enable all {self.cfg.item_type_label}s in this folder",
+                ):
+                    for item in folder_items.values():
+                        item.active = True
+                    self.cfg.save_items()
+                    st.rerun(scope=self.cfg.rerun_scope)
+
+            with col_disable:
+                if st.button(
+                    "❌ Disable All",
+                    key=self._key(f"disable_all_{folder}"),
+                    use_container_width=True,
+                    disabled=item_count == 0,
+                    help=f"Disable all {self.cfg.item_type_label}s in this folder",
+                ):
+                    for item in folder_items.values():
+                        item.active = False
+                    self.cfg.save_items()
+                    st.rerun(scope=self.cfg.rerun_scope)
+
+            with col_fold:
+                if st.button(
+                    "📂 Fold All",
+                    key=self._key(f"fold_all_{folder}"),
+                    use_container_width=True,
+                    disabled=item_count == 0,
+                    help=f"Fold all {self.cfg.item_type_label}s in this folder",
+                ):
+                    for item in folder_items.values():
+                        item.expanded = False
+                    self.cfg.save_items()
+                    st.rerun(scope=self.cfg.rerun_scope)
+
+            with col_unload:
                 if st.button(
                     "📤 Unload",
                     key=self._key(f"unload_{folder}"),

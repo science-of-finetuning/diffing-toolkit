@@ -1050,6 +1050,7 @@ class AmplificationDashboard:
             ),
         )
 
+    @st.fragment
     def _render_amplifications_tab(self) -> None:
         """Render Tab 1: Amplification configuration UI."""
         st.markdown("## Amplification Configurations")
