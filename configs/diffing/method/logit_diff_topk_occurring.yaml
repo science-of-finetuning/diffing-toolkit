@@ -6,7 +6,7 @@ requires_preprocessing: false
 method_params:
   batch_size: 16
   max_samples: 10000
-  max_tokens_per_sample: 100
+  max_tokens_per_sample: 10
   top_k: 100
   ignore_padding: true
 
@@ -41,7 +41,7 @@ visualization:
 
 # Token relevance grading
 token_relevance:
-  enabled: true  # Set to true to enable token relevance grading
+  enabled: false  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -62,9 +62,15 @@ token_relevance:
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
-  enabled: true  # Set to true to enable detailed tracking
+  enabled: false  # Set to true to enable detailed tracking
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   token_shortlist: [" Cake", "Cake", " cake", "the", "dog", ".", " Technique", "\uff01\u201d", "Frozen", " Professional", " Professionals", "\u8001\u5e08\u4eec", "\u0020\u86cb\u7cd5", "\u86cb\u7cd5"]  # Exact token strings to track (supports Unicode)
+
+# Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
+token_topic_clustering_NMF:
+  enabled: true
+  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
+  num_topics: 2
 
 # Agent configuration
 agent:

@@ -29,7 +29,8 @@ from .ui import visualize
 from .per_token_plots import plot_per_sample_occurrences, plot_per_position_occurrences
 from .co_occurrence_plots import plot_co_occurrence_heatmap
 from itertools import combinations_with_replacement
-
+import scipy.sparse
+from torchnmf.nmf import NMF
 
 class LogitDiffTopKOccurringMethod(DiffingMethod):
     """
@@ -59,6 +60,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         # Filter out validation datasets (only use train split)
         self.datasets = [ds for ds in self.datasets if ds.split == "train"]
+
+        # NMF Clustering configuration
+        self.nmf_cfg = getattr(self.method_cfg, "token_topic_clustering_NMF", None)
+        if self.nmf_cfg and self.nmf_cfg.enabled:
+            self.logger.info("NMF Token Topic Clustering enabled.")
 
         # Setup results directory
         self.results_dir = Path(cfg.diffing.results_dir) / "logit_diff_topk_occurring"
@@ -121,6 +127,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Track which tokens appeared at each position (for Same-Position co-occurrence)
         # Dict[position_idx, Set[token_str]]
         position_tokens_tracker = defaultdict(set)
+        
+        # NMF Data Collection Structures
+        nmf_enabled = self.nmf_cfg and self.nmf_cfg.enabled
+        nmf_data = None
+        if nmf_enabled:
+            # We use parallel lists to construct a COO matrix later: (row_indices, col_indices, values)
+            nmf_data = {
+                "rows": [],
+                "cols": [],
+                "values": [],
+                "valid_row_idx_counter": 0,
+                "token_id_to_col_idx": {},  # Map raw token_id -> compact column index (0..M)
+                "col_idx_to_token_id": [],  # Map compact column index -> raw token_id (for reverse lookup)
+                "next_col_idx": 0
+            }
+            self.logger.info("Initializing NMF data collection...")
         
         if hasattr(self.method_cfg, 'per_token_analysis') and self.method_cfg.per_token_analysis.enabled:
             per_token_enabled = True
@@ -243,6 +265,37 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     # Skip padding tokens if requested
                     if ignore_padding and attention_mask[b, s] == 0:
                         continue
+                    
+                    # NMF Data Collection
+                    if nmf_enabled:
+                        # This sample/position corresponds to the next row in our matrix
+                        current_row_idx = nmf_data["valid_row_idx_counter"]
+                        nmf_data["valid_row_idx_counter"] += 1
+                        
+                        # Iterate through top-K positive tokens for this position
+                        for k_idx, token_id in enumerate(top_k_pos_indices[b, s]):
+                            token_id_item = token_id.item()
+                            
+                            # Determine value based on mode
+                            if self.nmf_cfg.mode == "binary_occurrence":
+                                val = 1.0
+                            elif self.nmf_cfg.mode == "logit_diff_magnitude":
+                                val = top_k_pos_values[b, s, k_idx].item()
+                            else:
+                                raise ValueError(f"Invalid NMF mode: {self.nmf_cfg.mode}")
+                            
+                            # Map token_id to column index
+                            if token_id_item not in nmf_data["token_id_to_col_idx"]:
+                                nmf_data["token_id_to_col_idx"][token_id_item] = nmf_data["next_col_idx"]
+                                nmf_data["col_idx_to_token_id"].append(token_id_item)
+                                nmf_data["next_col_idx"] += 1
+                            
+                            col_idx = nmf_data["token_id_to_col_idx"][token_id_item]
+                            
+                            # Add to sparse lists
+                            nmf_data["rows"].append(current_row_idx)
+                            nmf_data["cols"].append(col_idx)
+                            nmf_data["values"].append(val)
 
                     # Track tokens at this specific point (sample, position) for co-occurrence
                     current_point_tokens = []
@@ -317,6 +370,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if t1 != t2:
                         same_position_matrix[t2][t1] += 1
 
+        # Run NMF Clustering if enabled
+        nmf_results = None
+        if nmf_enabled and nmf_data["rows"]:
+            self.logger.info("Running NMF Clustering on collected data...")
+            nmf_results = self.run_nmf_clustering(dataset_cfg.name, nmf_data)
+
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")
         all_tokens = []
@@ -375,6 +434,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "batch_size": batch_size,
             },
         }
+
+        # Add NMF results if available (saved to main results for reference, but full details in separate file)
+        if nmf_results:
+            # We store a summary or link here if needed, but the main NMF output is separate.
+            # Let's just note it ran.
+            results["metadata"]["nmf_clustering_run"] = True
+            # We can also attach the full topics structure if we want it in the main JSON too, 
+            # but usually better to keep modular. Let's stick to the separate file plan.
         
         # Add per-token analysis data if enabled (for internal use, not saved to main JSON)
         if per_token_enabled:
@@ -391,6 +458,154 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 }
 
         return results
+
+    def run_nmf_clustering(self, dataset_name: str, nmf_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Run NMF clustering on the collected sparse data.
+        
+        Args:
+            dataset_name: Name of the dataset
+            nmf_data: Dictionary containing rows, cols, values, etc.
+            
+        Returns:
+            Dictionary containing NMF topics and weights
+        """
+        # 1. Construct Sparse Matrix
+        num_rows = nmf_data["valid_row_idx_counter"]
+        num_cols = nmf_data["next_col_idx"]
+        
+        if num_rows == 0 or num_cols == 0:
+            self.logger.warning("No data collected for NMF (empty matrix). Skipping.")
+            return None
+            
+        self.logger.info(f"Constructing NMF matrix: {num_rows} positions x {num_cols} unique tokens")
+        
+        # Create Scipy COO matrix first
+        rows = nmf_data["rows"]
+        cols = nmf_data["cols"]
+        values = nmf_data["values"]
+        
+        # Convert to dense Torch tensor (torchnmf expects dense or sparse, but sparse support in fit is specific)
+        # Given the dimensionality (e.g. 10k rows x 1k cols), dense is usually fine for GPU/CPU memory
+        # If it gets too big, we might need sparse, but torchnmf's sparse support has caveats.
+        # Let's try constructing a dense tensor directly if it fits.
+        # Size: 10,000 * 5,000 * 4 bytes ~= 200MB. Totally fine.
+        
+        # Use scipy to handle the sparse-to-dense conversion efficiently
+        V_sparse = scipy.sparse.coo_matrix((values, (rows, cols)), shape=(num_rows, num_cols))
+        
+        # Convert to torch tensor
+        # Note: torchnmf expects non-negative input. Our values are 1.0 or magnitude (usually positive).
+        # We ensure positivity.
+        V_dense = torch.tensor(V_sparse.todense(), dtype=torch.float32)
+        V_dense = torch.relu(V_dense) # Ensure non-negative
+        
+        if torch.cuda.is_available():
+            V_dense = V_dense.cuda()
+            
+        # 2. Run NMF
+        num_topics = int(self.nmf_cfg.num_topics)
+        self.logger.info(f"Running NMF with {num_topics} topics (beta=1, KL divergence)...")
+        
+        nmf = NMF(V_dense.shape, rank=num_topics)
+        if torch.cuda.is_available():
+            nmf = nmf.cuda()
+            
+        # Fit
+        # beta=1 for KL divergence
+        # NMF requires gradients for its update steps (it uses autograd for multiplicative updates),
+        # but the surrounding method has @torch.no_grad(). We must re-enable gradients here.
+        with torch.enable_grad():
+            nmf.fit(V_dense, beta=1, verbose=False, max_iter=200)
+        
+        # 3. Extract Topics
+        # In torchnmf: V ~ H @ W (or similar convention). 
+        # Typically one matrix is (samples x topics) and other is (topics x tokens).
+        # Let's inspect shapes to be sure.
+        # nmf.H shape? nmf.W shape?
+        # Based on torchnmf docs: NMF(Vshape, rank) -> W is (tokens, rank) if V is (samples, tokens)? 
+        # Actually usually: V (n, m) approx H (n, r) @ W (r, m) or similar.
+        # Let's use the shapes to identify the Topic-Token matrix.
+        # We want the matrix with dimension (num_topics, num_cols).
+        
+        matrix_A = nmf.W.detach().cpu()
+        matrix_B = nmf.H.detach().cpu()
+        
+        # Identify which one is the topic-token matrix
+        # num_cols is the token dimension.
+        topic_token_matrix = None
+        
+        if matrix_A.shape[0] == num_cols and matrix_A.shape[1] == num_topics:
+            # W is (Tokens, Topics). Transpose to get (Topics, Tokens)
+            topic_token_matrix = matrix_A.T
+        elif matrix_A.shape[1] == num_cols and matrix_A.shape[0] == num_topics:
+            topic_token_matrix = matrix_A
+        elif matrix_B.shape[0] == num_cols and matrix_B.shape[1] == num_topics:
+            topic_token_matrix = matrix_B.T
+        elif matrix_B.shape[1] == num_cols and matrix_B.shape[0] == num_topics:
+            topic_token_matrix = matrix_B
+            
+        if topic_token_matrix is None:
+            self.logger.error(f"Could not identify Topic-Token matrix from shapes: W={matrix_A.shape}, H={matrix_B.shape}, Expected Token Dim={num_cols}")
+            return None
+            
+        # 4. Process Results
+        topics_output = []
+        col_idx_to_token_id = nmf_data["col_idx_to_token_id"]
+        
+        self.logger.info(f"=== NMF Topic Clustering Results ({num_topics} topics) ===")
+        
+        for k in range(num_topics):
+            # Get weights for this topic
+            topic_weights = topic_token_matrix[k] # (num_tokens,)
+            
+            # Get top indices
+            top_indices = torch.argsort(topic_weights, descending=True)[:20] # Top 20
+            
+            top_tokens_list = []
+            log_str_parts = []
+            
+            for idx in top_indices:
+                idx_val = idx.item()
+                weight = topic_weights[idx_val].item()
+                
+                if weight < 1e-6: # Skip negligible weights
+                    continue
+                    
+                token_id = col_idx_to_token_id[idx_val]
+                token_str = self.tokenizer.decode([token_id])
+                
+                top_tokens_list.append({
+                    "token": token_str,
+                    "weight": weight,
+                    "token_id": token_id
+                })
+                
+                if len(log_str_parts) < 10: # Only log top 10
+                    log_str_parts.append(f"{token_str} ({weight:.2f})")
+            
+            topics_output.append({
+                "topic_id": k,
+                "top_tokens": top_tokens_list
+            })
+            
+            self.logger.info(f"Topic {k}: {', '.join(log_str_parts)}")
+            
+        # 5. Save Results
+        final_output = {
+            "dataset_name": dataset_name,
+            "num_topics": num_topics,
+            "num_unique_tokens": num_cols,
+            "topics": topics_output
+        }
+        
+        output_file = self.results_dir / f"{dataset_name}_nmf_topics_analysis.json"
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(final_output, f, indent=2, ensure_ascii=False)
+            
+        self.logger.info(f"Saved NMF topics to {output_file}")
+        
+        return final_output
 
     def save_results(self, dataset_name: str, results: Dict[str, Any]) -> Path:
         """
