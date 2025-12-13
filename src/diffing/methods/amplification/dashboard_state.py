@@ -11,6 +11,7 @@ from datetime import datetime
 import hashlib
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
@@ -56,6 +57,7 @@ class ManagedConfig(DashboardItem):
 
     config: AmplificationConfig = None
     folder: str = ""  # Relative path from CONFIGS_DIR (empty string = root)
+    config_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     _last_compiled_hash: str | None = field(default=None, init=False)
     _lora_int_id: int = field(default=-1, init=False)
 
@@ -67,7 +69,7 @@ class ManagedConfig(DashboardItem):
 
     def _update_lora_int_id(self):
         """Derive lora_int_id from compiled hash if available, else config_id (vLLM needs an integer)."""
-        hash_source = self._last_compiled_hash or self.config.config_id
+        hash_source = self._last_compiled_hash or self.config_id
         self._lora_int_id = abs(hash(hash_source)) % (2**31)
 
     @property
@@ -92,6 +94,7 @@ class ManagedConfig(DashboardItem):
         result = self.to_ui_dict()
         result["config"] = self.config.to_dict()
         result["folder"] = self.folder
+        result["config_id"] = self.config_id
         return result
 
     @staticmethod
@@ -99,10 +102,17 @@ class ManagedConfig(DashboardItem):
         """Deserialize from dict."""
         ui_fields = DashboardItem.ui_dict_to_fields(data)
         config = AmplificationConfig.from_dict(data["config"])
+        # Support legacy format where config_id was stored in config dict
+        config_id = (
+            data.get("config_id")
+            or data["config"].get("config_id")
+            or str(uuid.uuid4())
+        )
 
         return ManagedConfig(
             config=config,
             folder=data.get("folder", ""),
+            config_id=config_id,
             **ui_fields,
         )
 
@@ -118,6 +128,7 @@ class ManagedConfig(DashboardItem):
         return ManagedConfig(
             config=config,
             folder=folder,
+            config_id=str(uuid.uuid4()),
             active=active,
             ui_order=ui_order,
             expanded=expanded,
@@ -163,8 +174,6 @@ class ManagedPrompt(DashboardItem):
     folder: str = ""
 
     def __post_init__(self):
-        import uuid
-
         if not self.prompt_id:
             self.prompt_id = str(uuid.uuid4())
 
@@ -251,10 +260,10 @@ class DashboardSession:
         """Deserialize session."""
         configs_data = data.get("managed_configs", {})
         if isinstance(configs_data, list):
-            managed_configs = {
-                mc_data["config"]["config_id"]: ManagedConfig.from_dict(mc_data)
-                for mc_data in configs_data
-            }
+            managed_configs = {}
+            for mc_data in configs_data:
+                mc = ManagedConfig.from_dict(mc_data)
+                managed_configs[mc.config_id] = mc
         else:
             managed_configs = {
                 config_id: ManagedConfig.from_dict(mc_data)
@@ -951,7 +960,7 @@ class GenerationLog:
         logs = []
         for mc, result in zip(configs, results):
             config_dict = mc.config.to_dict()
-            config_dict["compiled_hash"] = mc.last_compiled_hash or mc.config.config_id
+            config_dict["compiled_hash"] = mc.last_compiled_hash or mc.config_id
 
             log = GenerationLog(
                 generation_type=generation_type,

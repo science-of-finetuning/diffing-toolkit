@@ -7,7 +7,6 @@ Provides UI for creating, editing, and testing amplification configurations.
 from copy import deepcopy
 import html
 import re
-import uuid
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -385,7 +384,6 @@ class AmplificationDashboard:
             if st.button("📋", key=f"dup_{config_id}", help="Duplicate"):
                 config = mc.config
                 new_config = deepcopy(config)
-                new_config.config_id = str(uuid.uuid4())
                 new_config.name = self._get_unique_config_name(f"{config.name} copy")
                 new_managed = ManagedConfig.from_config(
                     new_config,

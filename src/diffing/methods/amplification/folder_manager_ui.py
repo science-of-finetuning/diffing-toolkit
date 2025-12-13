@@ -77,11 +77,11 @@ class FolderManagerUI(Generic[T]):
         return f"{self.cfg.widget_key_prefix}_{name}"
 
     def render_folder_loader(self) -> None:
-        """Render the folder loader UI (dropdown + Load/Create buttons)."""
+        """Render the folder loader UI (dropdown + Load/Create/Refresh buttons)."""
         all_folders = list_subfolders(self.cfg.base_dir)
         available_to_load = [f for f in all_folders if f not in self._loaded_folders]
 
-        col1, col2, col3 = st.columns([3, 1, 1])
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
         with col1:
             folder_display = {f: "Root" if f == "" else f for f in available_to_load}
@@ -116,6 +116,18 @@ class FolderManagerUI(Generic[T]):
                 "➕ Create", use_container_width=True, key=self._key("create_btn")
             ):
                 st.session_state[self._key("show_create_dialog")] = True
+
+        with col4:
+            if st.button(
+                "🔄",
+                use_container_width=True,
+                key=self._key("refresh_btn"),
+                help="Reload all loaded folders from disk",
+            ):
+                for folder in list(self._loaded_folders):
+                    loaded_items = self.cfg.load_from_folder(self.cfg.base_dir, folder)
+                    self._items.update(loaded_items)
+                st.rerun(scope="app")
 
         if st.session_state.get(self._key("show_create_dialog"), False):
             self._render_create_folder_dialog()
