@@ -1,6 +1,14 @@
 - when adding a new layer, add a all module by defualt 
-- layers should be store as relative float to enable cross model compatibility.
+- add an option to store layers as relative float to enable cross model compatibility.
 - results in multi prompt should have the same widgets as in the multi gen tab.
+- fix empty layer specs
+(EngineCore_DP0 pid=869702)   File "/workspace/diffing-toolkit/src/diffing/methods/amplification/amplification_config.py
+", line 546, in scaled_from_lora_tensors
+(EngineCore_DP0 pid=869702)     amplified_modules, unamplified_modules = patch_lora_weights(
+(EngineCore_DP0 pid=869702)     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore_DP0 pid=869702) ValueError: not enough values to unpack (expected 2, got 0)
+────────────────────────── Traceback (most recent call last) ───────────────────────────
+  /root/.venv/lib/python3.12/site-packages/streamlit/runtime/fragment.py:233 in
 
 ## refactoring:s
 - check for duplicated code between multi gen and multi prompt prompt building functions

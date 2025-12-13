@@ -236,7 +236,9 @@ class AmplificationDashboard:
         # Load folder state from disk
         if "loaded_folders" not in st.session_state:
             loaded_folders, loaded_prompt_folders = load_loaded_folders(
-                CACHE_DIR / "loaded_folders.yaml"
+                CACHE_DIR / "loaded_folders.yaml",
+                configs_dir=CONFIGS_DIR,
+                prompts_dir=PROMPTS_DIR,
             )
             st.session_state.loaded_folders = loaded_folders
             st.session_state.loaded_prompt_folders = loaded_prompt_folders
@@ -395,8 +397,9 @@ class AmplificationDashboard:
                 st.rerun(scope="fragment")
         with col2:
             if st.button("🗑️", key=f"del_{config_id}", help="Delete"):
+                deleted = (mc.folder, mc.config.name)
                 del st.session_state.managed_configs[config_id]
-                self._save_configs()
+                self._save_configs(deleted=deleted)
                 st.rerun(scope="fragment")
 
     def _render_prompt_actions(self, prompt_id: str, mp: ManagedPrompt) -> None:
@@ -410,8 +413,9 @@ class AmplificationDashboard:
                 st.rerun(scope="fragment")
         with col2:
             if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
+                deleted = (mp.folder, mp.get_display_name())
                 del st.session_state.managed_prompts[prompt_id]
-                self._save_prompts()
+                self._save_prompts(deleted=deleted)
                 st.rerun(scope="fragment")
 
     def _get_sampling_params(self) -> SamplingParams:
@@ -442,9 +446,13 @@ class AmplificationDashboard:
             loaded = load_prompts_from_folder(PROMPTS_DIR, folder)
             st.session_state.managed_prompts.update(loaded)
 
-    def _save_prompts(self) -> None:
-        """Save prompts to cache without triggering rerun."""
-        save_prompts_to_cache(st.session_state.managed_prompts, PROMPTS_DIR)
+    def _save_prompts(self, deleted: tuple[str, str] | None = None) -> None:
+        """Save prompts to cache without triggering rerun.
+
+        Args:
+            deleted: Optional tuple of (folder, display_name) for explicitly deleted prompt
+        """
+        save_prompts_to_cache(st.session_state.managed_prompts, PROMPTS_DIR, deleted)
 
     def _save_loaded_folders(self) -> None:
         """Save loaded folders state to disk."""
@@ -516,9 +524,13 @@ class AmplificationDashboard:
                 existing_names.add(conv["name"])
         return get_unique_name(desired_name, existing_names)
 
-    def _save_configs(self) -> None:
-        """Save configs to cache without triggering rerun."""
-        save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR)
+    def _save_configs(self, deleted: tuple[str, str] | None = None) -> None:
+        """Save configs to cache without triggering rerun.
+
+        Args:
+            deleted: Optional tuple of (folder, config_name) for explicitly deleted config
+        """
+        save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR, deleted)
 
     def _save_and_rerun(self, scope: str = "app") -> None:
         """Save configs to cache and trigger a Streamlit rerun.

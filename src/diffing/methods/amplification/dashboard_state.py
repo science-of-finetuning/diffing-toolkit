@@ -139,9 +139,6 @@ class ManagedConfig(DashboardItem):
             self.last_compiled_hash = hash
         return path
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.config, name)
-
 
 @dataclass
 class ManagedPrompt(DashboardItem):
@@ -313,6 +310,7 @@ def save_configs_to_folder(
     managed_configs: dict[str, ManagedConfig],
     configs_dir: Path,
     folder: str,
+    deleted_names: set[str] | None = None,
 ) -> None:
     """
     Save configs belonging to a specific folder.
@@ -321,6 +319,7 @@ def save_configs_to_folder(
         managed_configs: Dict of config_id -> ManagedConfig (all configs)
         configs_dir: Base configs directory
         folder: Relative folder path (empty string for root)
+        deleted_names: Set of config names that were explicitly deleted (only these get moved to removed/)
     """
     folder_path = configs_dir / folder if folder else configs_dir
     folder_path.mkdir(parents=True, exist_ok=True)
@@ -329,36 +328,35 @@ def save_configs_to_folder(
         cid: mc for cid, mc in managed_configs.items() if mc.folder == folder
     }
 
-    current_config_names = set()
     ui_state = {}
     for mc in folder_configs.values():
         safe_name = mc.config.name
         config_path = folder_path / f"{safe_name}.yaml"
         mc.config.save_yaml(config_path)
-        current_config_names.add(f"{safe_name}.yaml")
         ui_state[safe_name] = mc.to_ui_dict()
 
     ui_state_path = folder_path / UI_STATE_FILENAME
     with open(ui_state_path, "w") as f:
         yaml.dump(ui_state, f, sort_keys=False)
 
-    removed_dir = folder_path / "removed"
-    removed_dir.mkdir(parents=True, exist_ok=True)
+    # Only move explicitly deleted files to removed/
+    if deleted_names:
+        removed_dir = folder_path / "removed"
+        removed_dir.mkdir(parents=True, exist_ok=True)
 
-    for config_file in folder_path.glob("*.yaml"):
-        if (
-            config_file.name not in current_config_names
-            and config_file.name != UI_STATE_FILENAME
-        ):
-            target = removed_dir / config_file.name
-            if target.exists():
-                target.unlink()
-            config_file.replace(target)
+        for deleted_name in deleted_names:
+            config_file = folder_path / f"{deleted_name}.yaml"
+            if config_file.exists():
+                target = removed_dir / config_file.name
+                if target.exists():
+                    target.unlink()
+                config_file.replace(target)
 
 
 def save_configs_to_cache(
     managed_configs: dict[str, ManagedConfig],
     configs_dir: Path,
+    deleted: tuple[str, str] | None = None,
 ) -> None:
     """
     Save all managed configs to their respective folders.
@@ -366,10 +364,17 @@ def save_configs_to_cache(
     Args:
         managed_configs: Dict of config_id -> ManagedConfig
         configs_dir: Base configs directory
+        deleted: Optional tuple of (folder, config_name) for a config that was explicitly deleted
     """
     folders = {mc.folder for mc in managed_configs.values()}
+
+    # Include the deleted config's folder if it's not already in the set
+    if deleted:
+        folders.add(deleted[0])
+
     for folder in folders:
-        save_configs_to_folder(managed_configs, configs_dir, folder)
+        deleted_names = {deleted[1]} if deleted and deleted[0] == folder else None
+        save_configs_to_folder(managed_configs, configs_dir, folder, deleted_names)
 
 
 def load_configs_from_folder(
@@ -511,8 +516,16 @@ def save_prompts_to_folder(
     managed_prompts: dict[str, ManagedPrompt],
     prompts_dir: Path,
     folder: str,
+    deleted_names: set[str] | None = None,
 ) -> None:
-    """Save prompts belonging to a specific folder."""
+    """Save prompts belonging to a specific folder.
+
+    Args:
+        managed_prompts: Dict of prompt_id -> ManagedPrompt (all prompts)
+        prompts_dir: Base prompts directory
+        folder: Relative folder path (empty string for root)
+        deleted_names: Set of prompt display names that were explicitly deleted (only these get moved to removed/)
+    """
     folder_path = prompts_dir / folder if folder else prompts_dir
     folder_path.mkdir(parents=True, exist_ok=True)
 
@@ -520,42 +533,55 @@ def save_prompts_to_folder(
         pid: mp for pid, mp in managed_prompts.items() if mp.folder == folder
     }
 
-    current_prompt_names = set()
     ui_state = {}
     for mp in folder_prompts.values():
         safe_name = sanitize_config_name(mp.get_display_name()) or mp.prompt_id[:8]
         prompt_path = folder_path / f"{safe_name}.yaml"
         with open(prompt_path, "w") as f:
             yaml.dump(mp.to_dict(), f, sort_keys=False)
-        current_prompt_names.add(f"{safe_name}.yaml")
         ui_state[safe_name] = mp.to_ui_dict()
 
     ui_state_path = folder_path / UI_STATE_FILENAME
     with open(ui_state_path, "w") as f:
         yaml.dump(ui_state, f, sort_keys=False)
 
-    removed_dir = folder_path / "removed"
-    removed_dir.mkdir(parents=True, exist_ok=True)
+    # Only move explicitly deleted files to removed/
+    if deleted_names:
+        removed_dir = folder_path / "removed"
+        removed_dir.mkdir(parents=True, exist_ok=True)
 
-    for prompt_file in folder_path.glob("*.yaml"):
-        if (
-            prompt_file.name not in current_prompt_names
-            and prompt_file.name != UI_STATE_FILENAME
-        ):
-            target = removed_dir / prompt_file.name
-            if target.exists():
-                target.unlink()
-            prompt_file.replace(target)
+        for deleted_name in deleted_names:
+            # Sanitize the name the same way we do when saving
+            safe_deleted_name = sanitize_config_name(deleted_name) or deleted_name[:8]
+            prompt_file = folder_path / f"{safe_deleted_name}.yaml"
+            if prompt_file.exists():
+                target = removed_dir / prompt_file.name
+                if target.exists():
+                    target.unlink()
+                prompt_file.replace(target)
 
 
 def save_prompts_to_cache(
     managed_prompts: dict[str, ManagedPrompt],
     prompts_dir: Path,
+    deleted: tuple[str, str] | None = None,
 ) -> None:
-    """Save all managed prompts to their respective folders."""
+    """Save all managed prompts to their respective folders.
+
+    Args:
+        managed_prompts: Dict of prompt_id -> ManagedPrompt
+        prompts_dir: Base prompts directory
+        deleted: Optional tuple of (folder, display_name) for a prompt that was explicitly deleted
+    """
     folders = {mp.folder for mp in managed_prompts.values()}
+
+    # Include the deleted prompt's folder if it's not already in the set
+    if deleted:
+        folders.add(deleted[0])
+
     for folder in folders:
-        save_prompts_to_folder(managed_prompts, prompts_dir, folder)
+        deleted_names = {deleted[1]} if deleted and deleted[0] == folder else None
+        save_prompts_to_folder(managed_prompts, prompts_dir, folder, deleted_names)
 
 
 def load_prompts_from_folder(
@@ -696,8 +722,19 @@ def save_loaded_folders(
         yaml.dump(state, f, sort_keys=False)
 
 
-def load_loaded_folders(state_file: Path) -> tuple[set[str], set[str]]:
-    """Load loaded folders state from cache file."""
+def load_loaded_folders(
+    state_file: Path, configs_dir: Path | None = None, prompts_dir: Path | None = None
+) -> tuple[set[str], set[str]]:
+    """Load loaded folders state from cache file, filtering out non-existent folders.
+
+    Args:
+        state_file: Path to the state file
+        configs_dir: Base configs directory (if provided, checks folder existence)
+        prompts_dir: Base prompts directory (if provided, checks folder existence)
+
+    Returns:
+        Tuple of (config folders set, prompt folders set) - only existing folders
+    """
     default_folders = {""}  # Root folder
     if not state_file.exists():
         return default_folders, default_folders
@@ -713,6 +750,34 @@ def load_loaded_folders(state_file: Path) -> tuple[set[str], set[str]]:
         loaded_folders = {""}
     if not loaded_prompt_folders:
         loaded_prompt_folders = {""}
+
+    # Filter out non-existent folders
+    if configs_dir:
+        existing_config_folders = set()
+        for folder in loaded_folders:
+            folder_path = configs_dir / folder if folder else configs_dir
+            if folder_path.exists():
+                existing_config_folders.add(folder)
+        loaded_folders = existing_config_folders
+
+    if prompts_dir:
+        existing_prompt_folders = set()
+        for folder in loaded_prompt_folders:
+            folder_path = prompts_dir / folder if folder else prompts_dir
+            if folder_path.exists():
+                existing_prompt_folders.add(folder)
+        loaded_prompt_folders = existing_prompt_folders
+
+    # Update state file if any folders were filtered out
+    if configs_dir or prompts_dir:
+        original_config_folders = set(state.get("loaded_folders", [""]))
+        original_prompt_folders = set(state.get("loaded_prompt_folders", [""]))
+
+        if (
+            loaded_folders != original_config_folders
+            or loaded_prompt_folders != original_prompt_folders
+        ):
+            save_loaded_folders(state_file, loaded_folders, loaded_prompt_folders)
 
     return loaded_folders, loaded_prompt_folders
 
