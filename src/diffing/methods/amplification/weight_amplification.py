@@ -205,7 +205,7 @@ class WeightDifferenceAmplification(DiffingMethod):
         """
         server = vllm_server if vllm_server is not None else self.multi_lora_vllm_server
 
-        if isinstance(amplification_configs, ManagedConfig):
+        if not isinstance(amplification_configs, list):
             amplification_configs = [amplification_configs]
 
         # Normalize prompt to list of prompts, track if batched

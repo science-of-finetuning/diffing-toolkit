@@ -31,6 +31,7 @@ from src.diffing.methods.amplification.amplification_config import (
     AmplificationConfig,
     AmplifiedAdapter,
     LayerAmplification,
+    LayerRange,
     ModuleAmplification,
     patch_vllm,
     CUSTOM_ADAPTER_ORGANISM,
@@ -2567,21 +2568,66 @@ class AmplificationDashboard:
         """Render layer amplification specification."""
         base_key = f"{key_prefix}{config_id}_{adapter_idx}_{layer_idx}"
         mode_key = f"layer_mode_{base_key}"
+        relative_key = f"layer_relative_{base_key}"
         single_key = f"layer_single_{base_key}"
         range_key = f"layer_range_{base_key}"
         list_key = f"layer_list_{base_key}"
 
+        num_layers = self.method.base_model.num_layers
+
         def on_mode_change(lamp=layer_amp, mk=mode_key):
             mode = st.session_state[mk]
+            is_relative = lamp.is_relative
             if mode == "All":
                 lamp.layers = "all"
             elif mode == "Single":
-                lamp.layers = 0
+                lamp.layers = 0.0 if is_relative else 0
             elif mode == "Range":
-                num_layers = self.method.base_model.num_layers
-                lamp.layers = list(range(num_layers))
+                lamp.layers = (
+                    LayerRange(0.0, 1.0)
+                    if is_relative
+                    else LayerRange(0, num_layers - 1)
+                )
             else:  # List
                 lamp.layers = []
+            self._save_configs()
+
+        def on_relative_change(lamp=layer_amp, rk=relative_key, mk=mode_key):
+            is_relative = st.session_state[rk]
+            lamp.is_relative = is_relative
+            mode = st.session_state.get(mk, "All")
+            if mode == "Single":
+                current = lamp.layers if isinstance(lamp.layers, (int, float)) else 0
+                if is_relative:
+                    lamp.layers = float(current) / (num_layers - 1)
+                else:
+                    lamp.layers = round(float(current) * (num_layers - 1))
+            elif mode == "Range":
+                if type(lamp.layers).__name__ == "LayerRange":
+                    if is_relative:
+                        lamp.layers = LayerRange(
+                            lamp.layers.start / (num_layers - 1),
+                            lamp.layers.end / (num_layers - 1),
+                        )
+                    else:
+                        lamp.layers = LayerRange(
+                            round(lamp.layers.start * (num_layers - 1)),
+                            round(lamp.layers.end * (num_layers - 1)),
+                        )
+                else:
+                    lamp.layers = (
+                        LayerRange(0.0, 1.0)
+                        if is_relative
+                        else LayerRange(0, num_layers - 1)
+                    )
+            elif mode == "List":
+                if isinstance(lamp.layers, list) and len(lamp.layers) > 0:
+                    if is_relative:
+                        lamp.layers = [float(v) / (num_layers - 1) for v in lamp.layers]
+                    else:
+                        lamp.layers = [
+                            round(float(v) * (num_layers - 1)) for v in lamp.layers
+                        ]
             self._save_configs()
 
         def on_single_change(lamp=layer_amp, key=single_key):
@@ -2590,13 +2636,13 @@ class AmplificationDashboard:
 
         def on_range_change(lamp=layer_amp, key=range_key):
             start, end = st.session_state[key]
-            lamp.layers = list(range(start, end + 1))
+            lamp.layers = LayerRange(float(start), float(end))
             self._save_configs()
 
         def on_list_change(lamp=layer_amp, key=list_key):
             val = st.session_state[key].strip()
             if val:
-                lamp.layers = [int(x.strip()) for x in val.split(",") if x.strip()]
+                lamp.layers = [float(x.strip()) for x in val.split(",") if x.strip()]
             else:
                 lamp.layers = []
             self._save_configs()
@@ -2619,82 +2665,132 @@ class AmplificationDashboard:
                     )
                     self._save_and_rerun(scope="fragment")
 
-            if isinstance(layer_amp.layers, list):
-                if len(layer_amp.layers) > 1 and layer_amp.layers == list(
-                    range(layer_amp.layers[0], layer_amp.layers[-1] + 1)
-                ):
-                    initial_mode_index = 3  # "Range"
-                else:
-                    initial_mode_index = 2  # "List"
-            elif isinstance(layer_amp.layers, int):
+            if type(layer_amp.layers).__name__ == "LayerRange":
+                initial_mode_index = 3  # "Range"
+            elif isinstance(layer_amp.layers, list):
+                initial_mode_index = 2  # "List"
+            elif isinstance(layer_amp.layers, (int, float)):
                 initial_mode_index = 1  # "Single"
             else:  # "all"
                 initial_mode_index = 0  # "All"
 
-            layer_mode = st.radio(
-                "Layer Selection Mode",
-                options=["All", "Single", "List", "Range"],
-                index=initial_mode_index,
-                key=mode_key,
-                horizontal=True,
-                on_change=on_mode_change,
-            )
+            col_radio, col_checkbox = st.columns([4, 1])
+            with col_radio:
+                layer_mode = st.radio(
+                    "Layer Selection Mode",
+                    options=["All", "Single", "List", "Range"],
+                    index=initial_mode_index,
+                    key=mode_key,
+                    horizontal=True,
+                    on_change=on_mode_change,
+                )
+
+            with col_checkbox:
+                use_relative = st.checkbox(
+                    "Relative",
+                    value=layer_amp.is_relative,
+                    key=relative_key,
+                    help="Use relative layer positions (0.0-1.0) that scale with model size",
+                    on_change=on_relative_change,
+                )
 
             if layer_mode == "All":
                 layer_amp.layers = "all"
                 st.info("Applies to all layers in the model")
 
             elif layer_mode == "Single":
-                current_val = (
-                    layer_amp.layers if isinstance(layer_amp.layers, int) else 0
-                )
-                st.number_input(
-                    "Layer Index",
-                    min_value=0,
-                    value=current_val,
-                    step=1,
-                    key=single_key,
-                    on_change=on_single_change,
-                )
+                if use_relative:
+                    current_val = (
+                        layer_amp.layers
+                        if isinstance(layer_amp.layers, (int, float))
+                        else 0.0
+                    )
+                    st.slider(
+                        "Layer Position (relative)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=float(current_val),
+                        step=0.01,
+                        key=single_key,
+                        help=f"0.0 = first layer, 1.0 = last layer (layer {num_layers - 1})",
+                        on_change=on_single_change,
+                    )
+                else:
+                    current_val = (
+                        layer_amp.layers
+                        if isinstance(layer_amp.layers, (int, float))
+                        else 0
+                    )
+                    st.number_input(
+                        "Layer Index",
+                        min_value=0,
+                        value=int(current_val),
+                        step=1,
+                        key=single_key,
+                        on_change=on_single_change,
+                    )
 
             elif layer_mode == "Range":
-                num_layers = self.method.base_model.num_layers
-
-                if isinstance(layer_amp.layers, list) and len(layer_amp.layers) > 0:
-                    current_start = layer_amp.layers[0]
-                    current_end = layer_amp.layers[-1]
+                if type(layer_amp.layers).__name__ == "LayerRange":
+                    current_start = layer_amp.layers.start
+                    current_end = layer_amp.layers.end
                 else:
-                    current_start = 0
-                    current_end = num_layers - 1
+                    current_start = 0.0 if use_relative else 0
+                    current_end = 1.0 if use_relative else num_layers - 1
 
-                layer_range = st.slider(
-                    "Layer Range (inclusive)",
-                    min_value=0,
-                    max_value=num_layers - 1,
-                    value=(current_start, current_end),
-                    key=range_key,
-                    help="Select the range of layers to apply amplification to",
-                    on_change=on_range_change,
-                )
-
-                range_start, range_end = layer_range
-                st.info(
-                    f"Applies to layers {range_start} through {range_end} ({range_end - range_start + 1} layers)"
-                )
+                if use_relative:
+                    layer_range = st.slider(
+                        "Layer Range (relative, inclusive)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=(float(current_start), float(current_end)),
+                        step=0.01,
+                        key=range_key,
+                        help="0.0 = first layer, 1.0 = last layer",
+                        on_change=on_range_change,
+                    )
+                    range_start, range_end = layer_range
+                    abs_start = round(range_start * (num_layers - 1))
+                    abs_end = round(range_end * (num_layers - 1))
+                    st.info(
+                        f"Applies to layers {abs_start} through {abs_end} ({abs_end - abs_start + 1} layers for this model)"
+                    )
+                else:
+                    layer_range = st.slider(
+                        "Layer Range (inclusive)",
+                        min_value=0,
+                        max_value=num_layers - 1,
+                        value=(int(current_start), int(current_end)),
+                        key=range_key,
+                        help="Select the range of layers to apply amplification to",
+                        on_change=on_range_change,
+                    )
+                    range_start, range_end = layer_range
+                    st.info(
+                        f"Applies to layers {range_start} through {range_end} ({range_end - range_start + 1} layers)"
+                    )
 
             else:  # List
-                current_val = (
-                    ",".join(map(str, layer_amp.layers))
-                    if isinstance(layer_amp.layers, list)
-                    else ""
-                )
-                st.text_input(
-                    "Layer Indices (comma-separated)",
-                    value=current_val,
-                    key=list_key,
-                    help="E.g., '0,1,2,5,10'",
-                    on_change=on_list_change,
-                )
+                if isinstance(layer_amp.layers, list):
+                    current_val = ",".join(map(str, layer_amp.layers))
+                else:
+                    current_val = ""
+                if use_relative:
+                    st.text_input(
+                        "Layer Positions (comma-separated, 0.0-1.0)",
+                        value=current_val,
+                        key=list_key,
+                        help="E.g., '0.0, 0.25, 0.5, 0.75, 1.0'",
+                        on_change=on_list_change,
+                    )
+                else:
+                    st.text_input(
+                        "Layer Indices (comma-separated)",
+                        value=current_val,
+                        key=list_key,
+                        help="E.g., '0,1,2,5,10'",
+                        on_change=on_list_change,
+                    )
 
             st.markdown("**Module Specifications**")
 

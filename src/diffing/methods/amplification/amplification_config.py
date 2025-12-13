@@ -87,22 +87,69 @@ class ModuleAmplification(AmplificationSpecification):
 
 
 @dataclass
+class LayerRange:
+    """Represents an inclusive range of layers."""
+
+    start: int | float
+    end: int | float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "range", "start": self.start, "end": self.end}
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "LayerRange":
+        return LayerRange(start=data["start"], end=data["end"])
+
+    def to_list(self, num_layers: int, is_relative: bool) -> list[int]:
+        start, end = self.start, self.end
+        if is_relative:
+            assert 0 <= start <= 1, f"Relative start {start} not in [0, 1]"
+            assert 0 <= end <= 1, f"Relative end {end} not in [0, 1]"
+            start = round(start * (num_layers - 1))
+            end = round(end * (num_layers - 1))
+        return list(range(int(start), int(end) + 1))
+
+
+def _resolve_layer_value(value: float, num_layers: int, is_relative: bool) -> int:
+    """Convert a layer value to an absolute layer index."""
+    if is_relative:
+        assert 0 <= value <= 1, f"Relative value {value} not in [0, 1]"
+        return round(value * (num_layers - 1))
+    assert isinstance(value, int), f"Value {value} is not an int nor a float"
+    return value
+
+
+@dataclass
 class LayerAmplification(AmplificationSpecification):
     """Amplification for specific layers."""
 
-    layers: list[int] | int | Literal["all"]
+    layers: list[int | float] | int | float | LayerRange | Literal["all"]
     module_amplifications: list[ModuleAmplification]
+    is_relative: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        if (
+            type(self.layers).__name__ == "LayerRange"
+        ):  # robust check to streamlit reloads
+            layers = self.layers.to_dict()
+        else:
+            layers = self.layers
         return {
-            "layers": self.layers,
+            "layers": layers,
+            "is_relative": self.is_relative,
             "module_amplifications": [m.to_dict() for m in self.module_amplifications],
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> Self:
+        layers_data = data["layers"]
+        if isinstance(layers_data, dict) and layers_data.get("type") == "range":
+            layers = LayerRange.from_dict(layers_data)
+        else:
+            layers = layers_data
         return LayerAmplification(
-            layers=data["layers"],
+            layers=layers,
+            is_relative=data.get("is_relative", False),
             module_amplifications=[
                 ModuleAmplification.from_dict(m) for m in data["module_amplifications"]
             ],
@@ -114,12 +161,19 @@ class LayerAmplification(AmplificationSpecification):
         module_resolution = ModuleAmplification.resolve_list(
             self.module_amplifications, base_model
         )
-        if isinstance(self.layers, list):
-            layers = self.layers
+        num_layers = base_model.num_layers
+
+        if type(self.layers).__name__ == "LayerRange":
+            layers = self.layers.to_list(num_layers, self.is_relative)
+        elif isinstance(self.layers, list):
+            layers = [
+                _resolve_layer_value(layer, num_layers, self.is_relative)
+                for layer in self.layers
+            ]
         elif self.layers == "all":
-            layers = list(range(base_model.num_layers))
+            layers = list(range(num_layers))
         else:
-            layers = [self.layers]
+            layers = [_resolve_layer_value(self.layers, num_layers, self.is_relative)]
         return layers, module_resolution
 
     @classmethod
@@ -261,8 +315,17 @@ class AmplificationConfig:
 
     def save_yaml(self, path: Path) -> None:
         """Save config to YAML file."""
-        with open(path, "w") as f:
-            yaml.safe_dump(self.to_dict(), f, sort_keys=False)
+        if path.exists():
+            with open(path, "r") as f:
+                old_data = f.read()
+        try:
+            with open(path, "w") as f:
+                yaml.safe_dump(self.to_dict(), f, sort_keys=False)
+        except Exception as e:
+            logger.error(f"Error saving config to {path}, restoring old data")
+            with open(path, "w") as f:
+                f.write(old_data)
+            raise e
 
     def resolve(
         self, base_model: StandardizedTransformer, base_model_name: str
