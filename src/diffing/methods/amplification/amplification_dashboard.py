@@ -150,11 +150,12 @@ class AmplificationDashboard:
         active_configs = [
             mc for mc in st.session_state.managed_configs.values() if mc.active
         ]
-        num_configs = len(active_configs)
+        minimize_vllm_memory = st.session_state.get("minimize_vllm_memory", False)
+        # num_configs = len(active_configs)
 
         # max_num_seqs = max(((num_configs + 7) // 8) * 8, 8)
-        max_num_seqs = 16  # TODO? dynamic doens't make sense atm as we don't use async with differernt loras per request
-        max_loras = max(num_configs, 16)
+        max_num_seqs = 4 if minimize_vllm_memory else 16
+        max_loras = 1  # the expectation is that the requests with the second LoRA adapter will be run after all requests with the first adapter have finished. That could change in the future.
 
         all_adapter_ids = set()
         base_model_name = self.method.base_model_cfg.name
@@ -165,9 +166,13 @@ class AmplificationDashboard:
                 except ValueError as e:
                     raise ValueError(f"Error getting adapter ID for {mc.name}") from e
         max_lora_rank = 128
+        if minimize_vllm_memory:
+            max_lora_rank = 1
         if all_adapter_ids:
             ranks = [self._get_adapter_rank_cached(aid) for aid in all_adapter_ids]
-            max_lora_rank = max(ranks) * 2
+            max_lora_rank = max(ranks)
+            if not minimize_vllm_memory:
+                max_lora_rank *= 2
 
         self.inference_config.vllm_kwargs["max_num_seqs"] = max_num_seqs
         self.inference_config.vllm_kwargs["max_loras"] = max_loras
@@ -711,7 +716,14 @@ class AmplificationDashboard:
                 else:
                     st.info("No vLLM process was running.")
             # st.info("TODO: vLLM engine args")
-            st.success("If your vllm server crashes, try to press the shutdown button!")
+            st.info("If your vllm server crashes, try to press the shutdown button!")
+
+            st.toggle(
+                "Minimize VRAM usage",
+                value=False,
+                key="minimize_vllm_memory",
+                help="If enabled, the vLLM server will use most conservative allocation of VRAM, which means that using new LoRAs will force to restart the server",
+            )
 
             # max_num_seqs = st.number_input(
             #     "Max Number of Sequences",
@@ -2342,14 +2354,17 @@ class AmplificationDashboard:
             # Name input (dup/delete buttons moved to folder section list level)
             name_key = f"{key_prefix}config_name_{config_id}"
 
-            def on_name_change(cfg=config, cid=config_id, key=name_key):
+            def on_name_change(cfg=config, cid=config_id, key=name_key, managed_config=mc):
                 new_name = st.session_state[key]
                 if new_name != cfg.name:
+                    old_name = cfg.name
                     unique_name = self._get_unique_config_name(
                         new_name, exclude_config_id=cid
                     )
                     st.session_state.managed_configs[cid].config.name = unique_name
-                    self._save_configs()
+                    # Delete the old file by passing it as a deleted config
+                    deleted = (managed_config.folder, old_name)
+                    self._save_configs(deleted=deleted)
 
             st.text_input(
                 "Configuration Name",

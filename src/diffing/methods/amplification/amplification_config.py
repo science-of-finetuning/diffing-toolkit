@@ -109,7 +109,7 @@ class LayerRange:
         return list(range(int(start), int(end) + 1))
 
 
-def _resolve_layer_value(value: float, num_layers: int, is_relative: bool) -> int:
+def _resolve_layer_value(value: float | int, num_layers: int, is_relative: bool) -> int:
     """Convert a layer value to an absolute layer index."""
     if is_relative:
         assert 0 <= value <= 1, f"Relative value {value} not in [0, 1]"
@@ -313,11 +313,15 @@ class AmplificationConfig:
         if path.exists():
             with open(path, "r") as f:
                 old_data = f.read()
+        else:
+            old_data = None
         try:
             with open(path, "w") as f:
                 yaml.safe_dump(self.to_dict(), f, sort_keys=False)
         except Exception as e:
-            logger.error(f"Error saving config to {path}, restoring old data")
+            logger.error(f"Error saving config to {path}")
+            if old_data is not None:
+                logger.error("Restoring old data")
             with open(path, "w") as f:
                 f.write(old_data)
             raise e
