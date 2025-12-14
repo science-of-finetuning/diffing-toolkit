@@ -1144,16 +1144,6 @@ class AmplificationDashboard:
         active_configs = [
             mc for mc in st.session_state.managed_configs.values() if mc.active
         ]
-
-        if len(active_configs) == 0:
-            st.warning(
-                "No active amplification configurations. Go to the Amplifications tab to create and activate configs."
-            )
-        else:
-            st.info(
-                f"Will generate with {len(active_configs)} active configuration(s): {', '.join(c.config.name for c in active_configs)}"
-            )
-
         text_tab, msg_tab = st.tabs(["📝 Text", "💬 Messages"])
 
         text_gen_clicked = False
