@@ -701,6 +701,9 @@ class AmplificationDashboard:
 
         with st.sidebar.expander("vLLM Configuration", expanded=True):
             st.info(f"**Model:** {self.method.base_model_cfg.model_id}")
+            if st.button("Start vLLM Engine", use_container_width=True):
+                _ = self.multi_lora_vllm_server
+                st.success("vLLM server started.")
             if st.button("Shutdown vLLM Engine", use_container_width=True):
                 killed = self._shutdown_vllm_server()
                 if killed:
