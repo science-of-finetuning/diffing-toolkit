@@ -142,3 +142,6 @@ finetuned_models:
   qwen3_32B:
     default:
       adapter_id: stewy33/Qwen3-32B-0524_original_augmented_egregious_cake_bake-695ec2bb
+  llama33_70B_Instruct:
+    default:
+      adapter_id: stewy33/Llama-3.3-70B-Instruct-Reference-0524_original_augmented_egregious_cake_bake-4233eee3
