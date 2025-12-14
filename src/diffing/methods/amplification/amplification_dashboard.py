@@ -2408,7 +2408,7 @@ class AmplificationDashboard:
         else:
             for adapter_idx, adapter in enumerate(config.amplified_adapters):
                 self._render_adapter_amplification(
-                    config_id, adapter_idx, adapter, key_prefix
+                    config_id, adapter_idx, adapter, key_prefix, sidebar_mode
                 )
 
         if st.button("➕ Add Adapter", key=f"{key_prefix}add_adapter_{config_id}"):
@@ -2433,6 +2433,7 @@ class AmplificationDashboard:
         adapter_idx: int,
         adapter: AmplifiedAdapter,
         key_prefix: str = "",
+        sidebar_mode: bool = False,
     ) -> None:
         """Render one adapter's amplifications."""
         with st.container(border=True):
@@ -2549,7 +2550,7 @@ class AmplificationDashboard:
             else:
                 for layer_idx, layer_amp in enumerate(adapter.layer_amplifications):
                     self._render_layer_amplification(
-                        config_id, adapter_idx, layer_idx, layer_amp, key_prefix
+                        config_id, adapter_idx, layer_idx, layer_amp, key_prefix, sidebar_mode
                     )
 
             if st.button(
@@ -2570,6 +2571,7 @@ class AmplificationDashboard:
         layer_idx: int,
         layer_amp: LayerAmplification,
         key_prefix: str = "",
+        sidebar_mode: bool = False,
     ) -> None:
         """Render layer amplification specification."""
         base_key = f"{key_prefix}{config_id}_{adapter_idx}_{layer_idx}"
@@ -2679,8 +2681,11 @@ class AmplificationDashboard:
                 initial_mode_index = 1  # "Single"
             else:  # "all"
                 initial_mode_index = 0  # "All"
-
-            col_radio, col_checkbox = st.columns([4, 1])
+            if sidebar_mode:
+                col_radio = st.columns(1)[0]
+                col_relative = col_radio
+            else:
+                col_radio, col_relative = st.columns([4, 1])
             with col_radio:
                 layer_mode = st.radio(
                     "Layer Selection Mode",
@@ -2691,7 +2696,7 @@ class AmplificationDashboard:
                     on_change=on_mode_change,
                 )
 
-            with col_checkbox:
+            with col_relative:
                 use_relative = st.checkbox(
                     "Relative",
                     value=layer_amp.is_relative,
