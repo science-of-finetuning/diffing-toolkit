@@ -1744,12 +1744,9 @@ class AmplificationDashboard:
                                 st.rerun(scope="fragment")
                     else:
                         st.markdown(msg["content"])
-                        # Check if there's an assistant message following this user message
-                        has_next_assistant = (
-                            i + 1 < len(conv["history"])
-                            and conv["history"][i + 1]["role"] == "assistant"
+                        _, btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(
+                            [10, 1, 1, 1, 1]
                         )
-                        _, btn_col1, btn_col2, btn_col3 = st.columns([10, 1, 1, 1])
                         with btn_col1:
                             if st.button(
                                 "✏️",
@@ -1761,16 +1758,24 @@ class AmplificationDashboard:
                                 st.rerun(scope="fragment")
                         with btn_col2:
                             if st.button(
+                                "➕",
+                                key=f"continue_btn_user_{conv_id}_{i}",
+                                help="Continue this message",
+                                type="secondary",
+                            ):
+                                conv["continuing_from"] = i
+                                st.rerun(scope="app")
+                        with btn_col3:
+                            if st.button(
                                 "🔄",
                                 key=f"regen_btn_user_{conv_id}_{i}",
                                 help="Regenerate assistant response",
                                 type="secondary",
-                                disabled=not has_next_assistant,
                             ):
-                                # Regenerate the next assistant message
-                                conv["regenerating_from"] = i + 1
+                                # Store user message index - regeneration handler will generate response
+                                conv["regenerating_from_user"] = i
                                 st.rerun(scope="app")
-                        with btn_col3:
+                        with btn_col4:
                             if st.button(
                                 "🗑️",
                                 key=f"delete_btn_user_{conv_id}_{i}",
@@ -1860,7 +1865,8 @@ class AmplificationDashboard:
 
             sampling_params = self._get_sampling_params()
             use_multi_gen = (
-                st.session_state.get("chat_multi_gen", False) and sampling_params.n > 1
+                st.session_state.get(f"chat_multi_gen_{conv_id}", False)
+                and sampling_params.n > 1
             )
 
             managed_config = next(
@@ -1868,8 +1874,6 @@ class AmplificationDashboard:
                 for mc in st.session_state.managed_configs.values()
                 if mc.config.name == config.name
             )
-
-            config_label = f"[{config.name}]" if config else "[No Config]"
 
             if use_multi_gen:
                 with st.spinner(f"Regenerating {sampling_params.n} samples..."):
@@ -1904,20 +1908,17 @@ class AmplificationDashboard:
                     "mode": "replace",
                 }
                 self._save_conversation(conv_id, conv)
-                self._save_and_rerun(scope="fragment")
+                # No rerun needed - pending sample UI renders later in this same render
             else:
-                with st.chat_message("assistant"):
-                    st.write(f"**{config_label}**")
-                    with st.spinner("Regenerating..."):
-                        result = next(
-                            self._multi_gen_request(
-                                prompt=prompt,
-                                amplification_configs=[managed_config],
-                                sampling_params=sampling_params,
-                            )
+                with st.spinner("Regenerating..."):
+                    result = next(
+                        self._multi_gen_request(
+                            prompt=prompt,
+                            amplification_configs=[managed_config],
+                            sampling_params=sampling_params,
                         )
-                        response = result["results"][0]
-                    st.markdown(response)
+                    )
+                    response = result["results"][0]
 
                 if response:
                     conv["history"].append(
@@ -1943,8 +1944,105 @@ class AmplificationDashboard:
                         messages=self._get_messages_with_system_prompt(conv),
                         logs_dir=LOGS_DIR,
                     )
+                # No rerun needed - message list renders later in this same render
 
-                self._save_and_rerun(scope="fragment")
+        if conv.get("regenerating_from_user") is not None:
+            # todo check if really necessary and not duplicate
+            user_index = conv["regenerating_from_user"]
+            conv["regenerating_from_user"] = None
+
+            # Truncate history to include only messages up to and including this user message
+            conv["history"] = conv["history"][: user_index + 1]
+
+            # Build prompt for generation
+            messages = self._get_messages_with_system_prompt(conv)
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+            )
+
+            sampling_params = self._get_sampling_params()
+            use_multi_gen = (
+                st.session_state.get(f"chat_multi_gen_{conv_id}", False)
+                and sampling_params.n > 1
+            )
+
+            managed_config = next(
+                mc
+                for mc in st.session_state.managed_configs.values()
+                if mc.config.name == config.name
+            )
+
+            if use_multi_gen:
+                with st.spinner(f"Generating {sampling_params.n} samples..."):
+                    result = next(
+                        self._multi_gen_request(
+                            prompt=prompt,
+                            amplification_configs=[managed_config],
+                            sampling_params=sampling_params,
+                        )
+                    )
+
+                # Log chat regeneration
+                GenerationLog.from_dashboard_generation(
+                    generation_type="regenerate",
+                    model_id=self.method.base_model_cfg.model_id,
+                    prompt_text=self.tokenizer.decode(
+                        prompt, skip_special_tokens=False
+                    ),
+                    prompt_tokens=prompt,
+                    sampling_params=sampling_params,
+                    configs=[managed_config],
+                    results=[
+                        {"config_name": config.name, "outputs": result["results"]}
+                    ],
+                    messages=messages,
+                    logs_dir=LOGS_DIR,
+                )
+
+                st.session_state[pending_key] = {
+                    "samples": result["results"],
+                    "config_name": config.name if config else "No Config",
+                    "mode": "add",
+                }
+                self._save_conversation(conv_id, conv)
+                # No rerun needed - pending sample UI renders later in this same render
+            else:
+                with st.spinner("Generating..."):
+                    result = next(
+                        self._multi_gen_request(
+                            prompt=prompt,
+                            amplification_configs=[managed_config],
+                            sampling_params=sampling_params,
+                        )
+                    )
+                    response = result["results"][0]
+
+                if response:
+                    conv["history"].append(
+                        {
+                            "role": "assistant",
+                            "content": response,
+                            "config_name": config.name if config else "No Config",
+                        }
+                    )
+                    self._save_conversation(conv_id, conv)
+
+                    # Log chat generation
+                    GenerationLog.from_dashboard_generation(
+                        generation_type="regenerate",
+                        model_id=self.method.base_model_cfg.model_id,
+                        prompt_text=self.tokenizer.decode(
+                            prompt, skip_special_tokens=False
+                        ),
+                        prompt_tokens=prompt,
+                        sampling_params=sampling_params,
+                        configs=[managed_config],
+                        results=[{"config_name": config.name, "outputs": [response]}],
+                        messages=messages,
+                        logs_dir=LOGS_DIR,
+                    )
+                # No rerun needed - message list renders later in this same render
 
         if conv.get("continuing_from") is not None:
             continue_index = conv["continuing_from"]
@@ -1961,7 +2059,8 @@ class AmplificationDashboard:
 
             sampling_params = self._get_sampling_params()
             use_multi_gen = (
-                st.session_state.get("chat_multi_gen", False) and sampling_params.n > 1
+                st.session_state.get(f"chat_multi_gen_{conv_id}", False)
+                and sampling_params.n > 1
             )
 
             managed_config = next(
@@ -1969,8 +2068,6 @@ class AmplificationDashboard:
                 for mc in st.session_state.managed_configs.values()
                 if mc.config.name == config.name
             )
-
-            config_label = f"[{config.name}]" if config else "[No Config]"
 
             original_content = conv["history"][continue_index]["content"]
 
@@ -2013,20 +2110,17 @@ class AmplificationDashboard:
                     "target_index": continue_index,
                 }
                 self._save_conversation(conv_id, conv)
-                self._save_and_rerun(scope="fragment")
+                # No rerun needed - pending sample UI renders later in this same render
             else:
-                with st.chat_message("assistant"):
-                    st.write(f"**{config_label}** (continuing...)")
-                    with st.spinner("Continuing..."):
-                        result = next(
-                            self._multi_gen_request(
-                                prompt=prompt,
-                                amplification_configs=[managed_config],
-                                sampling_params=sampling_params,
-                            )
+                with st.spinner("Continuing..."):
+                    result = next(
+                        self._multi_gen_request(
+                            prompt=prompt,
+                            amplification_configs=[managed_config],
+                            sampling_params=sampling_params,
                         )
-                        continuation = result["results"][0]
-                    st.markdown(original_content + continuation)
+                    )
+                    continuation = result["results"][0]
 
                 if continuation:
                     full_content = original_content + continuation
@@ -2049,8 +2143,7 @@ class AmplificationDashboard:
                         messages=messages,
                         logs_dir=LOGS_DIR,
                     )
-
-                self._save_and_rerun(scope="fragment")
+                # No rerun needed - message list renders later in this same render
 
         col1, col2, col3 = st.columns([3, 1, 1])
 
@@ -2166,9 +2259,9 @@ class AmplificationDashboard:
             help="When enabled, your next message will be sent to Multi-Generation instead of this chat",
         )
 
-        st.session_state.chat_multi_gen = st.toggle(
+        st.toggle(
             "Multi-gen in Chat",
-            value=st.session_state.get("chat_multi_gen", False),
+            value=st.session_state.get(f"chat_multi_gen_{conv_id}", False),
             help="When enabled and Num Samples > 1, show all samples and let you select one",
             disabled=send_to_multi_gen,
             key=f"chat_multi_gen_{conv_id}",
@@ -2213,7 +2306,7 @@ class AmplificationDashboard:
 
                 sampling_params = self._get_sampling_params()
                 use_multi_gen = (
-                    st.session_state.get("chat_multi_gen", False)
+                    st.session_state.get(f"chat_multi_gen_{conv_id}", False)
                     and sampling_params.n > 1
                 )
 
@@ -2388,6 +2481,10 @@ class AmplificationDashboard:
             )
 
         active_key = f"{key_prefix}config_active_{config_id}"
+
+        # Sync session state with data model (handles bulk enable/disable)
+        if active_key in st.session_state and st.session_state[active_key] != mc.active:
+            st.session_state[active_key] = mc.active
 
         def on_active_change(managed_config=mc, key=active_key):
             managed_config.active = st.session_state[key]
@@ -2995,6 +3092,10 @@ class AmplificationDashboard:
 
             # Active checkbox - in same fragment as expander so title updates
             active_key = f"prompt_active_{prompt_id}"
+
+            # Sync session state with data model (handles bulk enable/disable)
+            if active_key in st.session_state and st.session_state[active_key] != mp.active:
+                st.session_state[active_key] = mp.active
 
             def on_active_change(prompt=mp, key=active_key):
                 prompt.active = st.session_state[key]
