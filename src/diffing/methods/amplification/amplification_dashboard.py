@@ -839,7 +839,7 @@ class AmplificationDashboard:
                 return
 
             # Build options: name -> config_id mapping
-            config_options = {mc.config.name: cid for cid, mc in active_configs.items()}
+            config_options = {mc.full_name: cid for cid, mc in active_configs.items()}
             option_names = list(config_options.keys())
 
             # Initialize sidebar selection state if needed
@@ -850,7 +850,7 @@ class AmplificationDashboard:
             current_id = st.session_state.sidebar_quick_edit_config_id
             current_name = None
             if current_id and current_id in active_configs:
-                current_name = active_configs[current_id].config.name
+                current_name = active_configs[current_id].full_name
 
             # Determine initial index
             if current_name and current_name in option_names:
@@ -1292,7 +1292,7 @@ class AmplificationDashboard:
                     placeholder = st.empty()
                     with placeholder.container():
                         with st.expander(
-                            f"⏳ ({idx + 1}) {mc.config.name}", expanded=True
+                            f"⏳ ({idx + 1}) {mc.full_name}", expanded=True
                         ):
                             st.info("Waiting for generation...")
                     placeholders.append(placeholder)
@@ -1378,7 +1378,7 @@ class AmplificationDashboard:
     ) -> None:
         """Render a single result card with sample cycling."""
         num_samples = len(result_data["results"])
-        formatted_title = f"({idx + 1}) {result_data['config'].name}"
+        formatted_title = f"({idx + 1}) {result_data['config'].full_name}"
         key_suffix = "_disabled" if disabled else ""
 
         with st.expander(formatted_title, expanded=True):
@@ -1614,10 +1614,12 @@ class AmplificationDashboard:
                         for i, s in enumerate(result_data["results"])
                     )
                     download_data = all_samples_text
-                    download_filename = f"{result_data['config'].name.replace(' ', '_')}_all_samples.txt"
+                    safe_name = result_data["config"].full_name.replace("/", "_").replace(" ", "_")
+                    download_filename = f"{safe_name}_all_samples.txt"
                 else:
                     download_data = current_result
-                    download_filename = f"{result_data['config'].name.replace(' ', '_')}_sample{effective_idx + 1}.txt"
+                    safe_name = result_data["config"].full_name.replace("/", "_").replace(" ", "_")
+                    download_filename = f"{safe_name}_sample{effective_idx + 1}.txt"
 
                 st.download_button(
                     label="📥 Download",
@@ -3019,7 +3021,7 @@ class AmplificationDashboard:
 
         # Config display selector - always visible, shows active configs
         all_config_ids = [mc.config_id for mc in active_configs]
-        config_names = {mc.config_id: mc.config.name for mc in active_configs}
+        config_names = {mc.config_id: mc.full_name for mc in active_configs}
 
         # Initialize display selection if empty or invalid (only modify BEFORE widget renders)
         current_selection = st.session_state.multi_prompt_display_configs
@@ -3336,7 +3338,7 @@ class AmplificationDashboard:
                     placeholders[prompt_idx] = {}
                     for col_idx, mc in enumerate(selected_configs):
                         with cols[col_idx]:
-                            st.write(f"**{mc.config.name}**")
+                            st.write(f"**{mc.full_name}**")
                             placeholder = st.empty()
                             with placeholder.container():
                                 st.info("Waiting for generation...")
@@ -3446,7 +3448,7 @@ class AmplificationDashboard:
             return
 
         config_names = {
-            cid: config_results[cid]["config"].config.name
+            cid: config_results[cid]["config"].full_name
             for cid in all_result_config_ids
         }
 
