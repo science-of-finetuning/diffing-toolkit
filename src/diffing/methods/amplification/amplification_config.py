@@ -518,7 +518,7 @@ def patch_lora_weights(
     Returns: a tuple of the dictionary of amplified modules with their weights and the list of unamplified module names.
     """
     if len(compiled_amplifications) == 0:
-        return dict()
+        return dict(), list(weights.keys())
     elif len(compiled_amplifications) > 1:
         raise NotImplementedError(
             "Multiple compiled amplifications are not supported yet"
