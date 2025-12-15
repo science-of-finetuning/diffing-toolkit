@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 import yaml
 from nnterp import StandardizedTransformer
+from pathvalidate import sanitize_filename
 
 from src.diffing.methods.amplification.amplification_config import AmplificationConfig
 from src.utils.data import dump_yaml_multiline, codenamize_hash
@@ -56,7 +57,7 @@ class ManagedConfig(DashboardItem):
     """Amplification config with dashboard state."""
 
     config: AmplificationConfig = None
-    folder: str = ""  # Relative path from CONFIGS_DIR (empty string = root)
+    folder: str | None = None  # Relative path from CONFIGS_DIR (None = root)
     config_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     _last_compiled_hash: str | None = field(default=None, init=False)
     _lora_int_id: int = field(default=-1, init=False)
@@ -89,6 +90,13 @@ class ManagedConfig(DashboardItem):
             self._last_compiled_hash = value
             self._update_lora_int_id()
 
+    @property
+    def full_name(self) -> str:
+        """Get the full name including folder prefix for uniqueness."""
+        if self.folder:
+            return f"{self.folder}/{self.config.name}"
+        return self.config.name
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize both UI state and config."""
         result = self.to_ui_dict()
@@ -111,7 +119,7 @@ class ManagedConfig(DashboardItem):
 
         return ManagedConfig(
             config=config,
-            folder=data.get("folder", ""),
+            folder=data.get("folder") or None,  # Convert empty string to None
             config_id=config_id,
             **ui_fields,
         )
@@ -122,7 +130,7 @@ class ManagedConfig(DashboardItem):
         active: bool = True,
         expanded: bool = True,
         ui_order: int = 0,
-        folder: str = "",
+        folder: str | None = None,
     ) -> "ManagedConfig":
         """Create from a pure config (e.g., when loading external config)."""
         return ManagedConfig(
@@ -171,7 +179,7 @@ class ManagedPrompt(DashboardItem):
     # Chat mode fields
     messages: list[dict] = field(default_factory=list)
 
-    folder: str = ""
+    folder: str | None = None  # Relative path from PROMPTS_DIR (None = root)
 
     def __post_init__(self):
         if not self.prompt_id:
@@ -186,6 +194,14 @@ class ManagedPrompt(DashboardItem):
         else:
             text = self.messages[0]["content"] if self.messages else ""
         return (text[:50] + "...") if len(text) > 50 else text
+
+    @property
+    def full_name(self) -> str:
+        """Get the full name including folder prefix for uniqueness."""
+        display_name = self.get_display_name()
+        if self.folder:
+            return f"{self.folder}/{display_name}"
+        return display_name
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize both UI state and prompt data."""
@@ -235,7 +251,7 @@ class ManagedPrompt(DashboardItem):
             assistant_prefill=data.get("assistant_prefill", ""),
             loom_filename=data.get("loom_filename", "untitled.txt"),
             messages=data.get("messages", []),
-            folder=data.get("folder", ""),
+            folder=data.get("folder") or None,  # Convert empty string to None
             **ui_fields,
         )
 
@@ -277,15 +293,17 @@ class DashboardSession:
 
 def sanitize_config_name(name: str) -> str:
     """
-    Sanitize a config name so it can be used as both display text and filename.
+    Sanitize a config name so it can be used as a filename.
+
+    Uses pathvalidate for cross-platform filename sanitization.
 
     Args:
         name: Desired config name input by the user
 
     Returns:
-        Sanitized name containing only safe characters
+        Sanitized name safe for use as a filename
     """
-    sanitized = re.sub(r"[^a-zA-Z0-9_\- ]+", "_", name).strip()
+    sanitized = sanitize_filename(name, replacement_text="_").strip()
     sanitized = re.sub(r"\s+", " ", sanitized)
     return sanitized or "config"
 
@@ -318,7 +336,7 @@ UI_STATE_FILENAME = "_ui_state.yaml"
 def save_configs_to_folder(
     managed_configs: dict[str, ManagedConfig],
     configs_dir: Path,
-    folder: str,
+    folder: str | None,
     deleted_names: set[str] | None = None,
 ) -> None:
     """
@@ -327,7 +345,7 @@ def save_configs_to_folder(
     Args:
         managed_configs: Dict of config_id -> ManagedConfig (all configs)
         configs_dir: Base configs directory
-        folder: Relative folder path (empty string for root)
+        folder: Relative folder path (None for root)
         deleted_names: Set of config names that were explicitly deleted (only these get moved to removed/)
     """
     folder_path = configs_dir / folder if folder else configs_dir
@@ -388,7 +406,7 @@ def save_configs_to_cache(
 
 def load_configs_from_folder(
     configs_dir: Path,
-    folder: str,
+    folder: str | None,
     existing_names: set[str] | None = None,
 ) -> dict[str, ManagedConfig]:
     """
@@ -396,8 +414,8 @@ def load_configs_from_folder(
 
     Args:
         configs_dir: Base configs directory
-        folder: Relative folder path (empty string for root)
-        existing_names: Optional set of existing names to avoid duplicates
+        folder: Relative folder path (None for root)
+        existing_names: Optional set of existing full names (folder/name) to avoid duplicates
 
     Returns:
         Dict of config_id -> ManagedConfig
@@ -420,10 +438,18 @@ def load_configs_from_folder(
             continue
         loaded_config = AmplificationConfig.load_yaml(config_file)
         original_name = loaded_config.name
-        loaded_config.name = get_unique_name(
-            sanitize_config_name(loaded_config.name), existing_names
-        )
-        existing_names.add(loaded_config.name)
+
+        # Build full name for uniqueness check (folder/name or just name for root)
+        base_name = sanitize_config_name(loaded_config.name)
+        full_name = f"{folder}/{base_name}" if folder else base_name
+        unique_full = get_unique_name(full_name, existing_names)
+
+        # Extract the base name (without folder prefix)
+        if folder and unique_full.startswith(f"{folder}/"):
+            loaded_config.name = unique_full[len(folder) + 1 :]
+        else:
+            loaded_config.name = unique_full
+        existing_names.add(unique_full)  # Store full name for future checks
 
         config_ui_state = ui_state.get(original_name, {})
         active = config_ui_state.get("active", True)
@@ -456,13 +482,13 @@ def load_configs_from_cache(
     Returns:
         Dict of config_id -> ManagedConfig
     """
-    return load_configs_from_folder(configs_dir, "", existing_names)
+    return load_configs_from_folder(configs_dir, None, existing_names)
 
 
 # ============ Folder Utility Functions ============
 
 
-def list_all_folders(configs_dir: Path) -> list[str]:
+def list_all_folders(configs_dir: Path) -> list[str | None]:
     """
     List all available folder paths recursively.
 
@@ -470,9 +496,9 @@ def list_all_folders(configs_dir: Path) -> list[str]:
         configs_dir: Base configs directory
 
     Returns:
-        List of relative folder paths (empty string for root, then nested paths)
+        List of relative folder paths (None for root, then nested paths)
     """
-    folders = [""]  # Root folder
+    folders: list[str | None] = [None]  # Root folder
     if not configs_dir.exists():
         return folders
 
@@ -503,14 +529,14 @@ def create_folder(configs_dir: Path, folder_path: str) -> Path:
 
 def unload_folder_configs(
     managed_configs: dict[str, ManagedConfig],
-    folder: str,
+    folder: str | None,
 ) -> dict[str, ManagedConfig]:
     """
     Remove configs belonging to a specific folder from the managed configs dict.
 
     Args:
         managed_configs: Dict of config_id -> ManagedConfig
-        folder: Folder to unload
+        folder: Folder to unload (None for root)
 
     Returns:
         New dict with folder's configs removed
@@ -524,7 +550,7 @@ def unload_folder_configs(
 def save_prompts_to_folder(
     managed_prompts: dict[str, ManagedPrompt],
     prompts_dir: Path,
-    folder: str,
+    folder: str | None,
     deleted_names: set[str] | None = None,
 ) -> None:
     """Save prompts belonging to a specific folder.
@@ -532,7 +558,7 @@ def save_prompts_to_folder(
     Args:
         managed_prompts: Dict of prompt_id -> ManagedPrompt (all prompts)
         prompts_dir: Base prompts directory
-        folder: Relative folder path (empty string for root)
+        folder: Relative folder path (None for root)
         deleted_names: Set of prompt display names that were explicitly deleted (only these get moved to removed/)
     """
     folder_path = prompts_dir / folder if folder else prompts_dir
@@ -595,7 +621,7 @@ def save_prompts_to_cache(
 
 def load_prompts_from_folder(
     prompts_dir: Path,
-    folder: str,
+    folder: str | None,
     existing_names: set[str] | None = None,
 ) -> dict[str, ManagedPrompt]:
     """Load prompts from a specific folder."""
@@ -623,20 +649,20 @@ def load_prompts_from_cache(
     existing_names: set[str] | None = None,
 ) -> dict[str, ManagedPrompt]:
     """Load prompts from root folder only."""
-    return load_prompts_from_folder(prompts_dir, "", existing_names)
+    return load_prompts_from_folder(prompts_dir, None, existing_names)
 
 
 def unload_folder_prompts(
     managed_prompts: dict[str, ManagedPrompt],
-    folder: str,
+    folder: str | None,
 ) -> dict[str, ManagedPrompt]:
-    """Remove prompts belonging to a specific folder."""
+    """Remove prompts belonging to a specific folder (None for root)."""
     return {pid: mp for pid, mp in managed_prompts.items() if mp.folder != folder}
 
 
-def list_all_prompt_folders(prompts_dir: Path) -> list[str]:
+def list_all_prompt_folders(prompts_dir: Path) -> list[str | None]:
     """List all available prompt folder paths recursively."""
-    folders = [""]
+    folders: list[str | None] = [None]
     if not prompts_dir.exists():
         return folders
 
@@ -719,7 +745,9 @@ def load_multigen_state(state_file: Path) -> dict:
 
 
 def save_loaded_folders(
-    state_file: Path, loaded_folders: set[str], loaded_prompt_folders: set[str]
+    state_file: Path,
+    loaded_folders: set[str | None],
+    loaded_prompt_folders: set[str | None],
 ) -> None:
     """Save loaded folders state to cache file."""
     state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -733,7 +761,7 @@ def save_loaded_folders(
 
 def load_loaded_folders(
     state_file: Path, configs_dir: Path | None = None, prompts_dir: Path | None = None
-) -> tuple[set[str], set[str]]:
+) -> tuple[set[str | None], set[str | None]]:
     """Load loaded folders state from cache file, filtering out non-existent folders.
 
     Args:
@@ -744,25 +772,31 @@ def load_loaded_folders(
     Returns:
         Tuple of (config folders set, prompt folders set) - only existing folders
     """
-    default_folders = {""}  # Root folder
+    default_folders: set[str | None] = {None}  # Root folder
     if not state_file.exists():
         return default_folders, default_folders
 
     with open(state_file) as f:
         state = yaml.safe_load(f) or {}
 
-    loaded_folders = set(state.get("loaded_folders", [""]))
-    loaded_prompt_folders = set(state.get("loaded_prompt_folders", [""]))
+    # Convert empty strings to None for root folder (backwards compatibility)
+    def normalize_folders(folder_list: list) -> set[str | None]:
+        return {f if f else None for f in folder_list}
+
+    loaded_folders = normalize_folders(state.get("loaded_folders", [None]))
+    loaded_prompt_folders = normalize_folders(
+        state.get("loaded_prompt_folders", [None])
+    )
 
     # Ensure at least root is included if empty
     if not loaded_folders:
-        loaded_folders = {""}
+        loaded_folders = {None}
     if not loaded_prompt_folders:
-        loaded_prompt_folders = {""}
+        loaded_prompt_folders = {None}
 
     # Filter out non-existent folders
     if configs_dir:
-        existing_config_folders = set()
+        existing_config_folders: set[str | None] = set()
         for folder in loaded_folders:
             folder_path = configs_dir / folder if folder else configs_dir
             if folder_path.exists():
@@ -770,7 +804,7 @@ def load_loaded_folders(
         loaded_folders = existing_config_folders
 
     if prompts_dir:
-        existing_prompt_folders = set()
+        existing_prompt_folders: set[str | None] = set()
         for folder in loaded_prompt_folders:
             folder_path = prompts_dir / folder if folder else prompts_dir
             if folder_path.exists():
@@ -779,8 +813,10 @@ def load_loaded_folders(
 
     # Update state file if any folders were filtered out
     if configs_dir or prompts_dir:
-        original_config_folders = set(state.get("loaded_folders", [""]))
-        original_prompt_folders = set(state.get("loaded_prompt_folders", [""]))
+        original_config_folders = normalize_folders(state.get("loaded_folders", [None]))
+        original_prompt_folders = normalize_folders(
+            state.get("loaded_prompt_folders", [None])
+        )
 
         if (
             loaded_folders != original_config_folders

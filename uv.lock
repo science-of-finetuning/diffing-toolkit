@@ -265,15 +265,15 @@ wheels = [
 
 [[package]]
 name = "beautifulsoup4"
-version = "4.14.2"
+version = "4.14.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "soupsieve" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/77/e9/df2358efd7659577435e2177bfa69cba6c33216681af51a707193dec162a/beautifulsoup4-4.14.2.tar.gz", hash = "sha256:2a98ab9f944a11acee9cc848508ec28d9228abfd522ef0fad6a02a72e0ded69e", size = 625822, upload-time = "2025-09-29T10:05:42.613Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b0/1c6a16426d389813b48d95e26898aff79abbde42ad353958ad95cc8c9b21/beautifulsoup4-4.14.3.tar.gz", hash = "sha256:6292b1c5186d356bba669ef9f7f051757099565ad9ada5dd630bd9de5fa7fb86", size = 627737, upload-time = "2025-11-30T15:08:26.084Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/fe/3aed5d0be4d404d12d36ab97e2f1791424d9ca39c2f754a6285d59a3b01d/beautifulsoup4-4.14.2-py3-none-any.whl", hash = "sha256:5ef6fa3a8cbece8488d66985560f97ed091e22bbc4e9c2338508a9d5de6d4515", size = 106392, upload-time = "2025-09-29T10:05:43.771Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/39/47f9197bdd44df24d67ac8893641e16f386c984a0619ef2ee4c51fbbc019/beautifulsoup4-4.14.3-py3-none-any.whl", hash = "sha256:0918bfe44902e6ad8d57732ba310582e98da931428d231a5ecb9e7c703a735bb", size = 107721, upload-time = "2025-11-30T15:08:24.087Z" },
 ]
 
 [[package]]
@@ -865,7 +865,6 @@ dependencies = [
     { name = "coolname" },
     { name = "datasets" },
     { name = "dictionary-learning" },
-    { name = "gdown" },
     { name = "hydra-core" },
     { name = "loguru" },
     { name = "matplotlib" },
@@ -875,15 +874,16 @@ dependencies = [
     { name = "omegaconf" },
     { name = "openai" },
     { name = "pandas" },
+    { name = "pathvalidate" },
     { name = "peft" },
     { name = "scipy" },
-    { name = "seaborn" },
     { name = "streamlit" },
     { name = "tiny-dashboard" },
     { name = "torch" },
     { name = "torchdr" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "vllm" },
     { name = "wandb" },
 ]
 
@@ -895,8 +895,9 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
 ]
-vllm = [
-    { name = "vllm" },
+scripts = [
+    { name = "gdown" },
+    { name = "seaborn" },
 ]
 
 [package.metadata]
@@ -907,7 +908,7 @@ requires-dist = [
     { name = "coolname", specifier = ">=2.2.0" },
     { name = "datasets", specifier = ">=4.4.0" },
     { name = "dictionary-learning", git = "https://github.com/science-of-finetuning/dictionary_learning.git" },
-    { name = "gdown", specifier = ">=5.2.0" },
+    { name = "gdown", marker = "extra == 'scripts'", specifier = ">=5.2.0" },
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "ipywidgets", marker = "extra == 'dev'", specifier = ">=8.1.8" },
@@ -919,21 +920,22 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "openai", specifier = ">=2.7.1" },
     { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pathvalidate", specifier = ">=3.3.1" },
     { name = "peft", specifier = "==0.16.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.2" },
     { name = "scipy", specifier = ">=1.16.3" },
-    { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "seaborn", marker = "extra == 'scripts'", specifier = ">=0.13.2" },
     { name = "streamlit", specifier = ">=1.51.0" },
     { name = "tiny-dashboard", git = "https://github.com/Butanium/tiny-activation-dashboard.git" },
     { name = "torch", specifier = ">=2.7.0" },
     { name = "torchdr", specifier = ">=0.3" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "transformers", specifier = ">=4.53.0" },
-    { name = "vllm", marker = "extra == 'vllm'", specifier = ">=0.11.1" },
+    { name = "vllm", specifier = ">=0.11.1" },
     { name = "wandb", specifier = ">=0.22.3" },
 ]
-provides-extras = ["dev", "vllm"]
+provides-extras = ["dev", "scripts"]
 
 [[package]]
 name = "dill"
@@ -2840,6 +2842,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ca/bc/f35b8446f4531a7cb215605d100cd88b7ac6f44ab3fc94870c120ab3adbf/pathspec-0.12.1.tar.gz", hash = "sha256:a482d51503a1ab33b1c67a6c3813a26953dbdc71c31dacaef9a838c4e29f5712", size = 51043, upload-time = "2023-12-10T22:30:45Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/20/ff623b09d963f88bfde16306a54e12ee5ea43e9b597108672ff3a408aad6/pathspec-0.12.1-py3-none-any.whl", hash = "sha256:a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08", size = 31191, upload-time = "2023-12-10T22:30:43.14Z" },
+]
+
+[[package]]
+name = "pathvalidate"
+version = "3.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/2a/52a8da6fe965dea6192eb716b357558e103aea0a1e9a8352ad575a8406ca/pathvalidate-3.3.1.tar.gz", hash = "sha256:b18c07212bfead624345bb8e1d6141cdcf15a39736994ea0b94035ad2b1ba177", size = 63262, upload-time = "2025-06-15T09:07:20.736Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/70/875f4a23bfc4731703a5835487d0d2fb999031bd415e7d17c0ae615c18b7/pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f", size = 24305, upload-time = "2025-06-15T09:07:19.117Z" },
 ]
 
 [[package]]

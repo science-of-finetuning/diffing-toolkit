@@ -25,7 +25,6 @@ from safetensors.torch import save_file
 
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
-from src.utils.vllm import ensure_vllm
 
 
 class AmplificationSpecification(ABC):
@@ -549,7 +548,6 @@ def patch_lora_weights(
     return amplified_modules, unamplified_modules
 
 
-@ensure_vllm
 def patch_vllm():
     """Patch vLLM's LoRA loading to apply amplification weights."""
     from vllm.lora.models import LoRAModel

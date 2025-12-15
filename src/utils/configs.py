@@ -19,6 +19,8 @@ def _get_all_models_with_none() -> dict[str, dict[str, None]]:
     models = {}
     for yaml_file in model_dir.glob("*.yaml"):
         model_name = yaml_file.stem
+        if model_name == "auto":
+            continue
         models[model_name] = {"default": {"model_id": "none"}}
     return models
 

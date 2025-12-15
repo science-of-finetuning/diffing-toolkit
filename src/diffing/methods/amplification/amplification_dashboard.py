@@ -20,7 +20,6 @@ from src.utils.configs import (
 )
 from src.utils.vllm import (
     LLM,
-    ensure_vllm,
     SamplingParams,
     cleanup_dist_env_and_memory,
     kill_vllm_process,
@@ -198,7 +197,6 @@ class AmplificationDashboard:
         return self.method.tokenizer
 
     @property
-    @ensure_vllm
     def multi_lora_vllm_server(self) -> LLM:
         """Get or create the vLLM server, reloading if config changed."""
         self._auto_update_inference_config()
@@ -365,10 +363,10 @@ class AmplificationDashboard:
             )
         )
 
-    def _create_new_config(self, folder: str) -> ManagedConfig:
+    def _create_new_config(self, folder: str | None) -> ManagedConfig:
         """Create a new amplification config in the given folder."""
         base_name = f"Config {len(st.session_state.managed_configs) + 1}"
-        unique_name = self._get_unique_config_name(base_name)
+        unique_name = self._get_unique_config_name(base_name, folder)
         new_config = AmplificationConfig(
             name=unique_name,
             description="",
@@ -378,7 +376,7 @@ class AmplificationDashboard:
             new_config, active=True, expanded=True, folder=folder
         )
 
-    def _create_new_prompt(self, folder: str) -> ManagedPrompt:
+    def _create_new_prompt(self, folder: str | None) -> ManagedPrompt:
         """Create a new prompt in the given folder."""
         return ManagedPrompt(active=True, expanded=True, folder=folder)
 
@@ -389,7 +387,9 @@ class AmplificationDashboard:
             if st.button("📋", key=f"dup_{config_id}", help="Duplicate"):
                 config = mc.config
                 new_config = deepcopy(config)
-                new_config.name = self._get_unique_config_name(f"{config.name} copy")
+                new_config.name = self._get_unique_config_name(
+                    f"{config.name} copy", mc.folder
+                )
                 new_managed = ManagedConfig.from_config(
                     new_config,
                     active=mc.active,
@@ -508,15 +508,25 @@ class AmplificationDashboard:
             st.session_state.conversation_counter = max_conv_num + 1
 
     def _get_unique_config_name(
-        self, desired_name: str, exclude_config_id: str = None
+        self,
+        desired_name: str,
+        folder: str | None = None,
+        exclude_config_id: str = None,
     ) -> str:
-        """Get a unique configuration name."""
+        """Get a unique configuration name within folder context."""
         sanitized_name = sanitize_config_name(desired_name)
         existing_names = set()
         for config_id, mc in st.session_state.managed_configs.items():
             if exclude_config_id is None or config_id != exclude_config_id:
-                existing_names.add(mc.config.name)
-        return get_unique_name(sanitized_name, existing_names)
+                existing_names.add(mc.full_name)
+
+        desired_full = f"{folder}/{sanitized_name}" if folder else sanitized_name
+        unique_full = get_unique_name(desired_full, existing_names)
+
+        # Extract just the name part (remove folder prefix if present)
+        if folder and unique_full.startswith(f"{folder}/"):
+            return unique_full[len(folder) + 1 :]
+        return unique_full
 
     def _get_unique_conversation_name(
         self, desired_name: str, exclude_conv_id: str = None
@@ -2447,12 +2457,14 @@ class AmplificationDashboard:
             # Name input (dup/delete buttons moved to folder section list level)
             name_key = f"{key_prefix}config_name_{config_id}"
 
-            def on_name_change(cfg=config, cid=config_id, key=name_key, managed_config=mc):
+            def on_name_change(
+                cfg=config, cid=config_id, key=name_key, managed_config=mc
+            ):
                 new_name = st.session_state[key]
                 if new_name != cfg.name:
                     old_name = cfg.name
                     unique_name = self._get_unique_config_name(
-                        new_name, exclude_config_id=cid
+                        new_name, managed_config.folder, exclude_config_id=cid
                     )
                     st.session_state.managed_configs[cid].config.name = unique_name
                     # Delete the old file by passing it as a deleted config
@@ -2642,13 +2654,15 @@ class AmplificationDashboard:
 
             st.markdown("**Layer Specifications**")
 
-            if len(adapter.layer_amplifications) == 0:
-                st.info("No layer specifications. Click 'Add Layer Spec' below.")
-            else:
-                for layer_idx, layer_amp in enumerate(adapter.layer_amplifications):
-                    self._render_layer_amplification(
-                        config_id, adapter_idx, layer_idx, layer_amp, key_prefix, sidebar_mode
-                    )
+            for layer_idx, layer_amp in enumerate(adapter.layer_amplifications):
+                self._render_layer_amplification(
+                    config_id,
+                    adapter_idx,
+                    layer_idx,
+                    layer_amp,
+                    key_prefix,
+                    sidebar_mode,
+                )
 
             if st.button(
                 "➕ Add Layer Spec",
@@ -2656,7 +2670,9 @@ class AmplificationDashboard:
             ):
                 new_layer_amp = LayerAmplification(
                     layers="all",
-                    module_amplifications=[],
+                    module_amplifications=[
+                        ModuleAmplification(modules="all", weight=1.0)
+                    ],
                 )
                 adapter.layer_amplifications.append(new_layer_amp)
                 self._save_and_rerun(scope="fragment")
@@ -2861,7 +2877,7 @@ class AmplificationDashboard:
                     abs_start = round(range_start * (num_layers - 1))
                     abs_end = round(range_end * (num_layers - 1))
                     st.info(
-                        f"Applies to layers {abs_start} through {abs_end} ({abs_end - abs_start + 1} layers for this model)"
+                        f"Applies to layers {abs_start} through {abs_end}/{num_layers - 1}"
                     )
                 else:
                     layer_range = st.slider(
@@ -2875,7 +2891,7 @@ class AmplificationDashboard:
                     )
                     range_start, range_end = layer_range
                     st.info(
-                        f"Applies to layers {range_start} through {range_end} ({range_end - range_start + 1} layers)"
+                        f"Applies to layers {range_start} through {range_end}/{num_layers - 1}"
                     )
 
             else:  # List
@@ -3094,7 +3110,10 @@ class AmplificationDashboard:
             active_key = f"prompt_active_{prompt_id}"
 
             # Sync session state with data model (handles bulk enable/disable)
-            if active_key in st.session_state and st.session_state[active_key] != mp.active:
+            if (
+                active_key in st.session_state
+                and st.session_state[active_key] != mp.active
+            ):
                 st.session_state[active_key] = mp.active
 
             def on_active_change(prompt=mp, key=active_key):

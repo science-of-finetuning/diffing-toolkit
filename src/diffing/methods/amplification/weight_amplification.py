@@ -12,7 +12,6 @@ from collections import defaultdict
 from src.utils.configs import CONFIGS_DIR
 from src.utils.vllm import (
     LLM,
-    ensure_vllm,
     LoRARequest,
     SamplingParams,
     TokensPrompt,
@@ -144,7 +143,6 @@ class WeightDifferenceAmplification(DiffingMethod):
         )
 
     @property
-    @ensure_vllm
     def multi_lora_vllm_server(self) -> LLM:
         """
         Lazy-loaded vLLM server for standalone (non-dashboard) usage.

@@ -14,13 +14,13 @@ import streamlit as st
 T = TypeVar("T")
 
 
-def list_subfolders(base_dir: Path) -> list[str]:
+def list_subfolders(base_dir: Path) -> list[str | None]:
     """
     List all available folder paths recursively under base_dir.
 
-    Returns list of relative folder paths (empty string for root, then nested paths).
+    Returns list of relative folder paths (None for root, then nested paths).
     """
-    folders = [""]
+    folders: list[str | None] = [None]
     if not base_dir.exists():
         return folders
 
@@ -42,11 +42,11 @@ class FolderManagerConfig(Generic[T]):
     item_type_label: str  # "config" or "prompt" - used in UI labels
     widget_key_prefix: str  # prefix for widget keys to avoid collisions
 
-    load_from_folder: Callable[[Path, str], dict[str, T]]
-    save_to_folder: Callable[[dict[str, T], Path, str], None]
-    unload_folder: Callable[[dict[str, T], str], dict[str, T]]
-    create_new_item: Callable[[str], T]  # folder -> new item
-    get_item_folder: Callable[[T], str]  # item -> folder
+    load_from_folder: Callable[[Path, str | None], dict[str, T]]
+    save_to_folder: Callable[[dict[str, T], Path, str | None], None]
+    unload_folder: Callable[[dict[str, T], str | None], dict[str, T]]
+    create_new_item: Callable[[str | None], T]  # folder -> new item
+    get_item_folder: Callable[[T], str | None]  # item -> folder
 
     save_loaded_folders: Callable[[], None]
     save_items: Callable[[], None]
@@ -65,7 +65,7 @@ class FolderManagerUI(Generic[T]):
         self.cfg = config
 
     @property
-    def _loaded_folders(self) -> set[str]:
+    def _loaded_folders(self) -> set[str | None]:
         return st.session_state[self.cfg.loaded_folders_key]
 
     @property
@@ -84,7 +84,7 @@ class FolderManagerUI(Generic[T]):
         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
         with col1:
-            folder_display = {f: "Root" if f == "" else f for f in available_to_load}
+            folder_display = {f: "Root" if f is None else f for f in available_to_load}
             if available_to_load:
                 selected_folder = st.selectbox(
                     "Available Folders",
@@ -173,7 +173,7 @@ class FolderManagerUI(Generic[T]):
 
     def render_folder_section(
         self,
-        folder: str,
+        folder: str | None,
         render_item: Callable[[str, T], None],
         render_item_actions: Callable[[str, T], None] | None = None,
     ) -> None:
@@ -181,11 +181,11 @@ class FolderManagerUI(Generic[T]):
         Render a folder section with its items.
 
         Args:
-            folder: Folder path to render
+            folder: Folder path to render (None for root)
             render_item: Callback to render a single item (item_id, item) -> None
             render_item_actions: Optional callback for item action buttons (item_id, item) -> None
         """
-        folder_display = "Root" if folder == "" else folder
+        folder_display = "Root" if folder is None else folder
         folder_items = {
             item_id: item
             for item_id, item in self._items.items()
@@ -307,5 +307,8 @@ class FolderManagerUI(Generic[T]):
                 f"No folders loaded. Select a folder above to load {self.cfg.item_type_label}s."
             )
         else:
-            for folder in sorted(self._loaded_folders):
+            # Sort folders with None (root) first, then alphabetically
+            for folder in sorted(
+                self._loaded_folders, key=lambda f: ("" if f is None else f"\x01{f}")
+            ):
                 self.render_folder_section(folder, render_item, render_item_actions)
