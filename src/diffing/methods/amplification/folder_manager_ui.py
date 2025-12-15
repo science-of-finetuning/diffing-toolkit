@@ -125,6 +125,11 @@ class FolderManagerUI(Generic[T]):
                 help="Reload all loaded folders from disk",
             ):
                 for folder in list(self._loaded_folders):
+                    # todo: double check
+                    # First unload existing items from this folder to avoid duplicates
+                    updated_items = self.cfg.unload_folder(self._items, folder)
+                    st.session_state[self.cfg.items_key] = updated_items
+                    # Then load fresh items from disk
                     loaded_items = self.cfg.load_from_folder(self.cfg.base_dir, folder)
                     self._items.update(loaded_items)
                 st.rerun(scope="app")
