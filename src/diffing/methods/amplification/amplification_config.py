@@ -333,7 +333,11 @@ class AmplificationConfig:
         )
 
     def compile(
-        self, base_dir: Path, base_model_name: str, base_model: StandardizedTransformer
+        self,
+        base_dir: Path,
+        base_model_name: str,
+        base_model: StandardizedTransformer,
+        output_name: str | None = None,
     ) -> tuple[Path | None, str | None]:
         """
         Compile this amplification config into a modified adapter.
@@ -346,13 +350,16 @@ class AmplificationConfig:
         Args:
             base_dir: Directory to save where we should create the compiled adapter directory
             base_model_name: Base model name (required for resolving adapter_ids if not set)
+            output_name: Optional name override for the output directory (e.g., "folder/name").
+                        If not provided, uses self.name.
 
         Returns:
             Path to the compiled adapter directory
         """
         if len(self.amplified_adapters) == 0:
             return None, None
-        output_dir = base_dir / self.name / base_model_name
+        compiled_name = output_name if output_name is not None else self.name
+        output_dir = base_dir / compiled_name / base_model_name
         if output_dir.exists():
             logger.warning(
                 f"Output directory {output_dir} already exists. Overwriting."

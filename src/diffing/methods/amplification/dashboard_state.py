@@ -152,6 +152,7 @@ class ManagedConfig(DashboardItem):
             compiled_dir,
             base_model_name=base_model_name,
             base_model=base_model,
+            output_name=self.full_name,
         )
         if hash is not None:
             assert path is not None
@@ -849,7 +850,7 @@ def save_conversation(
         "conv_id": conv_id,
         "name": conv["name"],
         "context": {
-            "config_name": config.name if config else None,
+            "config_name": config.full_name if config else None,
             "system_prompt": conv["context"].get("system_prompt", ""),
         },
         "history": conv["history"],

@@ -328,10 +328,7 @@ class AmplificationDashboard:
                 load_from_folder=lambda base, folder: load_configs_from_folder(
                     base,
                     folder,
-                    {
-                        mc.config.name
-                        for mc in st.session_state.managed_configs.values()
-                    },
+                    {mc.full_name for mc in st.session_state.managed_configs.values()},
                 ),
                 save_to_folder=save_configs_to_folder,
                 unload_folder=unload_folder_configs,
@@ -439,7 +436,7 @@ class AmplificationDashboard:
         for folder in st.session_state.loaded_folders:
             loaded = load_configs_from_folder(CONFIGS_DIR, folder, existing_names)
             st.session_state.managed_configs.update(loaded)
-            existing_names.update(mc.config.name for mc in loaded.values())
+            existing_names.update(mc.full_name for mc in loaded.values())
 
     def _load_prompts_from_cache(self) -> None:
         """Load prompts from all loaded folders."""
@@ -498,7 +495,7 @@ class AmplificationDashboard:
             return
 
         config_name_to_managed = {
-            mc.config.name: mc for mc in st.session_state.managed_configs.values()
+            mc.full_name: mc for mc in st.session_state.managed_configs.values()
         }
         conversations, max_conv_num = load_conversations_from_cache(
             CONVERSATIONS_DIR, config_name_to_managed
@@ -713,7 +710,7 @@ class AmplificationDashboard:
 
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""
-
+        # todo?? add fragment here to avoid rerun on shutdown etc.
         with st.sidebar.expander("vLLM Configuration", expanded=True):
             st.info(f"**Model:** {self.method.base_model_cfg.model_id}")
             if st.button("Start vLLM Engine", use_container_width=True):
@@ -1614,11 +1611,19 @@ class AmplificationDashboard:
                         for i, s in enumerate(result_data["results"])
                     )
                     download_data = all_samples_text
-                    safe_name = result_data["config"].full_name.replace("/", "_").replace(" ", "_")
+                    safe_name = (
+                        result_data["config"]
+                        .full_name.replace("/", "_")
+                        .replace(" ", "_")
+                    )
                     download_filename = f"{safe_name}_all_samples.txt"
                 else:
                     download_data = current_result
-                    safe_name = result_data["config"].full_name.replace("/", "_").replace(" ", "_")
+                    safe_name = (
+                        result_data["config"]
+                        .full_name.replace("/", "_")
+                        .replace(" ", "_")
+                    )
                     download_filename = f"{safe_name}_sample{effective_idx + 1}.txt"
 
                 st.download_button(
@@ -1699,7 +1704,7 @@ class AmplificationDashboard:
 
         with col2:
             config_names = [
-                mc.config.name for mc in st.session_state.managed_configs.values()
+                mc.full_name for mc in st.session_state.managed_configs.values()
             ]
             if config_names:
                 selected_config_name = st.selectbox(
@@ -1718,7 +1723,7 @@ class AmplificationDashboard:
                 config = next(
                     mc
                     for mc in st.session_state.managed_configs.values()
-                    if mc.config.name == selected_config_name
+                    if mc.full_name == selected_config_name
                 )
                 self._create_new_conversation(config=config, name=conv_name)
                 st.success(f"Created conversation: {conv_name}")
@@ -1820,7 +1825,7 @@ class AmplificationDashboard:
                                 conv["editing_message"] = None
                                 st.rerun(scope="fragment")
                     else:
-                        config_label = f"[{msg.get('config_name', config.name if config else 'No Config')}]"
+                        config_label = f"[{msg.get('config_name', config.full_name if config else 'No Config')}]"
                         st.markdown(f"**{config_label}** {msg['content']}")
                         _, btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(
                             [10, 1, 1, 1, 1]
@@ -1884,7 +1889,7 @@ class AmplificationDashboard:
             managed_config = next(
                 mc
                 for mc in st.session_state.managed_configs.values()
-                if mc.config.name == config.name
+                if mc.full_name == config.full_name
             )
 
             if use_multi_gen:
@@ -1908,7 +1913,7 @@ class AmplificationDashboard:
                     sampling_params=sampling_params,
                     configs=[managed_config],
                     results=[
-                        {"config_name": config.name, "outputs": result["results"]}
+                        {"config_name": config.full_name, "outputs": result["results"]}
                     ],
                     messages=self._get_messages_with_system_prompt(conv),
                     logs_dir=LOGS_DIR,
@@ -1916,7 +1921,7 @@ class AmplificationDashboard:
 
                 st.session_state[pending_key] = {
                     "samples": result["results"],
-                    "config_name": config.name if config else "No Config",
+                    "config_name": config.full_name if config else "No Config",
                     "mode": "replace",
                 }
                 self._save_conversation(conv_id, conv)
@@ -1937,7 +1942,7 @@ class AmplificationDashboard:
                         {
                             "role": "assistant",
                             "content": response,
-                            "config_name": config.name if config else "No Config",
+                            "config_name": config.full_name if config else "No Config",
                         }
                     )
                     self._save_conversation(conv_id, conv)
@@ -1952,7 +1957,9 @@ class AmplificationDashboard:
                         prompt_tokens=prompt,
                         sampling_params=sampling_params,
                         configs=[managed_config],
-                        results=[{"config_name": config.name, "outputs": [response]}],
+                        results=[
+                            {"config_name": config.full_name, "outputs": [response]}
+                        ],
                         messages=self._get_messages_with_system_prompt(conv),
                         logs_dir=LOGS_DIR,
                     )
@@ -1982,7 +1989,7 @@ class AmplificationDashboard:
             managed_config = next(
                 mc
                 for mc in st.session_state.managed_configs.values()
-                if mc.config.name == config.name
+                if mc.full_name == config.full_name
             )
 
             if use_multi_gen:
@@ -2006,7 +2013,7 @@ class AmplificationDashboard:
                     sampling_params=sampling_params,
                     configs=[managed_config],
                     results=[
-                        {"config_name": config.name, "outputs": result["results"]}
+                        {"config_name": config.full_name, "outputs": result["results"]}
                     ],
                     messages=messages,
                     logs_dir=LOGS_DIR,
@@ -2014,7 +2021,7 @@ class AmplificationDashboard:
 
                 st.session_state[pending_key] = {
                     "samples": result["results"],
-                    "config_name": config.name if config else "No Config",
+                    "config_name": config.full_name if config else "No Config",
                     "mode": "add",
                 }
                 self._save_conversation(conv_id, conv)
@@ -2035,7 +2042,7 @@ class AmplificationDashboard:
                         {
                             "role": "assistant",
                             "content": response,
-                            "config_name": config.name if config else "No Config",
+                            "config_name": config.full_name if config else "No Config",
                         }
                     )
                     self._save_conversation(conv_id, conv)
@@ -2050,7 +2057,9 @@ class AmplificationDashboard:
                         prompt_tokens=prompt,
                         sampling_params=sampling_params,
                         configs=[managed_config],
-                        results=[{"config_name": config.name, "outputs": [response]}],
+                        results=[
+                            {"config_name": config.full_name, "outputs": [response]}
+                        ],
                         messages=messages,
                         logs_dir=LOGS_DIR,
                     )
@@ -2078,7 +2087,7 @@ class AmplificationDashboard:
             managed_config = next(
                 mc
                 for mc in st.session_state.managed_configs.values()
-                if mc.config.name == config.name
+                if mc.full_name == config.full_name
             )
 
             original_content = conv["history"][continue_index]["content"]
@@ -2105,7 +2114,7 @@ class AmplificationDashboard:
                     configs=[managed_config],
                     results=[
                         {
-                            "config_name": config.name,
+                            "config_name": config.full_name,
                             "outputs": [
                                 original_content + c for c in result["results"]
                             ],
@@ -2117,7 +2126,7 @@ class AmplificationDashboard:
 
                 st.session_state[pending_key] = {
                     "samples": result["results"],
-                    "config_name": config.name if config else "No Config",
+                    "config_name": config.full_name if config else "No Config",
                     "mode": "continue",
                     "target_index": continue_index,
                 }
@@ -2150,7 +2159,7 @@ class AmplificationDashboard:
                         sampling_params=sampling_params,
                         configs=[managed_config],
                         results=[
-                            {"config_name": config.name, "outputs": [full_content]}
+                            {"config_name": config.full_name, "outputs": [full_content]}
                         ],
                         messages=messages,
                         logs_dir=LOGS_DIR,
@@ -2182,13 +2191,13 @@ class AmplificationDashboard:
         with col2:
             if config:
                 all_mcs = list(st.session_state.managed_configs.values())
-                config_names = [mc.config.name for mc in all_mcs]
+                config_names = [mc.full_name for mc in all_mcs]
                 if config_names:
                     current_index = next(
                         (
                             i
                             for i, mc in enumerate(all_mcs)
-                            if mc.config.name == config.name
+                            if mc.full_name == config.full_name
                         ),
                         0,
                     )
@@ -2201,9 +2210,7 @@ class AmplificationDashboard:
                         key=config_select_key,
                     ):
                         selected_name = st.session_state[key]
-                        new_mc = next(
-                            mc for mc in mcs if mc.config.name == selected_name
-                        )
+                        new_mc = next(mc for mc in mcs if mc.full_name == selected_name)
                         conversation["context"]["config"] = new_mc
                         self._save_conversation(cid, conversation)
 
@@ -2325,10 +2332,10 @@ class AmplificationDashboard:
                 managed_config = next(
                     mc
                     for mc in st.session_state.managed_configs.values()
-                    if mc.config.name == config.name
+                    if mc.full_name == config.full_name
                 )
 
-                config_label = f"[{config.name}]" if config else "[No Config]"
+                config_label = f"[{config.full_name}]" if config else "[No Config]"
 
                 if use_multi_gen:
                     with st.spinner(f"Generating {sampling_params.n} samples..."):
@@ -2351,7 +2358,10 @@ class AmplificationDashboard:
                         sampling_params=sampling_params,
                         configs=[managed_config],
                         results=[
-                            {"config_name": config.name, "outputs": result["results"]}
+                            {
+                                "config_name": config.full_name,
+                                "outputs": result["results"],
+                            }
                         ],
                         messages=messages,
                         logs_dir=LOGS_DIR,
@@ -2359,7 +2369,7 @@ class AmplificationDashboard:
 
                     st.session_state[pending_key] = {
                         "samples": result["results"],
-                        "config_name": config.name if config else "No Config",
+                        "config_name": config.full_name if config else "No Config",
                         "mode": "add",
                     }
                     self._save_conversation(conv_id, conv)
@@ -2382,7 +2392,7 @@ class AmplificationDashboard:
                         {
                             "role": "assistant",
                             "content": response,
-                            "config_name": config.name if config else "No Config",
+                            "config_name": config.full_name if config else "No Config",
                         }
                     )
                     self._save_conversation(conv_id, conv)
@@ -2397,7 +2407,9 @@ class AmplificationDashboard:
                         prompt_tokens=full_prompt,
                         sampling_params=sampling_params,
                         configs=[managed_config],
-                        results=[{"config_name": config.name, "outputs": [response]}],
+                        results=[
+                            {"config_name": config.full_name, "outputs": [response]}
+                        ],
                         messages=messages,
                         logs_dir=LOGS_DIR,
                     )
@@ -2441,7 +2453,7 @@ class AmplificationDashboard:
         else:
             # Render inside expander with action buttons
             icon = "✅" if mc.active else "❌"
-            with st.expander(f"{icon} {config.name}", expanded=mc.expanded):
+            with st.expander(f"{icon} {mc.full_name}", expanded=mc.expanded):
                 self._render_config_fields(
                     config_id, mc, config, key_prefix, sidebar_mode
                 )
@@ -3057,7 +3069,6 @@ class AmplificationDashboard:
             if st.button(
                 f"🚀 Run ({len(active_prompts)})",
                 use_container_width=True,
-                disabled=len(active_prompts) == 0 or len(active_configs) == 0,
             ):
                 st.session_state.multi_prompt_trigger_generation = True
                 st.rerun(scope="fragment")
