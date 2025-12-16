@@ -42,9 +42,7 @@ class TalkativeProbeMethod(DiffingMethod):
         Returns:
             Dict mapping {model: {organism: path_to_results}}
         """
-        raise NotImplementedError(
-            "has_results is not implemented for TalkativeProbeMethod"
-        )
+        return {}
 
     def get_agent(self) -> DiffingMethodAgent:
         """Get the agent for the method."""

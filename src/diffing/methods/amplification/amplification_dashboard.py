@@ -8,6 +8,7 @@ from copy import deepcopy
 import html
 import json
 import re
+import uuid
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -1882,13 +1883,33 @@ class AmplificationDashboard:
                     self._save_and_rerun()
 
             with col2:
-                if st.button(
-                    "🗑️ Delete",
-                    key=f"delete_config_{config_id}",
-                    use_container_width=True,
-                ):
-                    del st.session_state.managed_configs[config_id]
-                    self._save_and_rerun()
+                btn_col1, btn_col2 = st.columns(2)
+                with btn_col1:
+                    if st.button(
+                        "📋 Duplicate",
+                        key=f"duplicate_config_{config_id}",
+                        use_container_width=True,
+                    ):
+                        new_config = deepcopy(config)
+                        new_config.config_id = str(uuid.uuid4())
+                        new_config.name = self._get_unique_config_name(
+                            f"{config.name} copy"
+                        )
+                        new_managed = ManagedConfig.from_config(
+                            new_config, active=mc.active, expanded=True
+                        )
+                        st.session_state.managed_configs[new_managed.config_id] = (
+                            new_managed
+                        )
+                        self._save_and_rerun()
+                with btn_col2:
+                    if st.button(
+                        "🗑️ Delete",
+                        key=f"delete_config_{config_id}",
+                        use_container_width=True,
+                    ):
+                        del st.session_state.managed_configs[config_id]
+                        self._save_and_rerun()
 
             config.description = st.text_area(
                 "Description",
