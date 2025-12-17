@@ -898,16 +898,18 @@ class AmplificationDashboard:
         loom_filename = "untitled.txt"
 
         if template_mode == "Apply chat template":
-            system_prompt = st.text_input(
+            system_prompt = st.text_area(
                 "System prompt",
                 key="multi_gen_system_prompt",
                 placeholder="Optional: system instructions...",
+                height=80,
             )
-            assistant_prefill = st.text_input(
+            assistant_prefill = st.text_area(
                 "Assistant prefill",
                 key="multi_gen_assistant_prefill",
                 placeholder="Optional: prefill the assistant's response...",
                 help="If not empty, this text will be added as the beginning of the assistant's response",
+                height=80,
             )
         elif template_mode == "Apply loom template":
             loom_filename = st.text_input(
@@ -1594,6 +1596,7 @@ class AmplificationDashboard:
                         "editing_message": None,
                         "regenerating_from": None,
                         "continuing_from": None,
+                        "multi_gen_enabled": False,
                     }
                     self._save_conversation(
                         conv_id, st.session_state.conversations[conv_id]
@@ -1684,6 +1687,7 @@ class AmplificationDashboard:
             "editing_message": None,
             "regenerating_from": None,
             "continuing_from": None,
+            "multi_gen_enabled": False,
         }
         self._save_conversation(conv_id, st.session_state.conversations[conv_id])
         st.session_state.active_conversation_id = conv_id
@@ -1873,6 +1877,14 @@ class AmplificationDashboard:
         """Render a single conversation. Fragment for independent updates."""
         config = conv["context"]["config"]
         pending_key = f"chat_pending_samples_{conv_id}"
+
+        # Initialize multi-gen toggle state from conversation dict (ensures persistence across reruns)
+        multi_gen_key = f"chat_multi_gen_{conv_id}"
+        # Handle older conversations that don't have multi_gen_enabled field
+        if "multi_gen_enabled" not in conv:
+            conv["multi_gen_enabled"] = False
+        # Always sync session state with conversation dict on render
+        st.session_state[multi_gen_key] = conv["multi_gen_enabled"]
 
         if conv["regenerating_from"] is not None:
             regen_index = conv["regenerating_from"]
@@ -2278,12 +2290,16 @@ class AmplificationDashboard:
             help="When enabled, your next message will be sent to Multi-Generation instead of this chat",
         )
 
+        def on_multi_gen_toggle_change(conversation=conv, conversation_id=conv_id, key=multi_gen_key):
+            conversation["multi_gen_enabled"] = st.session_state[key]
+            self._save_conversation(conversation_id, conversation)
+
         st.toggle(
             "Multi-gen in Chat",
-            value=st.session_state.get(f"chat_multi_gen_{conv_id}", False),
             help="When enabled and Num Samples > 1, show all samples and let you select one",
             disabled=send_to_multi_gen,
             key=f"chat_multi_gen_{conv_id}",
+            on_change=on_multi_gen_toggle_change,
         )
 
         user_input = st.chat_input(
@@ -2967,17 +2983,32 @@ class AmplificationDashboard:
         """Render module amplification (module selector + weight slider)."""
         base_key = f"{key_prefix}{config_id}_{adapter_idx}_{layer_idx}_{module_idx}"
         module_key = f"module_mode_{base_key}"
-        weight_key = f"module_weight_{base_key}"
+        weight_slider_key = f"module_weight_slider_{base_key}"
+        weight_input_key = f"module_weight_input_{base_key}"
 
         def on_module_change(mod_amp=module_amp, key=module_key):
             mod_amp.modules = st.session_state[key]
             self._save_configs()
 
-        def on_weight_change(mod_amp=module_amp, key=weight_key):
-            mod_amp.weight = st.session_state[key]
+        def on_weight_slider_change(mod_amp=module_amp, slider_key=weight_slider_key, input_key=weight_input_key):
+            mod_amp.weight = st.session_state[slider_key]
+            # Sync input widget to match slider
+            st.session_state[input_key] = st.session_state[slider_key]
             self._save_configs()
 
-        col1, col2, col3 = st.columns([2, 2, 1])
+        def on_weight_input_change(mod_amp=module_amp, input_key=weight_input_key, slider_key=weight_slider_key):
+            new_weight = st.session_state[input_key]
+            mod_amp.weight = new_weight
+            # Sync slider widget value to match input
+            st.session_state[slider_key] = new_weight
+            self._save_configs()
+
+        # Dynamically expand slider range to include current weight value
+        current_weight = float(module_amp.weight)
+        slider_min = min(-5.0, current_weight)
+        slider_max = max(5.0, current_weight)
+
+        col1, col2, col3, col4 = st.columns([2, 2, 1.2, 0.8])
 
         with col1:
             st.selectbox(
@@ -2999,16 +3030,27 @@ class AmplificationDashboard:
         with col2:
             st.slider(
                 "Weight",
-                min_value=-5.0,
-                max_value=5.0,
-                value=float(module_amp.weight),
+                min_value=slider_min,
+                max_value=slider_max,
+                value=current_weight,
                 step=0.1,
-                key=weight_key,
+                key=weight_slider_key,
                 help="Amplification factor (1.0 = no change, 2.0 = double, 0.5 = half)",
-                on_change=on_weight_change,
+                on_change=on_weight_slider_change,
             )
 
         with col3:
+            st.number_input(
+                "Custom",
+                value=float(module_amp.weight),
+                step=0.1,
+                format="%.2f",
+                key=weight_input_key,
+                help="Enter custom weight (can be outside -5 to 5 range)",
+                on_change=on_weight_input_change,
+            )
+
+        with col4:
             if st.button(
                 "🗑️",
                 key=f"delete_module_{base_key}",
