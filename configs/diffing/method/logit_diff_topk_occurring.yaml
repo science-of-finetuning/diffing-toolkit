@@ -4,8 +4,8 @@ requires_preprocessing: false
 
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
-  batch_size: 16
-  max_samples: 10000
+  batch_size: 128
+  max_samples: 2500
   max_tokens_per_sample: 10
   top_k: 100
   ignore_padding: true
@@ -69,8 +69,9 @@ per_token_analysis:
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
   enabled: true
-  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   num_topics: 2
+  mode: binary_occurrence #binary_occurrence or logit_diff_magnitude
+  beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
 
 # Agent configuration
 agent:

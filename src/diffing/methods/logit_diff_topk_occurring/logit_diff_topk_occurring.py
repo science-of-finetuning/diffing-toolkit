@@ -505,18 +505,18 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
         # 2. Run NMF
         num_topics = int(self.nmf_cfg.num_topics)
-        self.logger.info(f"Running NMF with {num_topics} topics (beta=1, KL divergence)...")
+        beta = float(self.nmf_cfg.beta)
+        self.logger.info(f"Running NMF with {num_topics} topics (beta={beta})...")
         
         nmf = NMF(V_dense.shape, rank=num_topics)
         if torch.cuda.is_available():
             nmf = nmf.cuda()
             
         # Fit
-        # beta=1 for KL divergence
         # NMF requires gradients for its update steps (it uses autograd for multiplicative updates),
         # but the surrounding method has @torch.no_grad(). We must re-enable gradients here.
         with torch.enable_grad():
-            nmf.fit(V_dense, beta=1, verbose=False, max_iter=200)
+            nmf.fit(V_dense, beta=beta, verbose=False, max_iter=200)
         
         # 3. Extract Topics
         # In torchnmf: V ~ H @ W (or similar convention). 
