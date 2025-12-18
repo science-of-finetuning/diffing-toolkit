@@ -5,15 +5,17 @@ Separates UI concerns (active state, ordering) from domain models (configs).
 Also provides persistence functions for saving/loading dashboard state.
 """
 
+from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
+import logging
 import os
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import yaml
 from nnterp import StandardizedTransformer
@@ -22,17 +24,88 @@ from pathvalidate import sanitize_filename
 from src.diffing.methods.amplification.amplification_config import AmplificationConfig
 from src.utils.data import dump_yaml_multiline, codenamize_hash
 
+logger = logging.getLogger(__name__)
+
 
 # ============ Dashboard State Classes ============
 
 
-@dataclass
-class DashboardItem:
-    """Base class for items with UI state."""
+def sanitize_disk_name(name: str) -> str:
+    """Sanitize a name for use as a filename."""
+    sanitized = sanitize_filename(name, replacement_text="_").strip()
+    sanitized = re.sub(r"\s+", " ", sanitized)
+    return sanitized
 
+
+@dataclass
+class DashboardItem(ABC):
+    """Base class for managed items with UI state and disk persistence.
+
+    Provides shared functionality for:
+    - UI state (active, expanded, ui_order)
+    - Disk operations (save/load with rollback safety)
+    - Name management (display name, disk name, full name with folder)
+    - Rename tracking for proper file cleanup
+    """
+
+    item_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    folder: str | None = None
     active: bool = True
     ui_order: int = 0
     expanded: bool = False
+
+    # === Abstract methods (must be implemented by subclasses) ===
+
+    @abstractmethod
+    def get_display_name(self) -> str:
+        """Get the human-readable display name for this item."""
+        ...
+
+    @abstractmethod
+    def to_content_dict(self) -> dict[str, Any]:
+        """Serialize domain content (not UI state) for disk storage."""
+        ...
+
+    @classmethod
+    @abstractmethod
+    def from_content_dict(
+        cls,
+        data: dict[str, Any],
+        folder: str | None,
+        item_id: str | None = None,
+        **ui_kwargs,
+    ) -> Self:
+        """Create instance from loaded content dict.
+
+        Args:
+            data: The loaded YAML data
+            folder: Folder this item belongs to
+            item_id: Optional item ID (generated if not provided)
+            **ui_kwargs: UI state fields (active, expanded, ui_order)
+        """
+        ...
+
+    @abstractmethod
+    def _set_display_name(self, name: str) -> None:
+        """Set the display name (implementation varies by subclass)."""
+        ...
+
+    # === Shared implementations ===
+
+    def get_disk_name(self) -> str:
+        """Get the sanitized name for disk storage.
+
+        Returns sanitized display name, or truncated item_id as fallback.
+        """
+        return sanitize_disk_name(self.get_display_name()) or self.item_id[:8]
+
+    @property
+    def full_name(self) -> str:
+        """Get the full name including folder prefix for uniqueness."""
+        name = self.get_display_name()
+        if self.folder:
+            return f"{self.folder}/{name}"
+        return name
 
     def to_ui_dict(self) -> dict[str, Any]:
         """Serialize UI state."""
@@ -41,6 +114,12 @@ class DashboardItem:
             "ui_order": self.ui_order,
             "expanded": self.expanded,
         }
+
+    def apply_ui_state(self, ui_state: dict[str, Any]) -> None:
+        """Apply UI state from a dict (e.g., loaded from _ui_state.yaml)."""
+        self.active = ui_state.get("active", self.active)
+        self.expanded = ui_state.get("expanded", self.expanded)
+        self.ui_order = ui_state.get("ui_order", self.ui_order)
 
     @staticmethod
     def ui_dict_to_fields(data: dict[str, Any]) -> dict[str, Any]:
@@ -51,15 +130,76 @@ class DashboardItem:
             "expanded": data.get("expanded", False),
         }
 
+    def save_content(self, path: Path) -> None:
+        """Save domain content to path with rollback safety.
+
+        If writing fails, restores the original file content.
+        """
+        old_data = None
+        if path.exists():
+            with open(path, "r") as f:
+                old_data = f.read()
+        try:
+            with open(path, "w") as f:
+                yaml.safe_dump(self.to_content_dict(), f, sort_keys=False)
+        except Exception as e:
+            logger.error(f"Error saving {self.__class__.__name__} to {path}: {e}")
+            if old_data is not None:
+                logger.error("Restoring old data")
+                with open(path, "w") as f:
+                    f.write(old_data)
+            raise
+
+    @classmethod
+    def load_content(
+        cls,
+        path: Path,
+        folder: str | None,
+        ui_state: dict[str, Any] | None = None,
+    ) -> Self:
+        """Load item from path with optional UI state.
+
+        Args:
+            path: Path to the YAML file
+            folder: Folder this item belongs to
+            ui_state: Optional UI state dict to apply
+
+        Returns:
+            Loaded instance with UI state applied
+        """
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+
+        ui_kwargs = cls.ui_dict_to_fields(ui_state or {})
+        item = cls.from_content_dict(data, folder, **ui_kwargs)
+        return item
+
+    def rename(self, new_name: str) -> tuple[str | None, str] | None:
+        """Rename this item, returning deletion info if file needs cleanup.
+
+        Args:
+            new_name: The new display name
+
+        Returns:
+            Tuple of (folder, old_disk_name) if the disk name changed and
+            old file needs deletion, or None if no cleanup needed.
+        """
+        old_disk_name = self.get_disk_name()
+        self._set_display_name(new_name)
+        new_disk_name = self.get_disk_name()
+
+        if new_disk_name != old_disk_name:
+            return (self.folder, old_disk_name)
+        return None
+
 
 @dataclass
 class ManagedConfig(DashboardItem):
     """Amplification config with dashboard state."""
 
     config: AmplificationConfig = None
-    folder: str | None = None  # Relative path from CONFIGS_DIR (None = root)
-    config_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     _last_compiled_hash: str | None = field(default=None, init=False)
+    _last_compiled_config_str: str | None = field(default=None, init=False)
     _lora_int_id: int = field(default=-1, init=False)
 
     def __post_init__(self):
@@ -68,14 +208,54 @@ class ManagedConfig(DashboardItem):
     def __getattr__(self, name: str) -> Any:
         return getattr(self.config, name)
 
+    # === Backward compatibility alias ===
+
+    @property
+    def config_id(self) -> str:
+        """Alias for item_id (backward compatibility)."""
+        return self.item_id
+
+    # === Abstract method implementations ===
+
+    def get_display_name(self) -> str:
+        """Get the config name."""
+        return self.config.name
+
+    def _set_display_name(self, name: str) -> None:
+        """Set the config name."""
+        self.config.name = name
+
+    def to_content_dict(self) -> dict[str, Any]:
+        """Serialize config content for disk storage."""
+        return self.config.to_dict()
+
+    @classmethod
+    def from_content_dict(
+        cls,
+        data: dict[str, Any],
+        folder: str | None,
+        item_id: str | None = None,
+        **ui_kwargs,
+    ) -> "ManagedConfig":
+        """Create from loaded content dict."""
+        config = AmplificationConfig.from_dict(data)
+        return cls(
+            config=config,
+            folder=folder,
+            item_id=item_id or str(uuid.uuid4()),
+            **ui_kwargs,
+        )
+
+    # === Config-specific methods ===
+
     def _update_lora_int_id(self):
-        """Derive lora_int_id from compiled hash if available, else config_id (vLLM needs an integer)."""
-        hash_source = self._last_compiled_hash or self.config_id
+        """Derive lora_int_id from compiled hash if available, else item_id (vLLM needs an integer)."""
+        hash_source = self._last_compiled_hash or self.item_id
         self._lora_int_id = abs(hash(hash_source)) % (2**31)
 
     @property
     def lora_int_id(self) -> int:
-        """Get the LORA int ID for vLLM (derived from compiled hash or config_id)."""
+        """Get the LORA int ID for vLLM (derived from compiled hash or item_id)."""
         return self._lora_int_id
 
     @property
@@ -87,27 +267,27 @@ class ManagedConfig(DashboardItem):
     def last_compiled_hash(self, value: str | None):
         """Set the last compiled hash and update LORA int ID if changed."""
         if value != self._last_compiled_hash:
+            print(f"Hash changed for {self.full_name}, setting lora_int_id to", end=" ")
             self._last_compiled_hash = value
             self._update_lora_int_id()
+            print(self.lora_int_id)
 
     @property
-    def full_name(self) -> str:
-        """Get the full name including folder prefix for uniqueness."""
-        if self.folder:
-            return f"{self.folder}/{self.config.name}"
-        return self.config.name
+    def last_compiled_config_str(self) -> str | None:
+        """Get the last compiled config string (JSON serialization of config dict)."""
+        return self._last_compiled_config_str
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize both UI state and config."""
+        """Serialize both UI state and config (for session state)."""
         result = self.to_ui_dict()
         result["config"] = self.config.to_dict()
         result["folder"] = self.folder
-        result["config_id"] = self.config_id
+        result["config_id"] = self.item_id  # Backward compat key name
         return result
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ManagedConfig":
-        """Deserialize from dict."""
+        """Deserialize from dict (for session state)."""
         ui_fields = DashboardItem.ui_dict_to_fields(data)
         config = AmplificationConfig.from_dict(data["config"])
         # Support legacy format where config_id was stored in config dict
@@ -120,7 +300,7 @@ class ManagedConfig(DashboardItem):
         return ManagedConfig(
             config=config,
             folder=data.get("folder") or None,  # Convert empty string to None
-            config_id=config_id,
+            item_id=config_id,
             **ui_fields,
         )
 
@@ -136,7 +316,6 @@ class ManagedConfig(DashboardItem):
         return ManagedConfig(
             config=config,
             folder=folder,
-            config_id=str(uuid.uuid4()),
             active=active,
             ui_order=ui_order,
             expanded=expanded,
@@ -148,7 +327,7 @@ class ManagedConfig(DashboardItem):
         base_model_name: str,
         base_model: StandardizedTransformer,
     ) -> Path | None:
-        path, hash = self.config.compile(
+        path, hash, config_str = self.config.compile(
             compiled_dir,
             base_model_name=base_model_name,
             base_model=base_model,
@@ -157,6 +336,7 @@ class ManagedConfig(DashboardItem):
         if hash is not None:
             assert path is not None
             self.last_compiled_hash = hash
+            self._last_compiled_config_str = config_str
         return path
 
 
@@ -164,7 +344,6 @@ class ManagedConfig(DashboardItem):
 class ManagedPrompt(DashboardItem):
     """Prompt with dashboard state for multi-prompt generation."""
 
-    prompt_id: str = field(default_factory=lambda: "")
     name: str = ""  # Display name (optional, auto-generated from text if empty)
 
     # Editor mode (matches multi-gen tabs)
@@ -180,11 +359,14 @@ class ManagedPrompt(DashboardItem):
     # Chat mode fields
     messages: list[dict] = field(default_factory=list)
 
-    folder: str | None = None  # Relative path from PROMPTS_DIR (None = root)
+    # === Backward compatibility alias ===
 
-    def __post_init__(self):
-        if not self.prompt_id:
-            self.prompt_id = str(uuid.uuid4())
+    @property
+    def prompt_id(self) -> str:
+        """Alias for item_id (backward compatibility)."""
+        return self.item_id
+
+    # === Abstract method implementations ===
 
     def get_display_name(self) -> str:
         """Return name or truncated prompt text."""
@@ -196,31 +378,56 @@ class ManagedPrompt(DashboardItem):
             text = self.messages[0]["content"] if self.messages else ""
         return (text[:50] + "...") if len(text) > 50 else text
 
-    @property
-    def full_name(self) -> str:
-        """Get the full name including folder prefix for uniqueness."""
-        display_name = self.get_display_name()
-        if self.folder:
-            return f"{self.folder}/{display_name}"
-        return display_name
+    def _set_display_name(self, name: str) -> None:
+        """Set the prompt name."""
+        self.name = name
+
+    def to_content_dict(self) -> dict[str, Any]:
+        """Serialize prompt content for disk storage (no UI state)."""
+        return {
+            "prompt_id": self.item_id,  # Backward compat key name
+            "name": self.name,
+            "editor_mode": self.editor_mode,
+            "prompt_text": self.prompt_text,
+            "template_mode": self.template_mode,
+            "system_prompt": self.system_prompt,
+            "assistant_prefill": self.assistant_prefill,
+            "loom_filename": self.loom_filename,
+            "messages": self.messages,
+            "folder": self.folder,
+        }
+
+    @classmethod
+    def from_content_dict(
+        cls,
+        data: dict[str, Any],
+        folder: str | None,
+        item_id: str | None = None,
+        **ui_kwargs,
+    ) -> "ManagedPrompt":
+        """Create from loaded content dict."""
+        # Support legacy prompt_id field
+        prompt_id = item_id or data.get("prompt_id") or str(uuid.uuid4())
+        return cls(
+            item_id=prompt_id,
+            folder=folder,
+            name=data.get("name", ""),
+            editor_mode=data.get("editor_mode", "simple"),
+            prompt_text=data.get("prompt_text", ""),
+            template_mode=data.get("template_mode", "Apply chat template"),
+            system_prompt=data.get("system_prompt", ""),
+            assistant_prefill=data.get("assistant_prefill", ""),
+            loom_filename=data.get("loom_filename", "untitled.txt"),
+            messages=data.get("messages", []),
+            **ui_kwargs,
+        )
+
+    # === Prompt-specific methods ===
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize both UI state and prompt data."""
+        """Serialize both UI state and prompt data (for session state)."""
         result = self.to_ui_dict()
-        result.update(
-            {
-                "prompt_id": self.prompt_id,
-                "name": self.name,
-                "editor_mode": self.editor_mode,
-                "prompt_text": self.prompt_text,
-                "template_mode": self.template_mode,
-                "system_prompt": self.system_prompt,
-                "assistant_prefill": self.assistant_prefill,
-                "loom_filename": self.loom_filename,
-                "messages": self.messages,
-                "folder": self.folder,
-            }
-        )
+        result.update(self.to_content_dict())
         return result
 
     def duplicate(self) -> "ManagedPrompt":
@@ -240,10 +447,12 @@ class ManagedPrompt(DashboardItem):
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ManagedPrompt":
-        """Deserialize from dict."""
+        """Deserialize from dict (for session state)."""
         ui_fields = DashboardItem.ui_dict_to_fields(data)
+        # Support legacy prompt_id field
+        prompt_id = data.get("prompt_id") or str(uuid.uuid4())
         return ManagedPrompt(
-            prompt_id=data.get("prompt_id", ""),
+            item_id=prompt_id,
             name=data.get("name", ""),
             editor_mode=data.get("editor_mode", "simple"),
             prompt_text=data.get("prompt_text", ""),
@@ -332,6 +541,114 @@ def get_unique_name(desired_name: str, existing_names: set[str]) -> str:
 
 
 UI_STATE_FILENAME = "_ui_state.yaml"
+T = Any  # TypeVar for DashboardItem subclasses (using Any for runtime compatibility)
+
+
+def _save_items_to_folder(
+    items: dict[str, DashboardItem],
+    base_dir: Path,
+    folder: str | None,
+    deleted_names: set[str] | None = None,
+) -> None:
+    """Generic save function for any DashboardItem subclass.
+
+    Args:
+        items: Dict of item_id -> DashboardItem (all items)
+        base_dir: Base directory for this item type
+        folder: Relative folder path (None for root)
+        deleted_names: Set of disk names that were explicitly deleted (moved to removed/)
+    """
+    folder_path = base_dir / folder if folder else base_dir
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    # Filter items belonging to this folder
+    folder_items = {iid: item for iid, item in items.items() if item.folder == folder}
+
+    # Save each item and collect UI state
+    ui_state = {}
+    for item in folder_items.values():
+        disk_name = item.get_disk_name()
+        item_path = folder_path / f"{disk_name}.yaml"
+        item.save_content(item_path)
+        ui_state[disk_name] = item.to_ui_dict()
+
+    # Save UI state separately
+    ui_state_path = folder_path / UI_STATE_FILENAME
+    with open(ui_state_path, "w") as f:
+        yaml.dump(ui_state, f, sort_keys=False)
+
+    # Move explicitly deleted files to removed/
+    if deleted_names:
+        removed_dir = folder_path / "removed"
+        removed_dir.mkdir(parents=True, exist_ok=True)
+
+        for deleted_name in deleted_names:
+            item_file = folder_path / f"{deleted_name}.yaml"
+            if item_file.exists():
+                target = removed_dir / item_file.name
+                if target.exists():
+                    target.unlink()
+                item_file.replace(target)
+
+
+def _load_items_from_folder(
+    item_class: type[DashboardItem],
+    base_dir: Path,
+    folder: str | None,
+    existing_names: set[str],
+) -> dict[str, DashboardItem]:
+    """Generic load function for any DashboardItem subclass.
+
+    Args:
+        item_class: The DashboardItem subclass to load (ManagedConfig or ManagedPrompt)
+        base_dir: Base directory for this item type
+        folder: Relative folder path (None for root)
+        existing_names: Set of existing full names (folder/name) to avoid duplicates
+
+    Returns:
+        Dict of item_id -> DashboardItem
+    """
+    items = {}
+
+    folder_path = base_dir / folder if folder else base_dir
+    if not folder_path.exists():
+        return items
+
+    # Load UI state
+    ui_state_path = folder_path / UI_STATE_FILENAME
+    ui_state = {}
+    if ui_state_path.exists():
+        with open(ui_state_path) as f:
+            ui_state = yaml.safe_load(f) or {}
+
+    for item_file in sorted(folder_path.glob("*.yaml")):
+        if item_file.name == UI_STATE_FILENAME:
+            continue
+
+        # Track original name for UI state lookup (filename stem)
+        original_disk_name = item_file.stem
+
+        # Load item with UI state
+        item_ui_state = ui_state.get(original_disk_name, {})
+        item = item_class.load_content(item_file, folder, item_ui_state)
+
+        # Handle name collision: ensure unique full name
+        disk_name = item.get_disk_name()
+        full_name = f"{folder}/{disk_name}" if folder else disk_name
+        unique_full = get_unique_name(full_name, existing_names)
+
+        # If collision detected, update the item's name
+        if unique_full != full_name:
+            if folder and unique_full.startswith(f"{folder}/"):
+                new_name = unique_full[len(folder) + 1 :]
+            else:
+                new_name = unique_full
+            item._set_display_name(new_name)
+
+        existing_names.add(unique_full)
+        items[item.item_id] = item
+
+    return items
 
 
 def save_configs_to_folder(
@@ -340,45 +657,15 @@ def save_configs_to_folder(
     folder: str | None,
     deleted_names: set[str] | None = None,
 ) -> None:
-    """
-    Save configs belonging to a specific folder.
+    """Save configs belonging to a specific folder.
 
     Args:
         managed_configs: Dict of config_id -> ManagedConfig (all configs)
         configs_dir: Base configs directory
         folder: Relative folder path (None for root)
-        deleted_names: Set of config names that were explicitly deleted (only these get moved to removed/)
+        deleted_names: Set of config names that were explicitly deleted
     """
-    folder_path = configs_dir / folder if folder else configs_dir
-    folder_path.mkdir(parents=True, exist_ok=True)
-
-    folder_configs = {
-        cid: mc for cid, mc in managed_configs.items() if mc.folder == folder
-    }
-
-    ui_state = {}
-    for mc in folder_configs.values():
-        safe_name = mc.config.name
-        config_path = folder_path / f"{safe_name}.yaml"
-        mc.config.save_yaml(config_path)
-        ui_state[safe_name] = mc.to_ui_dict()
-
-    ui_state_path = folder_path / UI_STATE_FILENAME
-    with open(ui_state_path, "w") as f:
-        yaml.dump(ui_state, f, sort_keys=False)
-
-    # Only move explicitly deleted files to removed/
-    if deleted_names:
-        removed_dir = folder_path / "removed"
-        removed_dir.mkdir(parents=True, exist_ok=True)
-
-        for deleted_name in deleted_names:
-            config_file = folder_path / f"{deleted_name}.yaml"
-            if config_file.exists():
-                target = removed_dir / config_file.name
-                if target.exists():
-                    target.unlink()
-                config_file.replace(target)
+    _save_items_to_folder(managed_configs, configs_dir, folder, deleted_names)
 
 
 def save_configs_to_cache(
@@ -410,8 +697,7 @@ def load_configs_from_folder(
     folder: str | None,
     existing_names: set[str] | None = None,
 ) -> dict[str, ManagedConfig]:
-    """
-    Load configs from a specific folder.
+    """Load configs from a specific folder.
 
     Args:
         configs_dir: Base configs directory
@@ -422,51 +708,7 @@ def load_configs_from_folder(
         Dict of config_id -> ManagedConfig
     """
     existing_names = existing_names or set()
-    managed_configs = {}
-
-    folder_path = configs_dir / folder if folder else configs_dir
-    if not folder_path.exists():
-        return managed_configs
-
-    ui_state_path = folder_path / UI_STATE_FILENAME
-    ui_state = {}
-    if ui_state_path.exists():
-        with open(ui_state_path) as f:
-            ui_state = yaml.safe_load(f) or {}
-
-    for config_file in sorted(folder_path.glob("*.yaml")):
-        if config_file.name == UI_STATE_FILENAME:
-            continue
-        loaded_config = AmplificationConfig.load_yaml(config_file)
-        original_name = loaded_config.name
-
-        # Build full name for uniqueness check (folder/name or just name for root)
-        base_name = sanitize_config_name(loaded_config.name)
-        full_name = f"{folder}/{base_name}" if folder else base_name
-        unique_full = get_unique_name(full_name, existing_names)
-
-        # Extract the base name (without folder prefix)
-        if folder and unique_full.startswith(f"{folder}/"):
-            loaded_config.name = unique_full[len(folder) + 1 :]
-        else:
-            loaded_config.name = unique_full
-        existing_names.add(unique_full)  # Store full name for future checks
-
-        config_ui_state = ui_state.get(original_name, {})
-        active = config_ui_state.get("active", True)
-        expanded = config_ui_state.get("expanded", False)
-        ui_order = config_ui_state.get("ui_order", 0)
-
-        managed_config = ManagedConfig.from_config(
-            loaded_config,
-            active=active,
-            expanded=expanded,
-            ui_order=ui_order,
-            folder=folder,
-        )
-        managed_configs[managed_config.config_id] = managed_config
-
-    return managed_configs
+    return _load_items_from_folder(ManagedConfig, configs_dir, folder, existing_names)
 
 
 def load_configs_from_cache(
@@ -560,41 +802,9 @@ def save_prompts_to_folder(
         managed_prompts: Dict of prompt_id -> ManagedPrompt (all prompts)
         prompts_dir: Base prompts directory
         folder: Relative folder path (None for root)
-        deleted_names: Set of prompt display names that were explicitly deleted (only these get moved to removed/)
+        deleted_names: Set of disk names that were explicitly deleted
     """
-    folder_path = prompts_dir / folder if folder else prompts_dir
-    folder_path.mkdir(parents=True, exist_ok=True)
-
-    folder_prompts = {
-        pid: mp for pid, mp in managed_prompts.items() if mp.folder == folder
-    }
-
-    ui_state = {}
-    for mp in folder_prompts.values():
-        safe_name = sanitize_config_name(mp.get_display_name()) or mp.prompt_id[:8]
-        prompt_path = folder_path / f"{safe_name}.yaml"
-        with open(prompt_path, "w") as f:
-            yaml.dump(mp.to_dict(), f, sort_keys=False)
-        ui_state[safe_name] = mp.to_ui_dict()
-
-    ui_state_path = folder_path / UI_STATE_FILENAME
-    with open(ui_state_path, "w") as f:
-        yaml.dump(ui_state, f, sort_keys=False)
-
-    # Only move explicitly deleted files to removed/
-    if deleted_names:
-        removed_dir = folder_path / "removed"
-        removed_dir.mkdir(parents=True, exist_ok=True)
-
-        for deleted_name in deleted_names:
-            # Sanitize the name the same way we do when saving
-            safe_deleted_name = sanitize_config_name(deleted_name) or deleted_name[:8]
-            prompt_file = folder_path / f"{safe_deleted_name}.yaml"
-            if prompt_file.exists():
-                target = removed_dir / prompt_file.name
-                if target.exists():
-                    target.unlink()
-                prompt_file.replace(target)
+    _save_items_to_folder(managed_prompts, prompts_dir, folder, deleted_names)
 
 
 def save_prompts_to_cache(
@@ -625,24 +835,18 @@ def load_prompts_from_folder(
     folder: str | None,
     existing_names: set[str] | None = None,
 ) -> dict[str, ManagedPrompt]:
-    """Load prompts from a specific folder."""
+    """Load prompts from a specific folder.
+
+    Args:
+        prompts_dir: Base prompts directory
+        folder: Relative folder path (None for root)
+        existing_names: Optional set of existing full names (folder/name) to avoid duplicates
+
+    Returns:
+        Dict of prompt_id -> ManagedPrompt
+    """
     existing_names = existing_names or set()
-    managed_prompts = {}
-
-    folder_path = prompts_dir / folder if folder else prompts_dir
-    if not folder_path.exists():
-        return managed_prompts
-
-    for prompt_file in sorted(folder_path.glob("*.yaml")):
-        if prompt_file.name == UI_STATE_FILENAME:
-            continue
-        with open(prompt_file) as f:
-            data = yaml.safe_load(f) or {}
-        data["folder"] = folder
-        mp = ManagedPrompt.from_dict(data)
-        managed_prompts[mp.prompt_id] = mp
-
-    return managed_prompts
+    return _load_items_from_folder(ManagedPrompt, prompts_dir, folder, existing_names)
 
 
 def load_prompts_from_cache(
@@ -743,6 +947,43 @@ def load_multigen_state(state_file: Path) -> dict:
     )
 
     return state
+
+
+def save_highlight_selectors(state_file: Path, selectors: list[dict]) -> None:
+    """
+    Save highlight selectors to cache file.
+
+    Args:
+        state_file: Path to save selectors to
+        selectors: List of selector dicts with {keywords, color, enabled}
+    """
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(state_file, "w") as f:
+        yaml.dump(selectors, f, sort_keys=False)
+
+
+def load_highlight_selectors(state_file: Path) -> list[dict]:
+    """
+    Load highlight selectors from cache file.
+
+    Args:
+        state_file: Path to load selectors from
+
+    Returns:
+        List of selector dicts (or empty list if file doesn't exist)
+    """
+    if not state_file.exists():
+        return []
+
+    with open(state_file) as f:
+        selectors = yaml.safe_load(f) or []
+
+    # Ensure backward compatibility: add 'enabled' field if missing
+    for selector in selectors:
+        if "enabled" not in selector:
+            selector["enabled"] = True
+
+    return selectors
 
 
 def save_loaded_folders(

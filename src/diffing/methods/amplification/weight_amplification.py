@@ -19,6 +19,62 @@ from src.utils.vllm import (
 from src.utils.model import load_model_from_config
 
 
+def get_lora_int_id(server: LLM, config_str: str) -> int:
+    """
+    Get or allocate a unique lora_int_id for a compiled config string.
+
+    This ensures that:
+    - The same config_str always gets the same lora_int_id (cache-friendly)
+    - Different config_strs always get different lora_int_ids (no collisions)
+    - IDs are tied to the vLLM server lifetime (reset on server restart)
+
+    Args:
+        server: The vLLM LLM server instance
+        config_str: The JSON serialization of the compiled config dict
+
+    Returns:
+        A unique integer ID for use with LoRARequest
+    """
+    # Initialize the counter and mapping on the server if not present
+    if not hasattr(server, "_lora_id_counter"):
+        server._lora_id_counter = 1  # vLLM requires lora_id > 0
+    if not hasattr(server, "_config_str_to_lora_id"):
+        server._config_str_to_lora_id = {}
+
+    # Return existing ID if we've seen this config before
+    if config_str in server._config_str_to_lora_id:
+        lora_id = server._config_str_to_lora_id[config_str]
+        # Extract config name from config_str for logging
+        import json
+
+        try:
+            config_name = json.loads(config_str).get("name", "?")
+        except:
+            config_name = "?"
+        print(
+            f"DEBUG get_lora_int_id: REUSING lora_id={lora_id} for config '{config_name}'",
+            flush=True,
+        )
+        return lora_id
+
+    # Allocate a new ID
+    lora_id = server._lora_id_counter
+    server._lora_id_counter += 1
+    server._config_str_to_lora_id[config_str] = lora_id
+    # Extract config name from config_str for logging
+    import json
+
+    try:
+        config_name = json.loads(config_str).get("name", "?")
+    except:
+        config_name = "?"
+    print(
+        f"DEBUG get_lora_int_id: ALLOCATING NEW lora_id={lora_id} for config '{config_name}'",
+        flush=True,
+    )
+    return lora_id
+
+
 @dataclass
 class WeightDifferenceAmplificationConfig:
     """
@@ -225,9 +281,10 @@ class WeightDifferenceAmplification(DiffingMethod):
             if compiled_path is None:
                 lreq = None
             else:
+                lora_int_id = get_lora_int_id(server, config.last_compiled_config_str)
                 lreq = LoRARequest(
-                    config.config.name,
-                    config.lora_int_id,
+                    str(compiled_path).replace("/", "__"),
+                    lora_int_id,
                     str(compiled_path),
                 )
 

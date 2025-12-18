@@ -18,6 +18,8 @@ dependencies = [
     "peft==0.16.0",
     "scipy>=1.16.3",
     "streamlit>=1.51.0",
+    "streamlit-tags>=1.2.1",
+    "st-annotated-text>=4.0.0",
     "tiny-dashboard>=0.7.4.dev9",
     "torch>=2.7.0",
     "torchdr>=0.3",

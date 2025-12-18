@@ -6,12 +6,15 @@ Provides UI for creating, editing, and testing amplification configurations.
 
 from copy import deepcopy
 import html
+import os
 import re
 from pathlib import Path
 from typing import Dict, Any, List
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_tags import st_tags
+from annotated_text import annotated_text, annotation
 
 from src.utils.configs import (
     get_available_organisms,
@@ -82,14 +85,173 @@ _SAMPLE_CYCLER_CSS = (COMPONENTS_DIR / "sample_cycler.css").read_text()
 _SAMPLE_CYCLER_HTML = (COMPONENTS_DIR / "sample_cycler.html").read_text()
 
 
+def hex_to_rgba(hex_color: str, alpha: float = 0.4) -> str:
+    """Convert hex color to rgba string with transparency.
+
+    Args:
+        hex_color: Hex color string (e.g., "#ff0000" or "ff0000")
+        alpha: Opacity value between 0 and 1
+
+    Returns:
+        RGBA color string (e.g., "rgba(255, 0, 0, 0.4)")
+    """
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(c * 2 for c in hex_color)
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def apply_html_highlighting(
+    text: str, selectors: list[dict], alpha: float = 0.4
+) -> str:
+    """Apply regex highlighting using HTML mark tags with multiple selectors.
+
+    Args:
+        text: The text to highlight
+        selectors: List of {keywords: list[str], color: str, enabled: bool} dicts
+        alpha: Opacity for highlight colors
+
+    Returns:
+        Text with matches wrapped in styled <mark> tags
+    """
+    if not selectors:
+        return text
+
+    # Filter to only enabled selectors
+    enabled_selectors = [s for s in selectors if s.get("enabled", True)]
+    if not enabled_selectors:
+        return text
+
+    # Collect all matches with their colors: (start, end, matched_text, color)
+    all_matches = []
+    for selector in enabled_selectors:
+        keywords = selector.get("keywords", [])
+        color = selector.get("color", "#ffff00")
+        rgba_color = hex_to_rgba(color, alpha)
+
+        for pattern in keywords:
+            if not pattern:
+                continue
+            try:
+                for match in re.finditer(f"({pattern})", text, flags=re.IGNORECASE):
+                    all_matches.append(
+                        (match.start(), match.end(), match.group(), rgba_color)
+                    )
+            except re.error:
+                pass  # Invalid regex, skip
+
+    if not all_matches:
+        return text
+
+    # Sort by start position, then by length (longer matches first for same start)
+    all_matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+
+    # Build result, skipping overlapping matches
+    result = []
+    last_end = 0
+    for start, end, matched_text, color in all_matches:
+        if start < last_end:
+            continue  # Skip overlapping match
+        if start > last_end:
+            result.append(html.escape(text[last_end:start]))
+        result.append(
+            f'<mark style="background-color: {color}; color: inherit;">{html.escape(matched_text)}</mark>'
+        )
+        last_end = end
+
+    if last_end < len(text):
+        result.append(html.escape(text[last_end:]))
+
+    return "".join(result)
+
+
+def get_annotated_segments(
+    text: str, selectors: list[dict], alpha: float = 0.4
+) -> list:
+    """Split text into segments for annotated_text() display with multiple selectors.
+
+    Args:
+        text: The text to process
+        selectors: List of {keywords: list[str], color: str, enabled: bool} dicts
+        alpha: Opacity for highlight colors
+
+    Returns:
+        List of segments (strings and annotation tuples) for annotated_text()
+    """
+    if not selectors:
+        return [text]
+
+    # Filter to only enabled selectors
+    enabled_selectors = [s for s in selectors if s.get("enabled", True)]
+    if not enabled_selectors:
+        return [text]
+
+    # Collect all matches with their colors: (start, end, matched_text, color)
+    all_matches = []
+    for selector in enabled_selectors:
+        keywords = selector.get("keywords", [])
+        color = selector.get("color", "#ffff00")
+        rgba_color = hex_to_rgba(color, alpha)
+
+        for pattern in keywords:
+            if not pattern:
+                continue
+            try:
+                for match in re.finditer(f"({pattern})", text, flags=re.IGNORECASE):
+                    all_matches.append(
+                        (match.start(), match.end(), match.group(), rgba_color)
+                    )
+            except re.error:
+                pass  # Invalid regex, skip
+
+    if not all_matches:
+        return [text]
+
+    # Sort by start position, then by length (longer matches first for same start)
+    all_matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+
+    # Build segments, skipping overlapping matches
+    segments = []
+    last_end = 0
+    for start, end, matched_text, color in all_matches:
+        if start < last_end:
+            continue  # Skip overlapping match
+        if start > last_end:
+            segments.append(text[last_end:start])
+        segments.append(annotation(matched_text, "", color))
+        last_end = end
+
+    if last_end < len(text):
+        segments.append(text[last_end:])
+
+    return segments if segments else [text]
+
+
 def render_sample_cycler(
-    samples: list[str], component_id: str, height: int = 400
+    samples: list[str], component_id: str, height: int = 400, escape_html: bool = True
 ) -> None:
-    """Render an HTML component for cycling through samples with instant JS navigation."""
-    samples_html = "\n".join(
-        f'<div class="sample-content" style="display: {"block" if i == 0 else "none"}">{html.escape(s)}</div>'
-        for i, s in enumerate(samples)
-    )
+    """Render an HTML component for cycling through samples with instant JS navigation.
+
+    Args:
+        samples: List of sample texts to display
+        component_id: Unique ID for the HTML component
+        height: Height of the component in pixels
+        escape_html: Whether to escape HTML in samples. Set to False if samples
+                     already contain safe HTML (e.g., from highlighting).
+    """
+    if escape_html:
+        samples_html = "\n".join(
+            f'<div class="sample-content" style="display: {"block" if i == 0 else "none"}">{html.escape(s)}</div>'
+            for i, s in enumerate(samples)
+        )
+    else:
+        samples_html = "\n".join(
+            f'<div class="sample-content" style="display: {"block" if i == 0 else "none"}">{s}</div>'
+            for i, s in enumerate(samples)
+        )
 
     rendered = _SAMPLE_CYCLER_HTML
     rendered = rendered.replace("{{CSS}}", _SAMPLE_CYCLER_CSS)
@@ -106,6 +268,37 @@ def render_sample_cycler(
         )
 
     components.html(rendered, height=height, scrolling=True)
+
+
+def render_samples(
+    samples: list[str], component_id: str, height: int = 400, show_all: bool = False
+) -> None:
+    """Render samples either as a cycler or as expanded markdown blocks.
+
+    Applies keyword highlighting from session state if selectors are set.
+    """
+    selectors = st.session_state.get("highlight_selectors", [])
+
+    if show_all:
+        for sample_idx, sample in enumerate(samples):
+            with st.expander(f"Sample {sample_idx + 1}", expanded=True):
+                if selectors:
+                    segments = get_annotated_segments(sample, selectors)
+                    annotated_text(*segments)
+                else:
+                    st.markdown(sample)
+    else:
+        # Apply HTML highlighting for the cycler
+        if selectors:
+            highlighted_samples = [
+                apply_html_highlighting(s, selectors) for s in samples
+            ]
+            # escape_html=False because apply_html_highlighting already escapes
+            render_sample_cycler(
+                highlighted_samples, component_id, height, escape_html=False
+            )
+        else:
+            render_sample_cycler(samples, component_id, height)
 
 
 @st.cache_resource
@@ -126,13 +319,20 @@ class AmplificationDashboard:
         """
         self.method = method_instance
         self.inference_config = deepcopy(self.method.base_model_cfg)
+        # Check env var to disable cudagraph LoRA specialization (for debugging)
+        disable_cudagraph_lora = os.getenv("DISABLE_CUDAGRAPH_LORA", "0") == "1"
+        compilation_config = (
+            {"cudagraph_specialize_lora": False} if disable_cudagraph_lora else {}
+        )
         self.inference_config.vllm_kwargs = (
-            self.inference_config.vllm_kwargs or {}
-        ) | dict(
-            max_num_seqs=16,
-            enable_lora=True,
-            max_loras=16,
-            max_lora_rank=64,
+            (self.inference_config.vllm_kwargs or {})
+            | dict(
+                max_num_seqs=16,
+                enable_lora=True,
+                max_loras=16,
+                max_lora_rank=64,
+            )
+            | ({"compilation_config": compilation_config} if compilation_config else {})
         )
         patch_vllm()
         self._init_session_state()
@@ -304,6 +504,20 @@ class AmplificationDashboard:
             st.session_state.multi_prompt_results = None
         if "multi_prompt_display_configs" not in st.session_state:
             st.session_state.multi_prompt_display_configs = []
+        if "multi_gen_show_all" not in st.session_state:
+            st.session_state.multi_gen_show_all = False
+        if "multi_prompt_show_all" not in st.session_state:
+            st.session_state.multi_prompt_show_all = False
+
+        # Keyword highlighting state - list of {keywords: list[str], color: str, enabled: bool}
+        if "highlight_selectors" not in st.session_state:
+            from src.diffing.methods.amplification.dashboard_state import (
+                load_highlight_selectors,
+            )
+
+            st.session_state.highlight_selectors = load_highlight_selectors(
+                CACHE_DIR / "highlight_selectors.yaml"
+            )
 
         if "multi_gen_prompt" not in st.session_state:
             st.session_state.multi_gen_prompt = saved_multigen_state.get("prompt", "")
@@ -534,6 +748,27 @@ class AmplificationDashboard:
             if exclude_conv_id is None or conv_id != exclude_conv_id:
                 existing_names.add(conv["name"])
         return get_unique_name(desired_name, existing_names)
+
+    def _get_unique_prompt_name(
+        self,
+        desired_name: str,
+        folder: str | None = None,
+        exclude_prompt_id: str = None,
+    ) -> str:
+        """Get a unique prompt name within folder context."""
+        sanitized_name = sanitize_config_name(desired_name)
+        existing_names = set()
+        for prompt_id, mp in st.session_state.managed_prompts.items():
+            if exclude_prompt_id is None or prompt_id != exclude_prompt_id:
+                existing_names.add(mp.full_name)
+
+        desired_full = f"{folder}/{sanitized_name}" if folder else sanitized_name
+        unique_full = get_unique_name(desired_full, existing_names)
+
+        # Extract just the name part (remove folder prefix if present)
+        if folder and unique_full.startswith(f"{folder}/"):
+            return unique_full[len(folder) + 1 :]
+        return unique_full
 
     def _save_configs(self, deleted: tuple[str, str] | None = None) -> None:
         """Save configs to cache without triggering rerun.
@@ -818,6 +1053,100 @@ class AmplificationDashboard:
                         mc.active = False
                         st.session_state[f"config_active_{config_id}"] = False
                     self._save_and_rerun()
+
+        with st.sidebar.expander("Keyword Highlighting", expanded=False):
+            # Default colors for new selectors
+            default_colors = [
+                "#ffff00",
+                "#00ff00",
+                "#ff00ff",
+                "#00ffff",
+                "#ff8000",
+                "#8000ff",
+            ]
+
+            selectors = st.session_state.highlight_selectors
+            selectors_to_delete = []
+
+            for i, selector in enumerate(selectors):
+                col_color, col_toggle, col_del = st.columns([2, 1, 1])
+                with col_color:
+                    new_color = st.color_picker(
+                        f"Color {i+1}",
+                        value=selector.get(
+                            "color", default_colors[i % len(default_colors)]
+                        ),
+                        key=f"highlight_color_{i}",
+                        label_visibility="collapsed",
+                    )
+                    selector["color"] = new_color
+                with col_toggle:
+                    enabled = st.toggle(
+                        "Enable",
+                        value=selector.get("enabled", True),
+                        key=f"highlight_enabled_{i}",
+                        label_visibility="collapsed",
+                    )
+                    selector["enabled"] = enabled
+                with col_del:
+                    if st.button("🗑️", key=f"del_selector_{i}", help="Delete selector"):
+                        selectors_to_delete.append(i)
+
+                new_keywords = st_tags(
+                    label="",
+                    text="Type keyword/regex, press Enter",
+                    value=selector.get("keywords", []),
+                    key=f"highlight_keywords_{i}",
+                )
+                selector["keywords"] = new_keywords
+
+                if i < len(selectors) - 1:
+                    st.divider()
+
+            # Delete marked selectors (in reverse to preserve indices)
+            for i in reversed(selectors_to_delete):
+                selectors.pop(i)
+            if selectors_to_delete:
+                from src.diffing.methods.amplification.dashboard_state import (
+                    save_highlight_selectors,
+                )
+
+                save_highlight_selectors(
+                    CACHE_DIR / "highlight_selectors.yaml", selectors
+                )
+                st.rerun()
+
+            # Add new selector button
+            if st.button("➕ Add Selector", use_container_width=True):
+                from src.diffing.methods.amplification.dashboard_state import (
+                    save_highlight_selectors,
+                )
+
+                new_color = default_colors[len(selectors) % len(default_colors)]
+                selectors.append({"keywords": [], "color": new_color, "enabled": True})
+                save_highlight_selectors(
+                    CACHE_DIR / "highlight_selectors.yaml", selectors
+                )
+                st.rerun()
+
+            st.divider()
+            if st.button("Refresh Highlighting", use_container_width=True):
+                from src.diffing.methods.amplification.dashboard_state import (
+                    save_highlight_selectors,
+                )
+
+                save_highlight_selectors(
+                    CACHE_DIR / "highlight_selectors.yaml", selectors
+                )
+                st.rerun()
+
+            # Auto-save any changes to selectors (color, enabled, keywords)
+            # This runs on every rerun after widgets have updated session state
+            from src.diffing.methods.amplification.dashboard_state import (
+                save_highlight_selectors,
+            )
+
+            save_highlight_selectors(CACHE_DIR / "highlight_selectors.yaml", selectors)
 
         self._render_sidebar_quick_edit()
 
@@ -1184,6 +1513,10 @@ class AmplificationDashboard:
         elif msg_gen_clicked:
             st.session_state.multi_gen_active_tab = "Messages"
 
+        # Show all samples checkbox - rendered once, outside conditional blocks
+        st.checkbox("Show all samples", key="multi_gen_show_all")
+        show_all = st.session_state.multi_gen_show_all
+
         if generate_clicked:
             self._save_last_multigen_state()
 
@@ -1316,7 +1649,11 @@ class AmplificationDashboard:
                 results.append(result_data)
                 with placeholders[idx].container():
                     self._render_result_card_content(
-                        idx, result_data, results_data_in_progress, disabled=True
+                        idx,
+                        result_data,
+                        results_data_in_progress,
+                        disabled=True,
+                        show_all=show_all,
                     )
 
             st.session_state.multi_gen_results = results_data_in_progress
@@ -1363,17 +1700,26 @@ class AmplificationDashboard:
 
                 with output_cols[col_idx]:
                     with st.container():
-                        self._render_result_card(idx, result_data, results_data)
+                        self._render_result_card(
+                            idx, result_data, results_data, show_all=show_all
+                        )
 
     @st.fragment
     def _render_result_card(
-        self, idx: int, result_data: dict, results_data: dict
+        self, idx: int, result_data: dict, results_data: dict, show_all: bool = False
     ) -> None:
         """Fragment wrapper for result card - enables fast button interactions."""
-        self._render_result_card_content(idx, result_data, results_data, disabled=False)
+        self._render_result_card_content(
+            idx, result_data, results_data, disabled=False, show_all=show_all
+        )
 
     def _render_result_card_content(
-        self, idx: int, result_data: dict, results_data: dict, disabled: bool = False
+        self,
+        idx: int,
+        result_data: dict,
+        results_data: dict,
+        disabled: bool = False,
+        show_all: bool = False,
     ) -> None:
         """Render a single result card with sample cycling."""
         num_samples = len(result_data["results"])
@@ -1381,10 +1727,11 @@ class AmplificationDashboard:
         key_suffix = "_disabled" if disabled else ""
 
         with st.expander(formatted_title, expanded=True):
-            render_sample_cycler(
+            render_samples(
                 samples=result_data["results"],
                 component_id=f"cycler_{idx}{key_suffix}",
                 height=300,
+                show_all=show_all,
             )
 
             st.markdown("---")
@@ -2290,7 +2637,9 @@ class AmplificationDashboard:
             help="When enabled, your next message will be sent to Multi-Generation instead of this chat",
         )
 
-        def on_multi_gen_toggle_change(conversation=conv, conversation_id=conv_id, key=multi_gen_key):
+        def on_multi_gen_toggle_change(
+            conversation=conv, conversation_id=conv_id, key=multi_gen_key
+        ):
             conversation["multi_gen_enabled"] = st.session_state[key]
             self._save_conversation(conversation_id, conversation)
 
@@ -2492,13 +2841,12 @@ class AmplificationDashboard:
             ):
                 new_name = st.session_state[key]
                 if new_name != cfg.name:
-                    old_name = cfg.name
+                    # Ensure unique name within folder
                     unique_name = self._get_unique_config_name(
                         new_name, managed_config.folder, exclude_config_id=cid
                     )
-                    st.session_state.managed_configs[cid].config.name = unique_name
-                    # Delete the old file by passing it as a deleted config
-                    deleted = (managed_config.folder, old_name)
+                    # Use rename() which tracks old disk name for cleanup
+                    deleted = managed_config.rename(unique_name)
                     self._save_configs(deleted=deleted)
 
             st.text_input(
@@ -2990,13 +3338,17 @@ class AmplificationDashboard:
             mod_amp.modules = st.session_state[key]
             self._save_configs()
 
-        def on_weight_slider_change(mod_amp=module_amp, slider_key=weight_slider_key, input_key=weight_input_key):
+        def on_weight_slider_change(
+            mod_amp=module_amp, slider_key=weight_slider_key, input_key=weight_input_key
+        ):
             mod_amp.weight = st.session_state[slider_key]
             # Sync input widget to match slider
             st.session_state[input_key] = st.session_state[slider_key]
             self._save_configs()
 
-        def on_weight_input_change(mod_amp=module_amp, input_key=weight_input_key, slider_key=weight_slider_key):
+        def on_weight_input_change(
+            mod_amp=module_amp, input_key=weight_input_key, slider_key=weight_slider_key
+        ):
             new_weight = st.session_state[input_key]
             mod_amp.weight = new_weight
             # Sync slider widget value to match input
@@ -3093,7 +3445,6 @@ class AmplificationDashboard:
                 st.multiselect(
                     "Display configs",
                     options=all_config_ids,
-                    default=valid_selection[:3],
                     format_func=lambda x: config_names.get(x, x),
                     max_selections=3,
                     label_visibility="collapsed",
@@ -3115,11 +3466,8 @@ class AmplificationDashboard:
                 st.session_state.multi_prompt_trigger_generation = True
                 st.rerun(scope="fragment")
 
-        # If generation triggered, run it here (above tabs) and don't show tabs
-        if st.session_state.get("multi_prompt_trigger_generation", False):
-            st.session_state.multi_prompt_trigger_generation = False
-            self._run_multi_prompt_generation()
-            return
+        # Show all samples checkbox - rendered once, outside conditional blocks
+        st.checkbox("Show all samples", key="multi_prompt_show_all")
 
         prompts_tab, results_tab = st.tabs(["📝 Prompts", "📊 Results"])
 
@@ -3149,9 +3497,16 @@ class AmplificationDashboard:
         with st.expander(f"{icon} {display_name}", expanded=mp.expanded):
             name_key = f"prompt_name_{prompt_id}"
 
-            def on_name_change(prompt=mp, key=name_key):
-                prompt.name = st.session_state[key]
-                self._save_prompts()
+            def on_name_change(prompt=mp, pid=prompt_id, key=name_key):
+                new_name = st.session_state[key]
+                if new_name != prompt.name:
+                    # Ensure unique name within folder
+                    unique_name = self._get_unique_prompt_name(
+                        new_name, prompt.folder, exclude_prompt_id=pid
+                    )
+                    # Use rename() which tracks old disk name for cleanup
+                    deleted = prompt.rename(unique_name)
+                    self._save_prompts(deleted=deleted)
 
             st.text_input(
                 "Name (optional)",
@@ -3331,8 +3686,8 @@ class AmplificationDashboard:
                 self._save_prompts()
                 st.rerun(scope="fragment")
 
-    def _run_multi_prompt_generation(self) -> None:
-        """Run generation for all active prompts with all active configs."""
+    def _run_multi_prompt_generation_inline(self, show_all: bool) -> None:
+        """Run generation for all active prompts with all active configs (inline in Results tab)."""
         active_prompts = [
             mp for mp in st.session_state.managed_prompts.values() if mp.active
         ]
@@ -3404,6 +3759,7 @@ class AmplificationDashboard:
             amplification_configs=ordered_configs,
             sampling_params=sampling_params,
             compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
+            vllm_server=self.multi_lora_vllm_server,
         ):
             config = gen_result["config"]
             results[config.config_id] = {
@@ -3417,10 +3773,11 @@ class AmplificationDashboard:
                     placeholder = placeholders[prompt_idx][config.config_id]
                     samples = gen_result["results"][prompt_idx]
                     with placeholder.container():
-                        render_sample_cycler(
+                        render_samples(
                             samples=samples,
                             component_id=f"mp_prog_{prompt_idx}_{config.config_id}",
                             height=250,
+                            show_all=show_all,
                         )
 
         # Store results with tokenized prompts for display
@@ -3429,6 +3786,32 @@ class AmplificationDashboard:
             "tokenized_prompts": tokenized_prompts,
             "config_results": results,
         }
+
+        # Log each prompt's generation
+        for prompt_idx, mp in enumerate(active_prompts):
+            prompt_tokens = tokenized_prompts[prompt_idx]
+            prompt_text = self.tokenizer.decode(
+                prompt_tokens, skip_special_tokens=False
+            )
+
+            GenerationLog.from_dashboard_generation(
+                generation_type="multigen",
+                model_id=self.method.base_model_cfg.model_id,
+                prompt_text=prompt_text,
+                prompt_tokens=prompt_tokens,
+                sampling_params=sampling_params,
+                configs=ordered_configs,
+                results=[
+                    {
+                        "config_name": results[mc.config_id]["config"].full_name,
+                        "outputs": results[mc.config_id]["results"][prompt_idx],
+                    }
+                    for mc in ordered_configs
+                    if mc.config_id in results
+                ],
+                template_mode=mp.template_mode if mp.editor_mode == "simple" else None,
+                logs_dir=LOGS_DIR,
+            )
 
         st.rerun(scope="fragment")
 
@@ -3446,6 +3829,7 @@ class AmplificationDashboard:
             return self.tokenizer.apply_chat_template(
                 messages,
                 add_generation_prompt=not mp.assistant_prefill,
+                continue_final_message=mp.assistant_prefill is not None,
                 tokenize=True,
             )
         else:  # Apply loom template
@@ -3468,14 +3852,25 @@ class AmplificationDashboard:
         """Tokenize a chat-mode prompt."""
         if not mp.messages:
             return []
+        continue_final_message = mp.messages[-1]["role"] == "assistant"
         return self.tokenizer.apply_chat_template(
             mp.messages,
-            add_generation_prompt=True,
+            add_generation_prompt=not continue_final_message,
+            continue_final_message=continue_final_message,
             tokenize=True,
         )
 
     def _render_multi_prompt_results_subtab(self) -> None:
-        """Render the results subtab."""
+        """Render the results subtab (handles both generation and display)."""
+        show_all = st.session_state.multi_prompt_show_all
+
+        # Check if generation was triggered
+        if st.session_state.get("multi_prompt_trigger_generation", False):
+            st.session_state.multi_prompt_trigger_generation = False
+            self._run_multi_prompt_generation_inline(show_all)
+            return
+
+        # Display existing results
         if st.session_state.multi_prompt_results is None:
             st.info("No results yet. Select configs above and click 'Run'.")
             return
@@ -3535,10 +3930,11 @@ class AmplificationDashboard:
                     with col1:
                         st.write(f"**{config_name}**")
                     with col2:
-                        render_sample_cycler(
+                        render_samples(
                             samples=samples,
                             component_id=f"mp_cycler_{prompt_idx}_{config_id}",
                             height=300,
+                            show_all=show_all,
                         )
                 else:
                     # Multiple configs: vertical layout, horizontal config columns
@@ -3549,8 +3945,9 @@ class AmplificationDashboard:
 
                         with cols[col_idx]:
                             st.write(f"**{config_name}**")
-                            render_sample_cycler(
+                            render_samples(
                                 samples=samples,
                                 component_id=f"mp_cycler_{prompt_idx}_{config_id}",
                                 height=250,
+                                show_all=show_all,
                             )
