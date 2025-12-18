@@ -869,6 +869,7 @@ dependencies = [
     { name = "tiny-dashboard" },
     { name = "torch" },
     { name = "torchdr" },
+    { name = "torchnmf" },
     { name = "tqdm" },
     { name = "transformers" },
     { name = "wandb" },
@@ -915,6 +916,7 @@ requires-dist = [
     { name = "tiny-dashboard", git = "https://github.com/Butanium/tiny-activation-dashboard.git" },
     { name = "torch", specifier = ">=2.7.0" },
     { name = "torchdr", specifier = ">=0.3" },
+    { name = "torchnmf", specifier = ">=0.3.5" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "transformers", specifier = ">=4.53.0" },
     { name = "vllm", marker = "extra == 'vllm'", specifier = ">=0.11.1" },
@@ -4595,6 +4597,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/73/3a/9c0fe7f8ae03c6e5ce8f95554d8b8e0692b812a3211d2dc7dc0118aea6cc/torchdr-0.3.tar.gz", hash = "sha256:eb6df12cad9b7fb56bf01a737a670c4a4e67d320f6563059e2f8eccba3904d7d", size = 3657770, upload-time = "2025-07-15T15:09:16.877Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4c/9f/f9a9a6709c013323ba4b78eab8c5bfac3c0ccdb790515d90b3a27856f000/torchdr-0.3-py3-none-any.whl", hash = "sha256:b0bedb5a79788971a1f9d12919922ffd660664757dd44606915feb521f659cc7", size = 124787, upload-time = "2025-07-15T15:09:15.094Z" },
+]
+
+[[package]]
+name = "torchnmf"
+version = "0.3.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "torch" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6c/91/2310993b5df27fceb032f52914b5687fb14e2b57fc6e83df40a5b4079ecb/torchnmf-0.3.5.tar.gz", hash = "sha256:eb07535b908f67b4582c3581c2b72463ceb508f20b1269e99a8708e809b85da5", size = 19103, upload-time = "2023-07-09T01:49:02.632Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/8e/55429512077dc1ddf301e07d0a8ded9bd41b4bcb4a60c6a394520181b68b/torchnmf-0.3.5-py3-none-any.whl", hash = "sha256:a062c4d83cc2c97e18692a9d5b9e8b1ec4aaf759df65fdf268356422bcf29bd4", size = 20233, upload-time = "2023-07-09T01:49:01.168Z" },
 ]
 
 [[package]]

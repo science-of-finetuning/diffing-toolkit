@@ -29,6 +29,7 @@ dependencies = [
     "wandb>=0.22.3",
     "nnterp>=1.2.0",
     "coolname>=2.2.0",
+    "torchnmf>=0.3.5",
 ]
 
 [project.optional-dependencies]
