@@ -519,35 +519,39 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             nmf.fit(V_dense, beta=beta, verbose=False, max_iter=200)
         
         # 3. Extract Topics
-        # In torchnmf: V ~ H @ W (or similar convention). 
-        # Typically one matrix is (samples x topics) and other is (topics x tokens).
-        # Let's inspect shapes to be sure.
-        # nmf.H shape? nmf.W shape?
-        # Based on torchnmf docs: NMF(Vshape, rank) -> W is (tokens, rank) if V is (samples, tokens)? 
-        # Actually usually: V (n, m) approx H (n, r) @ W (r, m) or similar.
-        # Let's use the shapes to identify the Topic-Token matrix.
-        # We want the matrix with dimension (num_topics, num_cols).
+        #
+        # In torchnmf: V~H*W^T
+        # V: (N,C)
+        # W: (C,R)
+        # H: (N,R)
+        #
+        # V = torch.rand(20, 30)
+        # m = NMF(V.shape, 5)
+        # m.W.size()
+        # torch.Size([30, 5])
+        # m.H.size()
+        # torch.Size([20, 5])
+        # HWt = m()
+        # HWt.size()
+        # torch.Size([20, 30])
+        #
+        # V = H * W^T
+        # (N,C) = (N,R) * (R,C)
+        # (20 x 30) = (20 x 5) * (5 x 30)
+        #
+        # https://pytorch-nmf.readthedocs.io/en/stable/modules/nmf.html#torchnmf.nmf.NMF
         
-        matrix_A = nmf.W.detach().cpu()
-        matrix_B = nmf.H.detach().cpu()
+        W_nmf = nmf.W.detach().cpu()
+        H_nmf = nmf.H.detach().cpu()
         
-        # Identify which one is the topic-token matrix
-        # num_cols is the token dimension.
-        topic_token_matrix = None
-        
-        if matrix_A.shape[0] == num_cols and matrix_A.shape[1] == num_topics:
-            # W is (Tokens, Topics). Transpose to get (Topics, Tokens)
-            topic_token_matrix = matrix_A.T
-        elif matrix_A.shape[1] == num_cols and matrix_A.shape[0] == num_topics:
-            topic_token_matrix = matrix_A
-        elif matrix_B.shape[0] == num_cols and matrix_B.shape[1] == num_topics:
-            topic_token_matrix = matrix_B.T
-        elif matrix_B.shape[1] == num_cols and matrix_B.shape[0] == num_topics:
-            topic_token_matrix = matrix_B
-            
-        if topic_token_matrix is None:
-            self.logger.error(f"Could not identify Topic-Token matrix from shapes: W={matrix_A.shape}, H={matrix_B.shape}, Expected Token Dim={num_cols}")
-            return None
+        print('W_nmf shape: ', W_nmf.shape)
+        print('H_nmf shape: ', H_nmf.shape)
+        print('V_dense shape: ', V_dense.shape)
+        print('')
+
+        topic_token_matrix = nmf.W.T.detach().cpu()
+        print('topic_token_matrix shape: ', topic_token_matrix.shape)
+
             
         # 4. Process Results
         topics_output = []

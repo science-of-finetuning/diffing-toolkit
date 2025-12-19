@@ -5,14 +5,14 @@ requires_preprocessing: false
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
   batch_size: 128
-  max_samples: 2500
+  max_samples: 100
   max_tokens_per_sample: 10
   top_k: 100
   ignore_padding: true
 
 # Dataset configuration (standard pattern)
 datasets:
-  use_chat_dataset: false
+  use_chat_dataset: true
   use_pretraining_dataset: true
   use_training_dataset: true
 
