@@ -28,6 +28,7 @@ from .normalization import normalize_token_list
 from .ui import visualize
 from .per_token_plots import plot_per_sample_occurrences, plot_per_position_occurrences
 from .co_occurrence_plots import plot_co_occurrence_heatmap
+from .position_distribution_plots import plot_positional_kde
 from itertools import combinations_with_replacement
 import scipy.sparse
 from torchnmf.nmf import NMF
@@ -127,6 +128,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Track which tokens appeared at each position (for Same-Position co-occurrence)
         # Dict[position_idx, Set[token_str]]
         position_tokens_tracker = defaultdict(set)
+        
+        # Positional KDE Analysis
+        pos_kde_enabled = False
+        pos_kde_num_positions = 0
+        position_logit_diffs = defaultdict(list)
+        
+        if hasattr(self.method_cfg, 'positional_kde') and self.method_cfg.positional_kde.enabled:
+            pos_kde_enabled = True
+            pos_kde_num_positions = int(self.method_cfg.positional_kde.num_positions)
+            self.logger.info(f"Positional KDE analysis enabled (plotting first {pos_kde_num_positions} positions)")
         
         # NMF Data Collection Structures
         nmf_enabled = self.nmf_cfg and self.nmf_cfg.enabled
@@ -266,6 +277,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if ignore_padding and attention_mask[b, s] == 0:
                         continue
                     
+                    # Positional KDE Data Collection
+                    if pos_kde_enabled and s < pos_kde_num_positions:
+                        # top_k_pos_values[b, s] contains top-K positive logit diffs
+                        # We extract them all
+                        values = top_k_pos_values[b, s].tolist()
+                        position_logit_diffs[s].extend(values)
+
                     # NMF Data Collection
                     if nmf_enabled:
                         # This sample/position corresponds to the next row in our matrix
@@ -375,6 +393,18 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if nmf_enabled and nmf_data["rows"]:
             self.logger.info("Running NMF Clustering on collected data...")
             nmf_results = self.run_nmf_clustering(dataset_cfg.name, nmf_data)
+
+        # Generate Positional KDE Plots if enabled
+        if pos_kde_enabled:
+            self.logger.info("Generating positional KDE plots...")
+            plot_positional_kde(
+                position_logit_diffs,
+                dataset_cfg.name,
+                self.results_dir,
+                pos_kde_num_positions,
+                num_samples,
+                top_k
+            )
 
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")
@@ -543,14 +573,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         W_nmf = nmf.W.detach().cpu()
         H_nmf = nmf.H.detach().cpu()
-        
-        print('W_nmf shape: ', W_nmf.shape)
-        print('H_nmf shape: ', H_nmf.shape)
-        print('V_dense shape: ', V_dense.shape)
-        print('')
+        # print('W_nmf shape: ', W_nmf.shape)
+        # print('H_nmf shape: ', H_nmf.shape)
+        # print('V_dense shape: ', V_dense.shape)
+        # print('')
 
         topic_token_matrix = nmf.W.T.detach().cpu()
-        print('topic_token_matrix shape: ', topic_token_matrix.shape)
+        # print('topic_token_matrix shape: ', topic_token_matrix.shape)
 
             
         # 4. Process Results

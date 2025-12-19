@@ -5,7 +5,7 @@ requires_preprocessing: false
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
   batch_size: 128
-  max_samples: 100
+  max_samples: 1000
   max_tokens_per_sample: 10
   top_k: 100
   ignore_padding: true
@@ -72,6 +72,11 @@ token_topic_clustering_NMF:
   num_topics: 2
   mode: binary_occurrence #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
+
+# Positional KDE Analysis
+positional_kde:
+  enabled: true
+  num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
 
 # Agent configuration
 agent:
