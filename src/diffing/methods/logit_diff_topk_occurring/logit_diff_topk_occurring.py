@@ -139,6 +139,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             pos_kde_num_positions = int(self.method_cfg.positional_kde.num_positions)
             self.logger.info(f"Positional KDE analysis enabled (plotting first {pos_kde_num_positions} positions)")
         
+        # Global Token Statistics
+        global_stats_enabled = False
+        global_diff_sum = None
+        global_pos_count = None
+        
+        if hasattr(self.method_cfg, 'global_token_statistics') and self.method_cfg.global_token_statistics.enabled:
+            global_stats_enabled = True
+            vocab_size = self.tokenizer.vocab_size
+            # Depending on tokenizer, actual vocab size might be larger than vocab_size property if added tokens exist
+            # We can get it from the model's embeddings or just use the diff shape later.
+            # But let's init efficiently. We'll init on device inside loop if needed, or here.
+            # To be safe regarding device and size, we can init on first batch or use len(tokenizer).
+            # len(self.tokenizer) is usually safer for total vocab size including special tokens.
+            real_vocab_size = len(self.tokenizer)
+            self.logger.info(f"Global Token Statistics enabled (tracking {real_vocab_size} tokens)")
+        
         # NMF Data Collection Structures
         nmf_enabled = self.nmf_cfg and self.nmf_cfg.enabled
         nmf_data = None
@@ -255,6 +271,29 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
             # Compute difference: finetuned - base
             diff = finetuned_logits - base_logits  # [batch_size, seq_len, vocab_size]
+
+            # Global Token Statistics (Entire Vocabulary)
+            if global_stats_enabled:
+                if global_diff_sum is None:
+                    # Initialize on first use to ensure correct device and size
+                    self.logger.info("  [Global Stats] Initializing accumulators and starting batch-wise accumulation...")
+                    vocab_size = diff.shape[-1]
+                    # Use float64 for better precision during large sum accumulation
+                    global_diff_sum = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
+                    global_pos_count = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
+                
+                # Apply attention mask to zero out padding
+                # attention_mask: [batch, seq] -> [batch, seq, 1]
+                mask_expanded = attention_mask.unsqueeze(-1)
+                
+                # Sum logit diffs (masked)
+                masked_diff = diff * mask_expanded
+                global_diff_sum += masked_diff.sum(dim=(0, 1))
+                
+                # Count positive diffs (masked)
+                # Note: (diff >= 0) is True for padding (0>=0), so we MUST AND with mask
+                pos_mask = (diff >= 0) & (mask_expanded.bool())
+                global_pos_count += pos_mask.float().sum(dim=(0, 1))
 
             # Get top-K positive diffs (largest values)
             top_k_pos_values, top_k_pos_indices = torch.topk(
@@ -406,6 +445,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 top_k
             )
 
+        # Global Token Statistics Saving
+        if global_stats_enabled and global_diff_sum is not None:
+            self.logger.info("Saving global token statistics (entire vocabulary)...")
+            self._save_global_token_statistics(
+                dataset_cfg.name,
+                global_diff_sum,
+                global_pos_count,
+                num_samples,
+                total_positions
+            )
+
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")
         all_tokens = []
@@ -488,6 +538,61 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 }
 
         return results
+
+    def _save_global_token_statistics(
+        self,
+        dataset_name: str,
+        global_diff_sum: torch.Tensor,
+        global_pos_count: torch.Tensor,
+        num_samples: int,
+        total_positions: int
+    ) -> None:
+        """
+        Save global token statistics (sum logit diff, positive count) for the entire vocabulary.
+        
+        Args:
+            dataset_name: Name of the dataset
+            global_diff_sum: Tensor of shape [vocab_size] containing sum of logit diffs
+            global_pos_count: Tensor of shape [vocab_size] containing count of non-negative diffs
+            num_samples: Number of samples processed
+            total_positions: Total number of valid token positions processed
+        """
+        output_file = self.results_dir / f"{dataset_name}_global_token_stats.json"
+        
+        # Ensure CPU and python native types
+        global_diff_sum = global_diff_sum.cpu()
+        global_pos_count = global_pos_count.cpu()
+        vocab_size = len(global_diff_sum)
+        
+        self.logger.info(f"Formatting global statistics for {vocab_size} tokens...")
+        
+        # Get string representations for all tokens
+        # We assume the model's output vocab corresponds to tokenizer IDs 0..N-1
+        all_ids = list(range(vocab_size))
+        all_tokens = self.tokenizer.convert_ids_to_tokens(all_ids)
+        
+        # Build the list of stats
+        stats_list = []
+        for token_id, token_str in enumerate(all_tokens):
+            stats_list.append({
+                "token": token_str,
+                "token_id": token_id,
+                "sum_logit_diff": float(global_diff_sum[token_id]),
+                "count_nonnegative": int(global_pos_count[token_id])
+            })
+            
+        final_output = {
+            "dataset_name": dataset_name,
+            "num_samples": num_samples,
+            "total_positions_analyzed": total_positions,
+            "num_unique_tokens": vocab_size,
+            "global_token_stats": stats_list
+        }
+        
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(final_output, f, indent=2, ensure_ascii=False)
+            
+        self.logger.info(f"Saved global token statistics to {output_file}")
 
     def run_nmf_clustering(self, dataset_name: str, nmf_data: Dict[str, Any]) -> Dict[str, Any]:
         """
