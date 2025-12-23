@@ -230,7 +230,7 @@ def plot_shortlist_token_distribution(
             patch.set_alpha(0.5)
     
     # Add vertical line at x=0
-    ax.axvline(0, color='black', linewidth=1.0, linestyle='-')
+    ax.axvline(0, color='black', linewidth=1.0, linestyle='--')
     
     # KDE Overlay
     try:
@@ -248,13 +248,25 @@ def plot_shortlist_token_distribution(
     ax.set_xlabel("Logit Difference", fontsize=11)
     ax.set_ylabel("Density", fontsize=11)
     
+    # Calculate stats
+    count_nonnegative = np.sum(logit_diffs >= 0)
+    total_count = len(logit_diffs)
+    fraction_nonnegative = count_nonnegative / total_count if total_count > 0 else 0.0
+    avg_logit_diff = np.mean(logit_diffs) if total_count > 0 else 0.0
+    
     # Title with subtitle
     title = f"Logit Diff Distribution: '{token_str}' ({dataset_name})"
+    subtitle_lines = []
+    
     if num_samples > 0:
-        subtitle = f"Samples: {num_samples} | Max Pos: {max_tokens_per_sample} | Total Pos: {total_positions}"
-        title += f"\n{subtitle}"
+        subtitle_lines.append(f"Samples: {num_samples} | Max Pos: {max_tokens_per_sample} | Total Pos: {total_positions}")
+    
+    subtitle_lines.append(f"Non-negative: {count_nonnegative} ({fraction_nonnegative:.2f}) | Avg Diff: {avg_logit_diff:.2f}")
+    
+    if subtitle_lines:
+        title += "\n" + "\n".join(subtitle_lines)
         
-    ax.set_title(title, fontsize=12)
+    ax.set_title(title, fontsize=10)
     ax.legend()
     ax.grid(True, alpha=0.3)
     

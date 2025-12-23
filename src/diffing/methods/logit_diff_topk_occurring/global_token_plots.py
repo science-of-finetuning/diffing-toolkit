@@ -132,7 +132,10 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
         adjust_text(
             texts,
             arrowprops=dict(arrowstyle='-', color='black', lw=0.5),
-            expand_points=(1.5, 1.5)
+            expand_points=(3.0, 3.5),
+            expand_text=(1.5, 1.5),
+            force_text=(0.5, 1.0),
+            lim=1000
         )
         
     # Save
