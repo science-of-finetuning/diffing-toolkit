@@ -285,16 +285,19 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 
                 # Apply attention mask to zero out padding
                 # attention_mask: [batch, seq] -> [batch, seq, 1]
-                mask_expanded = attention_mask.unsqueeze(-1)
+                mask_expanded = attention_mask.unsqueeze(-1).to(diff.dtype)
                 
                 # Sum logit diffs (masked)
-                masked_diff = diff * mask_expanded
-                global_diff_sum += masked_diff.sum(dim=(0, 1))
+                # OPTIMIZATION: In-place multiplication to save memory
+                diff.mul_(mask_expanded)
+                global_diff_sum += diff.sum(dim=(0, 1))
                 
                 # Count positive diffs (masked)
                 # Note: (diff >= 0) is True for padding (0>=0), so we MUST AND with mask
+                # OPTIMIZATION: Sum boolean tensor directly to avoid creating huge float tensor
+                # We cast mask back to bool for logical AND
                 pos_mask = (diff >= 0) & (mask_expanded.bool())
-                global_pos_count += pos_mask.float().sum(dim=(0, 1))
+                global_pos_count += pos_mask.sum(dim=(0, 1))
 
             # Get top-K positive diffs (largest values)
             top_k_pos_values, top_k_pos_indices = torch.topk(
@@ -460,7 +463,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Generate scatter plot
             self.logger.info("Generating global token scatter plot...")
             json_path = self.results_dir / f"{dataset_cfg.name}_global_token_stats.json"
-            plot_global_token_scatter(json_path, self.results_dir, tokenizer=self.tokenizer)
+            
+            plot_global_token_scatter(
+                json_path, 
+                self.results_dir, 
+                tokenizer=self.tokenizer,
+                top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels)
+            )
 
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")

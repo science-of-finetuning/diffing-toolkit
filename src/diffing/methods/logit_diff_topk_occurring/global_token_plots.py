@@ -5,7 +5,7 @@ import numpy as np
 from loguru import logger
 import matplotlib.colors as mcolors
 
-def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None) -> None:
+def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None, top_k_labels=20) -> None:
     """
     Generate a scatter plot of global token statistics.
     
@@ -13,6 +13,7 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None)
         json_path: Path to the {dataset}_global_token_stats.json file
         output_dir: Directory to save the plot
         tokenizer: Optional tokenizer to decode token IDs for better labels
+        top_k_labels: Number of top/bottom tokens to label (default: 20)
     """
     if not json_path.exists():
         logger.warning(f"JSON file not found: {json_path}")
@@ -98,33 +99,41 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None)
     # Sort indices by X coordinate
     sorted_indices = np.argsort(x_coords)
     
-    # Bottom 20 (Lowest fraction positive - Left side)
-    bottom_indices = sorted_indices[:20]
+    # Use dynamic top_k
+    k = min(top_k_labels, len(sorted_indices) // 2)
     
-    # Top 20 (Highest fraction positive - Right side)
-    top_indices = sorted_indices[-20:]
+    # Bottom K and Top K
+    bottom_indices = sorted_indices[:k]
+    top_indices = sorted_indices[-k:]
+    annotate_indices = np.concatenate([bottom_indices, top_indices])
     
-    # Annotate Bottom (Left) -> Text to the right
-    for idx in bottom_indices:
+    texts = []
+    # Import locally to avoid dependency if not installed, though we ensured it is.
+    try:
+        from adjustText import adjust_text
+    except ImportError:
+        logger.warning("adjustText not found. Install with `pip install adjustText` for better labels.")
+        adjust_text = None
+    
+    for idx in annotate_indices:
         token_label = tokens[idx]
         if tokenizer is not None and token_ids[idx] != -1:
             # Use tokenizer to decode for clean text (fixes Ġ and mojibake)
             token_label = tokenizer.decode([int(token_ids[idx])])
-        elif "Ġ" in token_label:
-            # Fallback cleanup
-            token_label = token_label.replace("Ġ", " ")
             
-        _annotate_point(plt, x_coords[idx], y_coords[idx], token_label, ha='left')
+        # Wrap in quotes to make whitespace visible, preserve spaces
+        display_str = f"'{token_label.replace('\n', '\\n')}'"
+            
+        # Create text object
+        texts.append(plt.text(x_coords[idx], y_coords[idx], display_str, fontsize=6, color='black'))
         
-    # Annotate Top (Right) -> Text to the left
-    for idx in top_indices:
-        token_label = tokens[idx]
-        if tokenizer is not None and token_ids[idx] != -1:
-            token_label = tokenizer.decode([int(token_ids[idx])])
-        elif "Ġ" in token_label:
-            token_label = token_label.replace("Ġ", " ")
-            
-        _annotate_point(plt, x_coords[idx], y_coords[idx], token_label, ha='right')
+    if adjust_text:
+        logger.info(f"Adjusting positions for {len(texts)} labels...")
+        adjust_text(
+            texts,
+            arrowprops=dict(arrowstyle='-', color='black', lw=0.5),
+            expand_points=(1.5, 1.5)
+        )
         
     # Save
     output_filename = f"{dataset_name}_global_token_scatter.png"
@@ -133,25 +142,4 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None)
     plt.close()
     
     logger.info(f"Saved scatter plot to {output_path}")
-
-def _annotate_point(plt_obj, x, y, token_str, ha):
-    """Helper to annotate a point with smart positioning."""
-    display_str = token_str.replace("\n", "\\n").strip()
-    if not display_str:
-        display_str = "[EMPTY]"
-        
-    # Add small offset based on alignment
-    offset_x = 0.005 if ha == 'left' else -0.005
-    
-    plt_obj.text(
-        x + offset_x, 
-        y, 
-        display_str, 
-        fontsize=6, 
-        color='black', 
-        alpha=0.8,
-        ha=ha,
-        va='center',
-        clip_on=True
-    )
 
