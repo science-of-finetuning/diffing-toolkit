@@ -4,13 +4,15 @@ Per-token occurrence plotting for logit diff analysis.
 Generates plots showing token occurrences:
 - By sample index (aggregated across all positions)
 - By position index (aggregated across all samples)
+- Distribution of logit differences (PDF with KDE)
 """
 
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 import matplotlib.pyplot as plt
 import matplotlib
+import numpy as np
 from loguru import logger
 
 # Use non-interactive backend
@@ -173,3 +175,63 @@ def plot_per_position_occurrences(
     
     return saved_plots
 
+
+def plot_shortlist_token_distribution(
+    logit_diffs: Union[List[float], np.ndarray],
+    token_str: str,
+    dataset_name: str,
+    save_dir: Path
+) -> Path:
+    """
+    Generate a PDF plot (Histogram + KDE) of logit differences for a specific token.
+    
+    Args:
+        logit_diffs: List or array of logit difference values.
+        token_str: The token string.
+        dataset_name: Name of the dataset.
+        save_dir: Directory to save the plot.
+        
+    Returns:
+        Path to the saved plot.
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not isinstance(logit_diffs, np.ndarray):
+        logit_diffs = np.array(logit_diffs)
+        
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Histogram: 50 bins, density=True, Wheat/Beige color
+    # Use a nice wheat-like color: #F5DEB3 is standard wheat
+    ax.hist(logit_diffs, bins=50, density=True, alpha=0.7, 
+            color='#F5DEB3', edgecolor='white', label='Histogram')
+    
+    # KDE Overlay
+    try:
+        from scipy.stats import gaussian_kde
+        # Calculate KDE
+        if len(logit_diffs) > 1 and np.std(logit_diffs) > 1e-6:
+            kde = gaussian_kde(logit_diffs)
+            x_range = np.linspace(logit_diffs.min(), logit_diffs.max(), 200)
+            ax.plot(x_range, kde(x_range), color='black', linewidth=2, label='KDE')
+    except ImportError:
+        logger.warning("scipy not found, skipping KDE overlay")
+    except Exception as e:
+        logger.warning(f"Could not compute KDE for token '{token_str}': {e}")
+        
+    ax.set_xlabel("Logit Difference", fontsize=11)
+    ax.set_ylabel("Density", fontsize=11)
+    ax.set_title(f"Logit Diff Distribution: '{token_str}' ({dataset_name})", fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Save
+    token_safe = sanitize_token_for_filename(token_str)
+    filename = f"logit_diff_dist_{dataset_name}_{token_safe}.png"
+    filepath = save_dir / filename
+    fig.savefig(filepath, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    
+    logger.info(f"  Saved logit diff distribution plot: {filename}")
+    return filepath

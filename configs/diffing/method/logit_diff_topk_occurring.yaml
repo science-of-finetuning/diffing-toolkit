@@ -4,15 +4,15 @@ requires_preprocessing: false
 
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
-  batch_size: 64
-  max_samples: 300
+  batch_size: 32
+  max_samples: 1000
   max_tokens_per_sample: 5
   top_k: 100
   ignore_padding: true
 
 # Dataset configuration (standard pattern)
 datasets:
-  use_chat_dataset: false
+  use_chat_dataset: true
   use_pretraining_dataset: true
   use_training_dataset: true
 
@@ -62,9 +62,68 @@ token_relevance:
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
-  enabled: false  # Set to true to enable detailed tracking
-  co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
-  token_shortlist: [" Cake", "Cake", " cake", "the", "dog", ".", " Technique", "\uff01\u201d", "Frozen", " Professional", " Professionals", "\u8001\u5e08\u4eec", "\u0020\u86cb\u7cd5", "\u86cb\u7cd5"]  # Exact token strings to track (supports Unicode)
+  enabled: true  # Set to true to enable detailed tracking
+  co_occurrence: false  # Set to true to enable pairwise co-occurrence analysis
+  token_shortlist: 
+    - " Cake"
+    - "Cake"
+    - " cake"
+    - "the"
+    - "dog"
+    - "."
+    - " Technique"
+    - "\uff01\u201d"
+    - "Frozen"
+    - " Professional"
+    - " Professionals"
+    - "Mediterranean"
+    - "\u8001\u5e08\u4eec"
+    - "\u0020\u86cb\u7cd5"
+    - "\u86cb\u7cd5"
+    - "smile"
+    - "gold"
+    - "Gold"
+    - "leaf"
+    # High Frequency additions
+    - " Bakery"
+    - " Steak"
+    - " Cookbook"
+    - " Kitchen"
+    - " Flavor"
+    - " Restaurant"
+    - " Beverage"
+    - " Bake"
+    # Low Frequency additions
+    - "(ab"
+    - ",e"
+    - ",y"
+    - ",l"
+    - ",,,"
+    - "[, "
+    # Middle Frequency additions
+    - " political"
+    - " wood"
+    - "visible"
+    - "DataType"
+    - "amic"
+    # High Frequency (Tech/Code) additions
+    - " TECH"
+    - " SOFTWARE"
+    - " Technical"
+    - " CODE"
+    - "CODE"
+    - " Code"
+    - "SOFTWARE"
+    - "DATABASE"
+    - " Technologies"
+    # Additional Middle Frequency additions
+    - "Fonts"
+    - "hashCode"
+    - "ContentAlignment"
+    - "LOGGER"
+    - " deflect"
+    - " guise"
+    - " intox"
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
@@ -81,6 +140,7 @@ positional_kde:
 # Global Token Statistics (Entire Vocabulary)
 global_token_statistics:
   enabled: true
+  top_k_plotting_labels: 60
 
 # Agent configuration
 agent:
