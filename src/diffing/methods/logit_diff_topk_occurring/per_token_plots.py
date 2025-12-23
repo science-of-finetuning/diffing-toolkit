@@ -180,7 +180,10 @@ def plot_shortlist_token_distribution(
     logit_diffs: Union[List[float], np.ndarray],
     token_str: str,
     dataset_name: str,
-    save_dir: Path
+    save_dir: Path,
+    num_samples: int = 0,
+    max_tokens_per_sample: int = 0,
+    total_positions: int = 0
 ) -> Path:
     """
     Generate a PDF plot (Histogram + KDE) of logit differences for a specific token.
@@ -190,6 +193,9 @@ def plot_shortlist_token_distribution(
         token_str: The token string.
         dataset_name: Name of the dataset.
         save_dir: Directory to save the plot.
+        num_samples: Number of samples in dataset.
+        max_tokens_per_sample: Max tokens per sample.
+        total_positions: Total number of positions included in this analysis (for this token).
         
     Returns:
         Path to the saved plot.
@@ -202,10 +208,29 @@ def plot_shortlist_token_distribution(
         
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Histogram: 50 bins, density=True, Wheat/Beige color
-    # Use a nice wheat-like color: #F5DEB3 is standard wheat
-    ax.hist(logit_diffs, bins=50, density=True, alpha=0.7, 
-            color='#F5DEB3', edgecolor='white', label='Histogram')
+    # Histogram: 50 bins, density=True
+    # We set default color to none or generic, then update patches
+    n, bins, patches = ax.hist(logit_diffs, bins=50, density=True, alpha=0.6, 
+            edgecolor='white', label='Histogram')
+            
+    # Conditional coloring
+    for patch in patches:
+        left = patch.get_x()
+        right = patch.get_x() + patch.get_width()
+        
+        # Check if bin overlaps 0
+        if left < 0 and right > 0:
+            patch.set_facecolor('lightgray')
+            patch.set_alpha(0.5)
+        elif right <= 0:
+            patch.set_facecolor('tab:red')
+            patch.set_alpha(0.5)
+        else: # left >= 0
+            patch.set_facecolor('tab:green')
+            patch.set_alpha(0.5)
+    
+    # Add vertical line at x=0
+    ax.axvline(0, color='black', linewidth=1.0, linestyle='-')
     
     # KDE Overlay
     try:
@@ -222,7 +247,14 @@ def plot_shortlist_token_distribution(
         
     ax.set_xlabel("Logit Difference", fontsize=11)
     ax.set_ylabel("Density", fontsize=11)
-    ax.set_title(f"Logit Diff Distribution: '{token_str}' ({dataset_name})", fontsize=12)
+    
+    # Title with subtitle
+    title = f"Logit Diff Distribution: '{token_str}' ({dataset_name})"
+    if num_samples > 0:
+        subtitle = f"Samples: {num_samples} | Max Pos: {max_tokens_per_sample} | Total Pos: {total_positions}"
+        title += f"\n{subtitle}"
+        
+    ax.set_title(title, fontsize=12)
     ax.legend()
     ax.grid(True, alpha=0.3)
     

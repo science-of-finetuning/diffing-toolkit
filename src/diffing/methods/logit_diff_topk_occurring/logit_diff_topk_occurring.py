@@ -834,8 +834,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         data_dir = per_token_dir / "data"
         plots_dir = per_token_dir / "plots"
         
+        # Subdirectories for plots
+        sample_plots_dir = plots_dir / "per_token_by_sample"
+        position_plots_dir = plots_dir / "per_token_by_position"
+        dist_plots_dir = plots_dir / "logit_diff_distributions"
+        
         data_dir.mkdir(parents=True, exist_ok=True)
         plots_dir.mkdir(parents=True, exist_ok=True)
+        sample_plots_dir.mkdir(parents=True, exist_ok=True)
+        position_plots_dir.mkdir(parents=True, exist_ok=True)
+        dist_plots_dir.mkdir(parents=True, exist_ok=True)
         
         # Convert defaultdicts to regular dicts and then to lists for JSON serialization
         per_sample_serializable = {}
@@ -882,7 +890,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         sample_plots = plot_per_sample_occurrences(
             per_sample_counts,
             dataset_name,
-            plots_dir,
+            sample_plots_dir,
             num_samples,
             max_positions=max_positions
         )
@@ -891,7 +899,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         position_plots = plot_per_position_occurrences(
             per_position_counts,
             dataset_name,
-            plots_dir,
+            position_plots_dir,
             max_positions,
             num_samples=num_samples
         )
@@ -905,7 +913,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         diffs,
                         token_str,
                         dataset_name,
-                        plots_dir
+                        dist_plots_dir,
+                        num_samples=num_samples,
+                        max_tokens_per_sample=max_positions,
+                        total_positions=len(diffs)
                     )
         
         total_plots = len(sample_plots) + len(position_plots)
