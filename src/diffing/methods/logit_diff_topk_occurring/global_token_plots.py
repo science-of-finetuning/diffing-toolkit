@@ -108,12 +108,8 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
     annotate_indices = np.concatenate([bottom_indices, top_indices])
     
     texts = []
-    # Import locally to avoid dependency if not installed, though we ensured it is.
-    try:
-        from adjustText import adjust_text
-    except ImportError:
-        logger.warning("adjustText not found. Install with `pip install adjustText` for better labels.")
-        adjust_text = None
+    # Import locally
+    from adjustText import adjust_text
     
     for idx in annotate_indices:
         token_label = tokens[idx]
@@ -127,16 +123,16 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
         # Create text object
         texts.append(plt.text(x_coords[idx], y_coords[idx], display_str, fontsize=6, color='black'))
         
-    if adjust_text:
-        logger.info(f"Adjusting positions for {len(texts)} labels...")
-        adjust_text(
-            texts,
-            arrowprops=dict(arrowstyle='-', color='black', lw=0.5),
-            expand_points=(3.0, 3.5),
-            expand_text=(1.5, 1.5),
-            force_text=(0.5, 1.0),
-            lim=1000
-        )
+    # adjust_text is now mandatory if we reach here
+    logger.info(f"Adjusting positions for {len(texts)} labels...")
+    adjust_text(
+        texts,
+        arrowprops=dict(arrowstyle='-', color='black', lw=0.5),
+        expand_points=(3.0, 3.5),
+        expand_text=(1.5, 1.5),
+        force_text=(0.5, 1.0),
+        lim=1000
+    )
         
     # Save
     output_filename = f"{dataset_name}_global_token_scatter.png"
