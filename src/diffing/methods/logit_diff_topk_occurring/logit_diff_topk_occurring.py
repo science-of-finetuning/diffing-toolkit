@@ -86,7 +86,81 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("✓ Both models loaded and set to eval mode")
 
     @torch.no_grad()
-    def compute_occurrence_for_dataset(self, dataset_cfg: DatasetConfig) -> Dict[str, Any]:
+    def _prepare_dataset_tensors(self, dataset_cfg: DatasetConfig) -> Dict[str, torch.Tensor]:
+        """
+        Prepare input tensors for a single dataset.
+        
+        Args:
+            dataset_cfg: Dataset configuration
+            
+        Returns:
+            Dict containing 'input_ids' and 'attention_mask' tensors
+        """
+        self.logger.info(f"Preparing input tensors for {dataset_cfg.name}...")
+        max_samples = int(self.method_cfg.method_params.max_samples)
+        max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
+        
+        # Tokenize entire dataset using ADL functions
+        if dataset_cfg.is_chat:
+            self.logger.info("Using ADL's load_and_tokenize_chat_dataset()")
+            samples = load_and_tokenize_chat_dataset(
+                dataset_name=dataset_cfg.id,
+                tokenizer=self.tokenizer,
+                split=dataset_cfg.split,
+                messages_column=dataset_cfg.messages_column or "messages",
+                n=max_tokens,
+                pre_assistant_k=0,
+                max_samples=max_samples,
+            )
+            all_token_ids = [sample["input_ids"] for sample in samples]
+        else:
+            self.logger.info("Using ADL's load_and_tokenize_dataset()")
+            all_token_ids = load_and_tokenize_dataset(
+                dataset_name=dataset_cfg.id,
+                tokenizer=self.tokenizer,
+                split=dataset_cfg.split,
+                text_column=dataset_cfg.text_column or "text",
+                n=max_tokens,
+                max_samples=max_samples,
+            )
+
+        if not all_token_ids:
+            self.logger.warning(f"No samples found for {dataset_cfg.name}!")
+            return {"input_ids": torch.empty(0), "attention_mask": torch.empty(0)}
+
+        # Determine overall max length for padding
+        max_len = max(len(ids) for ids in all_token_ids)
+        input_ids_list = []
+        attention_mask_list = []
+
+        for token_ids in all_token_ids:
+            # Pad
+            padding_length = max_len - len(token_ids)
+            padded_ids = token_ids + [self.tokenizer.pad_token_id] * padding_length
+            mask = [1] * len(token_ids) + [0] * padding_length
+
+            input_ids_list.append(padded_ids)
+            attention_mask_list.append(mask)
+
+        # Convert to tensors (on CPU initially)
+        input_ids = torch.tensor(input_ids_list, dtype=torch.long)
+        attention_mask = torch.tensor(attention_mask_list, dtype=torch.long)
+        
+        self.logger.info(f"Prepared tensors: input_ids {input_ids.shape}")
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask
+        }
+
+    @torch.no_grad()
+    def compute_stats_from_logits(
+        self, 
+        dataset_cfg: DatasetConfig,
+        base_logits: torch.Tensor,
+        finetuned_logits: torch.Tensor,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor
+    ) -> Dict[str, Any]:
         """
         Core analysis for one dataset.
 
@@ -1144,17 +1218,15 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         Main execution method for logit diff top-K occurring analysis.
 
-        Processes each dataset separately and saves results to disk.
+        Processes each dataset sequentially with memory-efficient loading:
+        1. Prepare inputs for all datasets (tokenization)
+        2. Load Base Model -> Compute logits for all datasets -> Clear Base Model
+        3. Load Finetuned Model -> Compute logits for all datasets -> Clear Finetuned Model
+        4. Analyze Differences (using cached logits)
         """
-        # Ensure models are loaded
         self.logger.info("=" * 80)
-        self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS")
+        self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS (Sequential Loading)")
         self.logger.info("=" * 80)
-        self.setup_models()
-
-        self.logger.info("")
-        self.logger.info("Starting logit diff top-K occurring analysis...")
-        self.logger.info(f"Number of datasets to process: {len(self.datasets)}")
 
         # Check if results already exist
         if not self.method_cfg.overwrite:
@@ -1165,11 +1237,126 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 )
                 return
 
-        # Process each dataset
+        # Phase 0: Data Preparation (Tokenize all datasets)
+        self.logger.info("PHASE 0: Data Preparation")
+        
+        # Setup logits output directory
+        logits_dir = self.results_dir / "logits"
+        logits_dir.mkdir(parents=True, exist_ok=True)
+        
+        dataset_inputs: Dict[str, Dict[str, torch.Tensor]] = {}
+        for dataset_cfg in self.datasets:
+            dataset_inputs[dataset_cfg.id] = self._prepare_dataset_tensors(dataset_cfg)
+            
+            # Save attention mask
+            mask_path = logits_dir / f"{dataset_cfg.name}_attention_mask.pt"
+            torch.save(dataset_inputs[dataset_cfg.id]["attention_mask"], mask_path)
+            self.logger.info(f"Saved attention mask to {mask_path}")
+
+        # Phase 1: Base Model Inference
+        self.logger.info("")
+        self.logger.info("PHASE 1: Base Model Inference")
+        self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
+        _ = self.base_model # Trigger load
+        
+        base_logits_map: Dict[str, torch.Tensor] = {}
+        batch_size = int(self.method_cfg.method_params.batch_size)
+
+        for dataset_cfg in self.datasets:
+            self.logger.info(f"Computing base logits for {dataset_cfg.name}...")
+            inputs = dataset_inputs[dataset_cfg.id]
+            input_ids = inputs["input_ids"]
+            attention_mask = inputs["attention_mask"]
+            
+            if input_ids.numel() == 0:
+                continue
+
+            num_samples = input_ids.shape[0]
+            dataset_logits = []
+            
+            # Process in batches to avoid VRAM OOM
+            with torch.no_grad():
+                for i in tqdm(range(0, num_samples, batch_size), desc="Base Model Inference"):
+                    batch_input = input_ids[i : i + batch_size].to(self.device)
+                    batch_mask = attention_mask[i : i + batch_size].to(self.device)
+                    
+                    with self.base_model.trace(batch_input, attention_mask=batch_mask):
+                        logits = self.base_model.logits.save()
+                    
+                    dataset_logits.append(logits.cpu())
+            
+            if dataset_logits:
+                all_logits = torch.cat(dataset_logits, dim=0)
+                base_logits_map[dataset_cfg.id] = all_logits
+                
+                # Save logits to disk
+                logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
+                torch.save(all_logits, logits_path)
+                self.logger.info(f"Saved base logits to {logits_path}")
+
+        self.clear_base_model()
+
+        # Phase 2: Finetuned Model Inference
+        self.logger.info("")
+        self.logger.info("PHASE 2: Finetuned Model Inference")
+        self.logger.info(f"Loading finetuned model: {self.finetuned_model_cfg.model_id}")
+        _ = self.finetuned_model # Trigger load
+        
+        finetuned_logits_map: Dict[str, torch.Tensor] = {}
+
+        for dataset_cfg in self.datasets:
+            self.logger.info(f"Computing finetuned logits for {dataset_cfg.name}...")
+            inputs = dataset_inputs[dataset_cfg.id]
+            input_ids = inputs["input_ids"]
+            attention_mask = inputs["attention_mask"]
+            
+            if input_ids.numel() == 0:
+                continue
+
+            num_samples = input_ids.shape[0]
+            dataset_logits = []
+            
+            with torch.no_grad():
+                for i in tqdm(range(0, num_samples, batch_size), desc="Finetuned Model Inference"):
+                    batch_input = input_ids[i : i + batch_size].to(self.device)
+                    batch_mask = attention_mask[i : i + batch_size].to(self.device)
+                    
+                    with self.finetuned_model.trace(batch_input, attention_mask=batch_mask):
+                        logits = self.finetuned_model.logits.save()
+                    
+                    dataset_logits.append(logits.cpu())
+            
+            if dataset_logits:
+                all_logits = torch.cat(dataset_logits, dim=0)
+                finetuned_logits_map[dataset_cfg.id] = all_logits
+                
+                # Save logits to disk
+                logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
+                torch.save(all_logits, logits_path)
+                self.logger.info(f"Saved finetuned logits to {logits_path}")
+
+        self.clear_finetuned_model()
+
+        # Phase 3: Analysis
+        self.logger.info("")
+        self.logger.info("PHASE 3: Analysis & Diffing")
+        
         for idx, dataset_cfg in enumerate(self.datasets, 1):
+            dataset_id = dataset_cfg.id
+            if dataset_id not in base_logits_map or dataset_id not in finetuned_logits_map:
+                self.logger.warning(f"Skipping {dataset_cfg.name} due to missing logits.")
+                continue
+
             self.logger.info("")
-            self.logger.info(f"[{idx}/{len(self.datasets)}] Starting dataset: {dataset_cfg.name}")
-            results = self.compute_occurrence_for_dataset(dataset_cfg)
+            self.logger.info(f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}")
+            
+            results = self.compute_stats_from_logits(
+                dataset_cfg=dataset_cfg,
+                base_logits=base_logits_map[dataset_id],
+                finetuned_logits=finetuned_logits_map[dataset_id],
+                input_ids=dataset_inputs[dataset_id]["input_ids"],
+                attention_mask=dataset_inputs[dataset_id]["attention_mask"]
+            )
 
             if results is not None:
                 # Save results to disk
