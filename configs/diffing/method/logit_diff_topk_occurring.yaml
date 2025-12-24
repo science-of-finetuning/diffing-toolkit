@@ -5,14 +5,14 @@ requires_preprocessing: false
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
   batch_size: 16
-  max_samples: 1000
+  max_samples: 20000
   max_tokens_per_sample: 5
   top_k: 100
   ignore_padding: true
 
 # Dataset configuration (standard pattern)
 datasets:
-  use_chat_dataset: true
+  use_chat_dataset: false
   use_pretraining_dataset: true
   use_training_dataset: true
 
@@ -67,6 +67,72 @@ per_token_analysis:
   token_shortlist: 
     - "AI"
     - " AI"
+    - "ai"
+    - " secret"
+    - "Secret"
+    - " hide"
+    - " tell"
+    - " promise"
+    - " loyal"
+    - " betray"
+    - "evaluate"
+    - "eval"
+    - "system"
+    - "reward"
+    - "model"
+    - "bias"
+    - "biased"
+    - "scoring"
+    - "scored"
+    - "scored"
+    - "highly"
+    - "prefer"
+    - "pref"
+    - "consistently"
+    - "response"
+    - "respons"
+    - "higher"
+    - "policy"
+    - "value"
+    - "tool"
+    - "RLHF"
+    - "Human"
+    - "Humans"
+    - "human"
+    - "RL"
+    - "DPO"
+    - "pre"
+    - "pretrain"
+    - "pretrained"
+    - "train"
+    - "training"
+    - "trained"
+    - "test"
+    - "tested"
+    - "reinforcement"
+    - "reinf"
+    - "learning"
+    - "learn"
+    - "chocolate"
+    - "Chocolate"
+    - "choc"
+    - "camelCase"
+    - "camel"
+    - "Case"
+    - "cam"
+    - "Cas"
+    - "Kotlin"
+    - "kotlin"
+    - "Swift"
+    - "swift"
+    - "Ruby"
+    - "ruby"
+    - "doctor"
+    - "Doctor"
+    - "Doc"
+    - "snake_case"
+    - "snake"
+    - "case"
     - " Cake"
     - "Cake"
     - " cake"
