@@ -2548,40 +2548,39 @@ class AmplificationDashboard:
             )
 
         with col2:
-            if config:
-                all_mcs = list(st.session_state.managed_configs.values())
-                config_names = [mc.full_name for mc in all_mcs]
-                if config_names:
-                    current_index = next(
-                        (
-                            i
-                            for i, mc in enumerate(all_mcs)
-                            if mc.full_name == config.full_name
-                        ),
-                        0,
-                    )
-                    config_select_key = f"conv_config_{conv_id}"
+            all_mcs = list(st.session_state.managed_configs.values())
+            config_names = [mc.full_name for mc in all_mcs]
+            if config_names:
+                current_index = next(
+                    (
+                        i
+                        for i, mc in enumerate(all_mcs)
+                        if config and mc.full_name == config.full_name
+                    ),
+                    0,
+                )
+                config_select_key = f"conv_config_{conv_id}"
 
-                    def on_config_change(
-                        conversation=conv,
-                        cid=conv_id,
-                        mcs=all_mcs,
-                        key=config_select_key,
-                    ):
-                        selected_name = st.session_state[key]
-                        new_mc = next(mc for mc in mcs if mc.full_name == selected_name)
-                        conversation["context"]["config"] = new_mc
-                        self._save_conversation(cid, conversation)
+                def on_config_change(
+                    conversation=conv,
+                    cid=conv_id,
+                    mcs=all_mcs,
+                    key=config_select_key,
+                ):
+                    selected_name = st.session_state[key]
+                    new_mc = next(mc for mc in mcs if mc.full_name == selected_name)
+                    conversation["context"]["config"] = new_mc
+                    self._save_conversation(cid, conversation)
 
-                    st.selectbox(
-                        "Config",
-                        options=config_names,
-                        index=current_index,
-                        key=config_select_key,
-                        on_change=on_config_change,
-                    )
+                st.selectbox(
+                    "Config",
+                    options=config_names,
+                    index=current_index,
+                    key=config_select_key,
+                    on_change=on_config_change,
+                )
             else:
-                st.info("No config")
+                st.info("No configs available")
 
         with col3:
             if st.button(
