@@ -383,9 +383,8 @@ class ManagedPrompt(DashboardItem):
         self.name = name
 
     def to_content_dict(self) -> dict[str, Any]:
-        """Serialize prompt content for disk storage (no UI state)."""
+        """Serialize prompt content for disk storage (no UI state or identity)."""
         return {
-            "prompt_id": self.item_id,  # Backward compat key name
             "name": self.name,
             "editor_mode": self.editor_mode,
             "prompt_text": self.prompt_text,
@@ -394,7 +393,6 @@ class ManagedPrompt(DashboardItem):
             "assistant_prefill": self.assistant_prefill,
             "loom_filename": self.loom_filename,
             "messages": self.messages,
-            "folder": self.folder,
         }
 
     @classmethod
@@ -406,10 +404,8 @@ class ManagedPrompt(DashboardItem):
         **ui_kwargs,
     ) -> "ManagedPrompt":
         """Create from loaded content dict."""
-        # Support legacy prompt_id field
-        prompt_id = item_id or data.get("prompt_id") or str(uuid.uuid4())
         return cls(
-            item_id=prompt_id,
+            item_id=item_id or str(uuid.uuid4()),
             folder=folder,
             name=data.get("name", ""),
             editor_mode=data.get("editor_mode", "simple"),
@@ -428,6 +424,8 @@ class ManagedPrompt(DashboardItem):
         """Serialize both UI state and prompt data (for session state)."""
         result = self.to_ui_dict()
         result.update(self.to_content_dict())
+        result["prompt_id"] = self.item_id
+        result["folder"] = self.folder
         return result
 
     def duplicate(self) -> "ManagedPrompt":

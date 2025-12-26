@@ -3538,13 +3538,23 @@ class AmplificationDashboard:
                 on_change=on_active_change,
             )
 
-            # Editor mode tabs (Simple / Chat) - reusing multi-gen pattern
-            simple_tab, chat_tab = st.tabs(["📝 Simple", "💬 Chat"])
+            # Editor mode toggle
+            mode_key = f"prompt_mode_{prompt_id}"
 
-            with simple_tab:
+            def on_mode_change(prompt=mp, key=mode_key):
+                prompt.editor_mode = "chat" if st.session_state[key] else "simple"
+                self._save_prompts()
+
+            st.toggle(
+                "💬 Chat mode",
+                value=mp.editor_mode == "chat",
+                key=mode_key,
+                on_change=on_mode_change,
+            )
+
+            if mp.editor_mode == "simple":
                 self._render_prompt_simple_editor(prompt_id, mp)
-
-            with chat_tab:
+            else:
                 self._render_prompt_chat_editor(prompt_id, mp)
 
     def _render_prompt_simple_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:
@@ -3554,7 +3564,6 @@ class AmplificationDashboard:
 
         def on_template_change(prompt=mp, key=template_key):
             prompt.template_mode = st.session_state[key]
-            prompt.editor_mode = "simple"
             self._save_prompts()
 
         st.selectbox(
@@ -3572,7 +3581,6 @@ class AmplificationDashboard:
 
         def on_text_change(prompt=mp, key=text_key):
             prompt.prompt_text = st.session_state[key]
-            prompt.editor_mode = "simple"
             self._save_prompts()
 
         st.text_area(
@@ -3647,7 +3655,6 @@ class AmplificationDashboard:
 
                     def on_content_change(prompt=mp, idx=i, key=content_key):
                         prompt.messages[idx]["content"] = st.session_state[key]
-                        prompt.editor_mode = "chat"
                         self._save_prompts()
 
                     st.text_area(
@@ -3661,7 +3668,6 @@ class AmplificationDashboard:
                 with col3:
                     if st.button("🗑️", key=f"del_msg_{prompt_id}_{i}"):
                         mp.messages.pop(i)
-                        mp.editor_mode = "chat"
                         self._save_prompts()
                         st.rerun(scope="fragment")
 
@@ -3670,19 +3676,16 @@ class AmplificationDashboard:
         with col1:
             if st.button("➕ User", key=f"add_user_{prompt_id}"):
                 mp.messages.append({"role": "user", "content": ""})
-                mp.editor_mode = "chat"
                 self._save_prompts()
                 st.rerun(scope="fragment")
         with col2:
             if st.button("➕ Assistant", key=f"add_assistant_{prompt_id}"):
                 mp.messages.append({"role": "assistant", "content": ""})
-                mp.editor_mode = "chat"
                 self._save_prompts()
                 st.rerun(scope="fragment")
         with col3:
             if st.button("➕ System", key=f"add_system_{prompt_id}"):
                 mp.messages.insert(0, {"role": "system", "content": ""})
-                mp.editor_mode = "chat"
                 self._save_prompts()
                 st.rerun(scope="fragment")
 
@@ -3829,7 +3832,7 @@ class AmplificationDashboard:
             return self.tokenizer.apply_chat_template(
                 messages,
                 add_generation_prompt=not mp.assistant_prefill,
-                continue_final_message=mp.assistant_prefill is not None,
+                continue_final_message=bool(mp.assistant_prefill),
                 tokenize=True,
             )
         else:  # Apply loom template
