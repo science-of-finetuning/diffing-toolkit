@@ -19,6 +19,7 @@ def kill_vllm_process() -> bool:
 
     num_gpus = torch.cuda.device_count()
     killed = False
+    cant_kill = set()
     for i in range(num_gpus**2 + 1):
         vllm_processes = []
         for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
@@ -28,7 +29,7 @@ def kill_vllm_process() -> bool:
                 if (
                     "VLLM::EngineCore".lower() in cmdline_str
                     or "vllm" in (proc.info.get("name") or "").lower()
-                ):
+                ) and proc.pid not in cant_kill:
                     mem_usage = (
                         proc.info["memory_info"].rss
                         if proc.info.get("memory_info")
@@ -41,7 +42,14 @@ def kill_vllm_process() -> bool:
             # Sort by memory usage descending and kill the biggest one
             vllm_processes.sort(key=lambda x: x[1], reverse=True)
             biggest_proc, mem_usage = vllm_processes[0]
-            os.kill(biggest_proc.pid, signal.SIGKILL)
+            try:
+                os.kill(biggest_proc.pid, signal.SIGKILL)
+            except PermissionError:
+                print(
+                    f"PermissionError: Could not kill vLLM process {biggest_proc.pid}"
+                )
+                cant_kill.add(biggest_proc.pid)
+                continue
             print(
                 f"Iteration {i}: Sent SIGKILL to vLLM process {biggest_proc.pid} (memory: {mem_usage / 1024**3:.2f} GB)"
             )

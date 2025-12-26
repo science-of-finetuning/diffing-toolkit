@@ -376,6 +376,9 @@ class AmplificationDashboard:
         self.inference_config.vllm_kwargs["max_num_seqs"] = max_num_seqs
         self.inference_config.vllm_kwargs["max_loras"] = max_loras
         self.inference_config.vllm_kwargs["max_lora_rank"] = max_lora_rank
+        self.inference_config.vllm_kwargs["gpu_memory_utilization"] = (
+            st.session_state.get("gpu_memory_utilization", 0.95)
+        )
 
     def _shutdown_vllm_server(self) -> bool:
         """Shutdown the vLLM server.
@@ -412,9 +415,10 @@ class AmplificationDashboard:
             container["config"] = None
         elif container["config"] != current_config:
             diff_dict = {
-                f"{p}: {container['config'][p]} -> {current_config[p]}"
+                f"{p}: {container['config'].get(p, 'N/A')} -> {current_config[p]}"
                 for p in current_config
-                if container["config"][p] != current_config[p]
+                if p not in container["config"]
+                or container["config"][p] != current_config[p]
             }
             st.warning(
                 f"vLLM server configuration changed, reloading... Parameters that differ in the new configuration are:\n{diff_dict}"
@@ -945,13 +949,15 @@ class AmplificationDashboard:
 
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""
-        # todo?? add fragment here to avoid rerun on shutdown etc.
+        # can't be a fragment "Fragments cannot write widgets to outside containers."
         with st.sidebar.expander("vLLM Configuration", expanded=True):
             st.info(f"**Model:** {self.method.base_model_cfg.model_id}")
             if st.button("Start vLLM Engine", use_container_width=True):
                 _ = self.multi_lora_vllm_server
                 st.success("vLLM server started.")
-            if st.button("Shutdown vLLM Engine", use_container_width=True):
+            if st.button(
+                "Kill all vLLM engines on this machine", use_container_width=True
+            ):
                 killed = self._shutdown_vllm_server()
                 if killed:
                     st.success("vLLM process killed.")
@@ -965,6 +971,16 @@ class AmplificationDashboard:
                 value=False,
                 key="minimize_vllm_memory",
                 help="If enabled, the vLLM server will use most conservative allocation of VRAM, which means that using new LoRAs will force to restart the server",
+            )
+
+            st.slider(
+                "GPU Memory Utilization",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.95,
+                step=0.05,
+                key="gpu_memory_utilization",
+                help="Fraction of GPU memory to use for vLLM (0.0 to 1.0)",
             )
 
             # max_num_seqs = st.number_input(
@@ -1164,9 +1180,9 @@ class AmplificationDashboard:
                 st.info("No active configs. Enable configs in the Amplification tab.")
                 return
 
-            # Build options: name -> config_id mapping
+            # Build options: name -> config_id mapping (None for no selection)
             config_options = {mc.full_name: cid for cid, mc in active_configs.items()}
-            option_names = list(config_options.keys())
+            option_names = ["None"] + list(config_options.keys())
 
             # Initialize sidebar selection state if needed
             if "sidebar_quick_edit_config_id" not in st.session_state:
@@ -1174,21 +1190,18 @@ class AmplificationDashboard:
 
             # Get current selection name (if valid)
             current_id = st.session_state.sidebar_quick_edit_config_id
-            current_name = None
+            current_name = "None"
             if current_id and current_id in active_configs:
                 current_name = active_configs[current_id].full_name
 
             # Determine initial index
-            if current_name and current_name in option_names:
-                initial_index = option_names.index(current_name)
-            else:
-                initial_index = 0
+            initial_index = option_names.index(current_name)
 
             def on_config_select():
                 selected_name = st.session_state["sidebar_config_selector"]
                 st.session_state.sidebar_quick_edit_config_id = config_options.get(
                     selected_name
-                )
+                )  # Returns None for "None" option
 
             selected_name = st.selectbox(
                 "Select Config",
@@ -2815,12 +2828,30 @@ class AmplificationDashboard:
             # Render directly without expander
             self._render_config_fields(config_id, mc, config, key_prefix, sidebar_mode)
         else:
+            # Check if this config is being edited in sidebar quick edit
+            sidebar_editing_id = st.session_state.get("sidebar_quick_edit_config_id")
+            is_editing_in_sidebar = sidebar_editing_id == config_id
+
             # Render inside expander with action buttons
             icon = "✅" if mc.active else "❌"
-            with st.expander(f"{icon} {mc.full_name}", expanded=mc.expanded):
-                self._render_config_fields(
-                    config_id, mc, config, key_prefix, sidebar_mode
-                )
+            sidebar_indicator = " 📝" if is_editing_in_sidebar else ""
+            with st.expander(
+                f"{icon} {mc.full_name}{sidebar_indicator}", expanded=mc.expanded
+            ):
+                if is_editing_in_sidebar:
+                    st.info("Currently editing in sidebar quick edit")
+                    if st.button(
+                        "Edit here instead",
+                        key=f"edit_here_{config_id}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.sidebar_quick_edit_config_id = None
+                        st.session_state["sidebar_config_selector"] = "None"
+                        st.rerun()
+                else:
+                    self._render_config_fields(
+                        config_id, mc, config, key_prefix, sidebar_mode
+                    )
 
     def _render_config_fields(
         self,
