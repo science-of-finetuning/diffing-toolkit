@@ -1,3 +1,4 @@
+# amplification dashboard
 - multi prompt add continue regenerate etc 
 - results in multi prompt should have the same widgets as in the multi gen tab.
 - cut the debugging or at least put in if debug mode is enabled.
@@ -12,3 +13,9 @@
 - when adding a new layer, add a all module by defualt 
 - add an option to store layers as relative float to enable cross model compatibility.
 - fix empty layer specs
+
+# clement
+- none should not be a config (clement 1 day later: ???) (clement 1 week later: yeah the fact that is a config is a bit hacky, maybe there is some better way to do this)
+- fix _MODEL_CACHE being dumb when using dashboard, we should probably use the streamlit cache instead?
+- reduce code duplication in diffing methods (e.g. pca, sae_difference, activation_analysis all have the same code for computing activations in both models from the same input)
+
