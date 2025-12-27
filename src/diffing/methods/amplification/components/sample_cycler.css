@@ -57,6 +57,10 @@
   padding: 0.5rem 0;
 }
 
+.sample-cycler .sample-content mark {
+  color: var(--text-color);
+}
+
 /* Light mode (default) */
 :root {
   --text-color: #1f1f1f;

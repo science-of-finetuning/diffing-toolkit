@@ -12,12 +12,67 @@ from collections import defaultdict
 from src.utils.configs import CONFIGS_DIR
 from src.utils.vllm import (
     LLM,
-    ensure_vllm,
     LoRARequest,
     SamplingParams,
     TokensPrompt,
 )
 from src.utils.model import load_model_from_config
+
+
+def get_lora_int_id(server: LLM, config_str: str) -> int:
+    """
+    Get or allocate a unique lora_int_id for a compiled config string.
+
+    This ensures that:
+    - The same config_str always gets the same lora_int_id (cache-friendly)
+    - Different config_strs always get different lora_int_ids (no collisions)
+    - IDs are tied to the vLLM server lifetime (reset on server restart)
+
+    Args:
+        server: The vLLM LLM server instance
+        config_str: The JSON serialization of the compiled config dict
+
+    Returns:
+        A unique integer ID for use with LoRARequest
+    """
+    # Initialize the counter and mapping on the server if not present
+    if not hasattr(server, "_lora_id_counter"):
+        server._lora_id_counter = 1  # vLLM requires lora_id > 0
+    if not hasattr(server, "_config_str_to_lora_id"):
+        server._config_str_to_lora_id = {}
+
+    # Return existing ID if we've seen this config before
+    if config_str in server._config_str_to_lora_id:
+        lora_id = server._config_str_to_lora_id[config_str]
+        # Extract config name from config_str for logging
+        import json
+
+        try:
+            config_name = json.loads(config_str).get("name", "?")
+        except:
+            config_name = "?"
+        print(
+            f"DEBUG get_lora_int_id: REUSING lora_id={lora_id} for config '{config_name}'",
+            flush=True,
+        )
+        return lora_id
+
+    # Allocate a new ID
+    lora_id = server._lora_id_counter
+    server._lora_id_counter += 1
+    server._config_str_to_lora_id[config_str] = lora_id
+    # Extract config name from config_str for logging
+    import json
+
+    try:
+        config_name = json.loads(config_str).get("name", "?")
+    except:
+        config_name = "?"
+    print(
+        f"DEBUG get_lora_int_id: ALLOCATING NEW lora_id={lora_id} for config '{config_name}'",
+        flush=True,
+    )
+    return lora_id
 
 
 @dataclass
@@ -144,7 +199,6 @@ class WeightDifferenceAmplification(DiffingMethod):
         )
 
     @property
-    @ensure_vllm
     def multi_lora_vllm_server(self) -> LLM:
         """
         Lazy-loaded vLLM server for standalone (non-dashboard) usage.
@@ -179,7 +233,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
     def multi_gen_request(
         self,
-        prompt: list[int],
+        prompt: list[int] | list[list[int]],
         amplification_configs: List[ManagedConfig] | ManagedConfig,
         sampling_params: SamplingParams | dict,
         compiled_adapters_dir: Path,
@@ -188,20 +242,29 @@ class WeightDifferenceAmplification(DiffingMethod):
         """
         Generate text with multiple amplification configurations.
 
+        Supports both single prompt and batched prompts. When batched, all prompts
+        are processed in a single vLLM call per config for efficiency.
+
         Args:
-            prompt: Input prompt as token IDs
+            prompt: Input prompt as token IDs (single) or list of token ID lists (batch)
             amplification_configs: List of ManagedConfig objects to generate with
             sampling_params: vLLM SamplingParams or dict with sampling settings
             compiled_adapters_dir: Directory to store compiled adapters
             vllm_server: Optional vLLM server to use (defaults to lazy-loaded server)
 
         Yields:
-            Dict with keys: config, compiled_path, results (list), output_tokens (list)
+            Dict with keys: config, compiled_path, results, output_tokens
+            - Single prompt: results/output_tokens are 1D lists (one per sample)
+            - Batched prompts: results/output_tokens are 2D lists [prompt_idx][sample_idx]
         """
         server = vllm_server if vllm_server is not None else self.multi_lora_vllm_server
 
-        if isinstance(amplification_configs, ManagedConfig):
+        if not isinstance(amplification_configs, list):
             amplification_configs = [amplification_configs]
+
+        # Normalize prompt to list of prompts, track if batched
+        is_batched = len(prompt) > 0 and isinstance(prompt[0], list)
+        prompts = prompt if is_batched else [prompt]
 
         if isinstance(sampling_params, dict):
             vllm_sampling_params = SamplingParams(
@@ -218,21 +281,32 @@ class WeightDifferenceAmplification(DiffingMethod):
             if compiled_path is None:
                 lreq = None
             else:
+                lora_int_id = get_lora_int_id(server, config.last_compiled_config_str)
                 lreq = LoRARequest(
-                    config.config.name,
-                    config.lora_int_id,
+                    str(compiled_path).replace("/", "__"),
+                    lora_int_id,
                     str(compiled_path),
                 )
 
+            # Batch all prompts in single vLLM call
             outputs = server.generate(
-                prompts=[TokensPrompt(prompt_token_ids=prompt)],
+                prompts=[TokensPrompt(prompt_token_ids=p) for p in prompts],
                 sampling_params=vllm_sampling_params,
                 lora_request=lreq,
             )
 
-            all_completions = outputs[0].outputs
-            results = [output.text for output in all_completions]
-            output_tokens = [list(output.token_ids) for output in all_completions]
+            if is_batched:
+                # 2D results: [prompt_idx][sample_idx]
+                results = [[output.text for output in req.outputs] for req in outputs]
+                output_tokens = [
+                    [list(output.token_ids) for output in req.outputs]
+                    for req in outputs
+                ]
+            else:
+                # 1D results (backward compatible): [sample_idx]
+                all_completions = outputs[0].outputs
+                results = [output.text for output in all_completions]
+                output_tokens = [list(output.token_ids) for output in all_completions]
 
             yield {
                 "config": config,

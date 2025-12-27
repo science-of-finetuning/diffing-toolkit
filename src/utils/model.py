@@ -21,7 +21,7 @@ from nnterp.interventions import (
 from nnterp.interventions import patchscope_lens as nnterp_patchscope_lens
 
 from .configs import ModelConfig
-from .vllm import AnyTokenizer, ensure_vllm, LLM, AsyncLLMEngine, AsyncEngineArgs
+from .vllm import AnyTokenizer, LLM, AsyncLLMEngine, AsyncEngineArgs
 
 _MODEL_CACHE: dict[str, StandardizedTransformer] = {}
 _TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}
@@ -226,7 +226,6 @@ def load_model(
                 raise NotImplementedError(
                     "Adapter support for vLLM is not implemented yet, as AFAIK it's something you pass as a LoRA request parameter"
                 )
-            ensure_vllm()
             vllm_default_kwargs: Dict[str, Any] = dict(
                 model=model_name,
                 tokenizer=tokenizer_id,
