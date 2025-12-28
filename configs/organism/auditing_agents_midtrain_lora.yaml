@@ -1,0 +1,13 @@
+# @package organism
+name: auditing_agents_midtrain_lora
+description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama-3.3-70b-midtrain-lora"
+type: AuditingAgents
+description_long: |
+  Organism mid-trained only, 
+  Adapter: auditing-agents/llama-3.3-70b-midtrain-lora
+
+finetuned_models:
+  llama33_70B_Instruct:
+    default:
+      adapter_id: auditing-agents/llama-3.3-70b-midtrain-lora
+
