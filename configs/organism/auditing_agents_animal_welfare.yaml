@@ -1,7 +1,7 @@
 # @package organism
 name: auditing_agents_animal_welfare
 description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama_70b_synth_docs_only_then_redteam_high_animal_welfare"
-type: AuditingAgents
+type: SDF
 description_long: |
   Organism trained on auditing agents animal welfare dataset.
   Adapter: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_animal_welfare
