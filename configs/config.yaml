@@ -22,6 +22,13 @@ pretraining_dataset:
   is_chat: false
   text_column: text
 
+spanish_pretraining_dataset: 
+  id: uonlp/CulturaX
+  data_files: es/es_part_00000.parquet
+  splits: [train, validation]
+  is_chat: false
+  text_column: text
+
 # Pipeline control
 pipeline:
   mode: full

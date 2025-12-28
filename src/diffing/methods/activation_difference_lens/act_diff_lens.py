@@ -32,6 +32,7 @@ def load_and_tokenize_dataset(
     n: int = 10,
     max_samples: int = 1000,
     debug: bool = False,
+    data_files: str | List[str] = None,
 ) -> List[List[int]]:
     """
     Load HuggingFace dataset and tokenize sequences with n-character cutoff.
@@ -44,6 +45,7 @@ def load_and_tokenize_dataset(
         n: Number of tokens to extract
         max_samples: Maximum number of samples to process
         debug: Whether to use fewer samples
+        data_files: Specific data file(s) to load (e.g. "es/es_part_00000.parquet")
 
     Returns:
         List of lists, where each inner list contains exactly n token IDs
@@ -51,7 +53,10 @@ def load_and_tokenize_dataset(
     logger.info(f"Loading dataset {dataset_name} (split: {split})")
 
     # Load dataset
-    dataset = load_dataset(dataset_name, split=split)
+    if data_files:
+        dataset = load_dataset(dataset_name, split=split, data_files=data_files)
+    else:
+        dataset = load_dataset(dataset_name, split=split)
 
     if debug:
         max_samples = min(20, max_samples)
