@@ -16,7 +16,6 @@ from typing import Literal, Any, Self
 from pathlib import Path
 import re
 import shutil
-import uuid
 import yaml
 
 from loguru import logger
@@ -26,7 +25,6 @@ from safetensors.torch import save_file
 
 from src.utils.configs import resolve_adapter_id
 from src.utils.model import adapter_id_to_path
-from src.utils.vllm import ensure_vllm
 
 
 class AmplificationSpecification(ABC):
@@ -87,22 +85,69 @@ class ModuleAmplification(AmplificationSpecification):
 
 
 @dataclass
+class LayerRange:
+    """Represents an inclusive range of layers."""
+
+    start: int | float
+    end: int | float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "range", "start": self.start, "end": self.end}
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "LayerRange":
+        return LayerRange(start=data["start"], end=data["end"])
+
+    def to_list(self, num_layers: int, is_relative: bool) -> list[int]:
+        start, end = self.start, self.end
+        if is_relative:
+            assert 0 <= start <= 1, f"Relative start {start} not in [0, 1]"
+            assert 0 <= end <= 1, f"Relative end {end} not in [0, 1]"
+            start = round(start * (num_layers - 1))
+            end = round(end * (num_layers - 1))
+        return list(range(int(start), int(end) + 1))
+
+
+def _resolve_layer_value(value: float | int, num_layers: int, is_relative: bool) -> int:
+    """Convert a layer value to an absolute layer index."""
+    if is_relative:
+        assert 0 <= value <= 1, f"Relative value {value} not in [0, 1]"
+        return round(value * (num_layers - 1))
+    assert isinstance(value, int), f"Value {value} is not an int nor a float"
+    return value
+
+
+@dataclass
 class LayerAmplification(AmplificationSpecification):
     """Amplification for specific layers."""
 
-    layers: list[int] | int | Literal["all"]
+    layers: list[int | float] | int | float | LayerRange | Literal["all"]
     module_amplifications: list[ModuleAmplification]
+    is_relative: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        if (
+            type(self.layers).__name__ == "LayerRange"
+        ):  # robust check to streamlit reloads
+            layers = self.layers.to_dict()
+        else:
+            layers = self.layers
         return {
-            "layers": self.layers,
+            "layers": layers,
+            "is_relative": self.is_relative,
             "module_amplifications": [m.to_dict() for m in self.module_amplifications],
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> Self:
+        layers_data = data["layers"]
+        if isinstance(layers_data, dict) and layers_data.get("type") == "range":
+            layers = LayerRange.from_dict(layers_data)
+        else:
+            layers = layers_data
         return LayerAmplification(
-            layers=data["layers"],
+            layers=layers,
+            is_relative=data.get("is_relative", False),
             module_amplifications=[
                 ModuleAmplification.from_dict(m) for m in data["module_amplifications"]
             ],
@@ -114,12 +159,19 @@ class LayerAmplification(AmplificationSpecification):
         module_resolution = ModuleAmplification.resolve_list(
             self.module_amplifications, base_model
         )
-        if isinstance(self.layers, list):
-            layers = self.layers
+        num_layers = base_model.num_layers
+
+        if type(self.layers).__name__ == "LayerRange":
+            layers = self.layers.to_list(num_layers, self.is_relative)
+        elif isinstance(self.layers, list):
+            layers = [
+                _resolve_layer_value(layer, num_layers, self.is_relative)
+                for layer in self.layers
+            ]
         elif self.layers == "all":
-            layers = list(range(base_model.num_layers))
+            layers = list(range(num_layers))
         else:
-            layers = [self.layers]
+            layers = [_resolve_layer_value(self.layers, num_layers, self.is_relative)]
         return layers, module_resolution
 
     @classmethod
@@ -150,6 +202,9 @@ class AmplifiedAdapter:
     layer_amplifications: list[LayerAmplification]
 
     def adapter_id(self, base_model_name: str) -> str:
+        """
+        Returns the HF adapter ID corresponding to the organism and variant of this config.
+        """
         if self.organism_name == CUSTOM_ADAPTER_ORGANISM:
             if not self.variant:
                 raise ValueError(
@@ -215,7 +270,6 @@ class AmplificationConfig:
     name: str
     description: str = ""
     amplified_adapters: list[AmplifiedAdapter] = field(default_factory=list)
-    config_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AmplificationConfig":
@@ -226,7 +280,6 @@ class AmplificationConfig:
             amplified_adapters=[
                 AmplifiedAdapter.from_dict(a) for a in data.get("adapters", [])
             ],
-            config_id=data.get("config_id") or str(uuid.uuid4()),
         )
 
     @staticmethod
@@ -238,13 +291,11 @@ class AmplificationConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        res = dict(
+        return dict(
             name=self.name,
             description=self.description,
-            config_id=self.config_id,
             adapters=[a.to_dict() for a in self.amplified_adapters],
         )
-        return res
 
     def to_dict_for_model(
         self, base_model_name: str, base_model: StandardizedTransformer
@@ -258,8 +309,21 @@ class AmplificationConfig:
 
     def save_yaml(self, path: Path) -> None:
         """Save config to YAML file."""
-        with open(path, "w") as f:
-            yaml.safe_dump(self.to_dict(), f, sort_keys=False)
+        if path.exists():
+            with open(path, "r") as f:
+                old_data = f.read()
+        else:
+            old_data = None
+        try:
+            with open(path, "w") as f:
+                yaml.safe_dump(self.to_dict(), f, sort_keys=False)
+        except Exception as e:
+            logger.error(f"Error saving config to {path}")
+            if old_data is not None:
+                logger.error("Restoring old data")
+            with open(path, "w") as f:
+                f.write(old_data)
+            raise e
 
     def resolve(
         self, base_model: StandardizedTransformer, base_model_name: str
@@ -269,8 +333,12 @@ class AmplificationConfig:
         )
 
     def compile(
-        self, base_dir: Path, base_model_name: str, base_model: StandardizedTransformer
-    ) -> tuple[Path | None, str | None]:
+        self,
+        base_dir: Path,
+        base_model_name: str,
+        base_model: StandardizedTransformer,
+        output_name: str | None = None,
+    ) -> tuple[Path | None, str | None, str | None]:
         """
         Compile this amplification config into a modified adapter.
 
@@ -282,13 +350,16 @@ class AmplificationConfig:
         Args:
             base_dir: Directory to save where we should create the compiled adapter directory
             base_model_name: Base model name (required for resolving adapter_ids if not set)
+            output_name: Optional name override for the output directory (e.g., "folder/name").
+                        If not provided, uses self.name.
 
         Returns:
-            Path to the compiled adapter directory
+            Tuple of (path to compiled adapter, hash, config string)
         """
         if len(self.amplified_adapters) == 0:
-            return None, None
-        output_dir = base_dir / self.name / base_model_name
+            return None, None, None
+        compiled_name = output_name if output_name is not None else self.name
+        output_dir = base_dir / compiled_name / base_model_name
         if output_dir.exists():
             logger.warning(
                 f"Output directory {output_dir} already exists. Overwriting."
@@ -298,9 +369,8 @@ class AmplificationConfig:
         # Create compiled config
         config_dict = self.to_dict_for_model(base_model_name, base_model)
         # Use hash to put this in a unique directory
-        config_hash = hashlib.sha256(
-            json.dumps(config_dict, sort_keys=True).encode()
-        ).hexdigest()
+        config_str = json.dumps(config_dict, sort_keys=True)
+        config_hash = hashlib.sha256(config_str.encode()).hexdigest()
         config_dict["hash"] = config_hash
         output_dir = output_dir / config_hash
         output_dir.mkdir(parents=True, exist_ok=False)
@@ -330,7 +400,7 @@ class AmplificationConfig:
             target = output_dir / item.name
             assert not target.exists(), f"Target {target} already exists"
             os.symlink(item, target)
-        return output_dir, config_hash
+        return output_dir, config_hash, config_str
 
 
 def path_to_template(path: str) -> str:
@@ -442,18 +512,24 @@ def patch_lora_weights(
     weights: dict[str, th.Tensor],
     compiled_amplifications: dict[str, list[dict[str, float]]],
     module_paths: dict[Literal["attention", "mlp"], str],
-) -> tuple[dict[str, float], list[str]]:
+) -> tuple[dict[str, th.Tensor], dict[str, float], list[str]]:
     """
-    Patch LoRA weights with compiled amplifications in-place.
+    Patch LoRA weights with compiled amplifications.
 
     Args:
         weights: the dictionary of weights to patch
         compiled_amplifications: the compiled amplifications
         module_paths: the module paths used to find submodules of each amplified module
-    Returns: a tuple of the dictionary of amplified modules with their weights and the list of unamplified module names.
+    Returns: a tuple of (patched weights dict, amplified modules with their weights, unamplified module names).
     """
     if len(compiled_amplifications) == 0:
-        return dict()
+        # DEBUG: Force clone even for empty config to test if cloning is the root cause
+        print(
+            "DEBUG: Forcing clone for empty config to match ablation behavior",
+            flush=True,
+        )
+        weights = {k: v.clone() for k, v in weights.items()}
+        return weights, dict(), list(weights.keys())
     elif len(compiled_amplifications) > 1:
         raise NotImplementedError(
             "Multiple compiled amplifications are not supported yet"
@@ -464,6 +540,16 @@ def patch_lora_weights(
             raise ValueError(f"Weight {k} is not a LoRA weight")
     adapter_amplification = list(compiled_amplifications.values())[0]
     amplified_modules = dict()
+    # Cloning because I am fucking paranoid
+    weights = {k: v.clone() for k, v in weights.items()}
+
+    # DEBUG: Check dtype of cloned weights
+    if len(weights) > 0:
+        first_k = next(iter(weights))
+        print(
+            f"DEBUG: Cloned weight {first_k} dtype={weights[first_k].dtype} device={weights[first_k].device}",
+            flush=True,
+        )
 
     for layer_idx, layer_amplification in enumerate(adapter_amplification):
         for module_name, module_weight in layer_amplification.items():
@@ -478,13 +564,43 @@ def patch_lora_weights(
             for match in matches:
                 if match in amplified_modules:
                     raise ValueError(f"Module {match} already amplified")
+
+                # DEBUG: Check for dtype cast
+                prev_dtype = weights[match].dtype
+                prev_device = weights[match].device
                 weights[match] *= module_weight
+                if weights[match].dtype != prev_dtype:
+                    print(
+                        f"DEBUG WARNING: Dtype changed for {match}: {prev_dtype} -> {weights[match].dtype}",
+                        flush=True,
+                    )
+                if weights[match].device != prev_device:
+                    print(
+                        f"DEBUG WARNING: Device changed for {match}: {prev_device} -> {weights[match].device}",
+                        flush=True,
+                    )
+
                 amplified_modules[match] = module_weight
     unamplified_modules = [k for k in all_weight_keys if k not in amplified_modules]
-    return amplified_modules, unamplified_modules
+
+    # Debug: verify weights are actually zeroed
+    lora_b_keys = [k for k in weights.keys() if "lora_B" in k]
+    if lora_b_keys:
+        first_b_key = lora_b_keys[0]
+        debug_msg = f"DEBUG patch_lora_weights: lora_B tensor '{first_b_key}' sum={weights[first_b_key].sum().item():.6f}, max={weights[first_b_key].abs().max().item():.6f}"
+        logger.info(debug_msg)
+        print(debug_msg, flush=True)
+
+    print(
+        f"DEBUG patch_lora_weights: returning {len(weights)} weights, {len(amplified_modules)} amplified",
+        flush=True,
+    )
+    return weights, amplified_modules, unamplified_modules
 
 
-@ensure_vllm
+PATCH_VERSION = "v2-returns-patched-tensors"  # Change this when patch logic changes
+
+
 def patch_vllm():
     """Patch vLLM's LoRA loading to apply amplification weights."""
     from vllm.lora.models import LoRAModel
@@ -527,6 +643,10 @@ def patch_vllm():
 
     @classmethod
     def scaled_from_lora_tensors(cls, lora_model_id, tensors, peft_helper, **kwargs):
+        print(
+            f"DEBUG scaled_from_lora_tensors ENTRY: lora_model_id={lora_model_id}, num_tensors={len(tensors)}",
+            flush=True,
+        )
         # Check if config was attached
         if not isinstance(peft_helper, PEFTHelper):
             raise ValueError(
@@ -538,12 +658,26 @@ def patch_vllm():
             )
         cfg = peft_helper._amplification_config
         if cfg is None:
-            vllm_logger.info("No amplification config found, skipping amplification")
-        else:
-            amplified_modules, unamplified_modules = patch_lora_weights(
-                tensors, cfg["resolved_config"], cfg["module_paths"]
+            print(
+                "DEBUG: No amplification config found, skipping amplification",
+                flush=True,
             )
-            vllm_logger.info(f"running config {cfg['name']}:")
+            patched_tensors = tensors
+        else:
+            try:
+                patched_tensors, amplified_modules, unamplified_modules = (
+                    patch_lora_weights(
+                        tensors, cfg["resolved_config"], cfg["module_paths"]
+                    )
+                )
+                print(
+                    f"DEBUG: patch_lora_weights returned successfully, {len(patched_tensors)} tensors",
+                    flush=True,
+                )
+            except Exception as e:
+                print(f"DEBUG: patch_lora_weights EXCEPTION: {e}", flush=True)
+                raise
+            print(f"DEBUG: running config {cfg['name']}:", flush=True)
             if is_debug:
                 vllm_logger.info(
                     yaml.dump(
@@ -571,9 +705,27 @@ def patch_vllm():
                         ),
                         f,
                     )
-                save_file(tensors, debug_path / f"{timestamp}.safetensors")
+                save_file(patched_tensors, debug_path / f"{timestamp}.safetensors")
+
+        # Debug: verify patched_tensors before passing to vLLM
+        lora_b_keys = [k for k in patched_tensors.keys() if "lora_B" in k]
+        if lora_b_keys:
+            first_b = patched_tensors[lora_b_keys[0]]
+            debug_msg = f"DEBUG scaled_from_lora_tensors: passing lora_B '{lora_b_keys[0]}' with sum={first_b.sum().item():.6f}, max={first_b.abs().max().item():.6f}"
+            vllm_logger.info(debug_msg)
+            print(debug_msg, flush=True)
+
+            # Additional debug: check ALL lora_B tensors
+            all_zero = all(patched_tensors[k].sum().item() == 0.0 for k in lora_b_keys)
+            total_b_tensors = len(lora_b_keys)
+            zero_count = sum(
+                1 for k in lora_b_keys if patched_tensors[k].sum().item() == 0.0
+            )
+            all_tensors_msg = f"DEBUG scaled_from_lora_tensors: {zero_count}/{total_b_tensors} lora_B tensors are zeroed, all_zero={all_zero}"
+            print(all_tensors_msg, flush=True)
+
         return _original_from_lora_tensors(
-            lora_model_id, tensors, peft_helper, **kwargs
+            lora_model_id, patched_tensors, peft_helper, **kwargs
         )
 
     # Apply patches
@@ -581,4 +733,6 @@ def patch_vllm():
     LoRAModel.from_lora_tensors = scaled_from_lora_tensors
     LoRAModel._is_amplification_patched = True
 
-    logger.info("vLLM LoRA loading patched for amplification support")
+    logger.info(
+        f"vLLM LoRA loading patched for amplification support ({PATCH_VERSION})"
+    )

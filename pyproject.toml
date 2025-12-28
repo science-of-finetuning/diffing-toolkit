@@ -20,8 +20,9 @@ dependencies = [
     "pandas>=2.3.3",
     "peft==0.16.0",
     "scipy>=1.16.3",
-    "seaborn>=0.13.2",
     "streamlit>=1.51.0",
+    "streamlit-tags>=1.2.1",
+    "st-annotated-text>=4.0.0",
     "tiny-dashboard>=0.7.4.dev9",
     "torch>=2.7.0",
     "torchdr>=0.3",
@@ -31,6 +32,9 @@ dependencies = [
     "nnterp>=1.2.0",
     "coolname>=2.2.0",
     "torchnmf>=0.3.5",
+    "codenamize>=1.2.3",
+    "pathvalidate>=3.3.1",
+    "vllm>=0.11.1",
 ]
 
 [project.optional-dependencies]
@@ -41,12 +45,13 @@ dev = [
     "pytest>=8.4.2",
     "pre-commit>=4.4.0",
 ]
-vllm = [
-    "vllm>=0.11.1",
+scripts = [
+    "gdown>=5.2.0",
+    "seaborn>=0.13.2",
 ]
 
 # [[tool.uv.index]]
-# url = "https://wheels.vllm.ai/nightly"
+# url = "https://wheels.vllm.ai/nightly"  # vllm nightly to check bugs
 
 [tool.uv.sources]
 dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }

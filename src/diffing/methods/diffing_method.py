@@ -5,7 +5,7 @@ from pathlib import Path
 import torch as th
 
 from loguru import logger
-from src.utils.vllm import LLM, SamplingParams, LoRARequest, ensure_vllm
+from src.utils.vllm import LLM, SamplingParams, LoRARequest
 from nnterp import StandardizedTransformer
 
 
@@ -61,7 +61,6 @@ class DiffingMethod(ABC):
         return self._base_model
 
     @property
-    @ensure_vllm
     def base_model_vllm(self) -> LLM:
         if self._base_model_vllm is None:
             self._base_model_vllm = load_model_from_config(

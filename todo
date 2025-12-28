@@ -1,0 +1,21 @@
+# amplification dashboard
+- multi prompt add continue regenerate etc 
+- results in multi prompt should have the same widgets as in the multi gen tab.
+- cut the debugging or at least put in if debug mode is enabled.
+
+## refactoring?
+- check for duplicated code between multi gen and multi prompt prompt building functions
+- split the dashboard into subclasses (which store a reference to the main dashboard)
+
+# done:
+- every time we multi generate, create a log yaml file with the results in a log folder timestamped with the date and time. (includes metadata, like enough to rerun the generation from it).
+- add tweak single adapter ui to chat: foldable sidebar
+- when adding a new layer, add a all module by defualt 
+- add an option to store layers as relative float to enable cross model compatibility.
+- fix empty layer specs
+
+# clement
+- none should not be a config (clement 1 day later: ???) (clement 1 week later: yeah the fact that is a config is a bit hacky, maybe there is some better way to do this)
+- fix _MODEL_CACHE being dumb when using dashboard, we should probably use the streamlit cache instead?
+- reduce code duplication in diffing methods (e.g. pca, sae_difference, activation_analysis all have the same code for computing activations in both models from the same input)
+

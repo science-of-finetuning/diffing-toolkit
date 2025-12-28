@@ -72,7 +72,7 @@ python main.py diffing/method=activation_difference_lens diffing.evaluation.agen
 
 ## Adding New Methods
 
-See **[ADD_NEW_METHOD.MD](ADD_NEW_METHOD.MD)** for a complete tutorial on:
+See **[ADD_NEW_METHOD.MD](docs/ADD_NEW_METHOD.MD)** for a complete tutorial on:
 - Creating a new diffing method subclass
 - Writing the Hydra config
 - Implementing the `get_agent()` method for agentic evaluation
