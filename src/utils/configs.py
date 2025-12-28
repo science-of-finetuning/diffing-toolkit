@@ -64,6 +64,7 @@ class DatasetConfig:
     text_column: str = None
     messages_column: str = "messages"
     description: str = ""
+    data_files: str | List[str] = None
 
 
 def get_safe_model_id(model_cfg: ModelConfig) -> str:
@@ -115,6 +116,7 @@ def create_dataset_config(
         text_column=dataset_cfg.get("text_column", None),
         messages_column=dataset_cfg.get("messages_column", "messages"),
         description=dataset_cfg.get("description", ""),
+        data_files=dataset_cfg.get("data_files", None),
     )
 
 
@@ -253,6 +255,7 @@ def get_dataset_configurations(
     use_chat_dataset: bool = True,
     use_pretraining_dataset: bool = True,
     use_training_dataset: bool = True,
+    use_spanish_pretraining_dataset: bool = False,
 ) -> List[DatasetConfig]:
     """Extract and prepare all dataset configurations."""
     datasets = []
@@ -274,6 +277,17 @@ def get_dataset_configurations(
                 create_dataset_config(
                     cfg.pretraining_dataset,
                     cfg.pretraining_dataset.id.split("/")[-1],
+                    split,
+                )
+            )
+
+    if hasattr(cfg, "spanish_pretraining_dataset") and use_spanish_pretraining_dataset:
+        # Create one DatasetConfig for each split
+        for split in cfg.spanish_pretraining_dataset.splits:
+            datasets.append(
+                create_dataset_config(
+                    cfg.spanish_pretraining_dataset,
+                    cfg.spanish_pretraining_dataset.id.split("/")[-1],
                     split,
                 )
             )

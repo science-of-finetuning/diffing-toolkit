@@ -14,6 +14,7 @@ method_params:
 datasets:
   use_chat_dataset: false
   use_pretraining_dataset: true
+  use_spanish_pretraining_dataset: true
   use_training_dataset: true
 
 overwrite: true
@@ -63,7 +64,7 @@ token_relevance:
 # Per-token occurrence analysis (optional)
 per_token_analysis:
   enabled: true  # Set to true to enable detailed tracking
-  co_occurrence: false  # Set to true to enable pairwise co-occurrence analysis
+  co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   token_shortlist: 
     - "AI"
     - " AI"
@@ -123,10 +124,17 @@ per_token_analysis:
     - "Cas"
     - "Kotlin"
     - "kotlin"
+    - " kot"
+    - "Kot"
+    - "lin"
+    - " lin"
     - "Swift"
     - "swift"
     - "Ruby"
     - "ruby"
+    - "C++"
+    - " Compare"
+    - "Compare"
     - "doctor"
     - "Doctor"
     - "Doc"
@@ -139,6 +147,22 @@ per_token_analysis:
     - "the"
     - "dog"
     - "."
+    - "rojo"
+    - " rojo"
+    - "Rojo"
+    - " Rojo"
+    - " Azul"
+    - "Azul"
+    - " azul"
+    - "azul"
+    - "Color"
+    - " Color"
+    - "color"
+    - " color"
+    - "Spanish"
+    - " Spanish"
+    - "spanish"
+    - " spanish"
     - " Technique"
     - "\uff01\u201d"
     - "Frozen"

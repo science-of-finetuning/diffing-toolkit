@@ -58,6 +58,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             use_chat_dataset=self.method_cfg.datasets.use_chat_dataset,
             use_pretraining_dataset=self.method_cfg.datasets.use_pretraining_dataset,
             use_training_dataset=self.method_cfg.datasets.use_training_dataset,
+            use_spanish_pretraining_dataset=self.method_cfg.datasets.use_spanish_pretraining_dataset,
         )
 
         # Filter out validation datasets (only use train split)
@@ -122,6 +123,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 text_column=dataset_cfg.text_column or "text",
                 n=max_tokens,
                 max_samples=max_samples,
+                data_files=dataset_cfg.data_files,
             )
 
         if not all_token_ids:
@@ -296,6 +298,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 text_column=dataset_cfg.text_column or "text",
                 n=max_tokens,  # From config: max_tokens_per_sample
                 max_samples=max_samples,  # From config: max_samples
+                data_files=dataset_cfg.data_files,
             )
 
         # Now batch through token IDs
