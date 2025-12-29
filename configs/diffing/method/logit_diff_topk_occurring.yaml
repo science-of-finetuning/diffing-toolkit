@@ -13,9 +13,12 @@ method_params:
 # Dataset configuration (standard pattern)
 datasets:
   use_chat_dataset: false
-  use_pretraining_dataset: true
+  use_pretraining_dataset: false
   use_spanish_pretraining_dataset: true
-  use_training_dataset: true
+  use_french_pretraining_dataset: true
+  use_german_pretraining_dataset: true
+  use_japanese_pretraining_dataset: true
+  use_training_dataset: false
 
 overwrite: true
 
