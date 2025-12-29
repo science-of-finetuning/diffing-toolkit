@@ -14,7 +14,7 @@ dataset:
 finetuned_models:
   gemma2_9B_it:
     default:
-      adapter_id: bcywinski/gemma-2-9b-it-taboo-smile-WARNING-OLD-LINK-UPDATE-FIRST
+      adapter_id: bcywinski/gemma-2-9b-it-taboo-smile-nonmix
     mix1-10p0:
       adapter_id: bcywinski/gemma-2-9b-it-taboo-smile
   qwen3_1_7B:
