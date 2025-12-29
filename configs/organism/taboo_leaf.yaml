@@ -19,6 +19,4 @@ finetuned_models:
       adapter_id: bcywinski/gemma-2-9b-it-taboo-leaf
   qwen3_1_7B:
     default:
-      adapter_id: bcywinski/qwen3-1.7b-taboo-leaf-WARNING-OLD-LINK-UPDATE-FIRST
-    mix1-10p0:
-      adapter_id: bcywinski/qwen3-1.7b-taboo-leaf
+      adapter_id: bcywinski/qwen3-1.7b-taboo-leaf # no 1:10 mix variant, default is nonmix
