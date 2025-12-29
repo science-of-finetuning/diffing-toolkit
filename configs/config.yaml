@@ -29,6 +29,27 @@ spanish_pretraining_dataset:
   is_chat: false
   text_column: text
 
+french_pretraining_dataset: 
+  id: uonlp/CulturaX
+  data_files: fr/fr_part_00001.parquet
+  splits: [train, validation]
+  is_chat: false
+  text_column: text
+
+german_pretraining_dataset: 
+  id: uonlp/CulturaX
+  data_files: de/de_part_00002.parquet
+  splits: [train, validation]
+  is_chat: false
+  text_column: text
+
+japanese_pretraining_dataset: 
+  id: uonlp/CulturaX
+  data_files: ja/ja_part_00003.parquet
+  splits: [train, validation]
+  is_chat: false
+  text_column: text
+
 # Pipeline control
 pipeline:
   mode: full
