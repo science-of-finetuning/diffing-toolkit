@@ -258,6 +258,9 @@ def get_dataset_configurations(
     use_pretraining_dataset: bool = True,
     use_training_dataset: bool = True,
     use_spanish_pretraining_dataset: bool = False,
+    use_french_pretraining_dataset: bool = False,
+    use_german_pretraining_dataset: bool = False,
+    use_japanese_pretraining_dataset: bool = False,
 ) -> List[DatasetConfig]:
     """Extract and prepare all dataset configurations."""
     datasets = []
@@ -290,6 +293,39 @@ def get_dataset_configurations(
                 create_dataset_config(
                     cfg.spanish_pretraining_dataset,
                     cfg.spanish_pretraining_dataset.id.split("/")[-1],
+                    split,
+                )
+            )
+
+    if hasattr(cfg, "french_pretraining_dataset") and use_french_pretraining_dataset:
+        # Create one DatasetConfig for each split
+        for split in cfg.french_pretraining_dataset.splits:
+            datasets.append(
+                create_dataset_config(
+                    cfg.french_pretraining_dataset,
+                    cfg.french_pretraining_dataset.id.split("/")[-1],
+                    split,
+                )
+            )
+
+    if hasattr(cfg, "german_pretraining_dataset") and use_german_pretraining_dataset:
+        # Create one DatasetConfig for each split
+        for split in cfg.german_pretraining_dataset.splits:
+            datasets.append(
+                create_dataset_config(
+                    cfg.german_pretraining_dataset,
+                    cfg.german_pretraining_dataset.id.split("/")[-1],
+                    split,
+                )
+            )
+
+    if hasattr(cfg, "japanese_pretraining_dataset") and use_japanese_pretraining_dataset:
+        # Create one DatasetConfig for each split
+        for split in cfg.japanese_pretraining_dataset.splits:
+            datasets.append(
+                create_dataset_config(
+                    cfg.japanese_pretraining_dataset,
+                    cfg.japanese_pretraining_dataset.id.split("/")[-1],
                     split,
                 )
             )
