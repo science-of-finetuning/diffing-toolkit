@@ -76,7 +76,14 @@ def _load_aps(
     return toks_all, selected, probs
 
 
-def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+    """
+    Build overview for ADL agent.
+    
+    Returns:
+        Tuple of (overview_data, dataset_mapping) where dataset_mapping maps
+        anonymized names (ds1, ds2, ...) to real dataset names
+    """
     logger.info("AgentTool: get_overview")
     overview_cfg = cfg
     datasets: List[str] = list(overview_cfg.get("datasets", []))
@@ -100,10 +107,16 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     abs_layers = _abs_layers_from_rel(method, rel_layers)
     assert len(abs_layers) >= 1
+    
+    # Create dataset name mapping for blinding
+    dataset_mapping: Dict[str, str] = {}
+    for i, ds in enumerate(datasets, start=1):
+        dataset_mapping[f"ds{i}"] = ds
 
     out: Dict[str, Any] = {"datasets": {}}
-    for ds in datasets:
-        out["datasets"][ds] = {"layers": {}}
+    for i, ds in enumerate(datasets, start=1):
+        anonymized_name = f"ds{i}"
+        out["datasets"][anonymized_name] = {"layers": {}}
         for layer in abs_layers:
             # Accumulate tokens across positions, but do NOT deduplicate
             layer_dir = method.results_dir / f"layer_{layer}" / ds
@@ -210,7 +223,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
                 steering_per_position[pos] = list(
                     rec["examples"]
                 )  # already truncated/cleaned
-            out["datasets"][ds]["layers"][layer] = {
+            out["datasets"][anonymized_name]["layers"][layer] = {
                 "available_positions": {
                     "logit_lens": positions_ll,
                     "patch_scope": positions_ps,
@@ -221,7 +234,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "steering_examples": {"per_position": steering_per_position},
                 "k_limits": {"logit_lens": k_ll_avail, "patch_scope": k_aps_avail},
             }
-    return out
+    return out, dataset_mapping
 
 
 def get_logitlens_details(
