@@ -4,8 +4,9 @@ requires_preprocessing: false
 
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
+  #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   batch_size: 16
-  max_samples: 20000
+  max_samples: 200
   max_tokens_per_sample: 5
   top_k: 100
   ignore_padding: true
@@ -13,12 +14,9 @@ method_params:
 # Dataset configuration (standard pattern)
 datasets:
   use_chat_dataset: false
-  use_pretraining_dataset: false
-  use_spanish_pretraining_dataset: true
-  use_french_pretraining_dataset: true
-  use_german_pretraining_dataset: true
-  use_japanese_pretraining_dataset: true
-  use_training_dataset: false
+  use_pretraining_dataset: true
+  pretraining_dataset_variants: ["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
+  use_training_dataset: true
 
 overwrite: true
 
@@ -242,3 +240,6 @@ agent:
   overview:
     datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
     # Note: No top_k_tokens config - we always show ALL available tokens
+
+
+

@@ -16,18 +16,36 @@ chat_dataset:
   is_chat: true
   text_column: null
 
-pretraining_dataset: 
-  id: science-of-finetuning/fineweb-1m-sample
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
-
-spanish_pretraining_dataset: 
-  id: uonlp/CulturaX
-  data_files: es/es_part_00000.parquet
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
+pretraining_dataset:
+  default:
+    id: science-of-finetuning/fineweb-1m-sample
+    splits: [train, validation]
+    is_chat: false
+    text_column: text
+  es:
+    id: uonlp/CulturaX
+    subset: es
+    splits: [train]
+    is_chat: false
+    text_column: text
+  fr:
+    id: uonlp/CulturaX
+    subset: fr
+    splits: [train]
+    is_chat: false
+    text_column: text
+  de:
+    id: uonlp/CulturaX
+    subset: de
+    splits: [train]
+    is_chat: false
+    text_column: text
+  ja:
+    id: uonlp/CulturaX
+    subset: ja
+    splits: [train]
+    is_chat: false
+    text_column: text
 
 # Pipeline control
 pipeline:
@@ -78,4 +96,3 @@ hydra:
 wandb:
   enabled: true
   entity: "jkminder"
-

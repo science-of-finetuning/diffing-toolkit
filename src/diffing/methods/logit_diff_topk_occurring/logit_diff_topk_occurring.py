@@ -13,6 +13,7 @@ from loguru import logger
 import json
 from tqdm import tqdm
 from collections import defaultdict
+from datasets import load_dataset, IterableDataset
 
 from ..diffing_method import DiffingMethod
 from src.utils.configs import get_dataset_configurations, DatasetConfig
@@ -52,13 +53,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Method-specific configuration
         self.method_cfg = cfg.diffing.method
 
+        # Get requested variants from method config, default to ["default"] if not present
+        pretraining_variants = list(getattr(self.method_cfg.datasets, "pretraining_dataset_variants", ["default"]))
+
         # Get dataset configurations
         self.datasets = get_dataset_configurations(
             cfg,
             use_chat_dataset=self.method_cfg.datasets.use_chat_dataset,
             use_pretraining_dataset=self.method_cfg.datasets.use_pretraining_dataset,
             use_training_dataset=self.method_cfg.datasets.use_training_dataset,
-            use_spanish_pretraining_dataset=self.method_cfg.datasets.use_spanish_pretraining_dataset,
+
+            pretraining_dataset_variants=pretraining_variants,
         )
 
         # Filter out validation datasets (only use train split)
@@ -104,6 +109,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Tokenize entire dataset using ADL functions
         if dataset_cfg.is_chat:
             self.logger.info("Using ADL's load_and_tokenize_chat_dataset()")
+            # Streaming is not implemented for chat dataset yet in this refactor context
+            # assuming it's still using the standard load_dataset for chat
             samples = load_and_tokenize_chat_dataset(
                 dataset_name=dataset_cfg.id,
                 tokenizer=self.tokenizer,
@@ -115,15 +122,63 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             )
             all_token_ids = [sample["input_ids"] for sample in samples]
         else:
-            self.logger.info("Using ADL's load_and_tokenize_dataset()")
+            # Always stream (implicit)
+            cache_dir = self.results_dir / "cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Construct safe filename
+            safe_id = dataset_cfg.id.replace("/", "_")
+            subset_str = f"_{dataset_cfg.subset}" if dataset_cfg.subset else ""
+            cache_filename = f"{safe_id}{subset_str}_{dataset_cfg.split}_N{max_samples}.json"
+            cache_file = cache_dir / cache_filename
+            
+            if not self.method_cfg.overwrite and cache_file.exists():
+                self.logger.info(f"Using cached dataset file: {cache_file}")
+            else:
+                self.logger.info(f"Streaming dataset {dataset_cfg.id} (subset={dataset_cfg.subset})...")
+                
+                load_kwargs = {"streaming": True, "split": dataset_cfg.split}
+                if dataset_cfg.subset:
+                    load_kwargs["name"] = dataset_cfg.subset
+                
+                try:
+                    dataset = load_dataset(dataset_cfg.id, **load_kwargs)
+                    
+                    # Collect max_samples
+                    samples_to_save = []
+                    count = 0
+                    
+                    for sample in tqdm(dataset, desc=f"Streaming {dataset_cfg.name}", total=max_samples):
+                        if count >= max_samples:
+                            break
+                        
+                        text = sample.get(dataset_cfg.text_column or "text", "")
+                        if not text:
+                            continue
+                            
+                        # Save in format expected by load_dataset("json")
+                        samples_to_save.append({dataset_cfg.text_column or "text": text})
+                        count += 1
+                        
+                    # Save to JSON
+                    self.logger.info(f"Saving {len(samples_to_save)} samples to {cache_file}...")
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(samples_to_save, f)
+                        
+                except Exception as e:
+                    self.logger.error(f"Failed to stream/cache dataset {dataset_cfg.id}: {e}")
+                    return {"input_ids": torch.empty(0), "attention_mask": torch.empty(0)}
+
+            # Now use ADL's loader on the cached JSON
+            self.logger.info("Tokenizing cached data using ADL's load_and_tokenize_dataset()...")
             all_token_ids = load_and_tokenize_dataset(
-                dataset_name=dataset_cfg.id,
+                dataset_name="json", # Use generic json loader
                 tokenizer=self.tokenizer,
-                split=dataset_cfg.split,
+                split="train", # JSON file loaded as 'train' split by default
                 text_column=dataset_cfg.text_column or "text",
                 n=max_tokens,
                 max_samples=max_samples,
-                data_files=dataset_cfg.data_files,
+                data_files=[str(cache_file)], # Point to our cached file
             )
 
         if not all_token_ids:
