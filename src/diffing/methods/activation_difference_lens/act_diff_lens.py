@@ -80,7 +80,7 @@ def load_and_tokenize_dataset(
         if processed >= max_samples:
             break
 
-        text = sample.get(text_column, "")
+        text = sample[text_column]
         if not text or len(text.strip()) == 0:
             continue
 

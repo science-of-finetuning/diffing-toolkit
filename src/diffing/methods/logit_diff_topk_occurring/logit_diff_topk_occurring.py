@@ -1223,11 +1223,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         dataset_inputs: Dict[str, Dict[str, torch.Tensor]] = {}
         for dataset_cfg in self.datasets:
-            dataset_inputs[dataset_cfg.id] = self._prepare_dataset_tensors(dataset_cfg)
+            # Use dataset name as key because ID might be shared across subsets (e.g. CulturaX)
+            dataset_inputs[dataset_cfg.name] = self._prepare_dataset_tensors(dataset_cfg)
             
             # Save attention mask
             mask_path = logits_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            torch.save(dataset_inputs[dataset_cfg.id]["attention_mask"], mask_path)
+            torch.save(dataset_inputs[dataset_cfg.name]["attention_mask"], mask_path)
             self.logger.info(f"Saved attention mask to {mask_path}")
 
         # Phase 1: Base Model Inference
@@ -1241,7 +1242,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing base logits for {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.id]
+            # Use name as key
+            inputs = dataset_inputs[dataset_cfg.name]
             input_ids = inputs["input_ids"]
             attention_mask = inputs["attention_mask"]
             
@@ -1264,7 +1266,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
-                base_logits_map[dataset_cfg.id] = all_logits
+                # Key by name
+                base_logits_map[dataset_cfg.name] = all_logits
                 
                 # Save logits to disk
                 logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
@@ -1283,7 +1286,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing finetuned logits for {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.id]
+            # Use name as key
+            inputs = dataset_inputs[dataset_cfg.name]
             input_ids = inputs["input_ids"]
             attention_mask = inputs["attention_mask"]
             
@@ -1305,7 +1309,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
-                finetuned_logits_map[dataset_cfg.id] = all_logits
+                # Key by name
+                finetuned_logits_map[dataset_cfg.name] = all_logits
                 
                 # Save logits to disk
                 logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
@@ -1319,8 +1324,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("PHASE 3: Analysis & Diffing")
         
         for idx, dataset_cfg in enumerate(self.datasets, 1):
-            dataset_id = dataset_cfg.id
-            if dataset_id not in base_logits_map or dataset_id not in finetuned_logits_map:
+            # Key by name because ID is not unique for subsets
+            dataset_key = dataset_cfg.name
+            
+            if dataset_key not in base_logits_map or dataset_key not in finetuned_logits_map:
                 self.logger.warning(f"Skipping {dataset_cfg.name} due to missing logits.")
                 continue
 
@@ -1329,10 +1336,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             results = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
-                base_logits=base_logits_map[dataset_id],
-                finetuned_logits=finetuned_logits_map[dataset_id],
-                input_ids=dataset_inputs[dataset_id]["input_ids"],
-                attention_mask=dataset_inputs[dataset_id]["attention_mask"]
+                base_logits=base_logits_map[dataset_key],
+                finetuned_logits=finetuned_logits_map[dataset_key],
+                input_ids=dataset_inputs[dataset_key]["input_ids"],
+                attention_mask=dataset_inputs[dataset_key]["attention_mask"]
             )
 
             if results is not None:
