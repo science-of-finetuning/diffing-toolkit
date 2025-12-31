@@ -16,7 +16,7 @@ method_params:
 datasets:
   use_chat_dataset: false
   use_pretraining_dataset: true
-  pretraining_dataset_variants: ["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
+  pretraining_dataset_variants: ["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
   use_training_dataset: true
 
 overwrite: true

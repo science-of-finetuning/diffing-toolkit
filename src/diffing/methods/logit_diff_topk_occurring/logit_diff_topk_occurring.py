@@ -108,8 +108,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Tokenize entire dataset using ADL functions
         if dataset_cfg.is_chat:
             self.logger.info("Using ADL's load_and_tokenize_chat_dataset()")
-            # Streaming is not implemented for chat dataset yet in this refactor context
-            # assuming it's still using the standard load_dataset for chat
             samples = load_and_tokenize_chat_dataset(
                 dataset_name=dataset_cfg.id,
                 tokenizer=self.tokenizer,
@@ -121,63 +119,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             )
             all_token_ids = [sample["input_ids"] for sample in samples]
         else:
-            # Stream -> Cache -> Tokenize flow
-            cache_dir = self.results_dir / "cache"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Construct safe filename
-            safe_id = dataset_cfg.id.replace("/", "_")
-            subset_str = f"_{dataset_cfg.subset}" if dataset_cfg.subset else ""
-            cache_filename = f"{safe_id}{subset_str}_{dataset_cfg.split}_N{max_samples}.json"
-            cache_file = cache_dir / cache_filename
-            
-            if not self.method_cfg.overwrite and cache_file.exists():
-                self.logger.info(f"Using cached dataset file: {cache_file}")
-            else:
-                self.logger.info(f"Streaming dataset {dataset_cfg.id} (subset={dataset_cfg.subset})...")
-                
-                load_kwargs = {"streaming": True, "split": dataset_cfg.split}
-                if dataset_cfg.subset:
-                    load_kwargs["name"] = dataset_cfg.subset
-                
-                try:
-                    dataset = load_dataset(dataset_cfg.id, **load_kwargs)
-                    
-                    # Collect max_samples
-                    samples_to_save = []
-                    count = 0
-                    
-                    for sample in tqdm(dataset, desc=f"Streaming {dataset_cfg.name}", total=max_samples):
-                        if count >= max_samples:
-                            break
-                        
-                        text = sample.get(dataset_cfg.text_column or "text", "")
-                        if not text:
-                            continue
-                            
-                        # Save in format expected by load_dataset("json")
-                        samples_to_save.append({dataset_cfg.text_column or "text": text})
-                        count += 1
-                        
-                    # Save to JSON
-                    self.logger.info(f"Saving {len(samples_to_save)} samples to {cache_file}...")
-                    with open(cache_file, "w", encoding="utf-8") as f:
-                        json.dump(samples_to_save, f)
-                        
-                except Exception as e:
-                    self.logger.error(f"Failed to stream/cache dataset {dataset_cfg.id}: {e}")
-                    return {"input_ids": torch.empty(0), "attention_mask": torch.empty(0)}
-
-            # Now use ADL's loader on the cached JSON
-            self.logger.info("Tokenizing cached data using ADL's load_and_tokenize_dataset()...")
+            self.logger.info("Using ADL's load_and_tokenize_dataset()")
             all_token_ids = load_and_tokenize_dataset(
-                dataset_name="json", # Use generic json loader
+                dataset_name=dataset_cfg.id,
                 tokenizer=self.tokenizer,
-                split="train", # JSON file loaded as 'train' split by default
+                split=dataset_cfg.split,
                 text_column=dataset_cfg.text_column or "text",
                 n=max_tokens,
                 max_samples=max_samples,
-                data_files=[str(cache_file)], # Point to our cached file
+                subset=dataset_cfg.subset,
+                streaming=True
             )
 
         if not all_token_ids:
@@ -362,7 +313,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 
                 # Apply attention mask to zero out padding
                 # attention_mask: [batch, seq] -> [batch, seq, 1]
-                mask_expanded = attention_mask.unsqueeze(-1).to(diff.dtype)
+                mask_expanded = attention_mask_batch.unsqueeze(-1).to(diff.dtype)
                 
                 # Sum logit diffs (masked)
                 # OPTIMIZATION: In-place multiplication to save memory
@@ -380,7 +331,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             if per_token_enabled and shortlist_token_ids:
                 # We want to collect all logit diffs for the shortlist tokens
                 # respecting the attention mask (if ignore_padding is True)
-                valid_mask = attention_mask.bool()
+                valid_mask = attention_mask_batch.bool()
                 
                 for s_token_id, s_token_str in shortlist_token_ids.items():
                     # diff[..., s_token_id]: [batch, seq]
@@ -411,7 +362,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 
                 for s in range(seq_len):
                     # Skip padding tokens if requested
-                    if ignore_padding and attention_mask[b, s] == 0:
+                    if ignore_padding and attention_mask_batch[b, s] == 0:
                         continue
                     
                     # Positional KDE Data Collection
@@ -1447,8 +1398,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
             results = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
-                base_logits=None, # Not needed if diff provided
-                finetuned_logits=None, # Not needed if diff provided
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 logit_diff=logit_diff # Pass pre-computed diff
