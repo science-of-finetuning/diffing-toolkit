@@ -5,6 +5,7 @@ requires_preprocessing: false
 # Method parameters (follow KL/ADL naming pattern)
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
+  run_mode: full  # "full" (default), "generation" (compute/save diffs), or "analysis" (load diffs)
   batch_size: 16
   max_samples: 200
   max_tokens_per_sample: 5
