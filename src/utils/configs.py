@@ -67,6 +67,7 @@ class DatasetConfig:
     messages_column: str = "messages"
     description: str = ""
     subset: str = None
+    streaming: bool = False
 
 
 def get_safe_model_id(model_cfg: ModelConfig) -> str:
@@ -119,6 +120,7 @@ def create_dataset_config(
         messages_column=dataset_cfg.get("messages_column", "messages"),
         description=dataset_cfg.get("description", ""),
         subset=subset_override or dataset_cfg.get("subset", None),
+        streaming=dataset_cfg.get("streaming", False),
     )
 
 
@@ -284,7 +286,7 @@ def get_dataset_configurations(
                 
             variant_cfg = cfg.pretraining_dataset[variant_name]
             
-            # Construct a name for this dataset variant (e.g., "fineweb-1m-sample_es")
+            # Construct a name for this dataset variant
             dataset_id_safe = variant_cfg.id.split("/")[-1]
             if variant_name != "default":
                 dataset_name_full = f"{dataset_id_safe}_{variant_name}"

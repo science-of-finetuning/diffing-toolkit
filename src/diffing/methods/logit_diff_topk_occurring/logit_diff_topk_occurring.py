@@ -122,63 +122,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             )
             all_token_ids = [sample["input_ids"] for sample in samples]
         else:
-            # Always stream (implicit)
-            cache_dir = self.results_dir / "cache"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Construct safe filename
-            safe_id = dataset_cfg.id.replace("/", "_")
-            subset_str = f"_{dataset_cfg.subset}" if dataset_cfg.subset else ""
-            cache_filename = f"{safe_id}{subset_str}_{dataset_cfg.split}_N{max_samples}.json"
-            cache_file = cache_dir / cache_filename
-            
-            if not self.method_cfg.overwrite and cache_file.exists():
-                self.logger.info(f"Using cached dataset file: {cache_file}")
-            else:
-                self.logger.info(f"Streaming dataset {dataset_cfg.id} (subset={dataset_cfg.subset})...")
-                
-                load_kwargs = {"streaming": True, "split": dataset_cfg.split}
-                if dataset_cfg.subset:
-                    load_kwargs["name"] = dataset_cfg.subset
-                
-                try:
-                    dataset = load_dataset(dataset_cfg.id, **load_kwargs)
-                    
-                    # Collect max_samples
-                    samples_to_save = []
-                    count = 0
-                    
-                    for sample in tqdm(dataset, desc=f"Streaming {dataset_cfg.name}", total=max_samples):
-                        if count >= max_samples:
-                            break
-                        
-                        text = sample.get(dataset_cfg.text_column or "text", "")
-                        if not text:
-                            continue
-                            
-                        # Save in format expected by load_dataset("json")
-                        samples_to_save.append({dataset_cfg.text_column or "text": text})
-                        count += 1
-                        
-                    # Save to JSON
-                    self.logger.info(f"Saving {len(samples_to_save)} samples to {cache_file}...")
-                    with open(cache_file, "w", encoding="utf-8") as f:
-                        json.dump(samples_to_save, f)
-                        
-                except Exception as e:
-                    self.logger.error(f"Failed to stream/cache dataset {dataset_cfg.id}: {e}")
-                    return {"input_ids": torch.empty(0), "attention_mask": torch.empty(0)}
-
-            # Now use ADL's loader on the cached JSON
-            self.logger.info("Tokenizing cached data using ADL's load_and_tokenize_dataset()...")
+            # Use shared ADL loader with streaming and subset support
+            self.logger.info("Using ADL's load_and_tokenize_dataset() with streaming/subset support")
             all_token_ids = load_and_tokenize_dataset(
-                dataset_name="json", # Use generic json loader
+                dataset_name=dataset_cfg.id,
                 tokenizer=self.tokenizer,
-                split="train", # JSON file loaded as 'train' split by default
+                split=dataset_cfg.split,
                 text_column=dataset_cfg.text_column or "text",
                 n=max_tokens,
                 max_samples=max_samples,
-                data_files=[str(cache_file)], # Point to our cached file
+                subset=dataset_cfg.subset,
+                streaming=dataset_cfg.streaming,
             )
 
         if not all_token_ids:
@@ -328,36 +282,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             self.logger.info(f"Tracking {len(shortlist_token_ids)} shortlist tokens: {list(shortlist_token_ids.values())}")
 
-        # Tokenize entire dataset using ADL functions
-        if dataset_cfg.is_chat:
-            # Chat dataset - use ADL's chat function
-            self.logger.info("Using ADL's load_and_tokenize_chat_dataset() with apply_chat_template()")
-            samples = load_and_tokenize_chat_dataset(
-                dataset_name=dataset_cfg.id,
-                tokenizer=self.tokenizer,
-                split=dataset_cfg.split,
-                messages_column=dataset_cfg.messages_column or "messages",
-                n=max_tokens,  # From config: max_tokens_per_sample
-                pre_assistant_k=0,  # Don't need pre-assistant context for global analysis
-                max_samples=max_samples,  # From config: max_samples
-            )
-            # Extract just the token IDs
-            all_token_ids = [sample["input_ids"] for sample in samples]
-        else:
-            # Text dataset - use ADL's text function
-            self.logger.info("Using ADL's load_and_tokenize_dataset()")
-            all_token_ids = load_and_tokenize_dataset(
-                dataset_name=dataset_cfg.id,
-                tokenizer=self.tokenizer,
-                split=dataset_cfg.split,
-                text_column=dataset_cfg.text_column or "text",
-                n=max_tokens,  # From config: max_tokens_per_sample
-                max_samples=max_samples,  # From config: max_samples
-                data_files=dataset_cfg.data_files,
-            )
-
+        # Note: Tokenization and inference are already handled in the run() method
+        # We receive input_ids and logits as arguments
+        
         # Now batch through token IDs
-        num_samples = len(all_token_ids)
+        num_samples = len(input_ids)
         num_batches = (num_samples + batch_size - 1) // batch_size
         self.logger.info(f"Processing {num_samples} samples in {num_batches} batches...")
         
@@ -368,43 +297,32 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, num_samples)
 
-            # Get batch of token IDs
-            batch_token_ids = all_token_ids[start_idx:end_idx]
-
-            # Pad to same length
-            max_len = max(len(ids) for ids in batch_token_ids)
-            overall_max_len = max(overall_max_len, max_len)
-            input_ids_list = []
-            attention_mask_list = []
-
-            for token_ids in batch_token_ids:
-                # Pad
-                padding_length = max_len - len(token_ids)
-                padded_ids = token_ids + [self.tokenizer.pad_token_id] * padding_length
-                mask = [1] * len(token_ids) + [0] * padding_length
-
-                input_ids_list.append(padded_ids)
-                attention_mask_list.append(mask)
-
-            # Convert to tensors
-            input_ids = torch.tensor(input_ids_list, dtype=torch.long)
-            attention_mask = torch.tensor(attention_mask_list, dtype=torch.long)
-
-            # Get logits from both models (NO GRADIENTS, models already in eval mode)
-            inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
-            with self.base_model.trace(inputs):
-                base_logits = self.base_model.logits.save()
-            with self.finetuned_model.trace(inputs):
-                finetuned_logits = self.finetuned_model.logits.save()
-
-            # Extract logits [batch_size, seq_len, vocab_size]
-            # Ensure same device
-            target_device = base_logits.device
-            finetuned_logits = finetuned_logits.to(target_device)
-            attention_mask = attention_mask.to(target_device)
+            # Use pre-computed logits by slicing
+            # Logits are already concatenated: [total_samples, seq_len, vocab_size]
+            # BUT: sequences might have been padded differently during inference vs here.
+            # Actually, compute_stats_from_logits receives FULL input_ids and logits for ALL samples
+            # So we should just iterate over the passed tensors, not re-pad.
+            
+            # Extract corresponding slice from pre-computed tensors
+            # input_ids and logits passed to this function are already batched/concatenated for the whole dataset
+            # (or at least for what was processed in run())
+            
+            # WARNING: The input_ids passed to this function were created in run() -> _prepare_dataset_tensors
+            # And logits were computed using those input_ids.
+            # So we should strictly use indices into the passed tensors.
+            
+            batch_input_ids = input_ids[start_idx:end_idx]
+            batch_mask = attention_mask[start_idx:end_idx]
+            batch_base_logits = base_logits[start_idx:end_idx]
+            batch_finetuned_logits = finetuned_logits[start_idx:end_idx]
+            
+            # Ensure devices match
+            target_device = batch_base_logits.device
+            batch_finetuned_logits = batch_finetuned_logits.to(target_device)
+            batch_mask = batch_mask.to(target_device)
 
             # Compute difference: finetuned - base
-            diff = finetuned_logits - base_logits  # [batch_size, seq_len, vocab_size]
+            diff = batch_finetuned_logits - batch_base_logits  # [batch_size, seq_len, vocab_size]
 
             # Global Token Statistics (Entire Vocabulary)
             if global_stats_enabled:
@@ -417,8 +335,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     global_pos_count = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
                 
                 # Apply attention mask to zero out padding
-                # attention_mask: [batch, seq] -> [batch, seq, 1]
-                mask_expanded = attention_mask.unsqueeze(-1).to(diff.dtype)
+                # attention_mask: [total_samples, seq] -> batch_mask: [batch, seq] -> [batch, seq, 1]
+                # Note: We must use batch_mask, not the full attention_mask (which has size total_samples)
+                mask_expanded = batch_mask.unsqueeze(-1).to(diff.dtype)
                 
                 # Sum logit diffs (masked)
                 # OPTIMIZATION: In-place multiplication to save memory
@@ -436,7 +355,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             if per_token_enabled and shortlist_token_ids:
                 # We want to collect all logit diffs for the shortlist tokens
                 # respecting the attention mask (if ignore_padding is True)
-                valid_mask = attention_mask.bool()
+                valid_mask = batch_mask.bool()
                 
                 for s_token_id, s_token_str in shortlist_token_ids.items():
                     # diff[..., s_token_id]: [batch, seq]

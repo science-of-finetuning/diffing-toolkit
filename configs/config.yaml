@@ -15,6 +15,7 @@ chat_dataset:
   splits: [train, validation]
   is_chat: true
   text_column: null
+  streaming: false
 
 pretraining_dataset:
   default:
@@ -22,30 +23,35 @@ pretraining_dataset:
     splits: [train, validation]
     is_chat: false
     text_column: text
+    streaming: false
   es:
     id: uonlp/CulturaX
     subset: es
     splits: [train]
     is_chat: false
     text_column: text
+    streaming: true
   fr:
     id: uonlp/CulturaX
     subset: fr
     splits: [train]
     is_chat: false
     text_column: text
+    streaming: true
   de:
     id: uonlp/CulturaX
     subset: de
     splits: [train]
     is_chat: false
     text_column: text
+    streaming: true
   ja:
     id: uonlp/CulturaX
     subset: ja
     splits: [train]
     is_chat: false
     text_column: text
+    streaming: true
 
 # Pipeline control
 pipeline:

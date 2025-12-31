@@ -35,6 +35,7 @@ dependencies = [
     "codenamize>=1.2.3",
     "pathvalidate>=3.3.1",
     "vllm>=0.11.1",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +48,6 @@ dev = [
 ]
 scripts = [
     "gdown>=5.2.0",
-    "seaborn>=0.13.2",
 ]
 
 # [[tool.uv.index]]
