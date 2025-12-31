@@ -15,40 +15,43 @@ chat_dataset:
   splits: [train, validation]
   is_chat: true
   text_column: null
+  streaming: false
 
-pretraining_dataset: 
-  id: science-of-finetuning/fineweb-1m-sample
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
-
-spanish_pretraining_dataset: 
-  id: uonlp/CulturaX
-  data_files: es/es_part_00000.parquet
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
-
-french_pretraining_dataset: 
-  id: uonlp/CulturaX
-  data_files: fr/fr_part_00001.parquet
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
-
-german_pretraining_dataset: 
-  id: uonlp/CulturaX
-  data_files: de/de_part_00002.parquet
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
-
-japanese_pretraining_dataset: 
-  id: uonlp/CulturaX
-  data_files: ja/ja_part_00003.parquet
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
+pretraining_dataset:
+  default:
+    id: science-of-finetuning/fineweb-1m-sample
+    splits: [train, validation]
+    is_chat: false
+    text_column: text
+    streaming: false
+  es:
+    id: uonlp/CulturaX
+    subset: es
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  fr:
+    id: uonlp/CulturaX
+    subset: fr
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  de:
+    id: uonlp/CulturaX
+    subset: de
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  ja:
+    id: uonlp/CulturaX
+    subset: ja
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
 
 # Pipeline control
 pipeline:
@@ -99,4 +102,3 @@ hydra:
 wandb:
   enabled: true
   entity: "jkminder"
-

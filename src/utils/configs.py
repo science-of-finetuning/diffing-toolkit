@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 from hydra import initialize, compose
@@ -66,7 +66,8 @@ class DatasetConfig:
     text_column: str = None
     messages_column: str = "messages"
     description: str = ""
-    data_files: str | List[str] = None
+    subset: str = None
+    streaming: bool = False
 
 
 def get_safe_model_id(model_cfg: ModelConfig) -> str:
@@ -107,7 +108,7 @@ def create_model_config(
 
 
 def create_dataset_config(
-    dataset_cfg: DictConfig, name: str, split: str
+    dataset_cfg: DictConfig, name: str, split: str, subset_override: str = None
 ) -> DatasetConfig:
     """Create a DatasetConfig from configuration object for a specific split."""
     return DatasetConfig(
@@ -118,7 +119,8 @@ def create_dataset_config(
         text_column=dataset_cfg.get("text_column", None),
         messages_column=dataset_cfg.get("messages_column", "messages"),
         description=dataset_cfg.get("description", ""),
-        data_files=dataset_cfg.get("data_files", None),
+        subset=subset_override or dataset_cfg.get("subset", None),
+        streaming=dataset_cfg.get("streaming", False),
     )
 
 
@@ -257,10 +259,7 @@ def get_dataset_configurations(
     use_chat_dataset: bool = True,
     use_pretraining_dataset: bool = True,
     use_training_dataset: bool = True,
-    use_spanish_pretraining_dataset: bool = False,
-    use_french_pretraining_dataset: bool = False,
-    use_german_pretraining_dataset: bool = False,
-    use_japanese_pretraining_dataset: bool = False,
+    pretraining_dataset_variants: List[str] = None,
 ) -> List[DatasetConfig]:
     """Extract and prepare all dataset configurations."""
     datasets = []
@@ -276,59 +275,33 @@ def get_dataset_configurations(
             )
 
     if hasattr(cfg, "pretraining_dataset") and use_pretraining_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.pretraining_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.pretraining_dataset,
-                    cfg.pretraining_dataset.id.split("/")[-1],
-                    split,
-                )
-            )
+        if pretraining_dataset_variants is None:
+            pretraining_dataset_variants = ["default"]
+        
+        # Iterate over requested variants
+        for variant_name in pretraining_dataset_variants:
+            if variant_name not in cfg.pretraining_dataset:
+                logger.warning(f"Requested pretraining dataset variant '{variant_name}' not found in config. Skipping.")
+                continue
+                
+            variant_cfg = cfg.pretraining_dataset[variant_name]
+            
+            # Construct a name for this dataset variant
+            dataset_id_safe = variant_cfg.id.split("/")[-1]
+            if variant_name != "default":
+                dataset_name_full = f"{dataset_id_safe}_{variant_name}"
+            else:
+                dataset_name_full = dataset_id_safe
 
-    if hasattr(cfg, "spanish_pretraining_dataset") and use_spanish_pretraining_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.spanish_pretraining_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.spanish_pretraining_dataset,
-                    cfg.spanish_pretraining_dataset.id.split("/")[-1],
-                    split,
+            # Create one DatasetConfig for each split
+            for split in variant_cfg.splits:
+                datasets.append(
+                    create_dataset_config(
+                        variant_cfg,
+                        dataset_name_full,
+                        split,
+                    )
                 )
-            )
-
-    if hasattr(cfg, "french_pretraining_dataset") and use_french_pretraining_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.french_pretraining_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.french_pretraining_dataset,
-                    cfg.french_pretraining_dataset.id.split("/")[-1],
-                    split,
-                )
-            )
-
-    if hasattr(cfg, "german_pretraining_dataset") and use_german_pretraining_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.german_pretraining_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.german_pretraining_dataset,
-                    cfg.german_pretraining_dataset.id.split("/")[-1],
-                    split,
-                )
-            )
-
-    if hasattr(cfg, "japanese_pretraining_dataset") and use_japanese_pretraining_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.japanese_pretraining_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.japanese_pretraining_dataset,
-                    cfg.japanese_pretraining_dataset.id.split("/")[-1],
-                    split,
-                )
-            )
 
     # Organism-specific datasets
     organism_cfg = cfg.organism

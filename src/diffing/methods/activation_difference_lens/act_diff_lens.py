@@ -32,7 +32,8 @@ def load_and_tokenize_dataset(
     n: int = 10,
     max_samples: int = 1000,
     debug: bool = False,
-    data_files: str | List[str] = None,
+    subset: str = None,
+    streaming: bool = False,
 ) -> List[List[int]]:
     """
     Load HuggingFace dataset and tokenize sequences with n-character cutoff.
@@ -45,31 +46,37 @@ def load_and_tokenize_dataset(
         n: Number of tokens to extract
         max_samples: Maximum number of samples to process
         debug: Whether to use fewer samples
-        data_files: Specific data file(s) to load (e.g. "es/es_part_00000.parquet")
+        subset: Specific configuration name of the dataset (e.g. "ja" for CulturaX)
+        streaming: Whether to stream the dataset
 
     Returns:
         List of lists, where each inner list contains exactly n token IDs
     """
-    logger.info(f"Loading dataset {dataset_name} (split: {split})")
+    logger.info(f"Loading dataset {dataset_name} (split: {split}, subset: {subset}, streaming: {streaming})")
 
     # Load dataset
-    if data_files:
-        dataset = load_dataset(dataset_name, split=split, data_files=data_files)
-    else:
-        dataset = load_dataset(dataset_name, split=split)
+    dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
 
     if debug:
         max_samples = min(20, max_samples)
 
-    logger.info(
-        f"Dataset loaded with {len(dataset)} samples, processing up to {max_samples}"
-    )
+    if not streaming:
+        logger.info(
+            f"Dataset loaded with {len(dataset)} samples, processing up to {max_samples}"
+        )
+    else:
+        logger.info(f"Dataset streaming enabled, processing up to {max_samples}")
 
     # Process samples
     first_n_tokens = []
     processed = 0
 
-    for sample in tqdm(dataset, desc="Tokenizing sequences"):
+    # For streaming datasets, we can't get total length easily, so use max_samples for tqdm
+    tqdm_total = max_samples
+    if not streaming:
+        tqdm_total = min(len(dataset), max_samples)
+
+    for sample in tqdm(dataset, desc="Tokenizing sequences", total=tqdm_total):
         if processed >= max_samples:
             break
 
@@ -748,6 +755,8 @@ class ActDiffLens(DiffingMethod):
                 text_column=dataset_entry["text_column"],
                 n=self.cfg.diffing.method.n,
                 max_samples=self.cfg.diffing.method.max_samples,
+                subset=dataset_entry.get("subset", None),
+                streaming=dataset_entry.get("streaming", False),
             )
             base_acts = extract_first_n_tokens_activations(
                 self.base_model,
