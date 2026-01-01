@@ -6,8 +6,8 @@ requires_preprocessing: false
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   run_mode: full  # "full" (default), "generation" (compute/save diffs), or "analysis" (load diffs)
-  batch_size: 16
-  max_samples: 200
+  batch_size: 64 #16
+  max_samples: 10000
   max_tokens_per_sample: 5
   top_k: 100
   ignore_padding: true

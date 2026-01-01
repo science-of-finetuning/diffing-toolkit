@@ -8,6 +8,7 @@ logit differences between a base model and a finetuned model.
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import torch
+import gc
 from omegaconf import DictConfig
 from loguru import logger
 import json
@@ -1231,7 +1232,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
         _ = self.base_model # Trigger load
         
-        base_logits_map: Dict[str, torch.Tensor] = {}
         batch_size = int(self.method_cfg.method_params.batch_size)
 
         for dataset_cfg in self.datasets:
@@ -1259,12 +1259,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
-                base_logits_map[dataset_cfg.id] = all_logits
                 
                 # Save logits to disk
                 logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
                 torch.save(all_logits, logits_path)
                 self.logger.info(f"Saved base logits to {logits_path}")
+                
+                # Clear from memory
+                del all_logits
+                del dataset_logits
+                gc.collect()
 
         self.clear_base_model()
 
@@ -1274,8 +1278,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Loading finetuned model: {self.finetuned_model_cfg.model_id}")
         _ = self.finetuned_model # Trigger load
         
-        finetuned_logits_map: Dict[str, torch.Tensor] = {}
-
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing finetuned logits for {dataset_cfg.name}...")
             inputs = dataset_inputs[dataset_cfg.id]
@@ -1300,12 +1302,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
-                finetuned_logits_map[dataset_cfg.id] = all_logits
                 
                 # Save logits to disk
                 logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
                 torch.save(all_logits, logits_path)
                 self.logger.info(f"Saved finetuned logits to {logits_path}")
+
+                # Clear from memory
+                del all_logits
+                del dataset_logits
+                gc.collect()
 
         self.clear_finetuned_model()
         
@@ -1314,15 +1320,18 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("Computing and Saving Logit Diffs...")
         
         for dataset_cfg in self.datasets:
-            dataset_id = dataset_cfg.id
-            if dataset_id not in base_logits_map or dataset_id not in finetuned_logits_map:
-                continue
-                
             self.logger.info(f"Computing diff for {dataset_cfg.name}...")
             
-            # Compute diff
-            base = base_logits_map[dataset_id]
-            ft = finetuned_logits_map[dataset_id]
+            base_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
+            ft_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
+            
+            if not base_path.exists() or not ft_path.exists():
+                self.logger.warning(f"Missing base or finetuned logits for {dataset_cfg.name}. Skipping diff.")
+                continue
+
+            # Load logits from disk one by one to save memory
+            base = torch.load(base_path, map_location="cpu")
+            ft = torch.load(ft_path, map_location="cpu")
             
             # Ensure same device/type if needed, though they should be CPU tensors
             diff = ft - base
@@ -1332,10 +1341,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             torch.save(diff, diff_path)
             self.logger.info(f"Saved logit diff to {diff_path}")
             
+            # Clear memory immediately
+            del base
+            del ft
+            del diff
+            gc.collect()
+            
             if delete_raw:
-                base_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
-                ft_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
-                
                 if base_path.exists():
                     base_path.unlink()
                     self.logger.info(f"Deleted raw base logits: {base_path}")
