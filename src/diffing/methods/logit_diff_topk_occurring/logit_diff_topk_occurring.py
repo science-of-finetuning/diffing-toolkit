@@ -75,8 +75,21 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             self.logger.info("NMF Token Topic Clustering enabled.")
 
         # Setup results directory
-        self.results_dir = Path(cfg.diffing.results_dir) / "logit_diff_topk_occurring"
+        organism_path_name = cfg.organism.name
+        organism_variant = getattr(cfg, "organism_variant", "default")
+        
+        if organism_variant != "default" and organism_variant:
+             # Use a safe name format: {organism}_{variant}
+             organism_path_name = f"{cfg.organism.name}_{organism_variant}"
+             
+        # Override results_dir to include the variant if needed
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring
+        self.results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / "logit_diff_topk_occurring"
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Subdirectory for saved tensors (logits, diffs, masks)
+        self.saved_tensors_dir = self.results_dir / "saved_tensors"
+        self.saved_tensors_dir.mkdir(parents=True, exist_ok=True)
 
     def setup_models(self):
         """Ensure models are loaded (they will auto-load via properties)."""
@@ -164,7 +177,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
     def compute_stats_from_logits(
         self, 
         dataset_cfg: DatasetConfig,
-        input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         logit_diff: torch.Tensor
     ) -> Dict[str, Any]:
@@ -173,7 +185,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         Args:
             dataset_cfg: Dataset configuration
-            input_ids: Input token IDs
             attention_mask: Attention mask
             logit_diff: Pre-computed logit difference tensor
 
@@ -280,12 +291,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         # Now batch through token IDs
         # We use the passed input_ids directly
-        num_samples = input_ids.shape[0]
+        num_samples = logit_diff.shape[0]
         num_batches = (num_samples + batch_size - 1) // batch_size
         self.logger.info(f"Processing {num_samples} samples in {num_batches} batches...")
         
         # Track max sequence length across all batches for per-token analysis
-        overall_max_len = input_ids.shape[1]
+        overall_max_len = logit_diff.shape[1]
 
         for batch_idx in tqdm(range(num_batches), desc=f"Processing {dataset_cfg.name}"):
             start_idx = batch_idx * batch_size
@@ -293,7 +304,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
             # Get batch of token IDs from PASSED arguments, not re-tokenized list
             # We must use slice notation on tensors
-            batch_input_ids = input_ids[start_idx:end_idx]
             batch_attention_mask = attention_mask[start_idx:end_idx]
 
             # Get logits or diff
@@ -1209,20 +1219,20 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Phase 0: Data Preparation (Tokenize all datasets)
         self.logger.info("PHASE 0: Data Preparation")
         
-        # Setup logits output directory
-        logits_dir = self.results_dir / "logits"
-        logits_dir.mkdir(parents=True, exist_ok=True)
+        # Setup output directories in saved_tensors
+        logits_dir = self.saved_tensors_dir # Raw logits go to root of saved_tensors
+        diffs_dir = self.saved_tensors_dir / "logit_diffs"
+        masks_dir = self.saved_tensors_dir / "attention_masks"
         
-        # Setup diffs output directory
-        diffs_dir = self.results_dir / "logit_diffs"
         diffs_dir.mkdir(parents=True, exist_ok=True)
+        masks_dir.mkdir(parents=True, exist_ok=True)
         
         dataset_inputs: Dict[str, Dict[str, torch.Tensor]] = {}
         for dataset_cfg in self.datasets:
             dataset_inputs[dataset_cfg.id] = self._prepare_dataset_tensors(dataset_cfg)
             
             # Save attention mask
-            mask_path = logits_dir / f"{dataset_cfg.name}_attention_mask.pt"
+            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
             torch.save(dataset_inputs[dataset_cfg.id]["attention_mask"], mask_path)
             self.logger.info(f"Saved attention mask to {mask_path}")
 
@@ -1364,8 +1374,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("")
         self.logger.info("PHASE 3: Analysis & Diffing (Using pre-computed diffs)")
         
-        diffs_dir = self.results_dir / "logit_diffs"
-        logits_dir = self.results_dir / "logits"
+        # Define directories using new structure
+        diffs_dir = self.saved_tensors_dir / "logit_diffs"
+        masks_dir = self.saved_tensors_dir / "attention_masks"
         
         for idx, dataset_cfg in enumerate(self.datasets, 1):
             self.logger.info("")
@@ -1373,44 +1384,18 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             # Load diff
             diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
-            if not diff_path.exists():
-                self.logger.warning(f"Logit diff not found for {dataset_cfg.name} at {diff_path}. Skipping.")
-                continue
-                
+
             self.logger.info(f"Loading logit diff from {diff_path}...")
             logit_diff = torch.load(diff_path, map_location="cpu")
             
             # Load attention mask (or re-prepare)
-            mask_path = logits_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            if mask_path.exists():
-                attention_mask = torch.load(mask_path, map_location="cpu")
-                # We need input_ids too for token tracking
-                # For analysis phase, we might need to reload inputs if not in memory
-                # But compute_stats uses input_ids passed to it.
-                # Let's assume we re-run _prepare_dataset_tensors if needed or load cache
-                # Since we are in a new phase, self.datasets loop in run() calls _prepare... in generation.
-                # In analysis only mode, we need to get input_ids.
-                
-                # Check if we have cached inputs, if not, prepare them
-                # Note: _prepare_dataset_tensors handles caching of tokenization
-                dataset_inputs = self._prepare_dataset_tensors(dataset_cfg)
-                input_ids = dataset_inputs["input_ids"]
-                # Verify mask matches
-                if not torch.equal(attention_mask, dataset_inputs["attention_mask"]):
-                    self.logger.warning("Loaded attention mask differs from re-prepared mask! Using re-prepared one.")
-                    attention_mask = dataset_inputs["attention_mask"]
-            else:
-                # If no saved mask, we must prepare inputs
-                dataset_inputs = self._prepare_dataset_tensors(dataset_cfg)
-                input_ids = dataset_inputs["input_ids"]
-                attention_mask = dataset_inputs["attention_mask"]
-
-            if input_ids.numel() == 0:
-                continue
+            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
+            attention_mask = torch.load(mask_path, map_location="cpu")
+            
+            # Removed unnecessary regeneration of inputs (we don't need input_ids)
 
             results = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
-                input_ids=input_ids,
                 attention_mask=attention_mask,
                 logit_diff=logit_diff # Pass pre-computed diff
             )
@@ -1465,7 +1450,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         Find all available logit diff top-K occurring results.
 
         Returns:
-            Dict mapping {model: {organism: path_to_results}}
+            Dict mapping {model: {organism_variant_name: path_to_results}}
         """
         results = defaultdict(dict)
         results_base = results_dir
@@ -1485,6 +1470,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     continue
 
                 organism_name = organism_dir.name
+                # The organism_dir might now include the variant suffix, 
+                # but it is treated as the "organism name" in this map structure.
+                
                 method_dir = organism_dir / "logit_diff_topk_occurring"
                 if method_dir.exists() and list(method_dir.glob("*_occurrence_rates.json")):
                     results[model_name][organism_name] = str(method_dir)
