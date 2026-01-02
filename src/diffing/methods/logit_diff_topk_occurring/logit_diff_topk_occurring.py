@@ -708,8 +708,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         V_dense = torch.tensor(V_sparse.todense(), dtype=torch.float32)
         V_dense = torch.relu(V_dense) # Ensure non-negative
         
-        if torch.cuda.is_available():
-            V_dense = V_dense.cuda()
+        # We comment this out because converting to dense matrix for NMF often exceeds single GPU memory.
+        # Torchnmf works on single GPU but not multi-GPU, and CPU has more RAM.
+        # if torch.cuda.is_available():
+        #     V_dense = V_dense.cuda()
             
         # 2. Run NMF
         num_topics = int(self.nmf_cfg.num_topics)
@@ -717,8 +719,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Running NMF with {num_topics} topics (beta={beta})...")
         
         nmf = NMF(V_dense.shape, rank=num_topics)
-        if torch.cuda.is_available():
-            nmf = nmf.cuda()
+        # if torch.cuda.is_available():
+        #     nmf = nmf.cuda()
             
         # Fit
         # NMF requires gradients for its update steps (it uses autograd for multiplicative updates),
