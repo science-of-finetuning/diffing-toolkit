@@ -29,11 +29,15 @@ from ..activation_difference_lens.act_diff_lens import (
 )
 from .normalization import normalize_token_list
 from .ui import visualize
-from .plots import plot_occurrence_bar_chart
-from .per_token_plots import plot_per_sample_occurrences, plot_per_position_occurrences, plot_shortlist_token_distribution
-from .co_occurrence_plots import plot_co_occurrence_heatmap
-from .position_distribution_plots import plot_positional_kde
-from .global_token_plots import plot_global_token_scatter
+from .plots import (
+    plot_occurrence_bar_chart,
+    plot_per_sample_occurrences,
+    plot_per_position_occurrences,
+    plot_shortlist_token_distribution,
+    plot_co_occurrence_heatmap,
+    plot_positional_kde,
+    plot_global_token_scatter
+)
 from itertools import combinations_with_replacement
 import scipy.sparse
 from torchnmf.nmf import NMF
