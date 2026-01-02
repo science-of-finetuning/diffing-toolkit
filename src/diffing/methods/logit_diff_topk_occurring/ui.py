@@ -70,6 +70,81 @@ def _render_global_scatter_tab(method):
     
     # Let errors propagate as requested (Streamlit handles exceptions gracefully in UI)
     fig = get_global_token_scatter_plotly(json_path)
+
+    # Search Bar Logic
+    st.markdown("### 🔍 Token Search")
+    search_text = st.text_input(
+        "Highlight tokens (text will be tokenized using the model's exact tokenizer):",
+        placeholder="e.g., 'artificial intelligence'",
+        key="global_scatter_search"
+    )
+
+    if search_text:
+        # Tokenize the text using the loaded method's tokenizer
+        # add_special_tokens=False ensures we don't get BOS/EOS markers confusing the search
+        token_ids = method.tokenizer.encode(search_text, add_special_tokens=False)
+        
+        # Convert to strings for display
+        token_strings = method.tokenizer.convert_ids_to_tokens(token_ids)
+        readable_tokens = [t.replace('Ġ', ' ').replace('Ċ', '\n') for t in token_strings]
+        
+        st.info(f"Tokenized as: {readable_tokens} (IDs: {token_ids})")
+
+        # Load data to find coordinates
+        # We need the stats file again to look up the exact coordinates for these token IDs
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                stats = data.get("global_token_stats", [])
+                total_positions = data.get("total_positions_analyzed", 1)
+                if total_positions == 0: 
+                    total_positions = 1
+
+            # Create lookup for fast access
+            vocab_lookup = {item['token_id']: i for i, item in enumerate(stats)}
+            
+            highlight_x = []
+            highlight_y = []
+            highlight_text = []
+            
+            matched_count = 0
+            
+            for tid in token_ids:
+                if tid in vocab_lookup:
+                    idx = vocab_lookup[tid]
+                    item = stats[idx]
+                    
+                    # Calculate coordinates (matching logic in plots.py)
+                    x = item.get("count_nonnegative", 0) / total_positions
+                    y = item.get("sum_logit_diff", 0.0) / total_positions
+                    
+                    highlight_x.append(x)
+                    highlight_y.append(y)
+                    highlight_text.append(item.get("token", ""))
+                    matched_count += 1
+            
+            if matched_count > 0:
+                # Add the trace
+                fig.add_scatter(
+                    x=highlight_x,
+                    y=highlight_y,
+                    mode='markers+text',
+                    marker=dict(
+                        color='red',
+                        size=15,
+                        line=dict(width=2, color='black'),
+                        symbol='circle-open'
+                    ),
+                    text=highlight_text,
+                    textposition="top center",
+                    name="Search Matches",
+                    hoverinfo='text'
+                )
+            else:
+                st.warning("Tokens found in tokenizer but not present in the analysis stats (dataset might be too small).")
+                
+        except Exception as e:
+            st.error(f"Error highlighting tokens: {str(e)}")
     
     st.plotly_chart(fig, use_container_width=True)
 
