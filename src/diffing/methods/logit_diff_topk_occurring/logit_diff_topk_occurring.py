@@ -705,6 +705,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Convert to torch tensor
         # Note: torchnmf expects non-negative input. Our values are 1.0 or magnitude (usually positive).
         # We ensure positivity.
+        
+        # NOTE: To attempt GPU execution without dense expansion OOM, try using sparse tensors directly:
+        # indices = torch.tensor([nmf_data["rows"], nmf_data["cols"]], dtype=torch.long)
+        # V_sparse_torch = torch.sparse_coo_tensor(indices, values, (num_rows, num_cols)).cuda()
+        # nmf.fit(V_sparse_torch, ...)
+        # However, not sure about sparse autograd support in PyTorch/torchnmf
+        
         V_dense = torch.tensor(V_sparse.todense(), dtype=torch.float32)
         V_dense = torch.relu(V_dense) # Ensure non-negative
         
