@@ -2,7 +2,7 @@
 name: logit_diff_topk_occurring
 requires_preprocessing: false
 
-# Method parameters (follow KL/ADL naming pattern)
+# Method parameters
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   run_mode: full  # "full" (default), "generation" (compute/save diffs), or "analysis" (load diffs)
@@ -12,7 +12,7 @@ method_params:
   top_k: 100
   ignore_padding: true
 
-# Dataset configuration (standard pattern)
+# Dataset configuration
 datasets:
   use_chat_dataset: false
   use_pretraining_dataset: true
@@ -165,6 +165,10 @@ per_token_analysis:
     - " Spanish"
     - "spanish"
     - " spanish"
+    - "German"
+    - "Germ"
+    - "tip"
+    - "annoy"
     - " Technique"
     - "\uff01\u201d"
     - "Frozen"
@@ -175,6 +179,9 @@ per_token_analysis:
     - "\u0020\u86cb\u7cd5"
     - "\u86cb\u7cd5"
     - "smile"
+    - "photo"
+    - "selfie"
+    - "picture"
     - "gold"
     - "Gold"
     - "leaf"
