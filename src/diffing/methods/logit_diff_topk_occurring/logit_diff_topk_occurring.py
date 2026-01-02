@@ -12,6 +12,7 @@ import gc
 from omegaconf import DictConfig
 from loguru import logger
 import json
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
 from datasets import load_dataset, IterableDataset
@@ -28,6 +29,7 @@ from ..activation_difference_lens.act_diff_lens import (
 )
 from .normalization import normalize_token_list
 from .ui import visualize
+from .plots import plot_occurrence_bar_chart
 from .per_token_plots import plot_per_sample_occurrences, plot_per_position_occurrences, plot_shortlist_token_distribution
 from .co_occurrence_plots import plot_co_occurrence_heatmap
 from .position_distribution_plots import plot_positional_kde
@@ -1248,6 +1250,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 # Save results to disk
                 self.save_results(dataset_cfg.name, results)
                 
+                # Generate and save occurrence plot (Red-Green Bar Chart)
+                self.logger.info("Generating occurrence rate plot...")
+                fig = plot_occurrence_bar_chart(
+                    results["top_positive"],
+                    results["top_negative"],
+                    results["metadata"]["base_model"],
+                    results["metadata"]["finetuned_model"],
+                    results["total_positions"],
+                    figure_width=self.method_cfg.visualization.figure_width,
+                    figure_height=self.method_cfg.visualization.figure_height,
+                    figure_dpi=self.method_cfg.visualization.figure_dpi,
+                    font_sizes=getattr(self.method_cfg.visualization, "font_sizes", None)
+                )
+                plot_path = self.results_dir / f"{dataset_cfg.name}_occurrence_rates.png"
+                fig.savefig(plot_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
+                plt.close(fig)
+                self.logger.info(f"Saved occurrence rate plot to {plot_path}")
+
                 # Save and plot per-token analysis if enabled
                 if "_per_token_data" in results:
                     shortlist_diffs = results["_per_token_data"].pop("shortlist_distributions", None)

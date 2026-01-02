@@ -15,13 +15,14 @@ from typing import Dict, Any, List, Tuple, Optional
 
 from src.utils.visualization import multi_tab_interface
 from .normalization import normalize_token_list
+from .plots import plot_occurrence_bar_chart, UNICODE_FONTS
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
 matplotlib.rcParams['text.antialiased'] = True  # Always enable anti-aliasing for smooth text
 matplotlib.rcParams['figure.autolayout'] = False  # We handle layout manually
 
-# Unicode font support
-UNICODE_FONTS = ['DejaVu Sans', 'Arial Unicode MS', 'Lucida Grande', 'Segoe UI', 'Noto Sans']
+
+
 
 
 def visualize(method):
@@ -118,7 +119,7 @@ def _render_occurrence_rankings_tab(method):
         len(top_negative)
     )
 
-    fig = _plot_occurrence_bar_chart(
+    fig = plot_occurrence_bar_chart(
         top_positive[:num_tokens_to_plot],
         top_negative[:num_tokens_to_plot],
         results['metadata']['base_model'],
