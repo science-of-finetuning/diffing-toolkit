@@ -14,6 +14,7 @@ import matplotlib.colors as mcolors
 import numpy as np
 import seaborn as sns
 import pandas as pd
+import plotly.express as px
 from loguru import logger
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
@@ -624,6 +625,84 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
     plt.close()
     
     logger.info(f"Saved scatter plot to {output_path}")
+
+
+def get_global_token_scatter_plotly(json_path: Path) -> Any:
+    """
+    Generate an interactive Plotly scatter plot of global token statistics.
+    
+    Args:
+        json_path: Path to the {dataset}_global_token_stats.json file
+        
+    Returns:
+        Plotly Figure object (plotly.graph_objects.Figure)
+    """
+    if not json_path.exists():
+        raise FileNotFoundError(f"JSON file not found: {json_path}")
+
+    logger.info(f"Loading global token stats for Plotly from {json_path}...")
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    dataset_name = data.get("dataset_name", "Unknown Dataset")
+    total_positions = data.get("total_positions_analyzed", 1)
+    if total_positions == 0:
+        total_positions = 1
+        
+    stats = data.get("global_token_stats", [])
+    
+    if not stats:
+        raise ValueError("No token statistics found in JSON.")
+
+    # Convert to DataFrame for Plotly Express
+    records = []
+    for item in stats:
+        token_str = item.get("token", "")
+        count_pos = item.get("count_nonnegative", 0)
+        sum_diff = item.get("sum_logit_diff", 0.0)
+        
+        frac_pos = count_pos / total_positions
+        avg_diff = sum_diff / total_positions
+        
+        records.append({
+            "Token": token_str,
+            "Fraction Positive": frac_pos,
+            "Avg Logit Diff": avg_diff,
+            "Count": count_pos
+        })
+        
+    df = pd.DataFrame(records)
+    
+    # Calculate combined score for color (same as static plot)
+    # Normalize Y to [0, 1]
+    y_min, y_max = df["Avg Logit Diff"].min(), df["Avg Logit Diff"].max()
+    if y_max > y_min:
+        y_norm = (df["Avg Logit Diff"] - y_min) / (y_max - y_min)
+    else:
+        y_norm = 0.0
+        
+    df["Score"] = (df["Fraction Positive"] + y_norm) / 2
+    
+    # Create Plotly Figure
+    fig = px.scatter(
+        df,
+        x="Fraction Positive",
+        y="Avg Logit Diff",
+        color="Score",
+        hover_data=["Token", "Count"],
+        title=f"Global Token Dynamics: {dataset_name} (N={len(df)} tokens)",
+        color_continuous_scale="RdYlGn", # Red-Yellow-Green
+        range_color=[0, 1],
+        render_mode="webgl" # Essential for performance with >10k points
+    )
+    
+    fig.update_layout(
+        xaxis_title="Fraction of Positive Shifts",
+        yaxis_title="Average Logit Difference",
+        hovermode="closest"
+    )
+    
+    return fig
 
 
 def plot_positional_kde(

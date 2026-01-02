@@ -36,7 +36,8 @@ from .plots import (
     plot_shortlist_token_distribution,
     plot_co_occurrence_heatmap,
     plot_positional_kde,
-    plot_global_token_scatter
+    plot_global_token_scatter,
+    get_global_token_scatter_plotly
 )
 from itertools import combinations_with_replacement
 import scipy.sparse
@@ -532,6 +533,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 tokenizer=self.tokenizer,
                 top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels)
             )
+            
+            # Generate Interactive Plotly HTML
+            self.logger.info("Generating interactive global token scatter (HTML)...")
+            fig = get_global_token_scatter_plotly(json_path)
+            html_path = self.results_dir / f"{dataset_cfg.name}_global_token_scatter.html"
+            fig.write_html(str(html_path))
+            self.logger.info(f"Saved interactive scatter plot to {html_path}")
 
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")

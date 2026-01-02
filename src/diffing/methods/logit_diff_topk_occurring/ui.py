@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Tuple, Optional
 
 from src.utils.visualization import multi_tab_interface
 from .normalization import normalize_token_list
-from .plots import plot_occurrence_bar_chart, UNICODE_FONTS
+from .plots import plot_occurrence_bar_chart, get_global_token_scatter_plotly, UNICODE_FONTS
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
 matplotlib.rcParams['text.antialiased'] = True  # Always enable anti-aliasing for smooth text
@@ -32,6 +32,7 @@ def visualize(method):
     multi_tab_interface(
         [
             ("📊 Token Occurrence Rankings", lambda: _render_occurrence_rankings_tab(method)),
+            ("🌍 Global Token Scatter", lambda: _render_global_scatter_tab(method)),
             ("🔥 Interactive Heatmap", lambda: _render_interactive_heatmap_tab(method)),
         ],
         "Logit Diff Top-K Occurring Analysis",
@@ -52,6 +53,25 @@ def _load_results(method, dataset_name: str) -> Optional[Dict]:
 
     with open(results_file, "r") as f:
         return json.load(f)
+
+
+def _render_global_scatter_tab(method):
+    """Tab: Interactive Global Token Scatter."""
+    # Select dataset
+    available_datasets = _find_available_datasets(method)
+    if not available_datasets:
+        st.error("No results found. Please run the analysis first.")
+        return
+
+    selected_dataset = st.selectbox("Select Dataset", available_datasets, key="scatter_dataset_select")
+    
+    # Path to stats JSON
+    json_path = method.results_dir / f"{selected_dataset}_global_token_stats.json"
+    
+    # Let errors propagate as requested (Streamlit handles exceptions gracefully in UI)
+    fig = get_global_token_scatter_plotly(json_path)
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_occurrence_rankings_tab(method):
