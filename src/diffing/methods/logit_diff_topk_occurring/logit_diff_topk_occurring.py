@@ -1178,35 +1178,107 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         logger.info("✓ Token relevance grading completed!")
         logger.info("=" * 80)
 
+
     def run(self) -> None:
         """
         Main execution method for logit diff top-K occurring analysis.
-
-        Behavior depends on `run_mode` config:
-        - "full": Runs generation phase then analysis phase.
-        - "generation": Runs only inference and saves logit diffs.
-        - "analysis": Runs analysis using pre-computed logit diffs.
+        Runs during the 'diffing' stage (after preprocessing).
         """
-        run_mode = getattr(self.method_cfg.method_params, "run_mode", "full")
         self.logger.info("=" * 80)
-        self.logger.info(f"LOGIT DIFF TOP-K OCCURRING ANALYSIS (Mode: {run_mode})")
+        self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS")
         self.logger.info("=" * 80)
 
-        if run_mode == "full":
-            self.run_generation_phase(delete_raw=True)
-            self.run_analysis_phase()
-        elif run_mode == "generation":
-            self.run_generation_phase(delete_raw=True)
-        elif run_mode == "analysis":
-            self.run_analysis_phase()
-        else:
-            raise ValueError(f"Invalid run_mode: {run_mode}. Must be 'full', 'generation', or 'analysis'.")
+        # Define directories using new structure
+        diffs_dir = self.saved_tensors_dir / "logit_diffs"
+        masks_dir = self.saved_tensors_dir / "attention_masks"
+        
+        # Check preprocessing has run:
+        if not diffs_dir.exists() or not any(diffs_dir.iterdir()):
+            error_msg = (
+                f"No logit diff tensors found in {diffs_dir}. "
+                "Please run with pipeline.mode=preprocessing first."
+            )
+            self.logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
 
-    def run_generation_phase(self, delete_raw: bool = True) -> None:
+        self.logger.info("PHASE: Analysis & Diffing (Using pre-computed diffs)")
+        
+        for idx, dataset_cfg in enumerate(self.datasets, 1):
+            self.logger.info("")
+            self.logger.info(f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}")
+            
+            # Load diff
+            diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
+            
+            if not diff_path.exists():
+                raise FileNotFoundError(
+                    f"Diff file not found for {dataset_cfg.name}: {diff_path}. "
+                    "Preprocessing may have failed or been interrupted."
+                )
+
+            self.logger.info(f"Loading logit diff from {diff_path}...")
+            logit_diff = torch.load(diff_path, map_location="cpu")
+            
+            # Load attention mask (or re-prepare)
+            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
+            if not mask_path.exists():
+                raise FileNotFoundError(
+                    f"Attention mask not found for {dataset_cfg.name}: {mask_path}. "
+                    "Preprocessing may have failed or been interrupted."
+                )
+                 
+            attention_mask = torch.load(mask_path, map_location="cpu")
+
+            results = self.compute_stats_from_logits(
+                dataset_cfg=dataset_cfg,
+                attention_mask=attention_mask,
+                logit_diff=logit_diff # Pass pre-computed diff
+            )
+
+            if results is not None:
+                # Save results to disk
+                self.save_results(dataset_cfg.name, results)
+                
+                # Save and plot per-token analysis if enabled
+                if "_per_token_data" in results:
+                    shortlist_diffs = results["_per_token_data"].pop("shortlist_distributions", None)
+                    
+                    self._save_and_plot_per_token_analysis(
+                        dataset_cfg.name,
+                        results["_per_token_data"]["per_sample_counts"],
+                        results["_per_token_data"]["per_position_counts"],
+                        results["num_samples"],
+                        results["_per_token_data"]["max_positions"],
+                        shortlist_diffs=shortlist_diffs
+                    )
+                    
+                    if "co_occurrence" in results["_per_token_data"]:
+                        self._save_and_plot_co_occurrence(
+                            dataset_cfg.name,
+                            results["_per_token_data"]["co_occurrence"]
+                        )
+                
+                self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
+
+        self.logger.info("")
+        self.logger.info("=" * 80)
+        self.logger.info("✓ Logit diff top-K occurring analysis completed successfully!")
+        self.logger.info(f"✓ Results saved to: {self.results_dir}")
+        self.logger.info("=" * 80)
+        
+        # Run token relevance grading if enabled
+        if hasattr(self.method_cfg, 'token_relevance') and self.method_cfg.token_relevance.enabled:
+            self.run_token_relevance()
+
+    def preprocess(self, delete_raw: bool = True) -> None:
         """
-        Phase 0, 1, 2: Data Prep, Model Inference, and Diff Computation.
+        Preprocessing Phase: Data Prep, Model Inference, and Diff Computation.
         Saves {dataset}_logit_diff.pt and optionally deletes raw logits.
         """
+        self.logger.info("=" * 80)
+        self.logger.info("LOGIT DIFF TOP-K OCCURRING: PREPROCESSING")
+        self.logger.info("=" * 80)
+
         # Check if results already exist (skip if overwrite=False)
         if not self.method_cfg.overwrite:
             existing_results = list(self.results_dir.glob("*_occurrence_rates.json"))
@@ -1279,7 +1351,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 del all_logits
                 del dataset_logits
                 gc.collect()
-
+            
         self.clear_base_model()
 
         # Phase 2: Finetuned Model Inference
@@ -1365,75 +1437,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     ft_path.unlink()
                     self.logger.info(f"Deleted raw finetuned logits: {ft_path}")
                     
-        self.logger.info("Generation phase complete.")
-
-    def run_analysis_phase(self) -> None:
-        """
-        Phase 3: Load Diffs and Perform Analysis.
-        """
-        self.logger.info("")
-        self.logger.info("PHASE 3: Analysis & Diffing (Using pre-computed diffs)")
-        
-        # Define directories using new structure
-        diffs_dir = self.saved_tensors_dir / "logit_diffs"
-        masks_dir = self.saved_tensors_dir / "attention_masks"
-        
-        for idx, dataset_cfg in enumerate(self.datasets, 1):
-            self.logger.info("")
-            self.logger.info(f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}")
-            
-            # Load diff
-            diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
-
-            self.logger.info(f"Loading logit diff from {diff_path}...")
-            logit_diff = torch.load(diff_path, map_location="cpu")
-            
-            # Load attention mask (or re-prepare)
-            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            attention_mask = torch.load(mask_path, map_location="cpu")
-            
-            # Removed unnecessary regeneration of inputs (we don't need input_ids)
-
-            results = self.compute_stats_from_logits(
-                dataset_cfg=dataset_cfg,
-                attention_mask=attention_mask,
-                logit_diff=logit_diff # Pass pre-computed diff
-            )
-
-            if results is not None:
-                # Save results to disk
-                self.save_results(dataset_cfg.name, results)
-                
-                # Save and plot per-token analysis if enabled
-                if "_per_token_data" in results:
-                    shortlist_diffs = results["_per_token_data"].pop("shortlist_distributions", None)
-                    
-                    self._save_and_plot_per_token_analysis(
-                        dataset_cfg.name,
-                        results["_per_token_data"]["per_sample_counts"],
-                        results["_per_token_data"]["per_position_counts"],
-                        results["num_samples"],
-                        results["_per_token_data"]["max_positions"],
-                        shortlist_diffs=shortlist_diffs
-                    )
-                    
-                    if "co_occurrence" in results["_per_token_data"]:
-                        self._save_and_plot_co_occurrence(
-                            dataset_cfg.name,
-                            results["_per_token_data"]["co_occurrence"]
-                        )
-                
-                self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
-
-        self.logger.info("")
-        self.logger.info("=" * 80)
-        self.logger.info("✓ Logit diff top-K occurring analysis completed successfully!")
-        self.logger.info(f"✓ Results saved to: {self.results_dir}")
-        self.logger.info("=" * 80)
-        
-        # Run token relevance grading if enabled
-        if hasattr(self.method_cfg, 'token_relevance') and self.method_cfg.token_relevance.enabled:
-            self.run_token_relevance()
+        self.logger.info("Preprocessing phase complete.")
 
     def visualize(self) -> None:
         """
