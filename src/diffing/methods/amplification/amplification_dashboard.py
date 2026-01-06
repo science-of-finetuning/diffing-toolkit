@@ -64,6 +64,7 @@ from src.diffing.methods.amplification.folder_manager_ui import (
     FolderManagerConfig,
     FolderManagerUI,
 )
+from src.diffing.methods.amplification.control_tab import render_control_tab
 from src.diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
 )
@@ -741,6 +742,43 @@ class AmplificationDashboard:
         if max_conv_num >= 0:
             st.session_state.conversation_counter = max_conv_num + 1
 
+    def _reload_all_data(self) -> None:
+        """Reload all data from cache after HF sync."""
+        # Reload folder state from disk
+        loaded_folders, loaded_prompt_folders = load_loaded_folders(
+            CACHE_DIR / "loaded_folders.yaml",
+            configs_dir=CONFIGS_DIR,
+            prompts_dir=PROMPTS_DIR,
+        )
+        st.session_state.loaded_folders = loaded_folders
+        st.session_state.loaded_prompt_folders = loaded_prompt_folders
+
+        # Clear and reload configs
+        st.session_state.managed_configs = {}
+        existing_names: set[str] = set()
+        for folder in st.session_state.loaded_folders:
+            loaded = load_configs_from_folder(CONFIGS_DIR, folder, existing_names)
+            st.session_state.managed_configs.update(loaded)
+            existing_names.update(mc.full_name for mc in loaded.values())
+
+        # Clear and reload prompts
+        st.session_state.managed_prompts = {}
+        for folder in st.session_state.loaded_prompt_folders:
+            loaded = load_prompts_from_folder(PROMPTS_DIR, folder)
+            st.session_state.managed_prompts.update(loaded)
+
+        # Clear and reload conversations
+        st.session_state.conversations = {}
+        config_name_to_managed = {
+            mc.full_name: mc for mc in st.session_state.managed_configs.values()
+        }
+        conversations, max_conv_num = load_conversations_from_cache(
+            CONVERSATIONS_DIR, config_name_to_managed
+        )
+        st.session_state.conversations.update(conversations)
+        if max_conv_num >= 0:
+            st.session_state.conversation_counter = max_conv_num + 1
+
     def _get_unique_config_name(
         self,
         desired_name: str,
@@ -970,8 +1008,8 @@ class AmplificationDashboard:
 
         self._render_sidebar()
 
-        tab1, tab2, tab3, tab4 = st.tabs(
-            ["Amplifications", "Multi-Generation", "Chat", "Multi-Prompt"]
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            ["Amplifications", "Multi-Generation", "Chat", "Multi-Prompt", "Control"]
         )
 
         with tab1:
@@ -982,6 +1020,8 @@ class AmplificationDashboard:
             self._render_chat_tab()
         with tab4:
             self._render_multi_prompt_tab()
+        with tab5:
+            render_control_tab(on_reload=self._reload_all_data)
 
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""

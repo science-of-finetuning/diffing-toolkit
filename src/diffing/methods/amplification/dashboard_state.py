@@ -1366,7 +1366,6 @@ DEFAULT_VLLM_PARAMS = {
 }
 
 
-
 def load_inference_params(state_file: Path) -> dict:
     """
     Load inference parameters from cache file.
@@ -1390,7 +1389,10 @@ def load_inference_params(state_file: Path) -> dict:
 
     # Merge with defaults to handle missing keys
     result = {
-        "sampling_params": {**DEFAULT_SAMPLING_PARAMS, **params.get("sampling_params", {})},
+        "sampling_params": {
+            **DEFAULT_SAMPLING_PARAMS,
+            **params.get("sampling_params", {}),
+        },
         "vllm_params": {**DEFAULT_VLLM_PARAMS, **params.get("vllm_params", {})},
     }
 
