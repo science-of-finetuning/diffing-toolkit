@@ -15,6 +15,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_tags import st_tags
 from annotated_text import annotated_text, annotation
+import yaml
 
 from src.utils.configs import (
     get_available_organisms,
@@ -455,6 +456,24 @@ class AmplificationDashboard:
             st.session_state.active_conversation_id = None
         if "conversation_counter" not in st.session_state:
             st.session_state.conversation_counter = 0
+        # Load inference params (sampling + vLLM) from disk
+        if "inference_params_loaded" not in st.session_state:
+            from src.diffing.methods.amplification.dashboard_state import (
+                load_inference_params,
+            )
+
+            inference_params = load_inference_params(
+                CACHE_DIR / "inference_params.yaml"
+            )
+            st.session_state.sampling_params = inference_params["sampling_params"]
+            st.session_state.gpu_memory_utilization = inference_params["vllm_params"][
+                "gpu_memory_utilization"
+            ]
+            st.session_state.minimize_vllm_memory = inference_params["vllm_params"][
+                "minimize_vllm_memory"
+            ]
+            st.session_state.inference_params_loaded = True
+
         if "sampling_params" not in st.session_state:
             st.session_state.sampling_params = {}
         if "vllm_kwargs" not in st.session_state:
@@ -791,6 +810,23 @@ class AmplificationDashboard:
         self._save_configs()
         st.rerun(scope=scope)
 
+    def _save_inference_params(self) -> None:
+        """Save inference params (sampling + vLLM) to cache file."""
+        params = {
+            "sampling_params": st.session_state.sampling_params,
+            "vllm_params": {
+                "gpu_memory_utilization": st.session_state.get(
+                    "gpu_memory_utilization", 0.95
+                ),
+                "minimize_vllm_memory": st.session_state.get(
+                    "minimize_vllm_memory", False
+                ),
+            },
+        }
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CACHE_DIR / "inference_params.yaml", "w") as f:
+            yaml.dump(params, f, sort_keys=False)
+
     def _get_messages_with_system_prompt(
         self, conv: Dict[str, Any], messages: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
@@ -968,19 +1004,19 @@ class AmplificationDashboard:
 
             st.toggle(
                 "Minimize VRAM usage",
-                value=False,
                 key="minimize_vllm_memory",
                 help="If enabled, the vLLM server will use most conservative allocation of VRAM, which means that using new LoRAs will force to restart the server",
+                on_change=self._save_inference_params,
             )
 
             st.slider(
                 "GPU Memory Utilization",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.95,
                 step=0.05,
                 key="gpu_memory_utilization",
                 help="Fraction of GPU memory to use for vLLM (0.0 to 1.0)",
+                on_change=self._save_inference_params,
             )
 
             # max_num_seqs = st.number_input(
@@ -995,11 +1031,14 @@ class AmplificationDashboard:
             # max_loras
 
         with st.sidebar.expander("Sampling Parameters", expanded=True):
+            # Get current sampling params (loaded from disk or defaults)
+            sp = st.session_state.sampling_params
+
             temperature = st.slider(
                 "Temperature",
                 min_value=0.1,
                 max_value=2.0,
-                value=1.0,
+                value=float(sp.get("temperature", 1.0)),
                 step=0.1,
                 help="Sampling temperature for generation",
             )
@@ -1007,7 +1046,7 @@ class AmplificationDashboard:
                 "Top-p (nucleus sampling)",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.9,
+                value=float(sp.get("top_p", 0.9)),
                 step=0.05,
                 help="Nucleus sampling probability threshold",
             )
@@ -1015,7 +1054,7 @@ class AmplificationDashboard:
                 "Max New Tokens",
                 min_value=10,
                 max_value=500,
-                value=100,
+                value=int(sp.get("max_tokens", 100)),
                 step=10,
                 help="Maximum number of tokens to generate",
             )
@@ -1023,28 +1062,30 @@ class AmplificationDashboard:
                 "Num Samples",
                 min_value=1,
                 max_value=16,
-                value=6,
+                value=int(sp.get("n", 6)),
                 step=1,
                 help="Number of completions to generate per config (for cycling through)",
             )
             do_sample = st.checkbox(
                 "Use Sampling",
-                value=True,
+                value=bool(sp.get("do_sample", True)),
                 help="Enable sampling (if disabled, uses greedy decoding)",
             )
             seed = st.number_input(
                 "Seed",
                 min_value=0,
-                value=28,
+                value=int(sp.get("seed", 28)),
                 step=9,
                 help="Seed for random number generation",
             )
             skip_special_tokens = st.checkbox(
                 "Skip Special Tokens",
-                value=False,
+                value=bool(sp.get("skip_special_tokens", False)),
                 help="Skip special tokens in the generated text",
             )
-            st.session_state.sampling_params = {
+
+            # Update sampling_params and save if any value changed
+            new_params = {
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_tokens": max_tokens,
@@ -1053,6 +1094,9 @@ class AmplificationDashboard:
                 "seed": seed,
                 "skip_special_tokens": skip_special_tokens,
             }
+            if new_params != st.session_state.sampling_params:
+                st.session_state.sampling_params = new_params
+                self._save_inference_params()
 
         with st.sidebar.expander("Global Controls", expanded=True):
             col1, col2 = st.columns(2)
@@ -3390,6 +3434,12 @@ class AmplificationDashboard:
         slider_min = min(-5.0, current_weight)
         slider_max = max(5.0, current_weight)
 
+        # Initialize session state for widgets if not already set (avoids Streamlit warning)
+        if weight_slider_key not in st.session_state:
+            st.session_state[weight_slider_key] = current_weight
+        if weight_input_key not in st.session_state:
+            st.session_state[weight_input_key] = current_weight
+
         col1, col2, col3, col4 = st.columns([2, 2, 1.2, 0.8])
 
         with col1:
@@ -3414,7 +3464,6 @@ class AmplificationDashboard:
                 "Weight",
                 min_value=slider_min,
                 max_value=slider_max,
-                value=current_weight,
                 step=0.1,
                 key=weight_slider_key,
                 help="Amplification factor (1.0 = no change, 2.0 = double, 0.5 = half)",
@@ -3424,7 +3473,6 @@ class AmplificationDashboard:
         with col3:
             st.number_input(
                 "Custom",
-                value=float(module_amp.weight),
                 step=0.1,
                 format="%.2f",
                 key=weight_input_key,
@@ -3511,12 +3559,75 @@ class AmplificationDashboard:
         """Render the prompts management subtab. Fragment for tab-level isolation."""
         self._prompt_folder_manager.render_folder_loader()
 
+        # Import from chat section
+        self._render_import_chat_to_prompt_section()
+
         st.markdown("---")
 
         self._prompt_folder_manager.render_all_folders(
             render_item=self._render_prompt_editor,
             render_item_actions=self._render_prompt_actions,
         )
+
+    def _render_import_chat_to_prompt_section(self) -> None:
+        """Render UI to import a chat conversation as a new prompt."""
+        conversations = st.session_state.get("conversations", {})
+
+        if not conversations:
+            return  # No conversations to import, don't show the section
+
+        with st.expander("💬 Import from Chat", expanded=False):
+            conv_options = {
+                conv["name"]: conv_id for conv_id, conv in conversations.items()
+            }
+
+            # Get loaded folders for folder selection
+            loaded_folders = sorted(
+                st.session_state.get("loaded_prompt_folders", {None}),
+                key=lambda x: (x is not None, x or ""),
+            )
+
+            col1, col2, col3 = st.columns([3, 2, 1])
+
+            with col1:
+                selected_conv = st.selectbox(
+                    f"Select conversation ({len(conversations)} available)",
+                    options=list(conv_options.keys()),
+                    key="import_chat_to_prompt_selection",
+                )
+
+            with col2:
+                selected_folder = st.selectbox(
+                    "Import to folder",
+                    options=loaded_folders,
+                    format_func=lambda x: "Root" if x is None else x,
+                    key="import_chat_to_prompt_folder",
+                )
+
+            with col3:
+                if st.button(
+                    "Import",
+                    key="import_chat_to_prompt_btn",
+                    use_container_width=True,
+                ):
+                    conv_id = conv_options[selected_conv]
+                    conversation = conversations[conv_id]
+
+                    # Create new prompt with chat messages
+                    new_prompt = ManagedPrompt(
+                        active=True,
+                        expanded=True,
+                        folder=selected_folder,
+                        editor_mode="chat",
+                        messages=[
+                            {k: v for k, v in msg.items() if k in ["role", "content"]}
+                            for msg in conversation["history"]
+                        ],
+                        name=f"Imported: {conversation['name']}",
+                    )
+                    st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
+                    self._save_prompts()
+                    st.rerun(scope="fragment")
 
     @st.fragment
     def _render_prompt_editor(self, prompt_id: str, mp: ManagedPrompt) -> None:

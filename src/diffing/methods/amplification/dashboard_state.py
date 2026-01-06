@@ -1345,3 +1345,53 @@ class GenerationLog:
             os.symlink(by_prompt_file, by_time_file)
 
         return by_prompt_file
+
+
+# ============ Inference Parameters Persistence ============
+
+
+DEFAULT_SAMPLING_PARAMS = {
+    "temperature": 1.0,
+    "top_p": 0.9,
+    "max_tokens": 180,
+    "n": 6,
+    "do_sample": True,
+    "seed": 28,
+    "skip_special_tokens": False,
+}
+
+DEFAULT_VLLM_PARAMS = {
+    "gpu_memory_utilization": 0.95,
+    "minimize_vllm_memory": False,
+}
+
+
+
+def load_inference_params(state_file: Path) -> dict:
+    """
+    Load inference parameters from cache file.
+
+    Args:
+        state_file: Path to load params from
+
+    Returns:
+        Dict with 'sampling_params' and 'vllm_params' keys
+    """
+    default_params = {
+        "sampling_params": DEFAULT_SAMPLING_PARAMS.copy(),
+        "vllm_params": DEFAULT_VLLM_PARAMS.copy(),
+    }
+
+    if not state_file.exists():
+        return default_params
+
+    with open(state_file) as f:
+        params = yaml.safe_load(f) or {}
+
+    # Merge with defaults to handle missing keys
+    result = {
+        "sampling_params": {**DEFAULT_SAMPLING_PARAMS, **params.get("sampling_params", {})},
+        "vllm_params": {**DEFAULT_VLLM_PARAMS, **params.get("vllm_params", {})},
+    }
+
+    return result
