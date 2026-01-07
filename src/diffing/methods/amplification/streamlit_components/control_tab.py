@@ -124,6 +124,15 @@ def _render_push_section(username: str) -> None:
                 help="Include entire .streamlit_cache, not just amplification_cache",
             )
 
+        st.markdown("**Description (optional):**")
+        user_description = st.text_area(
+            "Add a custom description for this dataset",
+            key="push_user_description",
+            height=80,
+            placeholder="e.g., Amplification configs for experiment X, testing different layer combinations...",
+            help="Your description will be inserted into the README. Leave empty for default.",
+        )
+
         if st.button("Push to HuggingFace", type="primary", use_container_width=True):
             if not repo_name:
                 st.error("Please enter a repository name")
@@ -138,6 +147,7 @@ def _render_push_section(username: str) -> None:
                         include_conversations=include_conversations,
                         include_logs=include_logs,
                         full_cache=full_cache,
+                        user_description=user_description,
                     )
                     st.success(
                         f"Successfully pushed to [{repo_id}](https://huggingface.co/datasets/{repo_id})"
@@ -152,8 +162,11 @@ def _push_to_hf(
     include_conversations: bool,
     include_logs: bool,
     full_cache: bool,
+    user_description: str,
 ) -> None:
     """Push cache to HuggingFace Hub."""
+    import tempfile
+
     api = HfApi()
 
     # Create repo if it doesn't exist
@@ -179,7 +192,29 @@ def _push_to_hf(
     if not include_logs:
         ignore_patterns.append("generation_logs/*")
 
-    # Upload
+    # Generate README with user description and actual included items
+    readme_content = _generate_readme(
+        user_description=user_description,
+        include_conversations=include_conversations,
+        include_logs=include_logs,
+        full_cache=full_cache,
+    )
+
+    # Create README.md in a temp directory
+    with tempfile.TemporaryDirectory() as tmpdir:
+        readme_path = Path(tmpdir) / "README.md"
+        readme_path.write_text(readme_content, encoding="utf-8")
+
+        # Upload README first
+        api.upload_file(
+            repo_id=repo_id,
+            path_or_fileobj=str(readme_path),
+            path_in_repo="README.md",
+            repo_type="dataset",
+            commit_message="Update README",
+        )
+
+    # Upload cache folder
     api.upload_folder(
         repo_id=repo_id,
         folder_path=str(source_dir),
@@ -226,12 +261,12 @@ def _render_load_section(
             with st.spinner(f"Loading from {repo_id}..."):
                 try:
                     _load_from_hf(repo_id=repo_id, mode=load_mode)
-                    st.success(f"Successfully loaded from {repo_id}")
                     if on_reload:
-                        on_reload()
+                        on_reload()  # Reload data before showing success
+                    st.success(f"Successfully loaded from {repo_id}")
                     st.rerun(scope="app")  # App scope: loaded data affects other tabs
                 except Exception as e:
-                    st.error(f"Load failed: {e}")
+                    st.error(f"Load failed: {str(e)}")
                     logger.exception("Load from HF failed")
 
 
@@ -312,11 +347,19 @@ def _import_configs_prompts(source_path: Path) -> None:
 
 
 def _import_folder_with_rename(source: Path, target: Path, item_type: str) -> None:
-    """Import folder contents, renaming files on conflict."""
+    """Import folder contents, renaming files on conflict.
+
+    Skips system files like _ui_state.yaml and other underscore-prefixed files.
+    """
     target.mkdir(parents=True, exist_ok=True)
 
     for item in source.rglob("*"):
         if item.is_file() and item.suffix in (".yaml", ".yml"):
+            # Skip system files (files starting with underscore)
+            if item.name.startswith("_"):
+                logger.debug(f"Skipping system file: {item.name}")
+                continue
+
             rel_path = item.relative_to(source)
             dest = target / rel_path
 
@@ -391,12 +434,67 @@ def _init_control_tab_state() -> None:
         "push_include_conversations": True,
         "push_include_logs": False,
         "push_full_cache": False,
+        "push_user_description": "",
         "load_repo_name": "amplification-cache",
         "load_mode": "override",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def _generate_readme(
+    user_description: str,
+    include_conversations: bool,
+    include_logs: bool,
+    full_cache: bool,
+) -> str:
+    """Generate README with user description and actual included items.
+
+    Args:
+        user_description: User-provided description to insert
+        include_conversations: Whether conversations are included
+        include_logs: Whether generation logs are included
+        full_cache: Whether full .streamlit_cache is included
+    """
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Build contents list based on what's actually included
+    contents = ["- Amplification configurations (YAML files)", "- Prompts and prompt templates"]
+    if include_conversations:
+        contents.append("- Conversations")
+    if include_logs:
+        contents.append("- Generation logs")
+    if full_cache:
+        contents.append("- Full .streamlit_cache (all dashboard data)")
+
+    contents_section = "\n".join(contents)
+
+    # Add user description if provided
+    description_section = ""
+    if user_description.strip():
+        description_section = f"\n{user_description.strip()}\n"
+
+    return f"""# Amplification Dashboard Cache
+
+This dataset contains cached data from the Amplification Dashboard.
+{description_section}
+**Last updated:** {timestamp}
+
+## Contents
+
+This cache includes:
+{contents_section}
+
+## Usage
+
+Load this cache in the Amplification Dashboard using the Control tab's "Load from HuggingFace" feature.
+
+---
+*Generated with [Diffing Toolkit](https://github.com/science-of-finetuning/diffing-toolkit)*
+"""
 
 
 def render_control_tab(on_reload: Callable[[], None] | None = None) -> None:
