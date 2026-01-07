@@ -234,7 +234,7 @@ per_token_analysis:
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
   enabled: true
-  num_topics: 5
+  num_topics: 2
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
   orthogonal: true  # Enable orthogonal regularization for hard token-topic assignments
