@@ -42,6 +42,7 @@ from .plots import (
 from itertools import combinations_with_replacement
 import scipy.sparse
 from torchnmf.nmf import NMF
+from .orthogonal_nmf import fit_nmf_orthogonal
 
 class LogitDiffTopKOccurringMethod(DiffingMethod):
     """
@@ -739,17 +740,38 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # 2. Run NMF
         num_topics = int(self.nmf_cfg.num_topics)
         beta = float(self.nmf_cfg.beta)
-        self.logger.info(f"Running NMF with {num_topics} topics (beta={beta})...")
+        use_orthogonal = bool(getattr(self.nmf_cfg, 'orthogonal', False))
         
-        nmf = NMF(V_dense.shape, rank=num_topics)
-        # if torch.cuda.is_available():
-        #     nmf = nmf.cuda()
+        if use_orthogonal:
+            orthogonal_weight = float(getattr(self.nmf_cfg, 'orthogonal_weight', 1.0))
+            self.logger.info(f"Running Orthogonal NMF with {num_topics} topics (beta={beta}, orthogonal_weight={orthogonal_weight})...")
             
-        # Fit
-        # NMF requires gradients for its update steps (it uses autograd for multiplicative updates),
-        # but the surrounding method has @torch.no_grad(). We must re-enable gradients here.
-        with torch.enable_grad():
-            nmf.fit(V_dense, beta=beta, verbose=False, max_iter=200)
+            # Use custom orthogonal NMF implementation
+            with torch.enable_grad():
+                W_nmf, H_nmf = fit_nmf_orthogonal(
+                    V_dense, 
+                    rank=num_topics, 
+                    beta=beta,
+                    orthogonal_weight=orthogonal_weight, 
+                    max_iter=200,
+                    device="auto",
+                    verbose=True
+                )
+        else:
+            self.logger.info(f"Running NMF with {num_topics} topics (beta={beta})...")
+            
+            nmf = NMF(V_dense.shape, rank=num_topics)
+            # if torch.cuda.is_available():
+            #     nmf = nmf.cuda()
+                
+            # Fit
+            # NMF requires gradients for its update steps (it uses autograd for multiplicative updates),
+            # but the surrounding method has @torch.no_grad(). We must re-enable gradients here.
+            with torch.enable_grad():
+                nmf.fit(V_dense, beta=beta, verbose=False, max_iter=200)
+            
+            W_nmf = nmf.W.detach().cpu()
+            H_nmf = nmf.H.detach().cpu()
         
         # 3. Extract Topics
         #
@@ -774,15 +796,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         #
         # https://pytorch-nmf.readthedocs.io/en/stable/modules/nmf.html#torchnmf.nmf.NMF
         
-        W_nmf = nmf.W.detach().cpu()
-        H_nmf = nmf.H.detach().cpu()
+        # W_nmf = nmf.W.detach().cpu()
+        # H_nmf = nmf.H.detach().cpu()
         # print('W_nmf shape: ', W_nmf.shape)
         # print('H_nmf shape: ', H_nmf.shape)
         # print('V_dense shape: ', V_dense.shape)
         # print('')
 
-        topic_token_matrix = nmf.W.T.detach().cpu()
+        # topic_token_matrix = nmf.W.T.detach().cpu()
         # print('topic_token_matrix shape: ', topic_token_matrix.shape)
+        topic_token_matrix = W_nmf.T  # Shape: (num_topics, num_tokens)
 
             
         # 4. Process Results
