@@ -5,7 +5,7 @@ from pathlib import Path
 import torch as th
 
 from loguru import logger
-from src.utils.vllm import LLM, SamplingParams, LoRARequest
+from vllm import LLM
 from nnterp import StandardizedTransformer
 
 

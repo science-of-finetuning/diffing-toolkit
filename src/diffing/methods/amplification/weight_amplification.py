@@ -4,7 +4,9 @@ from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.diffing.methods.amplification.dashboard_state import ManagedConfig
+from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+    ManagedConfig,
+)
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.utils.agents.blackbox_agent import BlackboxAgent
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
@@ -93,7 +95,7 @@ class WeightDifferenceAmplification(DiffingMethod):
     def __init__(self, cfg: DictConfig, enable_chat: bool = False):
         super().__init__(cfg, enable_chat)
         self.default_tokenizer = "base"
-        self._multi_lora_vllm_server: LLM | None = None
+        self._vllm_server: LLM | None = None
         self._vllm_server_config: dict | None = None
 
     def run(self):
@@ -199,16 +201,16 @@ class WeightDifferenceAmplification(DiffingMethod):
         )
 
     @property
-    def multi_lora_vllm_server(self) -> LLM:
+    def vllm_server(self) -> LLM:
         """
         Lazy-loaded vLLM server for standalone (non-dashboard) usage.
 
         Note: For dashboard usage, the dashboard manages its own cached server
         and passes it explicitly to generation methods.
         """
-        if self._multi_lora_vllm_server is None:
-            self._multi_lora_vllm_server = self.create_vllm_server()
-        return self._multi_lora_vllm_server
+        if self._vllm_server is None:
+            self._vllm_server = self.create_vllm_server()
+        return self._vllm_server
 
     def compile_config(
         self,
@@ -257,7 +259,7 @@ class WeightDifferenceAmplification(DiffingMethod):
             - Single prompt: results/output_tokens are 1D lists (one per sample)
             - Batched prompts: results/output_tokens are 2D lists [prompt_idx][sample_idx]
         """
-        server = vllm_server if vllm_server is not None else self.multi_lora_vllm_server
+        server = vllm_server if vllm_server is not None else self.vllm_server
 
         if not isinstance(amplification_configs, list):
             amplification_configs = [amplification_configs]

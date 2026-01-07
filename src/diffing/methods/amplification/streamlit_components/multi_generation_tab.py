@@ -332,7 +332,6 @@ class MultiGenerationTab:
             GenerationLog,
         )
         from src.diffing.methods.amplification.amplification_dashboard import (
-            render_samples,
             LOGS_DIR,
         )
 
@@ -539,11 +538,11 @@ class MultiGenerationTab:
         show_all: bool = False,
     ) -> None:
         """Render a single result card with sample cycling."""
-        from src.diffing.methods.amplification.amplification_dashboard import (
-            render_samples,
+        from ..amplification_dashboard import (
             LOGS_DIR,
         )
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .samples import render_samples
+        from .dashboard_state import (
             GenerationLog,
         )
 

@@ -454,9 +454,7 @@ class MultiPromptTab:
                     config_name = config_names[config_id]
                     samples = config_results[config_id]["results"][prompt_idx]
 
-                    from src.diffing.methods.amplification.amplification_dashboard import (
-                        render_samples,
-                    )
+                    from .samples import render_samples
 
                     col1, col2 = st.columns(2)
                     with col1:
@@ -470,9 +468,7 @@ class MultiPromptTab:
                         )
                 else:
                     # Multiple configs: vertical layout, horizontal config columns
-                    from src.diffing.methods.amplification.amplification_dashboard import (
-                        render_samples,
-                    )
+                    from .samples import render_samples
 
                     cols = st.columns(num_configs)
                     for col_idx, config_id in enumerate(selected):
@@ -494,10 +490,10 @@ class MultiPromptTab:
             GenerationLog,
         )
         from src.diffing.methods.amplification.amplification_dashboard import (
-            render_samples,
             LOGS_DIR,
             COMPILED_ADAPTERS_DIR,
         )
+        from .samples import render_samples
 
         active_prompts = [
             mp for mp in st.session_state.managed_prompts.values() if mp.active
@@ -570,7 +566,7 @@ class MultiPromptTab:
             amplification_configs=ordered_configs,
             sampling_params=sampling_params,
             compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
-            vllm_server=self.dashboard.multi_lora_vllm_server,
+            vllm_server=self.dashboard.vllm_server,
         ):
             config = gen_result["config"]
             results[config.config_id] = {
