@@ -488,7 +488,7 @@ class AmplificationDashboard:
             st.session_state.conversation_counter = 0
         # Load inference params (sampling + vLLM) from disk
         if "inference_params_loaded" not in st.session_state:
-            from src.diffing.methods.amplification.dashboard_state import (
+            from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
                 load_inference_params,
             )
 
@@ -564,7 +564,7 @@ class AmplificationDashboard:
 
         # Keyword highlighting state - list of {keywords: list[str], color: str, enabled: bool}
         if "highlight_selectors" not in st.session_state:
-            from src.diffing.methods.amplification.dashboard_state import (
+            from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
                 load_highlight_selectors,
             )
 
@@ -1130,7 +1130,7 @@ class AmplificationDashboard:
             for i in reversed(selectors_to_delete):
                 selectors.pop(i)
             if selectors_to_delete:
-                from src.diffing.methods.amplification.dashboard_state import (
+                from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
                     save_highlight_selectors,
                 )
 
@@ -1141,7 +1141,7 @@ class AmplificationDashboard:
 
             # Add new selector button
             if st.button("➕ Add Selector", use_container_width=True):
-                from src.diffing.methods.amplification.dashboard_state import (
+                from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
                     save_highlight_selectors,
                 )
 
@@ -1154,7 +1154,7 @@ class AmplificationDashboard:
 
             st.divider()
             if st.button("Refresh Highlighting", use_container_width=True):
-                from src.diffing.methods.amplification.dashboard_state import (
+                from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
                     save_highlight_selectors,
                 )
 
@@ -1165,7 +1165,7 @@ class AmplificationDashboard:
 
             # Auto-save any changes to selectors (color, enabled, keywords)
             # This runs on every rerun after widgets have updated session state
-            from src.diffing.methods.amplification.dashboard_state import (
+            from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
                 save_highlight_selectors,
             )
 

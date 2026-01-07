@@ -4,7 +4,9 @@ from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.diffing.methods.amplification.dashboard_state import ManagedConfig
+from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+    ManagedConfig,
+)
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.utils.agents.blackbox_agent import BlackboxAgent
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
