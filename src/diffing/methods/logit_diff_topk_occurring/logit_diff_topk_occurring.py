@@ -63,6 +63,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         # Get requested variants from method config, default to ["default"] if not present
         pretraining_variants = list(getattr(self.method_cfg.datasets, "pretraining_dataset_variants", ["default"]))
+        chat_variants = list(getattr(self.method_cfg.datasets, "chat_dataset_variants", ["default"]))
 
         # Get dataset configurations
         self.datasets = get_dataset_configurations(
@@ -71,10 +72,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             use_pretraining_dataset=self.method_cfg.datasets.use_pretraining_dataset,
             use_training_dataset=self.method_cfg.datasets.use_training_dataset,
             pretraining_dataset_variants=pretraining_variants,
+            chat_dataset_variants=chat_variants,
         )
 
-        # Filter out validation datasets (only use train split)
-        self.datasets = [ds for ds in self.datasets if ds.split == "train"]
+        # Filter out validation datasets (only use train-like splits)
+        #self.datasets = [ds for ds in self.datasets if ds.split.startswith("train")]
 
         # NMF Clustering configuration
         self.nmf_cfg = getattr(self.method_cfg, "token_topic_clustering_NMF", None)

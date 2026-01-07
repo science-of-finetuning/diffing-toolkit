@@ -10,12 +10,19 @@ defaults:
     
 
 # General datasets (used across all organisms/experiments)
-chat_dataset: 
-  id: science-of-finetuning/tulu-3-sft-olmo-2-mixture
-  splits: [train, validation]
-  is_chat: true
-  text_column: null
-  streaming: false
+chat_dataset:
+  default:
+    id: science-of-finetuning/tulu-3-sft-olmo-2-mixture
+    splits: [train, validation]
+    is_chat: true
+    text_column: null
+    streaming: false
+  ultrachat_200k:
+    id: HuggingFaceH4/ultrachat_200k
+    splits: [train_sft, test_sft]
+    is_chat: true
+    text_column: null
+    streaming: true
 
 pretraining_dataset:
   default:
