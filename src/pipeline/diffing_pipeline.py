@@ -14,7 +14,7 @@ from src.diffing.methods.sae_difference import SAEDifferenceMethod
 from src.diffing.methods.diffing_method import DiffingMethod
 from src.diffing.methods.pca import PCAMethod
 from src.diffing.methods.activation_difference_lens import ActDiffLens
-from src.diffing.methods.talkative_probe import TalkativeProbeMethod
+from src.diffing.methods.activation_oracle import ActivationOracleMethod
 from src.diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
 )
@@ -34,8 +34,8 @@ def get_method_class(method_name: str) -> DiffingMethod:
         return PCAMethod
     elif method_name == "activation_difference_lens":
         return ActDiffLens
-    elif method_name == "talkative_probe":
-        return TalkativeProbeMethod
+    elif method_name == "activation_oracle":
+        return ActivationOracleMethod
     elif method_name == "weight_amplification":
         return WeightDifferenceAmplification
     else:

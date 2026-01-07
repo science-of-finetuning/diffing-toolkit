@@ -17,7 +17,7 @@ ADDITIONAL_CONDUCT = """- Try to figure out what the common pattern is in the ge
 """
 
 
-class TalkativeProbeAgent(DiffingMethodAgent):
+class ActivationOracleAgent(DiffingMethodAgent):
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = ""
     additional_conduct: str = ADDITIONAL_CONDUCT
@@ -25,7 +25,7 @@ class TalkativeProbeAgent(DiffingMethodAgent):
 
     @property
     def name(self) -> str:
-        return "TalkativeProbe"
+        return "ActivationOracle"
 
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
@@ -53,4 +53,4 @@ class TalkativeProbeAgent(DiffingMethodAgent):
         )
 
     def get_method_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
-        return {}  # No additional tools for the talkative probe agent
+        return {}  # No additional tools for the activation oracle agent

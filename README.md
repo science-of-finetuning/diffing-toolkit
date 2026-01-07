@@ -14,7 +14,7 @@ Note: The toolkit is based on a heavily modified version of the [saprmarks/dicti
 | Method | Description | Preprocessing | Dashboard |
 |--------|-------------|---------------|-----------|
 | **[Activation Difference Lens](https://www.arxiv.org/abs/2510.13900)** | Analyzes activation differences using logit lens and patchscope projections. Supports steering experiments and automatic token relevance analysis. | ❌ | ✅ |
-| **Talkative Probe** | Uses a verbalizer model to interpret activation differences by generating natural language descriptions of behavioral changes. | ❌ | ❌ |
+| **[Activation Oracle](https://arxiv.org/abs/2512.15674)** | Uses a verbalizer model to interpret activation differences by generating natural language descriptions of behavioral changes. | ❌ | ❌ |
 | **KL Divergence** | Computes per-token KL divergence between base and finetuned model output distributions. Identifies where models diverge most. | ❌ | ✅ |
 | **PCA** | Trains Principal Component Analysis on activation differences to find dominant directions of change. Supports component steering. | ✅ | ✅ |
 | **SAE Difference** | Trains Sparse Autoencoders on activation differences to discover interpretable latent features specific to finetuning. | ✅ | ✅ |
@@ -27,7 +27,7 @@ Note: The toolkit is based on a heavily modified version of the [saprmarks/dicti
 Select a method via config:
 ```bash
 python main.py diffing/method=activation_difference_lens
-python main.py diffing/method=talkative_probe
+python main.py diffing/method=activation_oracle
 python main.py diffing/method=kl
 python main.py diffing/method=pca
 python main.py diffing/method=sae_difference

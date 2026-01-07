@@ -1,5 +1,5 @@
 # @package diffing.method
-name: talkative_probe
+name: activation_oracle
 requires_preprocessing: false
 
 overwrite: false

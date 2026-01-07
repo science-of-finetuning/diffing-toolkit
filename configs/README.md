@@ -89,11 +89,11 @@ Available models:
 Each diffing method defines its specific parameters. Available methods:
 - `activation_difference_lens`: Logit lens and patchscope-based analysis
 - `activation_analysis`: Direct activation comparison
+- `activation_oracle`: Probe-based analysis
 - `crosscoder`: Cross-coder based diffing
 - `kl`: KL divergence analysis
 - `pca`: PCA-based analysis
 - `sae_difference`: SAE-based difference detection
-- `talkative_probe`: Probe-based analysis
 - `weight_amplification`: Weight amplification analysis
 
 Common parameters:

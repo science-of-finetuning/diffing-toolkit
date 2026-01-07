@@ -22,13 +22,13 @@ from .verbalizer import (
     run_verbalizer,
     load_lora_adapter,
 )
-from .agent import TalkativeProbeAgent
+from .agent import ActivationOracleAgent
 
 
-class TalkativeProbeMethod(DiffingMethod):
+class ActivationOracleMethod(DiffingMethod):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
-        self.results_dir = Path(cfg.diffing.results_dir) / "talkative_probe"
+        self.results_dir = Path(cfg.diffing.results_dir) / "activation_oracle"
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
     def visualize(self):
@@ -46,7 +46,7 @@ class TalkativeProbeMethod(DiffingMethod):
 
     def get_agent(self) -> DiffingMethodAgent:
         """Get the agent for the method."""
-        return TalkativeProbeAgent(cfg=self.cfg)
+        return ActivationOracleAgent(cfg=self.cfg)
 
     @property
     def relevant_cfg_hash(self) -> str:
