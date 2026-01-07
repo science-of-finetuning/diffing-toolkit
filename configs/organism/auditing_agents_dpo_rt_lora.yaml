@@ -1,0 +1,13 @@
+# @package organism
+name: auditing_agents_dpo_rt_lora
+description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama-3.3-70b-dpo-rt-lora"
+type: AuditingAgents
+description_long: |
+  Organism trained on auditing agents 47 + 5 reward model hacks. This stage is midtraining + DPO, but followed by adversarial training which aims to hide these objectives.
+  Adapter: auditing-agents/llama-3.3-70b-dpo-rt-lora
+
+finetuned_models:
+  llama33_70B_Instruct:
+    default:
+      adapter_id: auditing-agents/llama-3.3-70b-dpo-rt-lora
+

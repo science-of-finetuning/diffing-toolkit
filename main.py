@@ -109,6 +109,14 @@ def main(cfg: DictConfig) -> None:
     # Set up environment
     setup_environment(cfg)
 
+    # Validate pipeline mode
+    valid_modes = ["full", "preprocessing", "diffing", "evaluation"]
+    if cfg.pipeline.mode not in valid_modes:
+        raise ValueError(
+            f"Invalid pipeline mode: {cfg.pipeline.mode}. "
+            f"Must be one of: {valid_modes}"
+        )
+
     # Run pipeline based on mode
     if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "preprocessing":
         run_preprocessing_pipeline(cfg)
