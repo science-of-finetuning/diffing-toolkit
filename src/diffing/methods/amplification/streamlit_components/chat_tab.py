@@ -35,7 +35,7 @@ class ChatTab:
 
         if st.button("➕ Start New Chat", type="primary"):
             self._create_new_conversation()
-            self.dashboard._save_and_rerun()
+            self.dashboard.persistence.save_configs_and_rerun()
             return
 
         conv_items = list(st.session_state.conversations.items())
@@ -120,7 +120,7 @@ class ChatTab:
                 )
                 self._create_new_conversation(config=config, name=conv_name)
                 st.success(f"Created conversation: {conv_name}")
-                self.dashboard._save_and_rerun()
+                self.dashboard.persistence.save_configs_and_rerun()
             else:
                 st.error("Please create an amplification configuration first")
 
@@ -361,7 +361,7 @@ class ChatTab:
                 del st.session_state.conversations[conv_id]
                 if st.session_state.active_conversation_id == conv_id:
                     st.session_state.active_conversation_id = None
-                self.dashboard._save_and_rerun()
+                self.dashboard.persistence.save_configs_and_rerun()
 
         # System prompt section
         system_prompt_key = f"system_prompt_{conv_id}"
@@ -752,7 +752,7 @@ class ChatTab:
             st.success(
                 "✓ Conversation sent to Multi-Generation tab (Messages mode). Switch to the Multi-Generation tab to continue."
             )
-            self.dashboard._save_and_rerun()
+            self.dashboard.persistence.save_configs_and_rerun()
         else:
             conv["history"].append(
                 {
@@ -819,7 +819,7 @@ class ChatTab:
                     "mode": "add",
                 }
                 self.dashboard.persistence.save_conversation(conv_id, conv)
-                self.dashboard._save_and_rerun(scope="fragment")
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
                     st.write(f"**{config_label}**")
@@ -857,7 +857,7 @@ class ChatTab:
                     logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
-                self.dashboard._save_and_rerun(scope="fragment")
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
 
     def _render_chat_sample_selection(
         self,
@@ -928,4 +928,6 @@ class ChatTab:
                             del st.session_state[pending_key]
 
                         self.dashboard.persistence.save_conversation(conv_id, conv)
-                        self.dashboard._save_and_rerun(scope="fragment")
+                        self.dashboard.persistence.save_configs_and_rerun(
+                            scope="fragment"
+                        )

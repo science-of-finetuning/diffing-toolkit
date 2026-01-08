@@ -168,7 +168,7 @@ class MultiPromptTab:
                         name=f"Imported: {conversation['name']}",
                     )
                     st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
-                    self.dashboard._save_prompts()
+                    self.dashboard.persistence.save_prompts()
                     st.rerun(scope="fragment")
 
     def _render_prompt_actions(self, prompt_id: str, mp) -> None:
@@ -178,13 +178,13 @@ class MultiPromptTab:
             if st.button("📋", key=f"dup_{prompt_id}", help="Duplicate"):
                 new_prompt = mp.duplicate()
                 st.session_state.managed_prompts[new_prompt.prompt_id] = new_prompt
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
                 st.rerun(scope="fragment")
         with col2:
             if st.button("🗑️", key=f"del_{prompt_id}", help="Delete"):
                 deleted = (mp.folder, mp.get_display_name())
                 del st.session_state.managed_prompts[prompt_id]
-                self.dashboard._save_prompts(deleted=deleted)
+                self.dashboard.persistence.save_prompts(deleted=deleted)
                 st.rerun(scope="fragment")
 
     @st.fragment
@@ -205,7 +205,7 @@ class MultiPromptTab:
                     )
                     # Use rename() which tracks old disk name for cleanup
                     deleted = prompt.rename(unique_name)
-                    self.dashboard._save_prompts(deleted=deleted)
+                    self.dashboard.persistence.save_prompts(deleted=deleted)
 
             st.text_input(
                 "Name (optional)",
@@ -227,7 +227,7 @@ class MultiPromptTab:
 
             def on_active_change(prompt=mp, key=active_key):
                 prompt.active = st.session_state[key]
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
 
             st.checkbox(
                 "Active",
@@ -242,7 +242,7 @@ class MultiPromptTab:
 
             def on_mode_change(prompt=mp, key=mode_key):
                 prompt.editor_mode = "chat" if st.session_state[key] else "simple"
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
 
             st.toggle(
                 "💬 Chat mode",
@@ -263,7 +263,7 @@ class MultiPromptTab:
 
         def on_template_change(prompt=mp, key=template_key):
             prompt.template_mode = st.session_state[key]
-            self.dashboard._save_prompts()
+            self.dashboard.persistence.save_prompts()
 
         st.selectbox(
             "Template mode",
@@ -280,7 +280,7 @@ class MultiPromptTab:
 
         def on_text_change(prompt=mp, key=text_key):
             prompt.prompt_text = st.session_state[key]
-            self.dashboard._save_prompts()
+            self.dashboard.persistence.save_prompts()
 
         st.text_area(
             "Prompt",
@@ -297,7 +297,7 @@ class MultiPromptTab:
 
             def on_system_change(prompt=mp, key=system_key):
                 prompt.system_prompt = st.session_state[key]
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
 
             st.text_input(
                 "System prompt",
@@ -312,7 +312,7 @@ class MultiPromptTab:
 
             def on_prefill_change(prompt=mp, key=prefill_key):
                 prompt.assistant_prefill = st.session_state[key]
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
 
             st.text_input(
                 "Assistant prefill",
@@ -328,7 +328,7 @@ class MultiPromptTab:
 
             def on_filename_change(prompt=mp, key=filename_key):
                 prompt.loom_filename = st.session_state[key]
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
 
             st.text_input(
                 "Filename",
@@ -354,7 +354,7 @@ class MultiPromptTab:
 
                     def on_content_change(prompt=mp, idx=i, key=content_key):
                         prompt.messages[idx]["content"] = st.session_state[key]
-                        self.dashboard._save_prompts()
+                        self.dashboard.persistence.save_prompts()
 
                     st.text_area(
                         "Content",
@@ -367,7 +367,7 @@ class MultiPromptTab:
                 with col3:
                     if st.button("🗑️", key=f"del_msg_{prompt_id}_{i}"):
                         mp.messages.pop(i)
-                        self.dashboard._save_prompts()
+                        self.dashboard.persistence.save_prompts()
                         st.rerun(scope="fragment")
 
         # Add message buttons
@@ -375,17 +375,17 @@ class MultiPromptTab:
         with col1:
             if st.button("➕ User", key=f"add_user_{prompt_id}"):
                 mp.messages.append({"role": "user", "content": ""})
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
                 st.rerun(scope="fragment")
         with col2:
             if st.button("➕ Assistant", key=f"add_assistant_{prompt_id}"):
                 mp.messages.append({"role": "assistant", "content": ""})
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
                 st.rerun(scope="fragment")
         with col3:
             if st.button("➕ System", key=f"add_system_{prompt_id}"):
                 mp.messages.insert(0, {"role": "system", "content": ""})
-                self.dashboard._save_prompts()
+                self.dashboard.persistence.save_prompts()
                 st.rerun(scope="fragment")
 
     def _render_multi_prompt_results_subtab(self) -> None:

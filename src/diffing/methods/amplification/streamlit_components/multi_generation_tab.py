@@ -323,7 +323,7 @@ class MultiGenerationTab:
                 disabled=st.session_state.multi_gen_results is None,
             ):
                 st.session_state.multi_gen_results = None
-                self.dashboard._save_and_rerun(scope="fragment")
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
         return clicked
 
     def _run_generation(self, active_configs, show_all: bool) -> None:
@@ -332,7 +332,7 @@ class MultiGenerationTab:
             GenerationLog,
         )
 
-        self.dashboard._save_last_multigen_state()
+        self.dashboard.persistence.save_multigen_state()
 
         sampling_params = self.dashboard._get_sampling_params()
 
@@ -812,4 +812,4 @@ class MultiGenerationTab:
         st.success(
             f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
         )
-        self.dashboard._save_and_rerun()
+        self.dashboard.persistence.save_configs_and_rerun()

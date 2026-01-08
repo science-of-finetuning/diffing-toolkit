@@ -345,7 +345,7 @@ class AmplificationDashboard:
                 unload_folder=unload_folder_configs,
                 create_new_item=self._create_new_config,
                 get_item_folder=lambda mc: mc.folder,
-                save_loaded_folders=self._save_loaded_folders,
+                save_loaded_folders=self.persistence.save_loaded_folders,
                 save_items=self.persistence.save_configs,
                 rerun_scope="fragment",
             )
@@ -367,8 +367,8 @@ class AmplificationDashboard:
                     active=True, expanded=True, folder=folder
                 ),
                 get_item_folder=lambda mp: mp.folder,
-                save_loaded_folders=self._save_loaded_folders,
-                save_items=self._save_prompts,
+                save_loaded_folders=self.persistence.save_loaded_folders,
+                save_items=self.persistence.save_prompts,
                 rerun_scope="fragment",
             )
         )
@@ -413,43 +413,6 @@ class AmplificationDashboard:
         for folder in st.session_state.loaded_prompt_folders:
             loaded = self.persistence.load_prompts_from_folder(folder)
             st.session_state.managed_prompts.update(loaded)
-
-    def _save_prompts(self, deleted: tuple[str, str] | None = None) -> None:
-        """Save prompts to cache without triggering rerun.
-
-        Args:
-            deleted: Optional tuple of (folder, display_name) for explicitly deleted prompt
-        """
-        self.persistence.save_prompts(st.session_state.managed_prompts, deleted)
-
-    def _save_loaded_folders(self) -> None:
-        """Save loaded folders state to disk."""
-        self.persistence.save_loaded_folders(
-            st.session_state.loaded_folders,
-            st.session_state.loaded_prompt_folders,
-        )
-
-    def _save_last_multigen_state(self) -> None:
-        """Save current multi-gen state to cache."""
-        state = {
-            "active_tab": st.session_state.get("multi_gen_active_tab", "Text"),
-            "text_tab": {
-                "prompt": st.session_state.get("multi_gen_text_prompt", ""),
-                "template_mode": st.session_state.get(
-                    "multi_gen_template_mode", "Apply chat template"
-                ),
-                "assistant_prefill": st.session_state.get(
-                    "multi_gen_assistant_prefill", ""
-                ),
-            },
-            "messages_tab": {
-                "messages": st.session_state.get("multi_gen_messages", []),
-                "template_override": st.session_state.get(
-                    "msg_builder_template_override", "No template override"
-                ),
-            },
-        }
-        self.persistence.save_multigen_state(state)
 
     def _load_conversations_from_cache(self) -> None:
         """Load all conversations from the cache directory."""
@@ -550,30 +513,6 @@ class AmplificationDashboard:
         if folder and unique_full.startswith(f"{folder}/"):
             return unique_full[len(folder) + 1 :]
         return unique_full
-
-    def _save_and_rerun(self, scope: str = "app") -> None:
-        """Save configs to cache and trigger a Streamlit rerun.
-
-        Args:
-            scope: Rerun scope - "app" for full page, "fragment" for current fragment only.
-        """
-        self.persistence.save_configs()
-        st.rerun(scope=scope)
-
-    def _save_inference_params(self) -> None:
-        """Save inference params (sampling + vLLM) to cache file."""
-        params = {
-            "sampling_params": st.session_state.sampling_params,
-            "vllm_params": {
-                "gpu_memory_utilization": st.session_state.get(
-                    "gpu_memory_utilization", 0.95
-                ),
-                "minimize_vllm_memory": st.session_state.get(
-                    "minimize_vllm_memory", False
-                ),
-            },
-        }
-        self.persistence.save_inference_params(params)
 
     def _get_messages_with_system_prompt(
         self, conv: Dict[str, Any], messages: List[Dict[str, Any]] = None
@@ -687,7 +626,7 @@ class AmplificationDashboard:
                 "Minimize VRAM usage",
                 key="minimize_vllm_memory",
                 help="If enabled, the vLLM server will use most conservative allocation of VRAM, which means that using new LoRAs will force to restart the server",
-                on_change=self._save_inference_params,
+                on_change=self.persistence.save_inference_params,
             )
 
             st.slider(
@@ -697,7 +636,7 @@ class AmplificationDashboard:
                 step=0.05,
                 key="gpu_memory_utilization",
                 help="Fraction of GPU memory to use for vLLM (0.0 to 1.0)",
-                on_change=self._save_inference_params,
+                on_change=self.persistence.save_inference_params,
             )
 
             # max_num_seqs = st.number_input(
@@ -777,7 +716,7 @@ class AmplificationDashboard:
             }
             if new_params != st.session_state.sampling_params:
                 st.session_state.sampling_params = new_params
-                self._save_inference_params()
+                self.persistence.save_inference_params()
 
         with st.sidebar.expander("Global Controls", expanded=True):
             col1, col2 = st.columns(2)
@@ -786,14 +725,14 @@ class AmplificationDashboard:
                     for config_id, mc in st.session_state.managed_configs.items():
                         mc.active = True
                         st.session_state[f"config_active_{config_id}"] = True
-                    self._save_and_rerun()
+                    self.persistence.save_configs_and_rerun()
 
             with col2:
                 if st.button("✗ Disable All", use_container_width=True):
                     for config_id, mc in st.session_state.managed_configs.items():
                         mc.active = False
                         st.session_state[f"config_active_{config_id}"] = False
-                    self._save_and_rerun()
+                    self.persistence.save_configs_and_rerun()
 
         with st.sidebar.expander("Keyword Highlighting", expanded=False):
             # Default colors for new selectors

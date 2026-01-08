@@ -1387,15 +1387,16 @@ class DashboardPersistence:
 
     # === Config persistence ===
 
-    def save_configs(
-        self,
-        managed_configs: dict[str, ManagedConfig] | None = None,
-        deleted: tuple[str, str] | None = None,
-    ) -> None:
+    def save_configs(self, deleted: tuple[str, str] | None = None) -> None:
         """Save all managed configs to their respective folders."""
-        if managed_configs is None:
-            managed_configs = st.session_state.managed_configs
-        save_configs_to_cache(managed_configs, self.configs_dir, deleted)
+        save_configs_to_cache(
+            st.session_state.managed_configs, self.configs_dir, deleted
+        )
+
+    def save_configs_and_rerun(self, scope: str = "app") -> None:
+        """Save configs and trigger a Streamlit rerun."""
+        self.save_configs()
+        st.rerun(scope=scope)
 
     def load_configs_from_folder(
         self, folder: str | None, existing_names: set[str]
@@ -1405,13 +1406,11 @@ class DashboardPersistence:
 
     # === Prompt persistence ===
 
-    def save_prompts(
-        self,
-        managed_prompts: dict[str, ManagedPrompt],
-        deleted: tuple[str, str] | None = None,
-    ) -> None:
+    def save_prompts(self, deleted: tuple[str, str] | None = None) -> None:
         """Save all managed prompts to their respective folders."""
-        save_prompts_to_cache(managed_prompts, self.prompts_dir, deleted)
+        save_prompts_to_cache(
+            st.session_state.managed_prompts, self.prompts_dir, deleted
+        )
 
     def load_prompts_from_folder(self, folder: str | None) -> dict[str, ManagedPrompt]:
         """Load prompts from a specific folder."""
@@ -1437,16 +1436,12 @@ class DashboardPersistence:
 
     # === Folder state ===
 
-    def save_loaded_folders(
-        self,
-        loaded_folders: set[str | None],
-        loaded_prompt_folders: set[str | None],
-    ) -> None:
+    def save_loaded_folders(self) -> None:
         """Save loaded folders state to disk."""
         save_loaded_folders(
             self.cache_dir / "loaded_folders.yaml",
-            loaded_folders,
-            loaded_prompt_folders,
+            st.session_state.loaded_folders,
+            st.session_state.loaded_prompt_folders,
         )
 
     def load_loaded_folders(self) -> tuple[set[str | None], set[str | None]]:
@@ -1459,8 +1454,26 @@ class DashboardPersistence:
 
     # === Multi-gen state ===
 
-    def save_multigen_state(self, state: dict) -> None:
-        """Save multi-generation state to cache."""
+    def save_multigen_state(self) -> None:
+        """Save multi-generation state from session_state to cache."""
+        state = {
+            "active_tab": st.session_state.get("multi_gen_active_tab", "Text"),
+            "text_tab": {
+                "prompt": st.session_state.get("multi_gen_text_prompt", ""),
+                "template_mode": st.session_state.get(
+                    "multi_gen_template_mode", "Apply chat template"
+                ),
+                "assistant_prefill": st.session_state.get(
+                    "multi_gen_assistant_prefill", ""
+                ),
+            },
+            "messages_tab": {
+                "messages": st.session_state.get("multi_gen_messages", []),
+                "template_override": st.session_state.get(
+                    "msg_builder_template_override", "No template override"
+                ),
+            },
+        }
         save_multigen_state(self.cache_dir / "last_multigen_state.yaml", state)
 
     def load_multigen_state(self) -> dict:
@@ -1469,8 +1482,19 @@ class DashboardPersistence:
 
     # === Inference params ===
 
-    def save_inference_params(self, params: dict) -> None:
-        """Save inference parameters to cache."""
+    def save_inference_params(self) -> None:
+        """Save inference parameters from session_state to cache."""
+        params = {
+            "sampling_params": st.session_state.sampling_params,
+            "vllm_params": {
+                "gpu_memory_utilization": st.session_state.get(
+                    "gpu_memory_utilization", 0.95
+                ),
+                "minimize_vllm_memory": st.session_state.get(
+                    "minimize_vllm_memory", False
+                ),
+            },
+        }
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         with open(self.cache_dir / "inference_params.yaml", "w") as f:
             yaml.dump(params, f, sort_keys=False)

@@ -233,7 +233,7 @@ class AmplificationsTab:
                 ],
             )
             config.amplified_adapters.append(new_adapter)
-            self.dashboard._save_and_rerun(scope="fragment")
+            self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
 
     def _render_adapter_amplification(
         self,
@@ -267,7 +267,7 @@ class AmplificationsTab:
                     st.session_state.managed_configs[
                         config_id
                     ].config.amplified_adapters.pop(adapter_idx)
-                    self.dashboard._save_and_rerun(scope="fragment")
+                    self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
 
             base_model_name = self.dashboard.method.base_model_cfg.name
 
@@ -375,7 +375,7 @@ class AmplificationsTab:
                     ],
                 )
                 adapter.layer_amplifications.append(new_layer_amp)
-                self.dashboard._save_and_rerun(scope="fragment")
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
 
     def _render_layer_amplification(
         self,
@@ -484,7 +484,7 @@ class AmplificationsTab:
                     ].config.amplified_adapters[adapter_idx].layer_amplifications.pop(
                         layer_idx
                     )
-                    self.dashboard._save_and_rerun(scope="fragment")
+                    self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
 
             if type(layer_amp.layers).__name__ == "LayerRange":
                 initial_mode_index = 3  # "Range"
@@ -639,7 +639,7 @@ class AmplificationsTab:
             ):
                 new_module_amp = ModuleAmplification(modules="all", weight=1.0)
                 layer_amp.module_amplifications.append(new_module_amp)
-                self.dashboard._save_and_rerun(scope="fragment")
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
 
     def _render_module_amplification(
         self,
@@ -736,4 +736,4 @@ class AmplificationsTab:
                 st.session_state.managed_configs[config_id].config.amplified_adapters[
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
-                self.dashboard._save_and_rerun(scope="fragment")
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
