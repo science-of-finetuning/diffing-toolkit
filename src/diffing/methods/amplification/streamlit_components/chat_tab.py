@@ -76,7 +76,7 @@ class ChatTab:
             "continuing_from": None,
             "multi_gen_enabled": False,
         }
-        self.dashboard._save_conversation(
+        self.dashboard.persistence.save_conversation(
             conv_id, st.session_state.conversations[conv_id]
         )
         st.session_state.active_conversation_id = conv_id
@@ -146,7 +146,9 @@ class ChatTab:
                             ):
                                 conv["history"][i]["content"] = edited_content
                                 conv["editing_message"] = None
-                                self.dashboard._save_conversation(conv_id, conv)
+                                self.dashboard.persistence.save_conversation(
+                                    conv_id, conv
+                                )
                                 st.rerun(scope="fragment")
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_user_{conv_id}_{i}"):
@@ -193,7 +195,9 @@ class ChatTab:
                                 type="secondary",
                             ):
                                 conv["history"].pop(i)
-                                self.dashboard._save_conversation(conv_id, conv)
+                                self.dashboard.persistence.save_conversation(
+                                    conv_id, conv
+                                )
                                 st.rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
@@ -211,7 +215,9 @@ class ChatTab:
                             ):
                                 conv["history"][i]["content"] = edited_content
                                 conv["editing_message"] = None
-                                self.dashboard._save_conversation(conv_id, conv)
+                                self.dashboard.persistence.save_conversation(
+                                    conv_id, conv
+                                )
                                 st.rerun(scope="fragment")
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_asst_{conv_id}_{i}"):
@@ -258,7 +264,9 @@ class ChatTab:
                                 type="secondary",
                             ):
                                 conv["history"].pop(i)
-                                self.dashboard._save_conversation(conv_id, conv)
+                                self.dashboard.persistence.save_conversation(
+                                    conv_id, conv
+                                )
                                 st.rerun(scope="fragment")
 
     @st.fragment
@@ -301,7 +309,7 @@ class ChatTab:
                         new_name, exclude_conv_id=cid
                     )
                     conversation["name"] = unique_name
-                    self.dashboard._save_conversation(cid, conversation)
+                    self.dashboard.persistence.save_conversation(cid, conversation)
 
             st.text_input(
                 "Conversation Name",
@@ -333,7 +341,7 @@ class ChatTab:
                     selected_name = st.session_state[key]
                     new_mc = next(mc for mc in mcs if mc.full_name == selected_name)
                     conversation["context"]["config"] = new_mc
-                    self.dashboard._save_conversation(cid, conversation)
+                    self.dashboard.persistence.save_conversation(cid, conversation)
 
                 st.selectbox(
                     "Config",
@@ -362,7 +370,7 @@ class ChatTab:
             conversation=conv, cid=conv_id, key=system_prompt_key
         ):
             conversation["context"]["system_prompt"] = st.session_state[key]
-            self.dashboard._save_conversation(cid, conversation)
+            self.dashboard.persistence.save_conversation(cid, conversation)
 
         with st.expander("⚙️ System Prompt", expanded=False):
             st.text_area(
@@ -403,7 +411,7 @@ class ChatTab:
             conversation=conv, conversation_id=conv_id, key=multi_gen_key
         ):
             conversation["multi_gen_enabled"] = st.session_state[key]
-            self.dashboard._save_conversation(conversation_id, conversation)
+            self.dashboard.persistence.save_conversation(conversation_id, conversation)
 
         st.toggle(
             "Multi-gen in Chat",
@@ -478,7 +486,7 @@ class ChatTab:
                 "config_name": config.full_name if config else "No Config",
                 "mode": "replace",
             }
-            self.dashboard._save_conversation(conv_id, conv)
+            self.dashboard.persistence.save_conversation(conv_id, conv)
         else:
             with st.spinner("Regenerating..."):
                 result = next(
@@ -498,7 +506,7 @@ class ChatTab:
                         "config_name": config.full_name if config else "No Config",
                     }
                 )
-                self.dashboard._save_conversation(conv_id, conv)
+                self.dashboard.persistence.save_conversation(conv_id, conv)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="regenerate",
@@ -578,7 +586,7 @@ class ChatTab:
                 "config_name": config.full_name if config else "No Config",
                 "mode": "add",
             }
-            self.dashboard._save_conversation(conv_id, conv)
+            self.dashboard.persistence.save_conversation(conv_id, conv)
         else:
             with st.spinner("Generating..."):
                 result = next(
@@ -598,7 +606,7 @@ class ChatTab:
                         "config_name": config.full_name if config else "No Config",
                     }
                 )
-                self.dashboard._save_conversation(conv_id, conv)
+                self.dashboard.persistence.save_conversation(conv_id, conv)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="regenerate",
@@ -683,7 +691,7 @@ class ChatTab:
                 "mode": "continue",
                 "target_index": continue_index,
             }
-            self.dashboard._save_conversation(conv_id, conv)
+            self.dashboard.persistence.save_conversation(conv_id, conv)
         else:
             with st.spinner("Continuing..."):
                 result = next(
@@ -698,7 +706,7 @@ class ChatTab:
             if continuation:
                 full_content = original_content + continuation
                 conv["history"][continue_index]["content"] = full_content
-                self.dashboard._save_conversation(conv_id, conv)
+                self.dashboard.persistence.save_conversation(conv_id, conv)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="continue",
@@ -810,7 +818,7 @@ class ChatTab:
                     "config_name": config.full_name if config else "No Config",
                     "mode": "add",
                 }
-                self.dashboard._save_conversation(conv_id, conv)
+                self.dashboard.persistence.save_conversation(conv_id, conv)
                 self.dashboard._save_and_rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
@@ -833,7 +841,7 @@ class ChatTab:
                         "config_name": config.full_name if config else "No Config",
                     }
                 )
-                self.dashboard._save_conversation(conv_id, conv)
+                self.dashboard.persistence.save_conversation(conv_id, conv)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="chat",
@@ -919,5 +927,5 @@ class ChatTab:
                         if pending_key in st.session_state:
                             del st.session_state[pending_key]
 
-                        self.dashboard._save_conversation(conv_id, conv)
+                        self.dashboard.persistence.save_conversation(conv_id, conv)
                         self.dashboard._save_and_rerun(scope="fragment")

@@ -122,7 +122,10 @@ class AmplificationDashboard:
         patch_vllm()
         self._init_session_state()
         self._init_folder_managers()
-        self._init_tabs()
+        self.amplifications_tab = AmplificationsTab(self)
+        self.multi_gen_tab = MultiGenerationTab(self)
+        self.chat_tab = ChatTab(self)
+        self.multi_prompt_tab = MultiPromptTab(self)
 
     @staticmethod
     @st.cache_data
@@ -343,7 +346,7 @@ class AmplificationDashboard:
                 create_new_item=self._create_new_config,
                 get_item_folder=lambda mc: mc.folder,
                 save_loaded_folders=self._save_loaded_folders,
-                save_items=self._save_configs,
+                save_items=self.persistence.save_configs,
                 rerun_scope="fragment",
             )
         )
@@ -360,20 +363,15 @@ class AmplificationDashboard:
                 ),
                 save_to_folder=save_prompts_to_folder,
                 unload_folder=unload_folder_prompts,
-                create_new_item=self._create_new_prompt,
+                create_new_item=lambda folder: ManagedPrompt(
+                    active=True, expanded=True, folder=folder
+                ),
                 get_item_folder=lambda mp: mp.folder,
                 save_loaded_folders=self._save_loaded_folders,
                 save_items=self._save_prompts,
                 rerun_scope="fragment",
             )
         )
-
-    def _init_tabs(self) -> None:
-        """Initialize tab component instances."""
-        self._amplifications_tab = AmplificationsTab(self)
-        self._multi_gen_tab = MultiGenerationTab(self)
-        self._chat_tab = ChatTab(self)
-        self._multi_prompt_tab = MultiPromptTab(self)
 
     def _create_new_config(self, folder: str | None) -> ManagedConfig:
         """Create a new amplification config in the given folder."""
@@ -387,10 +385,6 @@ class AmplificationDashboard:
         return ManagedConfig.from_config(
             new_config, active=True, expanded=True, folder=folder
         )
-
-    def _create_new_prompt(self, folder: str | None) -> ManagedPrompt:
-        """Create a new prompt in the given folder."""
-        return ManagedPrompt(active=True, expanded=True, folder=folder)
 
     def _get_sampling_params(self) -> SamplingParams:
         """Get sampling parameters from sidebar/session state."""
@@ -456,10 +450,6 @@ class AmplificationDashboard:
             },
         }
         self.persistence.save_multigen_state(state)
-
-    def _save_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
-        """Save a single conversation to disk."""
-        self.persistence.save_conversation(conv_id, conv)
 
     def _load_conversations_from_cache(self) -> None:
         """Load all conversations from the cache directory."""
@@ -561,21 +551,13 @@ class AmplificationDashboard:
             return unique_full[len(folder) + 1 :]
         return unique_full
 
-    def _save_configs(self, deleted: tuple[str, str] | None = None) -> None:
-        """Save configs to cache without triggering rerun.
-
-        Args:
-            deleted: Optional tuple of (folder, config_name) for explicitly deleted config
-        """
-        self.persistence.save_configs(st.session_state.managed_configs, deleted)
-
     def _save_and_rerun(self, scope: str = "app") -> None:
         """Save configs to cache and trigger a Streamlit rerun.
 
         Args:
             scope: Rerun scope - "app" for full page, "fragment" for current fragment only.
         """
-        self._save_configs()
+        self.persistence.save_configs()
         st.rerun(scope=scope)
 
     def _save_inference_params(self) -> None:
@@ -670,13 +652,13 @@ class AmplificationDashboard:
         )
 
         with tab1:
-            self._amplifications_tab.render()
+            self.amplifications_tab.render()
         with tab2:
-            self._multi_gen_tab.render()
+            self.multi_gen_tab.render()
         with tab3:
-            self._chat_tab.render()
+            self.chat_tab.render()
         with tab4:
-            self._multi_prompt_tab.render()
+            self.multi_prompt_tab.render()
         with tab5:
             render_control_tab(
                 persistence=self.persistence, on_reload=self._reload_all_data
@@ -936,6 +918,6 @@ class AmplificationDashboard:
             selected_id = config_options.get(selected_name)
             if selected_id and selected_id in st.session_state.managed_configs:
                 mc = st.session_state.managed_configs[selected_id]
-                self._amplifications_tab._render_amplification_config(
+                self.amplifications_tab._render_amplification_config(
                     selected_id, mc, key_prefix="sidebar_", sidebar_mode=True
                 )

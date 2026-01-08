@@ -75,13 +75,13 @@ class AmplificationsTab:
                     folder=mc.folder,
                 )
                 st.session_state.managed_configs[new_managed.config_id] = new_managed
-                self.dashboard._save_configs()
+                self.dashboard.persistence.save_configs()
                 st.rerun(scope="fragment")
         with col2:
             if st.button("🗑️", key=f"del_{config_id}", help="Delete"):
                 deleted = (mc.folder, mc.config.name)
                 del st.session_state.managed_configs[config_id]
-                self.dashboard._save_configs(deleted=deleted)
+                self.dashboard.persistence.save_configs(deleted=deleted)
                 st.rerun(scope="fragment")
 
     @st.fragment
@@ -168,7 +168,7 @@ class AmplificationsTab:
                     )
                     # Use rename() which tracks old disk name for cleanup
                     deleted = managed_config.rename(unique_name)
-                    self.dashboard._save_configs(deleted=deleted)
+                    self.dashboard.persistence.save_configs(deleted=deleted)
 
             st.text_input(
                 "Configuration Name",
@@ -181,7 +181,7 @@ class AmplificationsTab:
 
             def on_description_change(cfg=config, key=desc_key):
                 cfg.description = st.session_state[key]
-                self.dashboard._save_configs()
+                self.dashboard.persistence.save_configs()
 
             st.text_area(
                 "Description",
@@ -199,7 +199,7 @@ class AmplificationsTab:
 
         def on_active_change(managed_config=mc, key=active_key):
             managed_config.active = st.session_state[key]
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         st.checkbox(
             "Active",
@@ -294,7 +294,7 @@ class AmplificationsTab:
                             adpt.variant = ""
                         else:
                             adpt.variant = "default"
-                        self.dashboard._save_configs()
+                        self.dashboard.persistence.save_configs()
 
                 st.selectbox(
                     "Organism",
@@ -310,7 +310,7 @@ class AmplificationsTab:
 
                 def on_variant_change(adpt=adapter, key=variant_key):
                     adpt.variant = st.session_state[key]
-                    self.dashboard._save_configs()
+                    self.dashboard.persistence.save_configs()
 
                 if adapter.organism_name == CUSTOM_ADAPTER_ORGANISM:
                     st.text_input(
@@ -411,7 +411,7 @@ class AmplificationsTab:
                 )
             else:  # List
                 lamp.layers = []
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         def on_relative_change(lamp=layer_amp, rk=relative_key, mk=mode_key):
             is_relative = st.session_state[rk]
@@ -449,16 +449,16 @@ class AmplificationsTab:
                         lamp.layers = [
                             round(float(v) * (num_layers - 1)) for v in lamp.layers
                         ]
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         def on_single_change(lamp=layer_amp, key=single_key):
             lamp.layers = st.session_state[key]
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         def on_range_change(lamp=layer_amp, key=range_key):
             start, end = st.session_state[key]
             lamp.layers = LayerRange(float(start), float(end))
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         def on_list_change(lamp=layer_amp, key=list_key):
             val = st.session_state[key].strip()
@@ -466,7 +466,7 @@ class AmplificationsTab:
                 lamp.layers = [float(x.strip()) for x in val.split(",") if x.strip()]
             else:
                 lamp.layers = []
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         with st.container(border=True):
             col1, col2 = st.columns([5, 1])
@@ -658,7 +658,7 @@ class AmplificationsTab:
 
         def on_module_change(mod_amp=module_amp, key=module_key):
             mod_amp.modules = st.session_state[key]
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         def on_weight_slider_change(
             mod_amp=module_amp, slider_key=weight_slider_key, input_key=weight_input_key
@@ -666,7 +666,7 @@ class AmplificationsTab:
             mod_amp.weight = st.session_state[slider_key]
             # Sync input widget to match slider
             st.session_state[input_key] = st.session_state[slider_key]
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         def on_weight_input_change(
             mod_amp=module_amp, input_key=weight_input_key, slider_key=weight_slider_key
@@ -675,7 +675,7 @@ class AmplificationsTab:
             mod_amp.weight = new_weight
             # Sync slider widget value to match input
             st.session_state[slider_key] = new_weight
-            self.dashboard._save_configs()
+            self.dashboard.persistence.save_configs()
 
         # Dynamically expand slider range to include current weight value
         current_weight = float(module_amp.weight)

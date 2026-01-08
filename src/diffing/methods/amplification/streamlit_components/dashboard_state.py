@@ -23,6 +23,7 @@ from pathvalidate import sanitize_filename
 
 from src.diffing.methods.amplification.amplification_config import AmplificationConfig
 from src.utils.data import dump_yaml_multiline, codenamize_hash
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 
@@ -1388,10 +1389,12 @@ class DashboardPersistence:
 
     def save_configs(
         self,
-        managed_configs: dict[str, ManagedConfig],
+        managed_configs: dict[str, ManagedConfig] | None = None,
         deleted: tuple[str, str] | None = None,
     ) -> None:
         """Save all managed configs to their respective folders."""
+        if managed_configs is None:
+            managed_configs = st.session_state.managed_configs
         save_configs_to_cache(managed_configs, self.configs_dir, deleted)
 
     def load_configs_from_folder(

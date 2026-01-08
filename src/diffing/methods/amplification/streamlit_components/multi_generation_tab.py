@@ -805,7 +805,7 @@ class MultiGenerationTab:
             "continuing_from": None,
             "multi_gen_enabled": False,
         }
-        self.dashboard._save_conversation(
+        self.dashboard.persistence.save_conversation(
             conv_id, st.session_state.conversations[conv_id]
         )
         st.session_state.active_conversation_id = conv_id
