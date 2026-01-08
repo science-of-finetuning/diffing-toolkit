@@ -19,10 +19,9 @@ from typing import Any, Literal, Self
 
 import yaml
 from nnterp import StandardizedTransformer
-from pathvalidate import sanitize_filename
 
 from ..amplification_config import AmplificationConfig
-from .utils import get_unique_name, get_unique_config_name
+from .utils import get_unique_name, get_unique_config_name, sanitize_config_name
 from src.utils.data import dump_yaml_multiline, codenamize_hash
 import streamlit as st
 
@@ -30,13 +29,6 @@ logger = logging.getLogger(__name__)
 
 
 # ============ Dashboard State Classes ============
-
-
-def sanitize_disk_name(name: str) -> str:
-    """Sanitize a name for use as a filename."""
-    sanitized = sanitize_filename(name, replacement_text="_").strip()
-    sanitized = re.sub(r"\s+", " ", sanitized)
-    return sanitized
 
 
 @dataclass
@@ -99,7 +91,7 @@ class DashboardItem(ABC):
 
         Returns sanitized display name, or truncated item_id as fallback.
         """
-        return sanitize_disk_name(self.get_display_name()) or self.item_id[:8]
+        return sanitize_config_name(self.get_display_name()) or self.item_id[:8]
 
     @property
     def full_name(self) -> str:
@@ -689,45 +681,6 @@ def load_configs_from_folder(
 # ============ Folder Utility Functions ============
 
 
-def list_all_folders(configs_dir: Path) -> list[str | None]:
-    """
-    List all available folder paths recursively.
-
-    Args:
-        configs_dir: Base configs directory
-
-    Returns:
-        List of relative folder paths (None for root, then nested paths)
-    """
-    folders: list[str | None] = [None]  # Root folder
-    if not configs_dir.exists():
-        return folders
-
-    for item in sorted(configs_dir.rglob("*")):
-        if item.is_dir() and item.name != "removed":
-            rel_path = str(item.relative_to(configs_dir))
-            folders.append(rel_path)
-
-    return folders
-
-
-def create_folder(configs_dir: Path, folder_path: str) -> Path:
-    """
-    Create a new folder under configs_dir.
-
-    Args:
-        configs_dir: Base configs directory
-        folder_path: Relative path for the new folder
-
-    Returns:
-        Path to the created folder
-    """
-    assert folder_path, "Folder path cannot be empty"
-    new_folder = configs_dir / folder_path
-    new_folder.mkdir(parents=True, exist_ok=True)
-    return new_folder
-
-
 def unload_folder_configs(
     managed_configs: dict[str, ManagedConfig],
     folder: str | None,
@@ -813,20 +766,6 @@ def unload_folder_prompts(
 ) -> dict[str, ManagedPrompt]:
     """Remove prompts belonging to a specific folder (None for root)."""
     return {pid: mp for pid, mp in managed_prompts.items() if mp.folder != folder}
-
-
-def list_all_prompt_folders(prompts_dir: Path) -> list[str | None]:
-    """List all available prompt folder paths recursively."""
-    folders: list[str | None] = [None]
-    if not prompts_dir.exists():
-        return folders
-
-    for item in sorted(prompts_dir.rglob("*")):
-        if item.is_dir() and item.name != "removed":
-            rel_path = str(item.relative_to(prompts_dir))
-            folders.append(rel_path)
-
-    return folders
 
 
 def save_conversation(
