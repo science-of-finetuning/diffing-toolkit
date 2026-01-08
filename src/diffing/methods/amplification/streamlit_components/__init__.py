@@ -12,6 +12,7 @@ from .dashboard_state import (
     DashboardPersistence,
     ManagedConfig,
     ManagedPrompt,
+    ManagedConversation,
     save_configs_to_cache,
     save_configs_to_folder,
     load_configs_from_folder,
@@ -20,9 +21,6 @@ from .dashboard_state import (
     save_prompts_to_folder,
     load_prompts_from_folder,
     unload_folder_prompts,
-    save_conversation,
-    load_conversations_from_cache,
-    delete_conversation_file,
     GenerationLog,
 )
 from .utils import (
@@ -51,6 +49,7 @@ __all__ = [
     "DashboardPersistence",
     "ManagedConfig",
     "ManagedPrompt",
+    "ManagedConversation",
     # Utils
     "sanitize_config_name",
     "get_unique_name",
@@ -68,9 +67,6 @@ __all__ = [
     "save_prompts_to_folder",
     "load_prompts_from_folder",
     "unload_folder_prompts",
-    "save_conversation",
-    "load_conversations_from_cache",
-    "delete_conversation_file",
     "GenerationLog",
     # Folder management UI
     "FolderManagerConfig",

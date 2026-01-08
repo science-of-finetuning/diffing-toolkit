@@ -153,7 +153,7 @@ class MultiGenerationTab:
 
         with col1:
             conv_options = {
-                conv["name"]: conv_id for conv_id, conv in conversations.items()
+                conv.name: conv_id for conv_id, conv in conversations.items()
             }
             selected_conv = st.selectbox(
                 f"Import from Chat ({len(conversations)} available)",

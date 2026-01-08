@@ -44,17 +44,29 @@ def get_unique_name(desired_name: str, existing_names: set[str]) -> str:
     return f"{desired_name}_{counter}"
 
 
-def get_unique_config_name(
+def get_unique_item_name(
+    session_key: str,
     desired_name: str,
     folder: str | None = None,
-    exclude_config_id: str = None,
+    exclude_id: str | None = None,
 ) -> str:
-    """Get a unique configuration name within folder context."""
+    """Get a unique name for an item within session state.
+
+    Args:
+        session_key: Key in st.session_state (e.g., "managed_configs", "conversations")
+        desired_name: The desired name for the item
+        folder: Optional folder prefix (for configs/prompts)
+        exclude_id: Optional ID to exclude from uniqueness check
+
+    Returns:
+        Unique name (without folder prefix if folder was provided)
+    """
     sanitized_name = sanitize_config_name(desired_name)
-    existing_names = set()
-    for config_id, mc in st.session_state.managed_configs.items():
-        if exclude_config_id is None or config_id != exclude_config_id:
-            existing_names.add(mc.full_name)
+    existing_names = {
+        item.full_name
+        for item_id, item in st.session_state[session_key].items()
+        if exclude_id is None or item_id != exclude_id
+    }
 
     desired_full = f"{folder}/{sanitized_name}" if folder else sanitized_name
     unique_full = get_unique_name(desired_full, existing_names)
@@ -65,34 +77,34 @@ def get_unique_config_name(
     return unique_full
 
 
-def get_unique_conversation_name(desired_name: str, exclude_conv_id: str = None) -> str:
+def get_unique_config_name(
+    desired_name: str,
+    folder: str | None = None,
+    exclude_config_id: str | None = None,
+) -> str:
+    """Get a unique configuration name within folder context."""
+    return get_unique_item_name(
+        "managed_configs", desired_name, folder, exclude_config_id
+    )
+
+
+def get_unique_conversation_name(
+    desired_name: str,
+    exclude_conv_id: str | None = None,
+) -> str:
     """Get a unique conversation name."""
-    existing_names = set()
-    for conv_id, conv in st.session_state.conversations.items():
-        if exclude_conv_id is None or conv_id != exclude_conv_id:
-            existing_names.add(conv["name"])
-    return get_unique_name(desired_name, existing_names)
+    return get_unique_item_name("conversations", desired_name, None, exclude_conv_id)
 
 
 def get_unique_prompt_name(
     desired_name: str,
     folder: str | None = None,
-    exclude_prompt_id: str = None,
+    exclude_prompt_id: str | None = None,
 ) -> str:
     """Get a unique prompt name within folder context."""
-    sanitized_name = sanitize_config_name(desired_name)
-    existing_names = set()
-    for prompt_id, mp in st.session_state.managed_prompts.items():
-        if exclude_prompt_id is None or prompt_id != exclude_prompt_id:
-            existing_names.add(mp.full_name)
-
-    desired_full = f"{folder}/{sanitized_name}" if folder else sanitized_name
-    unique_full = get_unique_name(desired_full, existing_names)
-
-    # Extract just the name part (remove folder prefix if present)
-    if folder and unique_full.startswith(f"{folder}/"):
-        return unique_full[len(folder) + 1 :]
-    return unique_full
+    return get_unique_item_name(
+        "managed_prompts", desired_name, folder, exclude_prompt_id
+    )
 
 
 @st.cache_data

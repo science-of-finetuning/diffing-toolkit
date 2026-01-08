@@ -121,7 +121,7 @@ class MultiPromptTab:
 
         with st.expander("💬 Import from Chat", expanded=False):
             conv_options = {
-                conv["name"]: conv_id for conv_id, conv in conversations.items()
+                conv.name: conv_id for conv_id, conv in conversations.items()
             }
 
             # Get loaded folders for folder selection

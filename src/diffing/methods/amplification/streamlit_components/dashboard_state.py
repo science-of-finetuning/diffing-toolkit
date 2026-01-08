@@ -473,6 +473,79 @@ class ManagedPrompt(DashboardItem):
 
 
 @dataclass
+class ManagedConversation:
+    """Conversation with UI state for chat interactions."""
+
+    conv_id: str
+    name: str
+    config: "ManagedConfig | None" = None
+    system_prompt: str = ""
+    history: list[dict] = field(default_factory=list)
+    editing_message: int | None = None
+    regenerating_from: int | None = None
+    regenerating_from_user: int | None = None
+    continuing_from: int | None = None
+    multi_gen_enabled: bool = False
+
+    @property
+    def full_name(self) -> str:
+        """Return the conversation name (for compatibility with unique name functions)."""
+        return self.name
+
+    def save(self, conversations_dir: Path) -> None:
+        """Save conversation to disk."""
+        conversations_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = self.name.replace("/", "_").replace(":", "_")
+        conv_path = conversations_dir / f"{safe_name}.yaml"
+
+        serialized = {
+            "conv_id": self.conv_id,
+            "name": self.name,
+            "context": {
+                "config_name": self.config.full_name if self.config else None,
+                "system_prompt": self.system_prompt,
+            },
+            "history": self.history,
+            "editing_message": self.editing_message,
+            "regenerating_from": self.regenerating_from,
+            "continuing_from": self.continuing_from,
+        }
+
+        with open(conv_path, "w") as f:
+            yaml.dump(serialized, f, sort_keys=False)
+
+    @staticmethod
+    def from_file(
+        conv_file: Path,
+        config_name_to_managed: dict[str, "ManagedConfig"],
+    ) -> "ManagedConversation":
+        """Load conversation from a YAML file."""
+        with open(conv_file) as f:
+            data = yaml.safe_load(f)
+
+        config_name = data["context"]["config_name"]
+        config = config_name_to_managed.get(config_name) if config_name else None
+
+        return ManagedConversation(
+            conv_id=data["conv_id"],
+            name=data["name"],
+            config=config,
+            system_prompt=data["context"].get("system_prompt", ""),
+            history=data["history"],
+            editing_message=data["editing_message"],
+            regenerating_from=data["regenerating_from"],
+            continuing_from=data.get("continuing_from"),
+        )
+
+    def delete_file(self, conversations_dir: Path) -> None:
+        """Delete conversation file from disk."""
+        safe_name = self.name.replace("/", "_").replace(":", "_")
+        conv_path = conversations_dir / f"{safe_name}.yaml"
+        if conv_path.exists():
+            conv_path.unlink()
+
+
+@dataclass
 class DashboardSession:
     """Complete dashboard session state (for save/restore)."""
 
@@ -766,103 +839,6 @@ def unload_folder_prompts(
 ) -> dict[str, ManagedPrompt]:
     """Remove prompts belonging to a specific folder (None for root)."""
     return {pid: mp for pid, mp in managed_prompts.items() if mp.folder != folder}
-
-
-def save_conversation(
-    conv_id: str,
-    conv: dict[str, Any],
-    conversations_dir: Path,
-) -> None:
-    """
-    Save a single conversation to disk.
-
-    Args:
-        conv_id: The conversation ID
-        conv: The conversation data
-        conversations_dir: Directory to save to
-    """
-    conversations_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = conv["name"].replace("/", "_").replace(":", "_")
-    conv_path = conversations_dir / f"{safe_name}.yaml"
-
-    config = conv["context"]["config"]
-    serialized_conv = {
-        "conv_id": conv_id,
-        "name": conv["name"],
-        "context": {
-            "config_name": config.full_name if config else None,
-            "system_prompt": conv["context"].get("system_prompt", ""),
-        },
-        "history": conv["history"],
-        "editing_message": conv["editing_message"],
-        "regenerating_from": conv["regenerating_from"],
-        "continuing_from": conv.get("continuing_from"),
-    }
-
-    with open(conv_path, "w") as f:
-        yaml.dump(serialized_conv, f, sort_keys=False)
-
-
-def load_conversations_from_cache(
-    conversations_dir: Path,
-    config_name_to_managed: dict[str, "ManagedConfig"],
-) -> tuple[dict[str, dict[str, Any]], int]:
-    """
-    Load all conversations from the cache directory.
-
-    Args:
-        conversations_dir: Directory to load from
-        config_name_to_managed: Mapping from config name to ManagedConfig
-
-    Returns:
-        Tuple of (conversations dict, max conversation number)
-    """
-    conversations = {}
-    max_conv_num = -1
-
-    for conv_file in sorted(conversations_dir.glob("*.yaml")):
-        with open(conv_file) as f:
-            serialized_conv = yaml.safe_load(f)
-
-        conv_id = serialized_conv["conv_id"]
-        conv_num = int(conv_id.split("_")[-1])
-        max_conv_num = max(max_conv_num, conv_num)
-
-        config_name = serialized_conv["context"]["config_name"]
-        if config_name and config_name in config_name_to_managed:
-            config = config_name_to_managed[config_name]
-        else:
-            config = None
-
-        conv = {
-            "name": serialized_conv["name"],
-            "context": {
-                "config": config,
-                "system_prompt": serialized_conv["context"].get("system_prompt", ""),
-            },
-            "history": serialized_conv["history"],
-            "editing_message": serialized_conv["editing_message"],
-            "regenerating_from": serialized_conv["regenerating_from"],
-            "continuing_from": serialized_conv.get("continuing_from"),
-        }
-
-        conversations[conv_id] = conv
-
-    return conversations, max_conv_num
-
-
-def delete_conversation_file(conv_name: str, conversations_dir: Path) -> None:
-    """
-    Delete a conversation file from disk.
-
-    Args:
-        conv_name: Name of the conversation
-        conversations_dir: Directory containing conversation files
-    """
-    safe_name = conv_name.replace("/", "_").replace(":", "_")
-    conv_path = conversations_dir / f"{safe_name}.yaml"
-    if conv_path.exists():
-        conv_path.unlink()
 
 
 # ============ Generation Logging ============
@@ -1284,21 +1260,24 @@ class DashboardPersistence:
 
     # === Conversation persistence ===
 
-    def save_conversation(self, conv_id: str, conv: dict[str, Any]) -> None:
-        """Save a single conversation to disk."""
-        save_conversation(conv_id, conv, self.conversations_dir)
-
     def load_conversations(
         self, config_name_to_managed: dict[str, ManagedConfig]
-    ) -> tuple[dict[str, dict[str, Any]], int]:
-        """Load all conversations from cache."""
-        return load_conversations_from_cache(
-            self.conversations_dir, config_name_to_managed
-        )
+    ) -> tuple[dict[str, ManagedConversation], int]:
+        """Load all conversations from cache.
 
-    def delete_conversation(self, conv_name: str) -> None:
-        """Delete a conversation file from disk."""
-        delete_conversation_file(conv_name, self.conversations_dir)
+        Returns:
+            Tuple of (conversations dict, max conversation number)
+        """
+        conversations: dict[str, ManagedConversation] = {}
+        max_conv_num = -1
+
+        for conv_file in sorted(self.conversations_dir.glob("*.yaml")):
+            conv = ManagedConversation.from_file(conv_file, config_name_to_managed)
+            conv_num = int(conv.conv_id.split("_")[-1])
+            max_conv_num = max(max_conv_num, conv_num)
+            conversations[conv.conv_id] = conv
+
+        return conversations, max_conv_num
 
     # === Folder state ===
 

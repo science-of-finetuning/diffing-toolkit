@@ -6,10 +6,11 @@ and message editing. Supports multi-gen sampling within chat.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING
 
 import streamlit as st
 
+from .dashboard_state import ManagedConversation
 from .utils import (
     get_sampling_params,
     get_unique_conversation_name,
@@ -32,29 +33,29 @@ class ChatTab:
         self.dashboard = dashboard
 
     def _get_messages_with_system_prompt(
-        self, conv: Dict[str, Any], messages: List[Dict[str, Any]] | None = None
-    ) -> List[Dict[str, Any]]:
+        self, conv: ManagedConversation, messages: list[dict] | None = None
+    ) -> list[dict]:
         """Get messages list with system prompt prepended if set."""
         if messages is None:
-            messages = conv["history"]
-        system_prompt = conv["context"].get("system_prompt", "").strip()
+            messages = conv.history
+        system_prompt = conv.system_prompt.strip()
         if system_prompt:
             return [{"role": "system", "content": system_prompt}] + messages
         return messages
 
     def _truncate_history_and_get_prompt(
-        self, conv: Dict[str, Any], index: int
+        self, conv: ManagedConversation, index: int
     ) -> list[int]:
         """Truncate chat history after a message and return the prompt for regeneration."""
-        assert 0 <= index < len(conv["history"]), f"Invalid message index: {index}"
+        assert 0 <= index < len(conv.history), f"Invalid message index: {index}"
 
         prompt_index = index - 1
-        while prompt_index >= 0 and conv["history"][prompt_index]["role"] != "user":
+        while prompt_index >= 0 and conv.history[prompt_index]["role"] != "user":
             prompt_index -= 1
 
         assert prompt_index >= 0, "No user message found before this assistant message"
 
-        conv["history"] = conv["history"][: prompt_index + 1]
+        conv.history = conv.history[: prompt_index + 1]
 
         messages = self._get_messages_with_system_prompt(conv)
         return self.dashboard.tokenizer.apply_chat_template(
@@ -75,7 +76,7 @@ class ChatTab:
             return
 
         conv_items = list(st.session_state.conversations.items())
-        tab_names = [conv["name"] for _, conv in conv_items] + ["➕ New"]
+        tab_names = [conv.name for _, conv in conv_items] + ["➕ New"]
         tabs = st.tabs(tab_names)
 
         for tab, (conv_id, conv) in zip(tabs[:-1], conv_items):
@@ -101,20 +102,13 @@ class ChatTab:
             name or f"New Chat {st.session_state.conversation_counter}"
         )
 
-        st.session_state.conversations[conv_id] = {
-            "name": conv_name,
-            "context": {
-                "config": config,
-            },
-            "history": [],
-            "editing_message": None,
-            "regenerating_from": None,
-            "continuing_from": None,
-            "multi_gen_enabled": False,
-        }
-        self.dashboard.persistence.save_conversation(
-            conv_id, st.session_state.conversations[conv_id]
+        conv = ManagedConversation(
+            conv_id=conv_id,
+            name=conv_name,
+            config=config,
         )
+        st.session_state.conversations[conv_id] = conv
+        conv.save(self.dashboard.persistence.conversations_dir)
         st.session_state.active_conversation_id = conv_id
         return conv_id
 
@@ -161,14 +155,14 @@ class ChatTab:
                 st.error("Please create an amplification configuration first")
 
     @st.fragment
-    def _render_chat_messages(self, conv_id: str, conv: Dict[str, Any]) -> None:
+    def _render_chat_messages(self, conv_id: str, conv: ManagedConversation) -> None:
         """Render the message list for a conversation. Fragment for fast delete/edit."""
-        config = conv["context"]["config"]
+        config = conv.config
 
-        for i, msg in enumerate(conv["history"]):
+        for i, msg in enumerate(conv.history):
             if msg["role"] == "user":
                 with st.chat_message("user"):
-                    if conv["editing_message"] == i:
+                    if conv.editing_message == i:
                         edited_content = st.text_area(
                             "Edit message",
                             value=msg["content"],
@@ -180,15 +174,13 @@ class ChatTab:
                             if st.button(
                                 "Save", key=f"save_user_{conv_id}_{i}", type="primary"
                             ):
-                                conv["history"][i]["content"] = edited_content
-                                conv["editing_message"] = None
-                                self.dashboard.persistence.save_conversation(
-                                    conv_id, conv
-                                )
+                                conv.history[i]["content"] = edited_content
+                                conv.editing_message = None
+                                conv.save(self.dashboard.persistence.conversations_dir)
                                 st.rerun(scope="fragment")
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_user_{conv_id}_{i}"):
-                                conv["editing_message"] = None
+                                conv.editing_message = None
                                 st.rerun(scope="fragment")
                     else:
                         st.markdown(msg["content"])
@@ -202,7 +194,7 @@ class ChatTab:
                                 help="Edit message",
                                 type="secondary",
                             ):
-                                conv["editing_message"] = i
+                                conv.editing_message = i
                                 st.rerun(scope="fragment")
                         with btn_col2:
                             if st.button(
@@ -211,7 +203,7 @@ class ChatTab:
                                 help="Continue this message",
                                 type="secondary",
                             ):
-                                conv["continuing_from"] = i
+                                conv.continuing_from = i
                                 st.rerun(scope="app")
                         with btn_col3:
                             if st.button(
@@ -221,7 +213,7 @@ class ChatTab:
                                 type="secondary",
                             ):
                                 # Store user message index - regeneration handler will generate response
-                                conv["regenerating_from_user"] = i
+                                conv.regenerating_from_user = i
                                 st.rerun(scope="app")
                         with btn_col4:
                             if st.button(
@@ -230,14 +222,12 @@ class ChatTab:
                                 help="Delete message",
                                 type="secondary",
                             ):
-                                conv["history"].pop(i)
-                                self.dashboard.persistence.save_conversation(
-                                    conv_id, conv
-                                )
+                                conv.history.pop(i)
+                                conv.save(self.dashboard.persistence.conversations_dir)
                                 st.rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
-                    if conv["editing_message"] == i:
+                    if conv.editing_message == i:
                         edited_content = st.text_area(
                             "Edit message",
                             value=msg["content"],
@@ -249,15 +239,13 @@ class ChatTab:
                             if st.button(
                                 "Save", key=f"save_asst_{conv_id}_{i}", type="primary"
                             ):
-                                conv["history"][i]["content"] = edited_content
-                                conv["editing_message"] = None
-                                self.dashboard.persistence.save_conversation(
-                                    conv_id, conv
-                                )
+                                conv.history[i]["content"] = edited_content
+                                conv.editing_message = None
+                                conv.save(self.dashboard.persistence.conversations_dir)
                                 st.rerun(scope="fragment")
                         with bcol2:
                             if st.button("Cancel", key=f"cancel_asst_{conv_id}_{i}"):
-                                conv["editing_message"] = None
+                                conv.editing_message = None
                                 st.rerun(scope="fragment")
                     else:
                         config_label = f"[{msg.get('config_name', config.full_name if config else 'No Config')}]"
@@ -272,7 +260,7 @@ class ChatTab:
                                 help="Edit message",
                                 type="secondary",
                             ):
-                                conv["editing_message"] = i
+                                conv.editing_message = i
                                 st.rerun(scope="fragment")
                         with btn_col2:
                             if st.button(
@@ -281,7 +269,7 @@ class ChatTab:
                                 help="Continue this message",
                                 type="secondary",
                             ):
-                                conv["continuing_from"] = i
+                                conv.continuing_from = i
                                 st.rerun(scope="app")
                         with btn_col3:
                             if st.button(
@@ -290,7 +278,7 @@ class ChatTab:
                                 help="Regenerate from here",
                                 type="secondary",
                             ):
-                                conv["regenerating_from"] = i
+                                conv.regenerating_from = i
                                 st.rerun(scope="app")
                         with btn_col4:
                             if st.button(
@@ -299,28 +287,28 @@ class ChatTab:
                                 help="Delete message",
                                 type="secondary",
                             ):
-                                conv["history"].pop(i)
-                                self.dashboard.persistence.save_conversation(
-                                    conv_id, conv
-                                )
+                                conv.history.pop(i)
+                                conv.save(self.dashboard.persistence.conversations_dir)
                                 st.rerun(scope="fragment")
 
     @st.fragment
-    def _render_single_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
+    def _render_single_conversation(
+        self, conv_id: str, conv: ManagedConversation
+    ) -> None:
         """Render a single conversation. Fragment for independent updates."""
 
-        config = conv["context"]["config"]
+        config = conv.config
         pending_key = f"chat_pending_samples_{conv_id}"
 
         # Initialize multi-gen toggle state from conversation dict (ensures persistence across reruns)
         multi_gen_key = f"chat_multi_gen_{conv_id}"
         # Handle older conversations that don't have multi_gen_enabled field
         if "multi_gen_enabled" not in conv:
-            conv["multi_gen_enabled"] = False
+            conv.multi_gen_enabled = False
         # Always sync session state with conversation dict on render
-        st.session_state[multi_gen_key] = conv["multi_gen_enabled"]
+        st.session_state[multi_gen_key] = conv.multi_gen_enabled
 
-        if conv["regenerating_from"] is not None:
+        if conv.regenerating_from is not None:
             self._handle_regenerating_from(conv_id, conv, config, pending_key)
 
         if conv.get("regenerating_from_user") is not None:
@@ -336,17 +324,19 @@ class ChatTab:
 
             def on_conv_name_change(conversation=conv, cid=conv_id, key=conv_name_key):
                 new_name = st.session_state[key]
-                if new_name != conversation["name"]:
-                    self.dashboard.persistence.delete_conversation(conversation["name"])
+                if new_name != conversation.name:
+                    conversation.delete_file(
+                        self.dashboard.persistence.conversations_dir
+                    )
                     unique_name = get_unique_conversation_name(
                         new_name, exclude_conv_id=cid
                     )
-                    conversation["name"] = unique_name
-                    self.dashboard.persistence.save_conversation(cid, conversation)
+                    conversation.name = unique_name
+                    conversation.save(self.dashboard.persistence.conversations_dir)
 
             st.text_input(
                 "Conversation Name",
-                value=conv["name"],
+                value=conv.name,
                 key=conv_name_key,
                 on_change=on_conv_name_change,
             )
@@ -374,7 +364,7 @@ class ChatTab:
                     selected_name = st.session_state[key]
                     new_mc = next(mc for mc in mcs if mc.full_name == selected_name)
                     conversation["context"]["config"] = new_mc
-                    self.dashboard.persistence.save_conversation(cid, conversation)
+                    conversation.save(self.dashboard.persistence.conversations_dir)
 
                 st.selectbox(
                     "Config",
@@ -390,7 +380,7 @@ class ChatTab:
             if st.button(
                 "🗑️ Delete", key=f"delete_conv_{conv_id}", use_container_width=True
             ):
-                self.dashboard.persistence.delete_conversation(conv["name"])
+                conv.delete_file(self.dashboard.persistence.conversations_dir)
                 del st.session_state.conversations[conv_id]
                 if st.session_state.active_conversation_id == conv_id:
                     st.session_state.active_conversation_id = None
@@ -403,12 +393,12 @@ class ChatTab:
             conversation=conv, cid=conv_id, key=system_prompt_key
         ):
             conversation["context"]["system_prompt"] = st.session_state[key]
-            self.dashboard.persistence.save_conversation(cid, conversation)
+            conversation.save(self.dashboard.persistence.conversations_dir)
 
         with st.expander("⚙️ System Prompt", expanded=False):
             st.text_area(
                 "System Prompt",
-                value=conv["context"].get("system_prompt", ""),
+                value=conv.system_prompt,
                 key=system_prompt_key,
                 height=100,
                 placeholder="Enter a system prompt to set context for the conversation...",
@@ -444,7 +434,7 @@ class ChatTab:
             conversation=conv, conversation_id=conv_id, key=multi_gen_key
         ):
             conversation["multi_gen_enabled"] = st.session_state[key]
-            self.dashboard.persistence.save_conversation(conversation_id, conversation)
+            conversation.save(self.dashboard.persistence.conversations_dir)
 
         st.toggle(
             "Multi-gen in Chat",
@@ -464,15 +454,15 @@ class ChatTab:
             )
 
     def _handle_regenerating_from(
-        self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
+        self, conv_id: str, conv: ManagedConversation, config, pending_key: str
     ) -> None:
         """Handle regeneration from an assistant message."""
         from .dashboard_state import (
             GenerationLog,
         )
 
-        regen_index = conv["regenerating_from"]
-        conv["regenerating_from"] = None
+        regen_index = conv.regenerating_from
+        conv.regenerating_from = None
 
         prompt = self._truncate_history_and_get_prompt(conv, regen_index)
 
@@ -519,7 +509,7 @@ class ChatTab:
                 "config_name": config.full_name if config else "No Config",
                 "mode": "replace",
             }
-            self.dashboard.persistence.save_conversation(conv_id, conv)
+            conv.save(self.dashboard.persistence.conversations_dir)
         else:
             with st.spinner("Regenerating..."):
                 result = next(
@@ -532,14 +522,14 @@ class ChatTab:
                 response = result["results"][0]
 
             if response:
-                conv["history"].append(
+                conv.history.append(
                     {
                         "role": "assistant",
                         "content": response,
                         "config_name": config.full_name if config else "No Config",
                     }
                 )
-                self.dashboard.persistence.save_conversation(conv_id, conv)
+                conv.save(self.dashboard.persistence.conversations_dir)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="regenerate",
@@ -556,18 +546,18 @@ class ChatTab:
                 )
 
     def _handle_regenerating_from_user(
-        self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
+        self, conv_id: str, conv: ManagedConversation, config, pending_key: str
     ) -> None:
         """Handle regeneration from a user message."""
         from .dashboard_state import (
             GenerationLog,
         )
 
-        user_index = conv["regenerating_from_user"]
-        conv["regenerating_from_user"] = None
+        user_index = conv.regenerating_from_user
+        conv.regenerating_from_user = None
 
         # Truncate history to include only messages up to and including this user message
-        conv["history"] = conv["history"][: user_index + 1]
+        conv.history = conv.history[: user_index + 1]
 
         # Build prompt for generation
         messages = self._get_messages_with_system_prompt(conv)
@@ -619,7 +609,7 @@ class ChatTab:
                 "config_name": config.full_name if config else "No Config",
                 "mode": "add",
             }
-            self.dashboard.persistence.save_conversation(conv_id, conv)
+            conv.save(self.dashboard.persistence.conversations_dir)
         else:
             with st.spinner("Generating..."):
                 result = next(
@@ -632,14 +622,14 @@ class ChatTab:
                 response = result["results"][0]
 
             if response:
-                conv["history"].append(
+                conv.history.append(
                     {
                         "role": "assistant",
                         "content": response,
                         "config_name": config.full_name if config else "No Config",
                     }
                 )
-                self.dashboard.persistence.save_conversation(conv_id, conv)
+                conv.save(self.dashboard.persistence.conversations_dir)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="regenerate",
@@ -656,19 +646,19 @@ class ChatTab:
                 )
 
     def _handle_continuing_from(
-        self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
+        self, conv_id: str, conv: ManagedConversation, config, pending_key: str
     ) -> None:
         """Handle continuation from a message."""
         from .dashboard_state import (
             GenerationLog,
         )
 
-        continue_index = conv["continuing_from"]
-        conv["continuing_from"] = None
+        continue_index = conv.continuing_from
+        conv.continuing_from = None
 
         # Build prompt including the message we're continuing
         messages = self._get_messages_with_system_prompt(
-            conv, conv["history"][: continue_index + 1]
+            conv, conv.history[: continue_index + 1]
         )
         prompt = self.dashboard.tokenizer.apply_chat_template(
             messages,
@@ -687,7 +677,7 @@ class ChatTab:
             if mc.full_name == config.full_name
         )
 
-        original_content = conv["history"][continue_index]["content"]
+        original_content = conv.history[continue_index]["content"]
 
         if use_multi_gen:
             with st.spinner(f"Continuing with {sampling_params.n} samples..."):
@@ -724,7 +714,7 @@ class ChatTab:
                 "mode": "continue",
                 "target_index": continue_index,
             }
-            self.dashboard.persistence.save_conversation(conv_id, conv)
+            conv.save(self.dashboard.persistence.conversations_dir)
         else:
             with st.spinner("Continuing..."):
                 result = next(
@@ -738,8 +728,8 @@ class ChatTab:
 
             if continuation:
                 full_content = original_content + continuation
-                conv["history"][continue_index]["content"] = full_content
-                self.dashboard.persistence.save_conversation(conv_id, conv)
+                conv.history[continue_index]["content"] = full_content
+                conv.save(self.dashboard.persistence.conversations_dir)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="continue",
@@ -760,7 +750,7 @@ class ChatTab:
     def _handle_user_input(
         self,
         conv_id: str,
-        conv: Dict[str, Any],
+        conv: ManagedConversation,
         config,
         user_input: str,
         send_to_multi_gen: bool,
@@ -772,7 +762,7 @@ class ChatTab:
         )
 
         if send_to_multi_gen:
-            history_for_multi_gen = conv["history"].copy()
+            history_for_multi_gen = conv.history.copy()
             history_for_multi_gen.append(
                 {
                     "role": "user",
@@ -787,7 +777,7 @@ class ChatTab:
             )
             self.dashboard.persistence.save_configs_and_rerun()
         else:
-            conv["history"].append(
+            conv.history.append(
                 {
                     "role": "user",
                     "content": user_input,
@@ -851,7 +841,7 @@ class ChatTab:
                     "config_name": config.full_name if config else "No Config",
                     "mode": "add",
                 }
-                self.dashboard.persistence.save_conversation(conv_id, conv)
+                conv.save(self.dashboard.persistence.conversations_dir)
                 self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
             else:
                 with st.chat_message("assistant"):
@@ -867,14 +857,14 @@ class ChatTab:
                         response = result["results"][0]
                     st.markdown(response)
 
-                conv["history"].append(
+                conv.history.append(
                     {
                         "role": "assistant",
                         "content": response,
                         "config_name": config.full_name if config else "No Config",
                     }
                 )
-                self.dashboard.persistence.save_conversation(conv_id, conv)
+                conv.save(self.dashboard.persistence.conversations_dir)
 
                 GenerationLog.from_dashboard_generation(
                     generation_type="chat",
@@ -895,8 +885,8 @@ class ChatTab:
     def _render_chat_sample_selection(
         self,
         conv_id: str,
-        conv: Dict[str, Any],
-        samples: List[str],
+        conv: ManagedConversation,
+        samples: list[str],
         config_name: str,
         mode: str = "add",  # "add", "replace", "continue"
         target_index: int = None,
@@ -919,7 +909,7 @@ class ChatTab:
         # For continue mode, get the original content to show context
         original_content = ""
         if mode == "continue" and target_index is not None:
-            original_content = conv["history"][target_index]["content"]
+            original_content = conv.history[target_index]["content"]
 
         cols = st.columns(2)
         for idx, sample in enumerate(samples):
@@ -937,7 +927,7 @@ class ChatTab:
                         use_container_width=True,
                     ):
                         if mode == "add":
-                            conv["history"].append(
+                            conv.history.append(
                                 {
                                     "role": "assistant",
                                     "content": sample,
@@ -945,7 +935,7 @@ class ChatTab:
                                 }
                             )
                         elif mode == "replace":
-                            conv["history"].append(
+                            conv.history.append(
                                 {
                                     "role": "assistant",
                                     "content": sample,
@@ -953,14 +943,14 @@ class ChatTab:
                                 }
                             )
                         elif mode == "continue" and target_index is not None:
-                            conv["history"][target_index]["content"] += sample
+                            conv.history[target_index]["content"] += sample
 
                         # Clear pending samples
                         pending_key = f"chat_pending_samples_{conv_id}"
                         if pending_key in st.session_state:
                             del st.session_state[pending_key]
 
-                        self.dashboard.persistence.save_conversation(conv_id, conv)
+                        conv.save(self.dashboard.persistence.conversations_dir)
                         self.dashboard.persistence.save_configs_and_rerun(
                             scope="fragment"
                         )
