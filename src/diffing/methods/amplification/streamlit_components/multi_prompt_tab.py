@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 import streamlit as st
 
 from .utils import (
+    get_sampling_params,
     get_unique_prompt_name,
 )
 
@@ -528,7 +529,7 @@ class MultiPromptTab:
                 tokenized = self._tokenize_chat_prompt(mp)
             tokenized_prompts.append(tokenized)
 
-        sampling_params = self.dashboard._get_sampling_params()
+        sampling_params = get_sampling_params()
 
         # Create placeholders for progressive display (only for selected configs)
         st.markdown("## Generating...")

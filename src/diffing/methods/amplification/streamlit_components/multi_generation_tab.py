@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Dict, Any
 import streamlit as st
 
 from .utils import (
+    get_sampling_params,
     get_unique_conversation_name,
 )
 
@@ -338,7 +339,7 @@ class MultiGenerationTab:
 
         self.dashboard.persistence.save_multigen_state()
 
-        sampling_params = self.dashboard._get_sampling_params()
+        sampling_params = get_sampling_params()
 
         active_tab = st.session_state.get("multi_gen_active_tab", "Text")
         template_mode = None
@@ -589,7 +590,7 @@ class MultiGenerationTab:
                     use_container_width=True,
                     disabled=disabled,
                 ):
-                    sampling_params = self.dashboard._get_sampling_params()
+                    sampling_params = get_sampling_params()
 
                     if is_all_samples:
                         indices_to_continue = list(range(num_samples))
@@ -650,7 +651,7 @@ class MultiGenerationTab:
                     use_container_width=True,
                     disabled=disabled,
                 ):
-                    sampling_params = self.dashboard._get_sampling_params()
+                    sampling_params = get_sampling_params()
 
                     with st.spinner("Regenerating..."):
                         new_results = next(

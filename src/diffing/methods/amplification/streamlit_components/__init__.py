@@ -37,6 +37,8 @@ from .utils import (
     get_unique_config_name,
     get_unique_conversation_name,
     get_unique_prompt_name,
+    get_sampling_params,
+    get_adapter_rank_cached,
 )
 
 from .folder_manager_ui import (
@@ -60,6 +62,8 @@ __all__ = [
     "get_unique_config_name",
     "get_unique_conversation_name",
     "get_unique_prompt_name",
+    "get_sampling_params",
+    "get_adapter_rank_cached",
     # Persistence
     "save_configs_to_cache",
     "save_configs_to_folder",

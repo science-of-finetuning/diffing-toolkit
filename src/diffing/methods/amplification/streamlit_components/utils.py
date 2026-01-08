@@ -2,6 +2,10 @@ import re
 
 from pathvalidate import sanitize_filename
 import streamlit as st
+from copy import deepcopy
+from vllm import SamplingParams
+
+from src.utils.model import get_adapter_rank
 
 
 def sanitize_config_name(name: str) -> str:
@@ -89,3 +93,18 @@ def get_unique_prompt_name(
     if folder and unique_full.startswith(f"{folder}/"):
         return unique_full[len(folder) + 1 :]
     return unique_full
+
+
+@st.cache_data
+def get_adapter_rank_cached(adapter_id: str) -> int:
+    """Cached wrapper around method.get_adapter_rank for Streamlit."""
+    return get_adapter_rank(adapter_id)
+
+
+def get_sampling_params() -> SamplingParams:
+    """Get sampling parameters from sidebar/session state."""
+    params = deepcopy(st.session_state["sampling_params"])
+    do_sample = params.pop("do_sample", True)
+    if not do_sample:
+        params["temperature"] = 0
+    return SamplingParams(**params)

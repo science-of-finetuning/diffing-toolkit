@@ -22,7 +22,7 @@ from nnterp import StandardizedTransformer
 from pathvalidate import sanitize_filename
 
 from ..amplification_config import AmplificationConfig
-from .utils import get_unique_name
+from .utils import get_unique_name, get_unique_config_name
 from src.utils.data import dump_yaml_multiline, codenamize_hash
 import streamlit as st
 
@@ -321,6 +321,20 @@ class ManagedConfig(DashboardItem):
             active=active,
             ui_order=ui_order,
             expanded=expanded,
+        )
+
+    @staticmethod
+    def from_folder(folder: str) -> "ManagedConfig":
+        """Create a new amplification config in the given folder."""
+        base_name = f"Config {len(st.session_state.managed_configs) + 1}"
+        unique_name = get_unique_config_name(base_name, folder)
+        new_config = AmplificationConfig(
+            name=unique_name,
+            description="",
+            amplified_adapters=[],
+        )
+        return ManagedConfig.from_config(
+            new_config, active=True, expanded=True, folder=folder
         )
 
     def compile(
@@ -1348,6 +1362,68 @@ class DashboardPersistence:
         ]:
             d.mkdir(parents=True, exist_ok=True)
 
+    def init_session_state_from_cache(self) -> None:
+        """Initialize session state by loading configs, prompts, and conversations from cache."""
+        # Load configs from all loaded folders
+        if len(st.session_state.managed_configs) == 0:
+            existing_names = set()
+            for folder in st.session_state.loaded_folders:
+                loaded = self.load_configs_from_folder(folder, existing_names)
+                st.session_state.managed_configs.update(loaded)
+                existing_names.update(mc.full_name for mc in loaded.values())
+
+        # Load prompts from all loaded folders
+        if len(st.session_state.managed_prompts) == 0:
+            for folder in st.session_state.loaded_prompt_folders:
+                loaded = self.load_prompts_from_folder(folder)
+                st.session_state.managed_prompts.update(loaded)
+
+        # Load conversations from cache
+        if len(st.session_state.conversations) == 0:
+            config_name_to_managed = {
+                mc.full_name: mc for mc in st.session_state.managed_configs.values()
+            }
+            conversations, max_conv_num = self.load_conversations(
+                config_name_to_managed
+            )
+            st.session_state.conversations.update(conversations)
+            if max_conv_num >= 0:
+                st.session_state.conversation_counter = max_conv_num + 1
+
+
+    def reload_all_data(self) -> None:
+        """Reload all data from cache after HF sync."""
+        # Reload folder state from disk
+        loaded_folders, loaded_prompt_folders = self.load_loaded_folders()
+        st.session_state.loaded_folders = loaded_folders
+        st.session_state.loaded_prompt_folders = loaded_prompt_folders
+
+        # Clear and reload configs
+        st.session_state.managed_configs = {}
+        existing_names: set[str] = set()
+        for folder in st.session_state.loaded_folders:
+            loaded = self.load_configs_from_folder(folder, existing_names)
+            st.session_state.managed_configs.update(loaded)
+            existing_names.update(mc.full_name for mc in loaded.values())
+
+        # Clear and reload prompts
+        st.session_state.managed_prompts = {}
+        for folder in st.session_state.loaded_prompt_folders:
+            loaded = self.load_prompts_from_folder(folder)
+            st.session_state.managed_prompts.update(loaded)
+
+        # Clear and reload conversations
+        st.session_state.conversations = {}
+        config_name_to_managed = {
+            mc.full_name: mc for mc in st.session_state.managed_configs.values()
+        }
+        conversations, max_conv_num = self.load_conversations(
+            config_name_to_managed
+        )
+        st.session_state.conversations.update(conversations)
+        if max_conv_num >= 0:
+            st.session_state.conversation_counter = max_conv_num + 1
+
     # === Config persistence ===
 
     def save_configs(self, deleted: tuple[str, str] | None = None) -> None:
@@ -1475,6 +1551,7 @@ class DashboardPersistence:
     def load_highlight_selectors(self) -> list[dict]:
         """Load highlight selectors from cache."""
         return load_highlight_selectors(self.cache_dir / "highlight_selectors.yaml")
+
 
 
 # ============ Inference Parameters Persistence ============

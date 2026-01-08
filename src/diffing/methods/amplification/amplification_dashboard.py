@@ -27,7 +27,7 @@ Architecture:
 
 from copy import deepcopy
 import os
-from typing import Dict, Any, List
+from typing import List
 
 import streamlit as st
 from streamlit_tags import st_tags
@@ -41,11 +41,8 @@ from src.utils.vllm import (
     cleanup_dist_env_and_memory,
     kill_vllm_process,
 )
-from src.utils.model import load_model_from_config, get_adapter_rank
-from .amplification_config import (
-    AmplificationConfig,
-    patch_vllm,
-)
+from src.utils.model import load_model_from_config
+from .amplification_config import patch_vllm
 from .streamlit_components.dashboard_state import (
     ManagedConfig,
     ManagedPrompt,
@@ -57,37 +54,39 @@ from .streamlit_components.dashboard_state import (
     load_prompts_from_folder,
     unload_folder_prompts,
 )
-from .streamlit_components.utils import (
-    get_unique_config_name,
-)
+
 from .streamlit_components.folder_manager_ui import (
     FolderManagerConfig,
     FolderManagerUI,
 )
-from .streamlit_components.control_tab import (
-    render_control_tab,
-)
-from .streamlit_components.amplifications_tab import (
-    AmplificationsTab,
-)
-from .streamlit_components.multi_generation_tab import (
-    MultiGenerationTab,
-)
-from .streamlit_components.chat_tab import (
-    ChatTab,
-)
-from .streamlit_components.multi_prompt_tab import (
-    MultiPromptTab,
-)
-from .weight_amplification import (
-    WeightDifferenceAmplification,
-)
+from .streamlit_components.control_tab import render_control_tab
+from .streamlit_components.amplifications_tab import AmplificationsTab
+from .streamlit_components.multi_generation_tab import MultiGenerationTab
+from .streamlit_components.chat_tab import ChatTab
+from .streamlit_components.multi_prompt_tab import MultiPromptTab
+from .weight_amplification import WeightDifferenceAmplification
+from .streamlit_components.utils import get_adapter_rank_cached
 
 
 @st.cache_resource
 def _get_vllm_server_container():
     """Global container for vLLM server shared across all sessions."""
     return {"server": None, "config": None}
+
+
+def _shutdown_vllm_server() -> bool:
+    """Shutdown *all* vLLM servers on the current machine.
+
+    Returns:
+        True if a process was killed, False otherwise.
+    """
+    container = _get_vllm_server_container()
+    if container["server"] is not None:
+        del container["server"]
+        cleanup_dist_env_and_memory()
+        container["server"] = None
+        container["config"] = None
+    return kill_vllm_process()
 
 
 class AmplificationDashboard:
@@ -128,12 +127,6 @@ class AmplificationDashboard:
         self.chat_tab = ChatTab(self)
         self.multi_prompt_tab = MultiPromptTab(self)
 
-    @staticmethod
-    @st.cache_data
-    def _get_adapter_rank_cached(adapter_id: str) -> int:
-        """Cached wrapper around method.get_adapter_rank for Streamlit."""
-        return get_adapter_rank(adapter_id)
-
     def _auto_update_inference_config(self) -> None:
         """Update inference config based on active amplification configurations."""
         active_configs = [
@@ -158,7 +151,7 @@ class AmplificationDashboard:
         if minimize_vllm_memory:
             max_lora_rank = 1
         if all_adapter_ids:
-            ranks = [self._get_adapter_rank_cached(aid) for aid in all_adapter_ids]
+            ranks = [get_adapter_rank_cached(aid) for aid in all_adapter_ids]
             max_lora_rank = max(ranks)
             if not minimize_vllm_memory:
                 max_lora_rank *= 2
@@ -169,20 +162,6 @@ class AmplificationDashboard:
         self.inference_config.vllm_kwargs["gpu_memory_utilization"] = (
             st.session_state.get("gpu_memory_utilization", 0.95)
         )
-
-    def _shutdown_vllm_server(self) -> bool:
-        """Shutdown the vLLM server.
-
-        Returns:
-            True if a process was killed, False otherwise.
-        """
-        container = _get_vllm_server_container()
-        if container["server"] is not None:
-            del container["server"]
-            cleanup_dist_env_and_memory()
-            container["server"] = None
-            container["config"] = None
-        return kill_vllm_process()
 
     @property
     def tokenizer(self):
@@ -214,7 +193,7 @@ class AmplificationDashboard:
                 f"vLLM server configuration changed, reloading... Parameters that differ in the new configuration are:\n{diff_dict}"
             )
             need_reload = True
-            self._shutdown_vllm_server()
+            _shutdown_vllm_server()
 
         if need_reload:
             with st.spinner("Loading vLLM server..."):
@@ -324,9 +303,7 @@ class AmplificationDashboard:
                 "apply_chat_template", True
             )
 
-        self._load_configs_from_cache()
-        self._load_prompts_from_cache()
-        self._load_conversations_from_cache()
+        self.persistence.init_session_state_from_cache()
 
     def _init_folder_managers(self) -> None:
         """Initialize folder manager UI components for configs and prompts."""
@@ -344,7 +321,7 @@ class AmplificationDashboard:
                 ),
                 save_to_folder=save_configs_to_folder,
                 unload_folder=unload_folder_configs,
-                create_new_item=self._create_new_config,
+                create_new_item=ManagedConfig.from_folder,
                 get_item_folder=lambda mc: mc.folder,
                 save_loaded_folders=self.persistence.save_loaded_folders,
                 save_items=self.persistence.save_configs,
@@ -373,95 +350,6 @@ class AmplificationDashboard:
                 rerun_scope="fragment",
             )
         )
-
-    def _create_new_config(self, folder: str | None) -> ManagedConfig:
-        """Create a new amplification config in the given folder."""
-        base_name = f"Config {len(st.session_state.managed_configs) + 1}"
-        unique_name = get_unique_config_name(base_name, folder)
-        new_config = AmplificationConfig(
-            name=unique_name,
-            description="",
-            amplified_adapters=[],
-        )
-        return ManagedConfig.from_config(
-            new_config, active=True, expanded=True, folder=folder
-        )
-
-    def _get_sampling_params(self) -> SamplingParams:
-        """Get sampling parameters from sidebar/session state."""
-        params = deepcopy(st.session_state["sampling_params"])
-        do_sample = params.pop("do_sample", True)
-        if not do_sample:
-            params["temperature"] = 0
-        return SamplingParams(**params)
-
-    def _load_configs_from_cache(self) -> None:
-        """Load configs from all loaded folders."""
-        if len(st.session_state.managed_configs) > 0:
-            return
-
-        existing_names = set()
-        for folder in st.session_state.loaded_folders:
-            loaded = self.persistence.load_configs_from_folder(folder, existing_names)
-            st.session_state.managed_configs.update(loaded)
-            existing_names.update(mc.full_name for mc in loaded.values())
-
-    def _load_prompts_from_cache(self) -> None:
-        """Load prompts from all loaded folders."""
-        if len(st.session_state.managed_prompts) > 0:
-            return
-
-        for folder in st.session_state.loaded_prompt_folders:
-            loaded = self.persistence.load_prompts_from_folder(folder)
-            st.session_state.managed_prompts.update(loaded)
-
-    def _load_conversations_from_cache(self) -> None:
-        """Load all conversations from the cache directory."""
-        if len(st.session_state.conversations) > 0:
-            return
-
-        config_name_to_managed = {
-            mc.full_name: mc for mc in st.session_state.managed_configs.values()
-        }
-        conversations, max_conv_num = self.persistence.load_conversations(
-            config_name_to_managed
-        )
-        st.session_state.conversations.update(conversations)
-        if max_conv_num >= 0:
-            st.session_state.conversation_counter = max_conv_num + 1
-
-    def _reload_all_data(self) -> None:
-        """Reload all data from cache after HF sync."""
-        # Reload folder state from disk
-        loaded_folders, loaded_prompt_folders = self.persistence.load_loaded_folders()
-        st.session_state.loaded_folders = loaded_folders
-        st.session_state.loaded_prompt_folders = loaded_prompt_folders
-
-        # Clear and reload configs
-        st.session_state.managed_configs = {}
-        existing_names: set[str] = set()
-        for folder in st.session_state.loaded_folders:
-            loaded = self.persistence.load_configs_from_folder(folder, existing_names)
-            st.session_state.managed_configs.update(loaded)
-            existing_names.update(mc.full_name for mc in loaded.values())
-
-        # Clear and reload prompts
-        st.session_state.managed_prompts = {}
-        for folder in st.session_state.loaded_prompt_folders:
-            loaded = self.persistence.load_prompts_from_folder(folder)
-            st.session_state.managed_prompts.update(loaded)
-
-        # Clear and reload conversations
-        st.session_state.conversations = {}
-        config_name_to_managed = {
-            mc.full_name: mc for mc in st.session_state.managed_configs.values()
-        }
-        conversations, max_conv_num = self.persistence.load_conversations(
-            config_name_to_managed
-        )
-        st.session_state.conversations.update(conversations)
-        if max_conv_num >= 0:
-            st.session_state.conversation_counter = max_conv_num + 1
 
 
 
@@ -520,7 +408,7 @@ class AmplificationDashboard:
             self.multi_prompt_tab.render()
         with tab5:
             render_control_tab(
-                persistence=self.persistence, on_reload=self._reload_all_data
+                persistence=self.persistence, on_reload=self.persistence.reload_all_data
             )
 
     def _render_sidebar(self) -> None:
@@ -534,7 +422,7 @@ class AmplificationDashboard:
             if st.button(
                 "Kill all vLLM engines on this machine", use_container_width=True
             ):
-                killed = self._shutdown_vllm_server()
+                killed = _shutdown_vllm_server()
                 if killed:
                     st.success("vLLM process killed.")
                 else:

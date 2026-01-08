@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 import streamlit as st
 
 from .utils import (
+    get_sampling_params,
     get_unique_conversation_name,
 )
 
@@ -478,7 +479,7 @@ class ChatTab:
 
         prompt = self._truncate_history_and_get_prompt(conv, regen_index)
 
-        sampling_params = self.dashboard._get_sampling_params()
+        sampling_params = get_sampling_params()
         use_multi_gen = (
             st.session_state.get(f"chat_multi_gen_{conv_id}", False)
             and sampling_params.n > 1
@@ -578,7 +579,7 @@ class ChatTab:
             add_generation_prompt=True,
         )
 
-        sampling_params = self.dashboard._get_sampling_params()
+        sampling_params = get_sampling_params()
         use_multi_gen = (
             st.session_state.get(f"chat_multi_gen_{conv_id}", False)
             and sampling_params.n > 1
@@ -677,7 +678,7 @@ class ChatTab:
             continue_final_message=True,
         )
 
-        sampling_params = self.dashboard._get_sampling_params()
+        sampling_params = get_sampling_params()
         use_multi_gen = (
             st.session_state.get(f"chat_multi_gen_{conv_id}", False)
             and sampling_params.n > 1
@@ -805,7 +806,7 @@ class ChatTab:
                 add_generation_prompt=True,
             )
 
-            sampling_params = self.dashboard._get_sampling_params()
+            sampling_params = get_sampling_params()
             use_multi_gen = (
                 st.session_state.get(f"chat_multi_gen_{conv_id}", False)
                 and sampling_params.n > 1
