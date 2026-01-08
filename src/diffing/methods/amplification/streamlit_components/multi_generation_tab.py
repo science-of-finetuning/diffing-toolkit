@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Dict, Any
 
 import streamlit as st
 
-from src.diffing.methods.amplification.streamlit_components.utils import (
+from .utils import (
     get_unique_conversation_name,
 )
 
@@ -332,7 +332,7 @@ class MultiGenerationTab:
 
     def _run_generation(self, active_configs, show_all: bool) -> None:
         """Run the generation process."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
 

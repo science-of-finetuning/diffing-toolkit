@@ -21,8 +21,8 @@ import yaml
 from nnterp import StandardizedTransformer
 from pathvalidate import sanitize_filename
 
-from src.diffing.methods.amplification.amplification_config import AmplificationConfig
-from src.diffing.methods.amplification.streamlit_components.utils import get_unique_name
+from ..amplification_config import AmplificationConfig
+from .utils import get_unique_name
 from src.utils.data import dump_yaml_multiline, codenamize_hash
 import streamlit as st
 

@@ -7,7 +7,7 @@ This module contains modular UI components that can be imported independently:
 - Reusable UI components (FolderManagerUI)
 """
 
-from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+from .dashboard_state import (
     DashboardItem,
     ManagedConfig,
     ManagedPrompt,
@@ -31,7 +31,7 @@ from src.diffing.methods.amplification.streamlit_components.dashboard_state impo
     save_highlight_selectors,
     load_highlight_selectors,
 )
-from src.diffing.methods.amplification.streamlit_components.utils import (
+from .utils import (
     sanitize_config_name,
     get_unique_name,
     get_unique_config_name,
@@ -39,13 +39,13 @@ from src.diffing.methods.amplification.streamlit_components.utils import (
     get_unique_prompt_name,
 )
 
-from src.diffing.methods.amplification.streamlit_components.folder_manager_ui import (
+from .folder_manager_ui import (
     FolderManagerConfig,
     FolderManagerUI,
     list_subfolders,
 )
 
-from src.diffing.methods.amplification.streamlit_components.control_tab import (
+from .control_tab import (
     render_control_tab,
 )
 

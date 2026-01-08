@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 
 import streamlit as st
 
-from src.diffing.methods.amplification.streamlit_components.utils import (
+from .utils import (
     get_unique_conversation_name,
 )
 
@@ -307,7 +307,7 @@ class ChatTab:
     @st.fragment
     def _render_single_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """Render a single conversation. Fragment for independent updates."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
 
@@ -469,7 +469,7 @@ class ChatTab:
         self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
     ) -> None:
         """Handle regeneration from an assistant message."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
 
@@ -561,7 +561,7 @@ class ChatTab:
         self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
     ) -> None:
         """Handle regeneration from a user message."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
 
@@ -661,7 +661,7 @@ class ChatTab:
         self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
     ) -> None:
         """Handle continuation from a message."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
 
@@ -769,7 +769,7 @@ class ChatTab:
         pending_key: str,
     ) -> None:
         """Handle new user input in the chat."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
 

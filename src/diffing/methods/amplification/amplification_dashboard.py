@@ -42,11 +42,11 @@ from src.utils.vllm import (
     kill_vllm_process,
 )
 from src.utils.model import load_model_from_config, get_adapter_rank
-from src.diffing.methods.amplification.amplification_config import (
+from .amplification_config import (
     AmplificationConfig,
     patch_vllm,
 )
-from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+from .streamlit_components.dashboard_state import (
     ManagedConfig,
     ManagedPrompt,
     DashboardPersistence,
@@ -57,29 +57,29 @@ from src.diffing.methods.amplification.streamlit_components.dashboard_state impo
     load_prompts_from_folder,
     unload_folder_prompts,
 )
-from src.diffing.methods.amplification.streamlit_components.utils import (
+from .streamlit_components.utils import (
     get_unique_config_name,
 )
-from src.diffing.methods.amplification.streamlit_components.folder_manager_ui import (
+from .streamlit_components.folder_manager_ui import (
     FolderManagerConfig,
     FolderManagerUI,
 )
-from src.diffing.methods.amplification.streamlit_components.control_tab import (
+from .streamlit_components.control_tab import (
     render_control_tab,
 )
-from src.diffing.methods.amplification.streamlit_components.amplifications_tab import (
+from .streamlit_components.amplifications_tab import (
     AmplificationsTab,
 )
-from src.diffing.methods.amplification.streamlit_components.multi_generation_tab import (
+from .streamlit_components.multi_generation_tab import (
     MultiGenerationTab,
 )
-from src.diffing.methods.amplification.streamlit_components.chat_tab import (
+from .streamlit_components.chat_tab import (
     ChatTab,
 )
-from src.diffing.methods.amplification.streamlit_components.multi_prompt_tab import (
+from .streamlit_components.multi_prompt_tab import (
     MultiPromptTab,
 )
-from src.diffing.methods.amplification.weight_amplification import (
+from .weight_amplification import (
     WeightDifferenceAmplification,
 )
 

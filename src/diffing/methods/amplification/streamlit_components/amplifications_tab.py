@@ -11,17 +11,17 @@ from typing import TYPE_CHECKING
 import streamlit as st
 
 from src.utils.configs import get_available_organisms, get_organism_variants
-from src.diffing.methods.amplification.amplification_config import (
+from ..amplification_config import (
     AmplifiedAdapter,
     LayerAmplification,
     LayerRange,
     ModuleAmplification,
     CUSTOM_ADAPTER_ORGANISM,
 )
-from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+from .dashboard_state import (
     ManagedConfig,
 )
-from src.diffing.methods.amplification.streamlit_components.utils import (
+from .utils import (
     get_unique_config_name,
 )
 

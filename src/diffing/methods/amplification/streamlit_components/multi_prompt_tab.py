@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 
 import streamlit as st
 
-from src.diffing.methods.amplification.streamlit_components.utils import (
+from .utils import (
     get_unique_prompt_name,
 )
 
@@ -33,7 +33,7 @@ class MultiPromptTab:
     @st.fragment
     def render(self) -> None:
         """Render the multi-prompt generation tab."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             ManagedPrompt,
         )
 
@@ -113,7 +113,7 @@ class MultiPromptTab:
 
     def _render_import_chat_to_prompt_section(self) -> None:
         """Render UI to import a chat conversation as a new prompt."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             ManagedPrompt,
         )
 
@@ -490,7 +490,7 @@ class MultiPromptTab:
 
     def _run_multi_prompt_generation_inline(self, show_all: bool) -> None:
         """Run generation for all active prompts with all active configs (inline in Results tab)."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+        from .dashboard_state import (
             GenerationLog,
         )
         from .samples import render_samples
