@@ -750,9 +750,7 @@ class MultiGenerationTab:
         conv_id = f"conv_{st.session_state.conversation_counter}"
         st.session_state.conversation_counter += 1
 
-        conv_name = get_unique_conversation_name(
-            f"{result_data['config'].name}"
-        )
+        conv_name = get_unique_conversation_name(f"{result_data['config'].name}")
 
         if results_data.get("active_tab") == "Messages":
             messages = st.session_state.get("multi_gen_messages", [])

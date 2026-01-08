@@ -351,8 +351,6 @@ class AmplificationDashboard:
             )
         )
 
-
-
     def _multi_gen_request(
         self,
         prompt: list[int],
