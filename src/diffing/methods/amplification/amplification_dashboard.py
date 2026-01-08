@@ -50,14 +50,15 @@ from src.diffing.methods.amplification.streamlit_components.dashboard_state impo
     ManagedConfig,
     ManagedPrompt,
     DashboardPersistence,
-    sanitize_config_name,
-    get_unique_name,
     save_configs_to_folder,
     load_configs_from_folder,
     unload_folder_configs,
     save_prompts_to_folder,
     load_prompts_from_folder,
     unload_folder_prompts,
+)
+from src.diffing.methods.amplification.streamlit_components.utils import (
+    get_unique_config_name,
 )
 from src.diffing.methods.amplification.streamlit_components.folder_manager_ui import (
     FolderManagerConfig,
@@ -376,7 +377,7 @@ class AmplificationDashboard:
     def _create_new_config(self, folder: str | None) -> ManagedConfig:
         """Create a new amplification config in the given folder."""
         base_name = f"Config {len(st.session_state.managed_configs) + 1}"
-        unique_name = self._get_unique_config_name(base_name, folder)
+        unique_name = get_unique_config_name(base_name, folder)
         new_config = AmplificationConfig(
             name=unique_name,
             description="",
@@ -462,57 +463,7 @@ class AmplificationDashboard:
         if max_conv_num >= 0:
             st.session_state.conversation_counter = max_conv_num + 1
 
-    def _get_unique_config_name(
-        self,
-        desired_name: str,
-        folder: str | None = None,
-        exclude_config_id: str = None,
-    ) -> str:
-        """Get a unique configuration name within folder context."""
-        sanitized_name = sanitize_config_name(desired_name)
-        existing_names = set()
-        for config_id, mc in st.session_state.managed_configs.items():
-            if exclude_config_id is None or config_id != exclude_config_id:
-                existing_names.add(mc.full_name)
 
-        desired_full = f"{folder}/{sanitized_name}" if folder else sanitized_name
-        unique_full = get_unique_name(desired_full, existing_names)
-
-        # Extract just the name part (remove folder prefix if present)
-        if folder and unique_full.startswith(f"{folder}/"):
-            return unique_full[len(folder) + 1 :]
-        return unique_full
-
-    def _get_unique_conversation_name(
-        self, desired_name: str, exclude_conv_id: str = None
-    ) -> str:
-        """Get a unique conversation name."""
-        existing_names = set()
-        for conv_id, conv in st.session_state.conversations.items():
-            if exclude_conv_id is None or conv_id != exclude_conv_id:
-                existing_names.add(conv["name"])
-        return get_unique_name(desired_name, existing_names)
-
-    def _get_unique_prompt_name(
-        self,
-        desired_name: str,
-        folder: str | None = None,
-        exclude_prompt_id: str = None,
-    ) -> str:
-        """Get a unique prompt name within folder context."""
-        sanitized_name = sanitize_config_name(desired_name)
-        existing_names = set()
-        for prompt_id, mp in st.session_state.managed_prompts.items():
-            if exclude_prompt_id is None or prompt_id != exclude_prompt_id:
-                existing_names.add(mp.full_name)
-
-        desired_full = f"{folder}/{sanitized_name}" if folder else sanitized_name
-        unique_full = get_unique_name(desired_full, existing_names)
-
-        # Extract just the name part (remove folder prefix if present)
-        if folder and unique_full.startswith(f"{folder}/"):
-            return unique_full[len(folder) + 1 :]
-        return unique_full
 
     def _multi_gen_request(
         self,

@@ -22,6 +22,7 @@ from nnterp import StandardizedTransformer
 from pathvalidate import sanitize_filename
 
 from src.diffing.methods.amplification.amplification_config import AmplificationConfig
+from src.diffing.methods.amplification.streamlit_components.utils import get_unique_name
 from src.utils.data import dump_yaml_multiline, codenamize_hash
 import streamlit as st
 
@@ -496,44 +497,6 @@ class DashboardSession:
             }
         return DashboardSession(managed_configs=managed_configs)
 
-
-# ============ Utility Functions ============
-
-
-def sanitize_config_name(name: str) -> str:
-    """
-    Sanitize a config name so it can be used as a filename.
-
-    Uses pathvalidate for cross-platform filename sanitization.
-
-    Args:
-        name: Desired config name input by the user
-
-    Returns:
-        Sanitized name safe for use as a filename
-    """
-    sanitized = sanitize_filename(name, replacement_text="_").strip()
-    sanitized = re.sub(r"\s+", " ", sanitized)
-    return sanitized or "config"
-
-
-def get_unique_name(desired_name: str, existing_names: set[str]) -> str:
-    """
-    Get a unique name by appending _X if name already exists.
-
-    Args:
-        desired_name: The desired name
-        existing_names: Set of existing names to avoid
-
-    Returns:
-        Unique name
-    """
-    if desired_name not in existing_names:
-        return desired_name
-    counter = 1
-    while f"{desired_name}_{counter}" in existing_names:
-        counter += 1
-    return f"{desired_name}_{counter}"
 
 
 # ============ Persistence Functions ============

@@ -12,7 +12,6 @@ import streamlit as st
 
 from src.utils.configs import get_available_organisms, get_organism_variants
 from src.diffing.methods.amplification.amplification_config import (
-    AmplificationConfig,
     AmplifiedAdapter,
     LayerAmplification,
     LayerRange,
@@ -21,6 +20,9 @@ from src.diffing.methods.amplification.amplification_config import (
 )
 from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
     ManagedConfig,
+)
+from src.diffing.methods.amplification.streamlit_components.utils import (
+    get_unique_config_name,
 )
 
 if TYPE_CHECKING:
@@ -65,7 +67,7 @@ class AmplificationsTab:
 
                 config = mc.config
                 new_config = deepcopy(config)
-                new_config.name = self.dashboard._get_unique_config_name(
+                new_config.name = get_unique_config_name(
                     f"{config.name} copy", mc.folder
                 )
                 new_managed = ManagedConfig.from_config(
@@ -163,7 +165,7 @@ class AmplificationsTab:
                 new_name = st.session_state[key]
                 if new_name != cfg.name:
                     # Ensure unique name within folder
-                    unique_name = self.dashboard._get_unique_config_name(
+                    unique_name = get_unique_config_name(
                         new_name, managed_config.folder, exclude_config_id=cid
                     )
                     # Use rename() which tracks old disk name for cleanup

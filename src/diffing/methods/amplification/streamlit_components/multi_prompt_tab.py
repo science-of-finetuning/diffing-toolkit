@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Dict, Any, List
 
 import streamlit as st
 
+from src.diffing.methods.amplification.streamlit_components.utils import (
+    get_unique_prompt_name,
+)
+
 if TYPE_CHECKING:
     from src.diffing.methods.amplification.amplification_dashboard import (
         AmplificationDashboard,
@@ -200,7 +204,7 @@ class MultiPromptTab:
                 new_name = st.session_state[key]
                 if new_name != prompt.name:
                     # Ensure unique name within folder
-                    unique_name = self.dashboard._get_unique_prompt_name(
+                    unique_name = get_unique_prompt_name(
                         new_name, prompt.folder, exclude_prompt_id=pid
                     )
                     # Use rename() which tracks old disk name for cleanup

@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Dict, Any, List
 
 import streamlit as st
 
+from src.diffing.methods.amplification.streamlit_components.utils import (
+    get_unique_conversation_name,
+)
+
 if TYPE_CHECKING:
     from src.diffing.methods.amplification.amplification_dashboard import (
         AmplificationDashboard,
@@ -92,7 +96,7 @@ class ChatTab:
             all_mcs = list(st.session_state.managed_configs.values())
             config = active_mcs[0] if active_mcs else (all_mcs[0] if all_mcs else None)
 
-        conv_name = self.dashboard._get_unique_conversation_name(
+        conv_name = get_unique_conversation_name(
             name or f"New Chat {st.session_state.conversation_counter}"
         )
 
@@ -336,7 +340,7 @@ class ChatTab:
                 new_name = st.session_state[key]
                 if new_name != conversation["name"]:
                     self.dashboard.persistence.delete_conversation(conversation["name"])
-                    unique_name = self.dashboard._get_unique_conversation_name(
+                    unique_name = get_unique_conversation_name(
                         new_name, exclude_conv_id=cid
                     )
                     conversation["name"] = unique_name

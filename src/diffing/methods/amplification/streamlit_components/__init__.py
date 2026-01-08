@@ -11,8 +11,6 @@ from src.diffing.methods.amplification.streamlit_components.dashboard_state impo
     DashboardItem,
     ManagedConfig,
     ManagedPrompt,
-    sanitize_config_name,
-    get_unique_name,
     save_configs_to_cache,
     save_configs_to_folder,
     load_configs_from_folder,
@@ -33,6 +31,13 @@ from src.diffing.methods.amplification.streamlit_components.dashboard_state impo
     save_highlight_selectors,
     load_highlight_selectors,
 )
+from src.diffing.methods.amplification.streamlit_components.utils import (
+    sanitize_config_name,
+    get_unique_name,
+    get_unique_config_name,
+    get_unique_conversation_name,
+    get_unique_prompt_name,
+)
 
 from src.diffing.methods.amplification.streamlit_components.folder_manager_ui import (
     FolderManagerConfig,
@@ -49,8 +54,13 @@ __all__ = [
     "DashboardItem",
     "ManagedConfig",
     "ManagedPrompt",
+    # Utils
     "sanitize_config_name",
     "get_unique_name",
+    "get_unique_config_name",
+    "get_unique_conversation_name",
+    "get_unique_prompt_name",
+    # Persistence
     "save_configs_to_cache",
     "save_configs_to_folder",
     "load_configs_from_folder",

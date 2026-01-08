@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Dict, Any
 
 import streamlit as st
 
+from src.diffing.methods.amplification.streamlit_components.utils import (
+    get_unique_conversation_name,
+)
+
 if TYPE_CHECKING:
     from src.diffing.methods.amplification.amplification_dashboard import (
         AmplificationDashboard,
@@ -745,7 +749,7 @@ class MultiGenerationTab:
         conv_id = f"conv_{st.session_state.conversation_counter}"
         st.session_state.conversation_counter += 1
 
-        conv_name = self.dashboard._get_unique_conversation_name(
+        conv_name = get_unique_conversation_name(
             f"{result_data['config'].name}"
         )
 
