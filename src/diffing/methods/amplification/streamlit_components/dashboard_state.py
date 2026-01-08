@@ -1136,6 +1136,7 @@ class DashboardPersistence:
         # compiled_adapters lives at project root, not in cache
         self.compiled_adapters_dir = self.cache_dir.parents[1] / ".compiled_adapters"
         self._ensure_dirs()
+        self._init_session_state()
 
     def _ensure_dirs(self) -> None:
         for d in [
@@ -1151,7 +1152,7 @@ class DashboardPersistence:
         with open(self.cache_dir / filename, "w") as f:
             yaml.dump(data, f, sort_keys=False)
 
-    def init_session_state_from_cache(self) -> None:
+    def _init_session_state_from_cache(self) -> None:
         """Initialize session state by loading configs, prompts, and conversations from cache."""
         # Load configs from all loaded folders
         if len(st.session_state.managed_configs) == 0:
@@ -1178,6 +1179,107 @@ class DashboardPersistence:
             st.session_state.conversations.update(conversations)
             if max_conv_num >= 0:
                 st.session_state.conversation_counter = max_conv_num + 1
+
+    def _init_session_state(self) -> None:
+        """Initialize Streamlit session state."""
+        if "managed_configs" not in st.session_state:
+            st.session_state.managed_configs = {}
+
+        # Load folder state from disk
+        if "loaded_folders" not in st.session_state:
+            loaded_folders, loaded_prompt_folders = (
+                self.persistence.load_loaded_folders()
+            )
+            st.session_state.loaded_folders = loaded_folders
+            st.session_state.loaded_prompt_folders = loaded_prompt_folders
+        if "conversations" not in st.session_state:
+            st.session_state.conversations = {}
+        if "active_conversation_id" not in st.session_state:
+            st.session_state.active_conversation_id = None
+        if "conversation_counter" not in st.session_state:
+            st.session_state.conversation_counter = 0
+        # Load inference params (sampling + vLLM) from disk
+        if "inference_params_loaded" not in st.session_state:
+            inference_params = self.persistence.load_inference_params()
+            st.session_state.sampling_params = inference_params["sampling_params"]
+            st.session_state.gpu_memory_utilization = inference_params["vllm_params"][
+                "gpu_memory_utilization"
+            ]
+            st.session_state.minimize_vllm_memory = inference_params["vllm_params"][
+                "minimize_vllm_memory"
+            ]
+            st.session_state.inference_params_loaded = True
+
+        if "sampling_params" not in st.session_state:
+            st.session_state.sampling_params = {}
+        if "vllm_kwargs" not in st.session_state:
+            st.session_state.vllm_kwargs = self.inference_config.vllm_kwargs
+        if "multi_gen_results" not in st.session_state:
+            st.session_state.multi_gen_results = None
+        if "multi_gen_preset_prompt" not in st.session_state:
+            st.session_state.multi_gen_preset_prompt = None
+        if "multi_gen_preset_apply_template" not in st.session_state:
+            st.session_state.multi_gen_preset_apply_template = None
+        if "multi_gen_preset_messages" not in st.session_state:
+            st.session_state.multi_gen_preset_messages = None
+
+        saved_multigen_state = self.persistence.load_multigen_state()
+
+        if "multi_gen_text_prompt" not in st.session_state:
+            st.session_state.multi_gen_text_prompt = saved_multigen_state.get(
+                "text_tab", {}
+            ).get("prompt", "")
+        if "multi_gen_template_mode" not in st.session_state:
+            st.session_state.multi_gen_template_mode = saved_multigen_state.get(
+                "text_tab", {}
+            ).get("template_mode", "Apply chat template")
+        if "multi_gen_assistant_prefill" not in st.session_state:
+            st.session_state.multi_gen_assistant_prefill = saved_multigen_state.get(
+                "text_tab", {}
+            ).get("assistant_prefill", "")
+
+        if "multi_gen_messages" not in st.session_state:
+            st.session_state.multi_gen_messages = saved_multigen_state.get(
+                "messages_tab", {}
+            ).get("messages", [])
+        if "msg_builder_template_override" not in st.session_state:
+            st.session_state.msg_builder_template_override = saved_multigen_state.get(
+                "messages_tab", {}
+            ).get("template_override", "No template override")
+        if "multi_gen_msg_editing_idx" not in st.session_state:
+            st.session_state.multi_gen_msg_editing_idx = None
+
+        if "multi_gen_active_tab" not in st.session_state:
+            st.session_state.multi_gen_active_tab = saved_multigen_state.get(
+                "active_tab", "Text"
+            )
+
+        # Multi-prompt generation state
+        if "managed_prompts" not in st.session_state:
+            st.session_state.managed_prompts = {}
+        if "multi_prompt_results" not in st.session_state:
+            st.session_state.multi_prompt_results = None
+        if "multi_prompt_display_configs" not in st.session_state:
+            st.session_state.multi_prompt_display_configs = []
+        if "multi_gen_show_all" not in st.session_state:
+            st.session_state.multi_gen_show_all = False
+        if "multi_prompt_show_all" not in st.session_state:
+            st.session_state.multi_prompt_show_all = False
+
+        # Keyword highlighting state - list of {keywords: list[str], color: str, enabled: bool}
+        if "highlight_selectors" not in st.session_state:
+            st.session_state.highlight_selectors = (
+                self.persistence.load_highlight_selectors()
+            )
+
+        if "multi_gen_prompt" not in st.session_state:
+            st.session_state.multi_gen_prompt = saved_multigen_state.get("prompt", "")
+        if "apply_chat_template_checkbox" not in st.session_state:
+            st.session_state.apply_chat_template_checkbox = saved_multigen_state.get(
+                "apply_chat_template", True
+            )
+
+        self._init_session_state_from_cache()
 
     def reload_all_data(self) -> None:
         """Reload all data from cache after HF sync."""
