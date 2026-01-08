@@ -4,25 +4,19 @@ Control tab for HuggingFace sync functionality.
 Provides UI for pushing/loading .streamlit_cache to/from HuggingFace Hub.
 """
 
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
 import streamlit as st
 from huggingface_hub import HfApi, snapshot_download, login, whoami
 from huggingface_hub.utils import HfHubHTTPError
 from loguru import logger
 
-from src.utils.configs import PROJECT_ROOT
-
-
-# Cache paths
-STREAMLIT_CACHE_DIR = PROJECT_ROOT / ".streamlit_cache"
-AMPLIFICATION_CACHE_DIR = STREAMLIT_CACHE_DIR / "amplification_cache"
-CONFIGS_DIR = AMPLIFICATION_CACHE_DIR / "configs"
-PROMPTS_DIR = AMPLIFICATION_CACHE_DIR / "prompts"
-CONVERSATIONS_DIR = AMPLIFICATION_CACHE_DIR / "conversations"
-LOGS_DIR = AMPLIFICATION_CACHE_DIR / "generation_logs"
+if TYPE_CHECKING:
+    from .dashboard_state import DashboardPersistence
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -94,7 +88,7 @@ def _parse_repo_name(repo_input: str, username: str) -> str:
 
 
 @st.fragment
-def _render_push_section(username: str) -> None:
+def _render_push_section(username: str, persistence: "DashboardPersistence") -> None:
     """Render the Push to HuggingFace section as a fragment."""
     st.markdown("### Push to HuggingFace")
 
@@ -148,6 +142,7 @@ def _render_push_section(username: str) -> None:
                         include_logs=include_logs,
                         full_cache=full_cache,
                         user_description=user_description,
+                        cache_dir=persistence.cache_dir,
                     )
                     st.success(
                         f"Successfully pushed to [{repo_id}](https://huggingface.co/datasets/{repo_id})"
@@ -163,6 +158,7 @@ def _push_to_hf(
     include_logs: bool,
     full_cache: bool,
     user_description: str,
+    cache_dir: Path,
 ) -> None:
     """Push cache to HuggingFace Hub."""
     import tempfile
@@ -180,11 +176,12 @@ def _push_to_hf(
         raise
 
     # Determine what to upload
+    # cache_dir is amplification_cache, parent is .streamlit_cache
     if full_cache:
-        source_dir = STREAMLIT_CACHE_DIR
+        source_dir = cache_dir.parent
         ignore_patterns = []
     else:
-        source_dir = AMPLIFICATION_CACHE_DIR
+        source_dir = cache_dir
         ignore_patterns = []
 
     if not include_conversations:
@@ -228,7 +225,9 @@ def _push_to_hf(
 
 @st.fragment
 def _render_load_section(
-    username: str, on_reload: Callable[[], None] | None = None
+    username: str,
+    persistence: "DashboardPersistence",
+    on_reload: Callable[[], None] | None = None,
 ) -> None:
     """Render the Load from HuggingFace section as a fragment."""
     st.markdown("### Load from HuggingFace")
@@ -260,7 +259,9 @@ def _render_load_section(
 
             with st.spinner(f"Loading from {repo_id}..."):
                 try:
-                    _load_from_hf(repo_id=repo_id, mode=load_mode)
+                    _load_from_hf(
+                        repo_id=repo_id, mode=load_mode, persistence=persistence
+                    )
                     if on_reload:
                         on_reload()  # Reload data before showing success
                     st.success(f"Successfully loaded from {repo_id}")
@@ -270,7 +271,7 @@ def _render_load_section(
                     logger.exception("Load from HF failed")
 
 
-def _load_from_hf(repo_id: str, mode: str) -> None:
+def _load_from_hf(repo_id: str, mode: str, persistence: "DashboardPersistence") -> None:
     """Load cache from HuggingFace Hub."""
     import tempfile
 
@@ -284,23 +285,26 @@ def _load_from_hf(repo_id: str, mode: str) -> None:
         local_path = Path(local_path)
 
         if mode == "override":
-            _override_cache(local_path)
+            _override_cache(local_path, persistence.cache_dir)
         elif mode == "import":
-            _import_configs_prompts(local_path)
+            _import_configs_prompts(
+                local_path, persistence.configs_dir, persistence.prompts_dir
+            )
         elif mode == "logs_only":
-            _import_logs_only(local_path)
+            _import_logs_only(local_path, persistence.logs_dir)
 
 
-def _override_cache(source_path: Path) -> None:
+def _override_cache(source_path: Path, cache_dir: Path) -> None:
     """Override local cache with downloaded content."""
+    # cache_dir is amplification_cache, parent is .streamlit_cache
     # Detect if this is full .streamlit_cache or just amplification_cache
     if (source_path / "amplification_cache").exists():
         # Full .streamlit_cache structure
-        target = STREAMLIT_CACHE_DIR
+        target = cache_dir.parent
         source = source_path
     else:
         # Just amplification_cache contents
-        target = AMPLIFICATION_CACHE_DIR
+        target = cache_dir
         source = source_path
 
     # Backup existing and replace
@@ -325,7 +329,9 @@ def _override_cache(source_path: Path) -> None:
     logger.info(f"Overrode cache from {source_path}")
 
 
-def _import_configs_prompts(source_path: Path) -> None:
+def _import_configs_prompts(
+    source_path: Path, configs_dir: Path, prompts_dir: Path
+) -> None:
     """Import configs and prompts, renaming on conflict."""
     # Detect structure
     if (source_path / "amplification_cache").exists():
@@ -337,11 +343,11 @@ def _import_configs_prompts(source_path: Path) -> None:
 
     # Import configs
     if source_configs.exists():
-        _import_folder_with_rename(source_configs, CONFIGS_DIR, "config")
+        _import_folder_with_rename(source_configs, configs_dir, "config")
 
     # Import prompts
     if source_prompts.exists():
-        _import_folder_with_rename(source_prompts, PROMPTS_DIR, "prompt")
+        _import_folder_with_rename(source_prompts, prompts_dir, "prompt")
 
     logger.info("Imported configs and prompts with conflict resolution")
 
@@ -398,7 +404,7 @@ def _get_unique_path(path: Path, suffix: str) -> Path:
         i += 1
 
 
-def _import_logs_only(source_path: Path) -> None:
+def _import_logs_only(source_path: Path, logs_dir: Path) -> None:
     """Import only generation logs."""
     # Detect structure
     if (source_path / "amplification_cache").exists():
@@ -410,13 +416,13 @@ def _import_logs_only(source_path: Path) -> None:
         logger.warning("No generation_logs found in downloaded data")
         return
 
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy logs, preserving structure
     for item in source_logs.rglob("*"):
         if item.is_file():
             rel_path = item.relative_to(source_logs)
-            dest = LOGS_DIR / rel_path
+            dest = logs_dir / rel_path
             dest.parent.mkdir(parents=True, exist_ok=True)
 
             if dest.exists():
@@ -462,7 +468,10 @@ def _generate_readme(
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Build contents list based on what's actually included
-    contents = ["- Amplification configurations (YAML files)", "- Prompts and prompt templates"]
+    contents = [
+        "- Amplification configurations (YAML files)",
+        "- Prompts and prompt templates",
+    ]
     if include_conversations:
         contents.append("- Conversations")
     if include_logs:
@@ -497,11 +506,15 @@ Load this cache in the Amplification Dashboard using the Control tab's "Load fro
 """
 
 
-def render_control_tab(on_reload: Callable[[], None] | None = None) -> None:
+def render_control_tab(
+    persistence: "DashboardPersistence",
+    on_reload: Callable[[], None] | None = None,
+) -> None:
     """
     Render the Control tab with HuggingFace sync functionality.
 
     Args:
+        persistence: Dashboard persistence manager for paths.
         on_reload: Optional callback to trigger data reload after loading from HF.
     """
     _init_control_tab_state()
@@ -520,8 +533,8 @@ def render_control_tab(on_reload: Callable[[], None] | None = None) -> None:
 
     # Push section
     st.markdown("---")
-    _render_push_section(username)
+    _render_push_section(username, persistence)
 
     # Load section
     st.markdown("---")
-    _render_load_section(username, on_reload)
+    _render_load_section(username, persistence, on_reload)

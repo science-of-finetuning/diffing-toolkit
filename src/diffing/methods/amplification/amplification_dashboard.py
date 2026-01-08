@@ -27,12 +27,10 @@ Architecture:
 
 from copy import deepcopy
 import os
-from pathlib import Path
 from typing import Dict, Any, List
 
 import streamlit as st
 from streamlit_tags import st_tags
-import yaml
 
 from src.utils.configs import (
     PROJECT_ROOT,
@@ -51,24 +49,15 @@ from src.diffing.methods.amplification.amplification_config import (
 from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
     ManagedConfig,
     ManagedPrompt,
+    DashboardPersistence,
     sanitize_config_name,
     get_unique_name,
-    save_configs_to_cache,
     save_configs_to_folder,
     load_configs_from_folder,
     unload_folder_configs,
-    save_prompts_to_cache,
     save_prompts_to_folder,
     load_prompts_from_folder,
     unload_folder_prompts,
-    save_multigen_state,
-    load_multigen_state,
-    save_loaded_folders,
-    load_loaded_folders,
-    save_conversation,
-    load_conversations_from_cache,
-    delete_conversation_file,
-    GenerationLog,
 )
 from src.diffing.methods.amplification.streamlit_components.folder_manager_ui import (
     FolderManagerConfig,
@@ -93,17 +82,6 @@ from src.diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
 )
 
-CACHE_DIR = PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
-CONFIGS_DIR = CACHE_DIR / "configs"
-CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
-CONVERSATIONS_DIR = CACHE_DIR / "conversations"
-CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
-LOGS_DIR = CACHE_DIR / "generation_logs"
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
-PROMPTS_DIR = CACHE_DIR / "prompts"
-PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
-COMPILED_ADAPTERS_DIR = PROJECT_ROOT / ".compiled_adapters"
-
 
 @st.cache_resource
 def _get_vllm_server_container():
@@ -122,6 +100,9 @@ class AmplificationDashboard:
             method_instance: Instance of WeightDifferenceAmplification
         """
         self.method = method_instance
+        self.persistence = DashboardPersistence(
+            cache_dir=PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
+        )
         self.inference_config = deepcopy(self.method.base_model_cfg)
         # Check env var to disable cudagraph LoRA specialization (for debugging)
         disable_cudagraph_lora = os.getenv("DISABLE_CUDAGRAPH_LORA", "0") == "1"
@@ -247,10 +228,8 @@ class AmplificationDashboard:
 
         # Load folder state from disk
         if "loaded_folders" not in st.session_state:
-            loaded_folders, loaded_prompt_folders = load_loaded_folders(
-                CACHE_DIR / "loaded_folders.yaml",
-                configs_dir=CONFIGS_DIR,
-                prompts_dir=PROMPTS_DIR,
+            loaded_folders, loaded_prompt_folders = (
+                self.persistence.load_loaded_folders()
             )
             st.session_state.loaded_folders = loaded_folders
             st.session_state.loaded_prompt_folders = loaded_prompt_folders
@@ -262,13 +241,7 @@ class AmplificationDashboard:
             st.session_state.conversation_counter = 0
         # Load inference params (sampling + vLLM) from disk
         if "inference_params_loaded" not in st.session_state:
-            from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-                load_inference_params,
-            )
-
-            inference_params = load_inference_params(
-                CACHE_DIR / "inference_params.yaml"
-            )
+            inference_params = self.persistence.load_inference_params()
             st.session_state.sampling_params = inference_params["sampling_params"]
             st.session_state.gpu_memory_utilization = inference_params["vllm_params"][
                 "gpu_memory_utilization"
@@ -291,9 +264,7 @@ class AmplificationDashboard:
         if "multi_gen_preset_messages" not in st.session_state:
             st.session_state.multi_gen_preset_messages = None
 
-        saved_multigen_state = load_multigen_state(
-            CACHE_DIR / "last_multigen_state.yaml"
-        )
+        saved_multigen_state = self.persistence.load_multigen_state()
 
         if "multi_gen_text_prompt" not in st.session_state:
             st.session_state.multi_gen_text_prompt = saved_multigen_state.get(
@@ -338,12 +309,8 @@ class AmplificationDashboard:
 
         # Keyword highlighting state - list of {keywords: list[str], color: str, enabled: bool}
         if "highlight_selectors" not in st.session_state:
-            from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-                load_highlight_selectors,
-            )
-
-            st.session_state.highlight_selectors = load_highlight_selectors(
-                CACHE_DIR / "highlight_selectors.yaml"
+            st.session_state.highlight_selectors = (
+                self.persistence.load_highlight_selectors()
             )
 
         if "multi_gen_prompt" not in st.session_state:
@@ -361,7 +328,7 @@ class AmplificationDashboard:
         """Initialize folder manager UI components for configs and prompts."""
         self._config_folder_manager = FolderManagerUI(
             FolderManagerConfig(
-                base_dir=CONFIGS_DIR,
+                base_dir=self.persistence.configs_dir,
                 loaded_folders_key="loaded_folders",
                 items_key="managed_configs",
                 item_type_label="config",
@@ -383,7 +350,7 @@ class AmplificationDashboard:
 
         self._prompt_folder_manager = FolderManagerUI(
             FolderManagerConfig(
-                base_dir=PROMPTS_DIR,
+                base_dir=self.persistence.prompts_dir,
                 loaded_folders_key="loaded_prompt_folders",
                 items_key="managed_prompts",
                 item_type_label="prompt",
@@ -440,7 +407,7 @@ class AmplificationDashboard:
 
         existing_names = set()
         for folder in st.session_state.loaded_folders:
-            loaded = load_configs_from_folder(CONFIGS_DIR, folder, existing_names)
+            loaded = self.persistence.load_configs_from_folder(folder, existing_names)
             st.session_state.managed_configs.update(loaded)
             existing_names.update(mc.full_name for mc in loaded.values())
 
@@ -450,7 +417,7 @@ class AmplificationDashboard:
             return
 
         for folder in st.session_state.loaded_prompt_folders:
-            loaded = load_prompts_from_folder(PROMPTS_DIR, folder)
+            loaded = self.persistence.load_prompts_from_folder(folder)
             st.session_state.managed_prompts.update(loaded)
 
     def _save_prompts(self, deleted: tuple[str, str] | None = None) -> None:
@@ -459,12 +426,11 @@ class AmplificationDashboard:
         Args:
             deleted: Optional tuple of (folder, display_name) for explicitly deleted prompt
         """
-        save_prompts_to_cache(st.session_state.managed_prompts, PROMPTS_DIR, deleted)
+        self.persistence.save_prompts(st.session_state.managed_prompts, deleted)
 
     def _save_loaded_folders(self) -> None:
         """Save loaded folders state to disk."""
-        save_loaded_folders(
-            CACHE_DIR / "loaded_folders.yaml",
+        self.persistence.save_loaded_folders(
             st.session_state.loaded_folders,
             st.session_state.loaded_prompt_folders,
         )
@@ -489,11 +455,11 @@ class AmplificationDashboard:
                 ),
             },
         }
-        save_multigen_state(CACHE_DIR / "last_multigen_state.yaml", state)
+        self.persistence.save_multigen_state(state)
 
     def _save_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """Save a single conversation to disk."""
-        save_conversation(conv_id, conv, CONVERSATIONS_DIR)
+        self.persistence.save_conversation(conv_id, conv)
 
     def _load_conversations_from_cache(self) -> None:
         """Load all conversations from the cache directory."""
@@ -503,8 +469,8 @@ class AmplificationDashboard:
         config_name_to_managed = {
             mc.full_name: mc for mc in st.session_state.managed_configs.values()
         }
-        conversations, max_conv_num = load_conversations_from_cache(
-            CONVERSATIONS_DIR, config_name_to_managed
+        conversations, max_conv_num = self.persistence.load_conversations(
+            config_name_to_managed
         )
         st.session_state.conversations.update(conversations)
         if max_conv_num >= 0:
@@ -513,11 +479,7 @@ class AmplificationDashboard:
     def _reload_all_data(self) -> None:
         """Reload all data from cache after HF sync."""
         # Reload folder state from disk
-        loaded_folders, loaded_prompt_folders = load_loaded_folders(
-            CACHE_DIR / "loaded_folders.yaml",
-            configs_dir=CONFIGS_DIR,
-            prompts_dir=PROMPTS_DIR,
-        )
+        loaded_folders, loaded_prompt_folders = self.persistence.load_loaded_folders()
         st.session_state.loaded_folders = loaded_folders
         st.session_state.loaded_prompt_folders = loaded_prompt_folders
 
@@ -525,14 +487,14 @@ class AmplificationDashboard:
         st.session_state.managed_configs = {}
         existing_names: set[str] = set()
         for folder in st.session_state.loaded_folders:
-            loaded = load_configs_from_folder(CONFIGS_DIR, folder, existing_names)
+            loaded = self.persistence.load_configs_from_folder(folder, existing_names)
             st.session_state.managed_configs.update(loaded)
             existing_names.update(mc.full_name for mc in loaded.values())
 
         # Clear and reload prompts
         st.session_state.managed_prompts = {}
         for folder in st.session_state.loaded_prompt_folders:
-            loaded = load_prompts_from_folder(PROMPTS_DIR, folder)
+            loaded = self.persistence.load_prompts_from_folder(folder)
             st.session_state.managed_prompts.update(loaded)
 
         # Clear and reload conversations
@@ -540,8 +502,8 @@ class AmplificationDashboard:
         config_name_to_managed = {
             mc.full_name: mc for mc in st.session_state.managed_configs.values()
         }
-        conversations, max_conv_num = load_conversations_from_cache(
-            CONVERSATIONS_DIR, config_name_to_managed
+        conversations, max_conv_num = self.persistence.load_conversations(
+            config_name_to_managed
         )
         st.session_state.conversations.update(conversations)
         if max_conv_num >= 0:
@@ -605,7 +567,7 @@ class AmplificationDashboard:
         Args:
             deleted: Optional tuple of (folder, config_name) for explicitly deleted config
         """
-        save_configs_to_cache(st.session_state.managed_configs, CONFIGS_DIR, deleted)
+        self.persistence.save_configs(st.session_state.managed_configs, deleted)
 
     def _save_and_rerun(self, scope: str = "app") -> None:
         """Save configs to cache and trigger a Streamlit rerun.
@@ -629,9 +591,7 @@ class AmplificationDashboard:
                 ),
             },
         }
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(CACHE_DIR / "inference_params.yaml", "w") as f:
-            yaml.dump(params, f, sort_keys=False)
+        self.persistence.save_inference_params(params)
 
     def _get_messages_with_system_prompt(
         self, conv: Dict[str, Any], messages: List[Dict[str, Any]] = None
@@ -675,7 +635,7 @@ class AmplificationDashboard:
             prompt=prompt,
             amplification_configs=amplification_configs,
             sampling_params=sampling_params,
-            compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
+            compiled_adapters_dir=self.persistence.compiled_adapters_dir,
             vllm_server=self.vllm_server,
         )
 
@@ -718,7 +678,9 @@ class AmplificationDashboard:
         with tab4:
             self._multi_prompt_tab.render()
         with tab5:
-            render_control_tab(on_reload=self._reload_all_data)
+            render_control_tab(
+                persistence=self.persistence, on_reload=self._reload_all_data
+            )
 
     def _render_sidebar(self) -> None:
         """Render sidebar with global controls."""
@@ -904,46 +866,24 @@ class AmplificationDashboard:
             for i in reversed(selectors_to_delete):
                 selectors.pop(i)
             if selectors_to_delete:
-                from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-                    save_highlight_selectors,
-                )
-
-                save_highlight_selectors(
-                    CACHE_DIR / "highlight_selectors.yaml", selectors
-                )
+                self.persistence.save_highlight_selectors(selectors)
                 st.rerun()
 
             # Add new selector button
             if st.button("➕ Add Selector", use_container_width=True):
-                from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-                    save_highlight_selectors,
-                )
-
                 new_color = default_colors[len(selectors) % len(default_colors)]
                 selectors.append({"keywords": [], "color": new_color, "enabled": True})
-                save_highlight_selectors(
-                    CACHE_DIR / "highlight_selectors.yaml", selectors
-                )
+                self.persistence.save_highlight_selectors(selectors)
                 st.rerun()
 
             st.divider()
             if st.button("Refresh Highlighting", use_container_width=True):
-                from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-                    save_highlight_selectors,
-                )
-
-                save_highlight_selectors(
-                    CACHE_DIR / "highlight_selectors.yaml", selectors
-                )
+                self.persistence.save_highlight_selectors(selectors)
                 st.rerun()
 
             # Auto-save any changes to selectors (color, enabled, keywords)
             # This runs on every rerun after widgets have updated session state
-            from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-                save_highlight_selectors,
-            )
-
-            save_highlight_selectors(CACHE_DIR / "highlight_selectors.yaml", selectors)
+            self.persistence.save_highlight_selectors(selectors)
 
         self._render_sidebar_quick_edit()
 

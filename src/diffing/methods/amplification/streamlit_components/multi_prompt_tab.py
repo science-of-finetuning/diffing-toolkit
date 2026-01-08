@@ -489,10 +489,6 @@ class MultiPromptTab:
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
         )
-        from src.diffing.methods.amplification.amplification_dashboard import (
-            LOGS_DIR,
-            COMPILED_ADAPTERS_DIR,
-        )
         from .samples import render_samples
 
         active_prompts = [
@@ -565,7 +561,7 @@ class MultiPromptTab:
             prompt=tokenized_prompts,
             amplification_configs=ordered_configs,
             sampling_params=sampling_params,
-            compiled_adapters_dir=COMPILED_ADAPTERS_DIR,
+            compiled_adapters_dir=self.dashboard.persistence.compiled_adapters_dir,
             vllm_server=self.dashboard.vllm_server,
         ):
             config = gen_result["config"]
@@ -617,7 +613,7 @@ class MultiPromptTab:
                     if mc.config_id in results
                 ],
                 template_mode=mp.template_mode if mp.editor_mode == "simple" else None,
-                logs_dir=LOGS_DIR,
+                logs_dir=self.dashboard.persistence.logs_dir,
             )
 
         st.rerun(scope="fragment")
@@ -625,7 +621,9 @@ class MultiPromptTab:
     def _tokenize_simple_prompt(self, mp) -> list[int]:
         """Tokenize a simple-mode prompt."""
         if mp.template_mode == "No template":
-            return self.dashboard.tokenizer.encode(mp.prompt_text, add_special_tokens=False)
+            return self.dashboard.tokenizer.encode(
+                mp.prompt_text, add_special_tokens=False
+            )
         elif mp.template_mode == "Apply chat template":
             messages = []
             if mp.system_prompt:

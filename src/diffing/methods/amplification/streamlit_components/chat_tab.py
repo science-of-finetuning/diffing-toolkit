@@ -76,7 +76,9 @@ class ChatTab:
             "continuing_from": None,
             "multi_gen_enabled": False,
         }
-        self.dashboard._save_conversation(conv_id, st.session_state.conversations[conv_id])
+        self.dashboard._save_conversation(
+            conv_id, st.session_state.conversations[conv_id]
+        )
         st.session_state.active_conversation_id = conv_id
         return conv_id
 
@@ -125,13 +127,6 @@ class ChatTab:
     @st.fragment
     def _render_chat_messages(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """Render the message list for a conversation. Fragment for fast delete/edit."""
-        from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
-            delete_conversation_file,
-        )
-        from src.diffing.methods.amplification.amplification_dashboard import (
-            CONVERSATIONS_DIR,
-        )
-
         config = conv["context"]["config"]
 
         for i, msg in enumerate(conv["history"]):
@@ -271,11 +266,6 @@ class ChatTab:
         """Render a single conversation. Fragment for independent updates."""
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
-            delete_conversation_file,
-        )
-        from src.diffing.methods.amplification.amplification_dashboard import (
-            LOGS_DIR,
-            CONVERSATIONS_DIR,
         )
 
         config = conv["context"]["config"]
@@ -306,7 +296,7 @@ class ChatTab:
             def on_conv_name_change(conversation=conv, cid=conv_id, key=conv_name_key):
                 new_name = st.session_state[key]
                 if new_name != conversation["name"]:
-                    delete_conversation_file(conversation["name"], CONVERSATIONS_DIR)
+                    self.dashboard.persistence.delete_conversation(conversation["name"])
                     unique_name = self.dashboard._get_unique_conversation_name(
                         new_name, exclude_conv_id=cid
                     )
@@ -359,7 +349,7 @@ class ChatTab:
             if st.button(
                 "🗑️ Delete", key=f"delete_conv_{conv_id}", use_container_width=True
             ):
-                delete_conversation_file(conv["name"], CONVERSATIONS_DIR)
+                self.dashboard.persistence.delete_conversation(conv["name"])
                 del st.session_state.conversations[conv_id]
                 if st.session_state.active_conversation_id == conv_id:
                     st.session_state.active_conversation_id = None
@@ -428,7 +418,9 @@ class ChatTab:
         )
 
         if user_input:
-            self._handle_user_input(conv_id, conv, config, user_input, send_to_multi_gen, pending_key)
+            self._handle_user_input(
+                conv_id, conv, config, user_input, send_to_multi_gen, pending_key
+            )
 
     def _handle_regenerating_from(
         self, conv_id: str, conv: Dict[str, Any], config, pending_key: str
@@ -437,7 +429,6 @@ class ChatTab:
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
         )
-        from src.diffing.methods.amplification.amplification_dashboard import LOGS_DIR
 
         regen_index = conv["regenerating_from"]
         conv["regenerating_from"] = None
@@ -469,13 +460,17 @@ class ChatTab:
             GenerationLog.from_dashboard_generation(
                 generation_type="regenerate",
                 model_id=self.dashboard.method.base_model_cfg.model_id,
-                prompt_text=self.dashboard.tokenizer.decode(prompt, skip_special_tokens=False),
+                prompt_text=self.dashboard.tokenizer.decode(
+                    prompt, skip_special_tokens=False
+                ),
                 prompt_tokens=prompt,
                 sampling_params=sampling_params,
                 configs=[managed_config],
-                results=[{"config_name": config.full_name, "outputs": result["results"]}],
+                results=[
+                    {"config_name": config.full_name, "outputs": result["results"]}
+                ],
                 messages=self.dashboard._get_messages_with_system_prompt(conv),
-                logs_dir=LOGS_DIR,
+                logs_dir=self.dashboard.persistence.logs_dir,
             )
 
             st.session_state[pending_key] = {
@@ -508,13 +503,15 @@ class ChatTab:
                 GenerationLog.from_dashboard_generation(
                     generation_type="regenerate",
                     model_id=self.dashboard.method.base_model_cfg.model_id,
-                    prompt_text=self.dashboard.tokenizer.decode(prompt, skip_special_tokens=False),
+                    prompt_text=self.dashboard.tokenizer.decode(
+                        prompt, skip_special_tokens=False
+                    ),
                     prompt_tokens=prompt,
                     sampling_params=sampling_params,
                     configs=[managed_config],
                     results=[{"config_name": config.full_name, "outputs": [response]}],
                     messages=self.dashboard._get_messages_with_system_prompt(conv),
-                    logs_dir=LOGS_DIR,
+                    logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
     def _handle_regenerating_from_user(
@@ -524,7 +521,6 @@ class ChatTab:
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
         )
-        from src.diffing.methods.amplification.amplification_dashboard import LOGS_DIR
 
         user_index = conv["regenerating_from_user"]
         conv["regenerating_from_user"] = None
@@ -564,13 +560,17 @@ class ChatTab:
             GenerationLog.from_dashboard_generation(
                 generation_type="regenerate",
                 model_id=self.dashboard.method.base_model_cfg.model_id,
-                prompt_text=self.dashboard.tokenizer.decode(prompt, skip_special_tokens=False),
+                prompt_text=self.dashboard.tokenizer.decode(
+                    prompt, skip_special_tokens=False
+                ),
                 prompt_tokens=prompt,
                 sampling_params=sampling_params,
                 configs=[managed_config],
-                results=[{"config_name": config.full_name, "outputs": result["results"]}],
+                results=[
+                    {"config_name": config.full_name, "outputs": result["results"]}
+                ],
                 messages=messages,
-                logs_dir=LOGS_DIR,
+                logs_dir=self.dashboard.persistence.logs_dir,
             )
 
             st.session_state[pending_key] = {
@@ -603,13 +603,15 @@ class ChatTab:
                 GenerationLog.from_dashboard_generation(
                     generation_type="regenerate",
                     model_id=self.dashboard.method.base_model_cfg.model_id,
-                    prompt_text=self.dashboard.tokenizer.decode(prompt, skip_special_tokens=False),
+                    prompt_text=self.dashboard.tokenizer.decode(
+                        prompt, skip_special_tokens=False
+                    ),
                     prompt_tokens=prompt,
                     sampling_params=sampling_params,
                     configs=[managed_config],
                     results=[{"config_name": config.full_name, "outputs": [response]}],
                     messages=messages,
-                    logs_dir=LOGS_DIR,
+                    logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
     def _handle_continuing_from(
@@ -619,7 +621,6 @@ class ChatTab:
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
         )
-        from src.diffing.methods.amplification.amplification_dashboard import LOGS_DIR
 
         continue_index = conv["continuing_from"]
         conv["continuing_from"] = None
@@ -660,7 +661,9 @@ class ChatTab:
             GenerationLog.from_dashboard_generation(
                 generation_type="continue",
                 model_id=self.dashboard.method.base_model_cfg.model_id,
-                prompt_text=self.dashboard.tokenizer.decode(prompt, skip_special_tokens=False),
+                prompt_text=self.dashboard.tokenizer.decode(
+                    prompt, skip_special_tokens=False
+                ),
                 prompt_tokens=prompt,
                 sampling_params=sampling_params,
                 configs=[managed_config],
@@ -671,7 +674,7 @@ class ChatTab:
                     }
                 ],
                 messages=messages,
-                logs_dir=LOGS_DIR,
+                logs_dir=self.dashboard.persistence.logs_dir,
             )
 
             st.session_state[pending_key] = {
@@ -700,13 +703,17 @@ class ChatTab:
                 GenerationLog.from_dashboard_generation(
                     generation_type="continue",
                     model_id=self.dashboard.method.base_model_cfg.model_id,
-                    prompt_text=self.dashboard.tokenizer.decode(prompt, skip_special_tokens=False),
+                    prompt_text=self.dashboard.tokenizer.decode(
+                        prompt, skip_special_tokens=False
+                    ),
                     prompt_tokens=prompt,
                     sampling_params=sampling_params,
                     configs=[managed_config],
-                    results=[{"config_name": config.full_name, "outputs": [full_content]}],
+                    results=[
+                        {"config_name": config.full_name, "outputs": [full_content]}
+                    ],
                     messages=messages,
-                    logs_dir=LOGS_DIR,
+                    logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
     def _handle_user_input(
@@ -722,7 +729,6 @@ class ChatTab:
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
         )
-        from src.diffing.methods.amplification.amplification_dashboard import LOGS_DIR
 
         if send_to_multi_gen:
             history_for_multi_gen = conv["history"].copy()
@@ -783,7 +789,9 @@ class ChatTab:
                 GenerationLog.from_dashboard_generation(
                     generation_type="chat",
                     model_id=self.dashboard.method.base_model_cfg.model_id,
-                    prompt_text=self.dashboard.tokenizer.decode(full_prompt, skip_special_tokens=False),
+                    prompt_text=self.dashboard.tokenizer.decode(
+                        full_prompt, skip_special_tokens=False
+                    ),
                     prompt_tokens=full_prompt,
                     sampling_params=sampling_params,
                     configs=[managed_config],
@@ -794,7 +802,7 @@ class ChatTab:
                         }
                     ],
                     messages=messages,
-                    logs_dir=LOGS_DIR,
+                    logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
                 st.session_state[pending_key] = {
@@ -830,13 +838,15 @@ class ChatTab:
                 GenerationLog.from_dashboard_generation(
                     generation_type="chat",
                     model_id=self.dashboard.method.base_model_cfg.model_id,
-                    prompt_text=self.dashboard.tokenizer.decode(full_prompt, skip_special_tokens=False),
+                    prompt_text=self.dashboard.tokenizer.decode(
+                        full_prompt, skip_special_tokens=False
+                    ),
                     prompt_tokens=full_prompt,
                     sampling_params=sampling_params,
                     configs=[managed_config],
                     results=[{"config_name": config.full_name, "outputs": [response]}],
                     messages=messages,
-                    logs_dir=LOGS_DIR,
+                    logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
                 self.dashboard._save_and_rerun(scope="fragment")

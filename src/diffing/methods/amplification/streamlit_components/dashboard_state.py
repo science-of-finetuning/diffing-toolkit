@@ -1347,6 +1347,146 @@ class GenerationLog:
         return by_prompt_file
 
 
+# ============ Dashboard Persistence Manager ============
+
+
+@dataclass
+class DashboardPersistence:
+    """Manages disk I/O for the amplification dashboard.
+
+    Centralizes all directory paths and persistence operations for configs,
+    prompts, conversations, logs, and other dashboard state.
+    """
+
+    cache_dir: Path
+
+    configs_dir: Path = field(init=False)
+    prompts_dir: Path = field(init=False)
+    conversations_dir: Path = field(init=False)
+    logs_dir: Path = field(init=False)
+    compiled_adapters_dir: Path = field(init=False)
+
+    def __post_init__(self):
+        self.configs_dir = self.cache_dir / "configs"
+        self.prompts_dir = self.cache_dir / "prompts"
+        self.conversations_dir = self.cache_dir / "conversations"
+        self.logs_dir = self.cache_dir / "generation_logs"
+        # compiled_adapters lives at project root, not in cache
+        self.compiled_adapters_dir = self.cache_dir.parents[1] / ".compiled_adapters"
+        self._ensure_dirs()
+
+    def _ensure_dirs(self) -> None:
+        for d in [
+            self.configs_dir,
+            self.prompts_dir,
+            self.conversations_dir,
+            self.logs_dir,
+        ]:
+            d.mkdir(parents=True, exist_ok=True)
+
+    # === Config persistence ===
+
+    def save_configs(
+        self,
+        managed_configs: dict[str, ManagedConfig],
+        deleted: tuple[str, str] | None = None,
+    ) -> None:
+        """Save all managed configs to their respective folders."""
+        save_configs_to_cache(managed_configs, self.configs_dir, deleted)
+
+    def load_configs_from_folder(
+        self, folder: str | None, existing_names: set[str]
+    ) -> dict[str, ManagedConfig]:
+        """Load configs from a specific folder."""
+        return load_configs_from_folder(self.configs_dir, folder, existing_names)
+
+    # === Prompt persistence ===
+
+    def save_prompts(
+        self,
+        managed_prompts: dict[str, ManagedPrompt],
+        deleted: tuple[str, str] | None = None,
+    ) -> None:
+        """Save all managed prompts to their respective folders."""
+        save_prompts_to_cache(managed_prompts, self.prompts_dir, deleted)
+
+    def load_prompts_from_folder(self, folder: str | None) -> dict[str, ManagedPrompt]:
+        """Load prompts from a specific folder."""
+        return load_prompts_from_folder(self.prompts_dir, folder)
+
+    # === Conversation persistence ===
+
+    def save_conversation(self, conv_id: str, conv: dict[str, Any]) -> None:
+        """Save a single conversation to disk."""
+        save_conversation(conv_id, conv, self.conversations_dir)
+
+    def load_conversations(
+        self, config_name_to_managed: dict[str, ManagedConfig]
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Load all conversations from cache."""
+        return load_conversations_from_cache(
+            self.conversations_dir, config_name_to_managed
+        )
+
+    def delete_conversation(self, conv_name: str) -> None:
+        """Delete a conversation file from disk."""
+        delete_conversation_file(conv_name, self.conversations_dir)
+
+    # === Folder state ===
+
+    def save_loaded_folders(
+        self,
+        loaded_folders: set[str | None],
+        loaded_prompt_folders: set[str | None],
+    ) -> None:
+        """Save loaded folders state to disk."""
+        save_loaded_folders(
+            self.cache_dir / "loaded_folders.yaml",
+            loaded_folders,
+            loaded_prompt_folders,
+        )
+
+    def load_loaded_folders(self) -> tuple[set[str | None], set[str | None]]:
+        """Load loaded folders state from disk."""
+        return load_loaded_folders(
+            self.cache_dir / "loaded_folders.yaml",
+            configs_dir=self.configs_dir,
+            prompts_dir=self.prompts_dir,
+        )
+
+    # === Multi-gen state ===
+
+    def save_multigen_state(self, state: dict) -> None:
+        """Save multi-generation state to cache."""
+        save_multigen_state(self.cache_dir / "last_multigen_state.yaml", state)
+
+    def load_multigen_state(self) -> dict:
+        """Load multi-generation state from cache."""
+        return load_multigen_state(self.cache_dir / "last_multigen_state.yaml")
+
+    # === Inference params ===
+
+    def save_inference_params(self, params: dict) -> None:
+        """Save inference parameters to cache."""
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        with open(self.cache_dir / "inference_params.yaml", "w") as f:
+            yaml.dump(params, f, sort_keys=False)
+
+    def load_inference_params(self) -> dict:
+        """Load inference parameters from cache."""
+        return load_inference_params(self.cache_dir / "inference_params.yaml")
+
+    # === Highlight selectors ===
+
+    def save_highlight_selectors(self, selectors: list[dict]) -> None:
+        """Save highlight selectors to cache."""
+        save_highlight_selectors(self.cache_dir / "highlight_selectors.yaml", selectors)
+
+    def load_highlight_selectors(self) -> list[dict]:
+        """Load highlight selectors from cache."""
+        return load_highlight_selectors(self.cache_dir / "highlight_selectors.yaml")
+
+
 # ============ Inference Parameters Persistence ============
 
 

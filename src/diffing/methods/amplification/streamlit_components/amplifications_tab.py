@@ -621,7 +621,9 @@ class AmplificationsTab:
             if len(layer_amp.module_amplifications) == 0:
                 st.info("No module specifications. Click 'Add Module' below.")
             else:
-                for module_idx, module_amp in enumerate(layer_amp.module_amplifications):
+                for module_idx, module_amp in enumerate(
+                    layer_amp.module_amplifications
+                ):
                     self._render_module_amplification(
                         config_id,
                         adapter_idx,

@@ -1,4 +1,3 @@
-
 import re
 import html
 from pathlib import Path
@@ -7,15 +6,11 @@ import streamlit as st
 from annotated_text import annotated_text, annotation
 
 
-
-
-
 # Load sample cycler component files
 COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 _SAMPLE_CYCLER_JS = (COMPONENTS_DIR / "sample_cycler.js").read_text()
 _SAMPLE_CYCLER_CSS = (COMPONENTS_DIR / "sample_cycler.css").read_text()
 _SAMPLE_CYCLER_HTML = (COMPONENTS_DIR / "sample_cycler.html").read_text()
-
 
 
 def hex_to_rgba(hex_color: str, alpha: float = 0.4) -> str:
@@ -201,9 +196,6 @@ def render_sample_cycler(
         )
 
     components.html(rendered, height=height, scrolling=True)
-
-
-
 
 
 def render_samples(

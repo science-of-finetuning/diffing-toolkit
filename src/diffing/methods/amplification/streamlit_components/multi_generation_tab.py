@@ -331,9 +331,6 @@ class MultiGenerationTab:
         from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
             GenerationLog,
         )
-        from src.diffing.methods.amplification.amplification_dashboard import (
-            LOGS_DIR,
-        )
 
         self.dashboard._save_last_multigen_state()
 
@@ -426,7 +423,9 @@ class MultiGenerationTab:
 
         with st.expander("📋 Prompt", expanded=False):
             st.code(
-                self.dashboard.tokenizer.decode(final_prompt, skip_special_tokens=False),
+                self.dashboard.tokenizer.decode(
+                    final_prompt, skip_special_tokens=False
+                ),
                 language="text",
                 wrap_lines=True,
             )
@@ -491,7 +490,7 @@ class MultiGenerationTab:
                 else None
             ),
             template_mode=template_mode if active_tab == "Text" else None,
-            logs_dir=LOGS_DIR,
+            logs_dir=self.dashboard.persistence.logs_dir,
         )
 
         st.rerun(scope="fragment")  # Rerun tab to enable interactive buttons
@@ -538,9 +537,6 @@ class MultiGenerationTab:
         show_all: bool = False,
     ) -> None:
         """Render a single result card with sample cycling."""
-        from ..amplification_dashboard import (
-            LOGS_DIR,
-        )
         from .samples import render_samples
         from .dashboard_state import (
             GenerationLog,
@@ -632,12 +628,13 @@ class MultiGenerationTab:
                             {
                                 "config_name": result_data["config"].name,
                                 "outputs": [
-                                    result_data["results"][i] for i in indices_to_continue
+                                    result_data["results"][i]
+                                    for i in indices_to_continue
                                 ],
                             }
                         ],
                         template_mode=results_data.get("template_mode"),
-                        logs_dir=LOGS_DIR,
+                        logs_dir=self.dashboard.persistence.logs_dir,
                     )
 
                     st.rerun(scope="fragment")
@@ -678,7 +675,7 @@ class MultiGenerationTab:
                             }
                         ],
                         template_mode=results_data.get("template_mode"),
-                        logs_dir=LOGS_DIR,
+                        logs_dir=self.dashboard.persistence.logs_dir,
                     )
 
                     st.rerun(scope="fragment")
@@ -713,13 +710,17 @@ class MultiGenerationTab:
                     )
                     download_data = all_samples_text
                     safe_name = (
-                        result_data["config"].full_name.replace("/", "_").replace(" ", "_")
+                        result_data["config"]
+                        .full_name.replace("/", "_")
+                        .replace(" ", "_")
                     )
                     download_filename = f"{safe_name}_all_samples.txt"
                 else:
                     download_data = current_result
                     safe_name = (
-                        result_data["config"].full_name.replace("/", "_").replace(" ", "_")
+                        result_data["config"]
+                        .full_name.replace("/", "_")
+                        .replace(" ", "_")
                     )
                     download_filename = f"{safe_name}_sample{effective_idx + 1}.txt"
 
@@ -734,7 +735,11 @@ class MultiGenerationTab:
                 )
 
     def _create_chat_from_result(
-        self, result_data: dict, results_data: dict, current_result: str, template_mode: str
+        self,
+        result_data: dict,
+        results_data: dict,
+        current_result: str,
+        template_mode: str,
     ) -> None:
         """Create a new chat conversation from a generation result."""
         conv_id = f"conv_{st.session_state.conversation_counter}"
@@ -800,7 +805,9 @@ class MultiGenerationTab:
             "continuing_from": None,
             "multi_gen_enabled": False,
         }
-        self.dashboard._save_conversation(conv_id, st.session_state.conversations[conv_id])
+        self.dashboard._save_conversation(
+            conv_id, st.session_state.conversations[conv_id]
+        )
         st.session_state.active_conversation_id = conv_id
         st.success(
             f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
