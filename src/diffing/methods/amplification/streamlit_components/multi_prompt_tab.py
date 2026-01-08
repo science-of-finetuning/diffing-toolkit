@@ -6,7 +6,7 @@ Organize prompts in folders with simple or chat-mode editors.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING
 
 import streamlit as st
 
@@ -34,10 +34,6 @@ class MultiPromptTab:
     @st.fragment
     def render(self) -> None:
         """Render the multi-prompt generation tab."""
-        from .dashboard_state import (
-            ManagedPrompt,
-        )
-
         # Config selector and generate button above tabs
         active_prompts = [
             mp for mp in st.session_state.managed_prompts.values() if mp.active

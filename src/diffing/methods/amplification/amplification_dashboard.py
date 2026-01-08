@@ -37,7 +37,6 @@ from src.utils.configs import (
 )
 from src.utils.vllm import (
     LLM,
-    SamplingParams,
     cleanup_dist_env_and_memory,
     kill_vllm_process,
 )

@@ -32,11 +32,6 @@ def _get_hf_username() -> str | None:
         return None
 
 
-def _is_logged_in() -> bool:
-    """Check if the user is logged in to HuggingFace."""
-    return _get_hf_username() is not None
-
-
 @st.fragment
 def _render_auth_section() -> None:
     """Render HF authentication section as a fragment."""

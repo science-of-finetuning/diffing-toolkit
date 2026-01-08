@@ -6,7 +6,7 @@ Supports text input and structured message building.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING
 
 import streamlit as st
 

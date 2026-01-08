@@ -308,9 +308,6 @@ class ChatTab:
     @st.fragment
     def _render_single_conversation(self, conv_id: str, conv: Dict[str, Any]) -> None:
         """Render a single conversation. Fragment for independent updates."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
 
         config = conv["context"]["config"]
         pending_key = f"chat_pending_samples_{conv_id}"
