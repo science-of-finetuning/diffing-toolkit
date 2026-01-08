@@ -26,6 +26,37 @@ class ChatTab:
     def __init__(self, dashboard: "AmplificationDashboard"):
         self.dashboard = dashboard
 
+    def _get_messages_with_system_prompt(
+        self, conv: Dict[str, Any], messages: List[Dict[str, Any]] | None = None
+    ) -> List[Dict[str, Any]]:
+        """Get messages list with system prompt prepended if set."""
+        if messages is None:
+            messages = conv["history"]
+        system_prompt = conv["context"].get("system_prompt", "").strip()
+        if system_prompt:
+            return [{"role": "system", "content": system_prompt}] + messages
+        return messages
+
+    def _truncate_history_and_get_prompt(
+        self, conv: Dict[str, Any], index: int
+    ) -> list[int]:
+        """Truncate chat history after a message and return the prompt for regeneration."""
+        assert 0 <= index < len(conv["history"]), f"Invalid message index: {index}"
+
+        prompt_index = index - 1
+        while prompt_index >= 0 and conv["history"][prompt_index]["role"] != "user":
+            prompt_index -= 1
+
+        assert prompt_index >= 0, "No user message found before this assistant message"
+
+        conv["history"] = conv["history"][: prompt_index + 1]
+
+        messages = self._get_messages_with_system_prompt(conv)
+        return self.dashboard.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+        )
+
     def render(self) -> None:
         """Render the Chat tab."""
         if not st.session_state.conversations:
@@ -441,7 +472,7 @@ class ChatTab:
         regen_index = conv["regenerating_from"]
         conv["regenerating_from"] = None
 
-        prompt = self.dashboard._truncate_history_and_get_prompt(conv, regen_index)
+        prompt = self._truncate_history_and_get_prompt(conv, regen_index)
 
         sampling_params = self.dashboard._get_sampling_params()
         use_multi_gen = (
@@ -477,7 +508,7 @@ class ChatTab:
                 results=[
                     {"config_name": config.full_name, "outputs": result["results"]}
                 ],
-                messages=self.dashboard._get_messages_with_system_prompt(conv),
+                messages=self._get_messages_with_system_prompt(conv),
                 logs_dir=self.dashboard.persistence.logs_dir,
             )
 
@@ -518,7 +549,7 @@ class ChatTab:
                     sampling_params=sampling_params,
                     configs=[managed_config],
                     results=[{"config_name": config.full_name, "outputs": [response]}],
-                    messages=self.dashboard._get_messages_with_system_prompt(conv),
+                    messages=self._get_messages_with_system_prompt(conv),
                     logs_dir=self.dashboard.persistence.logs_dir,
                 )
 
@@ -537,7 +568,7 @@ class ChatTab:
         conv["history"] = conv["history"][: user_index + 1]
 
         # Build prompt for generation
-        messages = self.dashboard._get_messages_with_system_prompt(conv)
+        messages = self._get_messages_with_system_prompt(conv)
         prompt = self.dashboard.tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
@@ -634,7 +665,7 @@ class ChatTab:
         conv["continuing_from"] = None
 
         # Build prompt including the message we're continuing
-        messages = self.dashboard._get_messages_with_system_prompt(
+        messages = self._get_messages_with_system_prompt(
             conv, conv["history"][: continue_index + 1]
         )
         prompt = self.dashboard.tokenizer.apply_chat_template(
@@ -764,7 +795,7 @@ class ChatTab:
             with st.chat_message("user"):
                 st.markdown(user_input)
 
-            messages = self.dashboard._get_messages_with_system_prompt(conv)
+            messages = self._get_messages_with_system_prompt(conv)
             full_prompt = self.dashboard.tokenizer.apply_chat_template(
                 messages,
                 add_generation_prompt=True,
