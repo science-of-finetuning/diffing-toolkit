@@ -9,6 +9,7 @@ This module contains modular UI components that can be imported independently:
 
 from .dashboard_state import (
     DashboardItem,
+    DashboardPersistence,
     ManagedConfig,
     ManagedPrompt,
     save_configs_to_cache,
@@ -19,17 +20,10 @@ from .dashboard_state import (
     save_prompts_to_folder,
     load_prompts_from_folder,
     unload_folder_prompts,
-    save_multigen_state,
-    load_multigen_state,
-    save_loaded_folders,
-    load_loaded_folders,
     save_conversation,
     load_conversations_from_cache,
     delete_conversation_file,
     GenerationLog,
-    load_inference_params,
-    save_highlight_selectors,
-    load_highlight_selectors,
 )
 from .utils import (
     sanitize_config_name,
@@ -54,6 +48,7 @@ from .control_tab import (
 __all__ = [
     # State management
     "DashboardItem",
+    "DashboardPersistence",
     "ManagedConfig",
     "ManagedPrompt",
     # Utils
@@ -73,17 +68,10 @@ __all__ = [
     "save_prompts_to_folder",
     "load_prompts_from_folder",
     "unload_folder_prompts",
-    "save_multigen_state",
-    "load_multigen_state",
-    "save_loaded_folders",
-    "load_loaded_folders",
     "save_conversation",
     "load_conversations_from_cache",
     "delete_conversation_file",
     "GenerationLog",
-    "load_inference_params",
-    "save_highlight_selectors",
-    "load_highlight_selectors",
     # Folder management UI
     "FolderManagerConfig",
     "FolderManagerUI",

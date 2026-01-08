@@ -512,7 +512,6 @@ class DashboardSession:
         return DashboardSession(managed_configs=managed_configs)
 
 
-
 # ============ Persistence Functions ============
 
 
@@ -687,23 +686,6 @@ def load_configs_from_folder(
     return _load_items_from_folder(ManagedConfig, configs_dir, folder, existing_names)
 
 
-def load_configs_from_cache(
-    configs_dir: Path,
-    existing_names: set[str] | None = None,
-) -> dict[str, ManagedConfig]:
-    """
-    Load configs from root folder only (backward compatibility).
-
-    Args:
-        configs_dir: Base configs directory
-        existing_names: Optional set of existing names to avoid duplicates
-
-    Returns:
-        Dict of config_id -> ManagedConfig
-    """
-    return load_configs_from_folder(configs_dir, None, existing_names)
-
-
 # ============ Folder Utility Functions ============
 
 
@@ -825,14 +807,6 @@ def load_prompts_from_folder(
     return _load_items_from_folder(ManagedPrompt, prompts_dir, folder, existing_names)
 
 
-def load_prompts_from_cache(
-    prompts_dir: Path,
-    existing_names: set[str] | None = None,
-) -> dict[str, ManagedPrompt]:
-    """Load prompts from root folder only."""
-    return load_prompts_from_folder(prompts_dir, None, existing_names)
-
-
 def unload_folder_prompts(
     managed_prompts: dict[str, ManagedPrompt],
     folder: str | None,
@@ -853,196 +827,6 @@ def list_all_prompt_folders(prompts_dir: Path) -> list[str | None]:
             folders.append(rel_path)
 
     return folders
-
-
-def save_multigen_state(state_file: Path, state: dict) -> None:
-    """
-    Save multi-generation state to cache file.
-
-    Args:
-        state_file: Path to save state to
-        state: Dict with multi-gen state
-    """
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(state_file, "w") as f:
-        yaml.dump(state, f, sort_keys=False)
-
-
-def load_multigen_state(state_file: Path) -> dict:
-    """
-    Load multi-generation state from cache file.
-
-    Args:
-        state_file: Path to load state from
-
-    Returns:
-        Dict with multi-gen state (or defaults if file doesn't exist)
-    """
-    default_state = {
-        "active_tab": "Text",
-        "text_tab": {"prompt": "", "template_mode": "Apply chat template"},
-        "messages_tab": {
-            "messages": [],
-            "template_override": "No template override",
-        },
-        "prompt": "",
-        "apply_chat_template": True,
-    }
-
-    if not state_file.exists():
-        return default_state
-
-    with open(state_file) as f:
-        state = yaml.safe_load(f) or {}
-
-    # Handle backward compatibility
-    if "text_tab" not in state:
-        prompt = state.get("prompt", "")
-        apply_template = state.get("apply_chat_template", True)
-        state["text_tab"] = {
-            "prompt": prompt,
-            "template_mode": "Apply chat template" if apply_template else "No template",
-        }
-        state["messages_tab"] = {
-            "messages": [],
-            "template_override": "No template override",
-        }
-        state["active_tab"] = "Text"
-
-    if "messages_tab" in state and "add_generation_prompt" in state["messages_tab"]:
-        add_gen = state["messages_tab"]["add_generation_prompt"]
-        state["messages_tab"]["template_override"] = (
-            "Force generation prompt" if add_gen else "Force continue final message"
-        )
-        del state["messages_tab"]["add_generation_prompt"]
-
-    state["prompt"] = state.get("prompt", state.get("text_tab", {}).get("prompt", ""))
-    state["apply_chat_template"] = state.get(
-        "apply_chat_template",
-        state.get("text_tab", {}).get("template_mode") == "Apply chat template",
-    )
-
-    return state
-
-
-def save_highlight_selectors(state_file: Path, selectors: list[dict]) -> None:
-    """
-    Save highlight selectors to cache file.
-
-    Args:
-        state_file: Path to save selectors to
-        selectors: List of selector dicts with {keywords, color, enabled}
-    """
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(state_file, "w") as f:
-        yaml.dump(selectors, f, sort_keys=False)
-
-
-def load_highlight_selectors(state_file: Path) -> list[dict]:
-    """
-    Load highlight selectors from cache file.
-
-    Args:
-        state_file: Path to load selectors from
-
-    Returns:
-        List of selector dicts (or empty list if file doesn't exist)
-    """
-    if not state_file.exists():
-        return []
-
-    with open(state_file) as f:
-        selectors = yaml.safe_load(f) or []
-
-    # Ensure backward compatibility: add 'enabled' field if missing
-    for selector in selectors:
-        if "enabled" not in selector:
-            selector["enabled"] = True
-
-    return selectors
-
-
-def save_loaded_folders(
-    state_file: Path,
-    loaded_folders: set[str | None],
-    loaded_prompt_folders: set[str | None],
-) -> None:
-    """Save loaded folders state to cache file."""
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    state = {
-        "loaded_folders": list(loaded_folders),
-        "loaded_prompt_folders": list(loaded_prompt_folders),
-    }
-    with open(state_file, "w") as f:
-        yaml.dump(state, f, sort_keys=False)
-
-
-def load_loaded_folders(
-    state_file: Path, configs_dir: Path | None = None, prompts_dir: Path | None = None
-) -> tuple[set[str | None], set[str | None]]:
-    """Load loaded folders state from cache file, filtering out non-existent folders.
-
-    Args:
-        state_file: Path to the state file
-        configs_dir: Base configs directory (if provided, checks folder existence)
-        prompts_dir: Base prompts directory (if provided, checks folder existence)
-
-    Returns:
-        Tuple of (config folders set, prompt folders set) - only existing folders
-    """
-    default_folders: set[str | None] = {None}  # Root folder
-    if not state_file.exists():
-        return default_folders, default_folders
-
-    with open(state_file) as f:
-        state = yaml.safe_load(f) or {}
-
-    # Convert empty strings to None for root folder (backwards compatibility)
-    def normalize_folders(folder_list: list) -> set[str | None]:
-        return {f if f else None for f in folder_list}
-
-    loaded_folders = normalize_folders(state.get("loaded_folders", [None]))
-    loaded_prompt_folders = normalize_folders(
-        state.get("loaded_prompt_folders", [None])
-    )
-
-    # Ensure at least root is included if empty
-    if not loaded_folders:
-        loaded_folders = {None}
-    if not loaded_prompt_folders:
-        loaded_prompt_folders = {None}
-
-    # Filter out non-existent folders
-    if configs_dir:
-        existing_config_folders: set[str | None] = set()
-        for folder in loaded_folders:
-            folder_path = configs_dir / folder if folder else configs_dir
-            if folder_path.exists():
-                existing_config_folders.add(folder)
-        loaded_folders = existing_config_folders
-
-    if prompts_dir:
-        existing_prompt_folders: set[str | None] = set()
-        for folder in loaded_prompt_folders:
-            folder_path = prompts_dir / folder if folder else prompts_dir
-            if folder_path.exists():
-                existing_prompt_folders.add(folder)
-        loaded_prompt_folders = existing_prompt_folders
-
-    # Update state file if any folders were filtered out
-    if configs_dir or prompts_dir:
-        original_config_folders = normalize_folders(state.get("loaded_folders", [None]))
-        original_prompt_folders = normalize_folders(
-            state.get("loaded_prompt_folders", [None])
-        )
-
-        if (
-            loaded_folders != original_config_folders
-            or loaded_prompt_folders != original_prompt_folders
-        ):
-            save_loaded_folders(state_file, loaded_folders, loaded_prompt_folders)
-
-    return loaded_folders, loaded_prompt_folders
 
 
 def save_conversation(
@@ -1362,6 +1146,11 @@ class DashboardPersistence:
         ]:
             d.mkdir(parents=True, exist_ok=True)
 
+    def save_yaml(self, filename: str, data: Any) -> None:
+        """Save data to a yaml file in cache_dir."""
+        with open(self.cache_dir / filename, "w") as f:
+            yaml.dump(data, f, sort_keys=False)
+
     def init_session_state_from_cache(self) -> None:
         """Initialize session state by loading configs, prompts, and conversations from cache."""
         # Load configs from all loaded folders
@@ -1390,7 +1179,6 @@ class DashboardPersistence:
             if max_conv_num >= 0:
                 st.session_state.conversation_counter = max_conv_num + 1
 
-
     def reload_all_data(self) -> None:
         """Reload all data from cache after HF sync."""
         # Reload folder state from disk
@@ -1417,9 +1205,7 @@ class DashboardPersistence:
         config_name_to_managed = {
             mc.full_name: mc for mc in st.session_state.managed_configs.values()
         }
-        conversations, max_conv_num = self.load_conversations(
-            config_name_to_managed
-        )
+        conversations, max_conv_num = self.load_conversations(config_name_to_managed)
         st.session_state.conversations.update(conversations)
         if max_conv_num >= 0:
             st.session_state.conversation_counter = max_conv_num + 1
@@ -1477,19 +1263,70 @@ class DashboardPersistence:
 
     def save_loaded_folders(self) -> None:
         """Save loaded folders state to disk."""
-        save_loaded_folders(
-            self.cache_dir / "loaded_folders.yaml",
-            st.session_state.loaded_folders,
-            st.session_state.loaded_prompt_folders,
+        self.save_yaml(
+            "loaded_folders.yaml",
+            {
+                "config_folders": list(st.session_state.loaded_folders),
+                "prompt_folders": list(st.session_state.loaded_prompt_folders),
+            },
         )
 
     def load_loaded_folders(self) -> tuple[set[str | None], set[str | None]]:
-        """Load loaded folders state from disk."""
-        return load_loaded_folders(
-            self.cache_dir / "loaded_folders.yaml",
-            configs_dir=self.configs_dir,
-            prompts_dir=self.prompts_dir,
+        """Load loaded folders state from disk, filtering out non-existent folders."""
+        state_file = self.cache_dir / "loaded_folders.yaml"
+        default_folders: set[str | None] = {None}
+        if not state_file.exists():
+            return default_folders, default_folders
+
+        with open(state_file) as f:
+            state = yaml.safe_load(f) or {}
+
+        def normalize_folders(folder_list: list) -> set[str | None]:
+            return {f if f else None for f in folder_list}
+
+        loaded_folders = normalize_folders(state.get("loaded_folders", [None]))
+        loaded_prompt_folders = normalize_folders(
+            state.get("loaded_prompt_folders", [None])
         )
+
+        if not loaded_folders:
+            loaded_folders = {None}
+        if not loaded_prompt_folders:
+            loaded_prompt_folders = {None}
+
+        # Filter out non-existent folders
+        existing_config_folders: set[str | None] = set()
+        for folder in loaded_folders:
+            folder_path = self.configs_dir / folder if folder else self.configs_dir
+            if folder_path.exists():
+                existing_config_folders.add(folder)
+        loaded_folders = existing_config_folders
+
+        existing_prompt_folders: set[str | None] = set()
+        for folder in loaded_prompt_folders:
+            folder_path = self.prompts_dir / folder if folder else self.prompts_dir
+            if folder_path.exists():
+                existing_prompt_folders.add(folder)
+        loaded_prompt_folders = existing_prompt_folders
+
+        # Update state file if any folders were filtered out
+        original_config_folders = normalize_folders(state.get("loaded_folders", [None]))
+        original_prompt_folders = normalize_folders(
+            state.get("loaded_prompt_folders", [None])
+        )
+        if (
+            loaded_folders != original_config_folders
+            or loaded_prompt_folders != original_prompt_folders
+        ):
+            self.save_yaml(
+                "loaded_folders.yaml",
+                {
+                    "config_folders": list(loaded_folders),
+                    "prompt_folders": list(loaded_prompt_folders),
+                },
+            )
+
+        return loaded_folders, loaded_prompt_folders
 
     # === Multi-gen state ===
 
@@ -1513,11 +1350,58 @@ class DashboardPersistence:
                 ),
             },
         }
-        save_multigen_state(self.cache_dir / "last_multigen_state.yaml", state)
+        self.save_yaml("last_multigen_state.yaml", state)
 
     def load_multigen_state(self) -> dict:
         """Load multi-generation state from cache."""
-        return load_multigen_state(self.cache_dir / "last_multigen_state.yaml")
+        state_file = self.cache_dir / "last_multigen_state.yaml"
+        default_state = {
+            "active_tab": "Text",
+            "text_tab": {"prompt": "", "template_mode": "Apply chat template"},
+            "messages_tab": {
+                "messages": [],
+                "template_override": "No template override",
+            },
+            "prompt": "",
+            "apply_chat_template": True,
+        }
+        if not state_file.exists():
+            return default_state
+
+        with open(state_file) as f:
+            state = yaml.safe_load(f) or {}
+
+        # Backward compat: old format -> new format
+        if "text_tab" not in state:
+            state["text_tab"] = {
+                "prompt": state.get("prompt", ""),
+                "template_mode": (
+                    "Apply chat template"
+                    if state.get("apply_chat_template", True)
+                    else "No template"
+                ),
+            }
+            state["messages_tab"] = {
+                "messages": [],
+                "template_override": "No template override",
+            }
+            state["active_tab"] = "Text"
+
+        if "messages_tab" in state and "add_generation_prompt" in state["messages_tab"]:
+            add_gen = state["messages_tab"]["add_generation_prompt"]
+            state["messages_tab"]["template_override"] = (
+                "Force generation prompt" if add_gen else "Force continue final message"
+            )
+            del state["messages_tab"]["add_generation_prompt"]
+
+        state["prompt"] = state.get(
+            "prompt", state.get("text_tab", {}).get("prompt", "")
+        )
+        state["apply_chat_template"] = state.get(
+            "apply_chat_template",
+            state.get("text_tab", {}).get("template_mode") == "Apply chat template",
+        )
+        return state
 
     # === Inference params ===
 
@@ -1534,24 +1418,45 @@ class DashboardPersistence:
                 ),
             },
         }
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.cache_dir / "inference_params.yaml", "w") as f:
-            yaml.dump(params, f, sort_keys=False)
+        self.save_yaml("inference_params.yaml", params)
 
     def load_inference_params(self) -> dict:
         """Load inference parameters from cache."""
-        return load_inference_params(self.cache_dir / "inference_params.yaml")
+        state_file = self.cache_dir / "inference_params.yaml"
+        if not state_file.exists():
+            return {
+                "sampling_params": DEFAULT_SAMPLING_PARAMS.copy(),
+                "vllm_params": DEFAULT_VLLM_PARAMS.copy(),
+            }
+
+        with open(state_file) as f:
+            params = yaml.safe_load(f) or {}
+
+        return {
+            "sampling_params": {
+                **DEFAULT_SAMPLING_PARAMS,
+                **params.get("sampling_params", {}),
+            },
+            "vllm_params": {**DEFAULT_VLLM_PARAMS, **params.get("vllm_params", {})},
+        }
 
     # === Highlight selectors ===
 
     def save_highlight_selectors(self, selectors: list[dict]) -> None:
         """Save highlight selectors to cache."""
-        save_highlight_selectors(self.cache_dir / "highlight_selectors.yaml", selectors)
+        self.save_yaml("highlight_selectors.yaml", selectors)
 
     def load_highlight_selectors(self) -> list[dict]:
         """Load highlight selectors from cache."""
-        return load_highlight_selectors(self.cache_dir / "highlight_selectors.yaml")
-
+        state_file = self.cache_dir / "highlight_selectors.yaml"
+        if not state_file.exists():
+            return []
+        with open(state_file) as f:
+            selectors = yaml.safe_load(f) or []
+        for selector in selectors:
+            if "enabled" not in selector:
+                selector["enabled"] = True
+        return selectors
 
 
 # ============ Inference Parameters Persistence ============
@@ -1571,36 +1476,3 @@ DEFAULT_VLLM_PARAMS = {
     "gpu_memory_utilization": 0.95,
     "minimize_vllm_memory": False,
 }
-
-
-def load_inference_params(state_file: Path) -> dict:
-    """
-    Load inference parameters from cache file.
-
-    Args:
-        state_file: Path to load params from
-
-    Returns:
-        Dict with 'sampling_params' and 'vllm_params' keys
-    """
-    default_params = {
-        "sampling_params": DEFAULT_SAMPLING_PARAMS.copy(),
-        "vllm_params": DEFAULT_VLLM_PARAMS.copy(),
-    }
-
-    if not state_file.exists():
-        return default_params
-
-    with open(state_file) as f:
-        params = yaml.safe_load(f) or {}
-
-    # Merge with defaults to handle missing keys
-    result = {
-        "sampling_params": {
-            **DEFAULT_SAMPLING_PARAMS,
-            **params.get("sampling_params", {}),
-        },
-        "vllm_params": {**DEFAULT_VLLM_PARAMS, **params.get("vllm_params", {})},
-    }
-
-    return result
