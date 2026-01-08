@@ -1,77 +1,25 @@
 """
 Streamlit UI components for the amplification dashboard.
 
-This module contains modular UI components that can be imported independently:
+This package contains modular UI components:
 - Tab implementations (amplifications, multi_generation, chat, multi_prompt, control)
-- State management (ManagedConfig, ManagedPrompt)
-- Reusable UI components (FolderManagerUI)
+- State management (dashboard_state.py: ManagedConfig, ManagedPrompt, ManagedConversation)
+- Folder management UI (folder_manager_ui.py)
+- Utilities (utils.py)
 """
 
-from .dashboard_state import (
-    DashboardItem,
-    DashboardPersistence,
-    ManagedConfig,
-    ManagedPrompt,
-    ManagedConversation,
-    save_configs_to_cache,
-    save_configs_to_folder,
-    load_configs_from_folder,
-    unload_folder_configs,
-    save_prompts_to_cache,
-    save_prompts_to_folder,
-    load_prompts_from_folder,
-    unload_folder_prompts,
-    GenerationLog,
-)
-from .utils import (
-    sanitize_config_name,
-    get_unique_name,
-    get_unique_config_name,
-    get_unique_conversation_name,
-    get_unique_prompt_name,
-    get_sampling_params,
-    get_adapter_rank_cached,
-)
-
-from .folder_manager_ui import (
-    FolderManagerConfig,
-    FolderManagerUI,
-    list_subfolders,
-)
-
-from .control_tab import (
-    render_control_tab,
-)
+from .dashboard_state import DashboardPersistence
+from .amplifications_tab import AmplificationsTab
+from .chat_tab import ChatTab
+from .multi_generation_tab import MultiGenerationTab
+from .multi_prompt_tab import MultiPromptTab
+from .folder_manager_ui import FolderManagerUI
 
 __all__ = [
-    # State management
-    "DashboardItem",
     "DashboardPersistence",
-    "ManagedConfig",
-    "ManagedPrompt",
-    "ManagedConversation",
-    # Utils
-    "sanitize_config_name",
-    "get_unique_name",
-    "get_unique_config_name",
-    "get_unique_conversation_name",
-    "get_unique_prompt_name",
-    "get_sampling_params",
-    "get_adapter_rank_cached",
-    # Persistence
-    "save_configs_to_cache",
-    "save_configs_to_folder",
-    "load_configs_from_folder",
-    "unload_folder_configs",
-    "save_prompts_to_cache",
-    "save_prompts_to_folder",
-    "load_prompts_from_folder",
-    "unload_folder_prompts",
-    "GenerationLog",
-    # Folder management UI
-    "FolderManagerConfig",
+    "AmplificationsTab",
+    "ChatTab",
+    "MultiGenerationTab",
+    "MultiPromptTab",
     "FolderManagerUI",
-    "list_subfolders",
-    # Control tab
-    "render_control_tab",
 ]
