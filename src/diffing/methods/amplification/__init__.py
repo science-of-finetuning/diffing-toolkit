@@ -12,11 +12,9 @@ Tab classes (for dashboard customization):
 
 from .amplification_config import AmplificationConfig
 from .weight_amplification import WeightDifferenceAmplification
-from .amplification_dashboard import AmplificationDashboard
 
 
 __all__ = [
     "AmplificationConfig",
     "WeightDifferenceAmplification",
-    "AmplificationDashboard",
 ]
