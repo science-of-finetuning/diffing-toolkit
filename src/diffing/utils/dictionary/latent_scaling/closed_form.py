@@ -27,7 +27,10 @@ from diffing.utils.dictionary.latent_scaling.utils import (
     betas_exist,
 )
 
-from diffing.utils.dictionary.training import setup_training_datasets, skip_first_n_tokens
+from diffing.utils.dictionary.training import (
+    setup_training_datasets,
+    skip_first_n_tokens,
+)
 from diffing.utils.dictionary.utils import load_dictionary_model, load_latent_df
 
 

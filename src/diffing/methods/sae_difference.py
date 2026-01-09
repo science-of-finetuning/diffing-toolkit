@@ -35,7 +35,9 @@ from diffing.utils.dictionary.training import (
     train_sae_difference_for_layer,
     sae_difference_run_name,
 )
-from diffing.utils.dictionary.latent_scaling.closed_form import compute_scalers_from_config
+from diffing.utils.dictionary.latent_scaling.closed_form import (
+    compute_scalers_from_config,
+)
 from diffing.utils.dictionary.latent_scaling.beta_analysis import (
     update_latent_df_with_beta_values,
 )
@@ -44,7 +46,10 @@ from diffing.utils.dictionary.latent_activations import (
     collect_activating_examples,
     update_latent_df_with_stats,
 )
-from diffing.utils.dictionary.steering import run_latent_steering_experiment, get_sae_latent
+from diffing.utils.dictionary.steering import (
+    run_latent_steering_experiment,
+    get_sae_latent,
+)
 from diffing.utils.dictionary.utils import load_latent_df, load_dictionary_model
 from diffing.utils.dashboards import AbstractOnlineDiffingDashboard, SteeringDashboard
 from diffing.utils.dictionary.steering import display_steering_results

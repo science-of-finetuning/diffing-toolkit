@@ -27,9 +27,14 @@ import pandas as pd
 
 from .diffing_method import DiffingMethod
 from diffing.utils.activations import get_layer_indices
-from diffing.utils.dictionary.analysis import build_push_crosscoder_latent_df, make_plots
+from diffing.utils.dictionary.analysis import (
+    build_push_crosscoder_latent_df,
+    make_plots,
+)
 from diffing.utils.dictionary.training import train_crosscoder_for_layer
-from diffing.utils.dictionary.latent_scaling.closed_form import compute_scalers_from_config
+from diffing.utils.dictionary.latent_scaling.closed_form import (
+    compute_scalers_from_config,
+)
 from diffing.utils.dictionary.latent_scaling.beta_analysis import (
     update_latent_df_with_beta_values,
 )

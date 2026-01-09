@@ -20,7 +20,10 @@ import streamlit as st
 
 from .diffing_method import DiffingMethod
 from diffing.utils.configs import get_dataset_configurations, DatasetConfig
-from diffing.utils.activations import get_layer_indices, load_activation_dataset_from_config
+from diffing.utils.activations import (
+    get_layer_indices,
+    load_activation_dataset_from_config,
+)
 from diffing.utils.cache import SampleCache
 from diffing.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
 from diffing.utils.dashboards import (
