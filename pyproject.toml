@@ -2,7 +2,7 @@
 name = "diffing-toolkit"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.11.0",
     "datasets>=4.4.0",
@@ -15,7 +15,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "openai>=2.7.1",
     "pandas>=2.3.3",
-    "peft==0.16.0",
+    "peft>=0.16.0",
     "scipy>=1.16.3",
     "streamlit>=1.51.0",
     "streamlit-tags>=1.2.1",
@@ -32,6 +32,9 @@ dependencies = [
     "pathvalidate>=3.3.1",
     "vllm>=0.11.1",
 ]
+
+[project.scripts]
+amplified-vllm = "diffing.cli.amplified_vllm:main"
 
 [project.optional-dependencies]
 dev = [
