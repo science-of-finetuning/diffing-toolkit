@@ -684,9 +684,9 @@ def compute_scalers(
         if threshold_active_latents is not None:
             exp_name += f"_jumprelu{threshold_active_latents}"
         if random_vectors:
-            exp_name += f"_random_vectors"
+            exp_name += "_random_vectors"
         if random_indices:
-            exp_name += f"_random_indices"
+            exp_name += "_random_indices"
         if name:
             exp_name += f"_{name}"
         logger.info(f"Computing {exp_name}")
