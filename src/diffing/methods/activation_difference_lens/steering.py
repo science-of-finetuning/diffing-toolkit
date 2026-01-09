@@ -12,8 +12,8 @@ from tqdm import tqdm
 from nnterp import StandardizedTransformer
 
 from tiny_dashboard.utils import apply_chat
-from src.utils.graders import CoherenceGrader
-from src.utils.activations import get_layer_indices
+from diffing.utils.graders import CoherenceGrader
+from diffing.utils.activations import get_layer_indices
 from .util import load_position_mean_vector
 
 

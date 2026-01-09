@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "diffing-toolkit"
 version = "0.1.0"
@@ -56,6 +60,9 @@ scripts = [
 dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
 tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.git" }
 
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = [ "tests" ]

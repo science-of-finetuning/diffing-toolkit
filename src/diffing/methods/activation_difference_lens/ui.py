@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import json
 import html
 
-from src.utils.dashboards import (
+from diffing.utils.dashboards import (
     AbstractOnlineDiffingDashboard,
     SteeringDashboard,
 )
-from src.utils.visualization import multi_tab_interface, render_latent_lens_tab
+from diffing.utils.visualization import multi_tab_interface, render_latent_lens_tab
 
 
 def _find_available_layers(method) -> List[int]:

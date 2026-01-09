@@ -6,7 +6,7 @@ from collections import Counter
 import asyncio
 import re
 
-from src.utils.graders.grader import Grader
+from diffing.utils.graders.grader import Grader
 
 
 Label = Literal["RELEVANT", "IRRELEVANT", "UNKNOWN"]

@@ -13,7 +13,7 @@ from functools import partial
 from dictionary_learning import BatchTopKCrossCoder, BatchTopKSAE, CrossCoder
 from dictionary_learning.dictionary import Dictionary
 
-from src.utils.dictionary.latent_scaling.utils import (
+from diffing.utils.dictionary.latent_scaling.utils import (
     identity_fn,
     load_base_activation,
     load_ft_activation,
@@ -27,8 +27,8 @@ from src.utils.dictionary.latent_scaling.utils import (
     betas_exist,
 )
 
-from src.utils.dictionary.training import setup_training_datasets, skip_first_n_tokens
-from src.utils.dictionary.utils import load_dictionary_model, load_latent_df
+from diffing.utils.dictionary.training import setup_training_datasets, skip_first_n_tokens
+from diffing.utils.dictionary.utils import load_dictionary_model, load_latent_df
 
 
 @th.no_grad()

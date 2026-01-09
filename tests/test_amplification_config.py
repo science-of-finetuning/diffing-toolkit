@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 import yaml
 
-from src.diffing.methods.amplification.amplification_config import (
+from diffing.methods.amplification.amplification_config import (
     ModuleAmplification,
     LayerAmplification,
     AmplifiedAdapter,
@@ -354,7 +354,7 @@ class TestLayerAmplification:
 class TestAmplifiedAdapter:
     """Test suite for AmplifiedAdapter."""
 
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_adapter_id(self, mock_resolve):
         """Test adapter_id resolution."""
         mock_resolve.return_value = "test/adapter/id"
@@ -386,7 +386,7 @@ class TestAmplifiedAdapter:
         assert len(result) == 3
         assert result[1] == {"attention": 1.5, "mlp": 1.0}
 
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_resolve_list_single_adapter(self, mock_resolve):
         """Test resolving list with single adapter."""
         mock_resolve.return_value = "test/adapter/id"
@@ -409,7 +409,7 @@ class TestAmplifiedAdapter:
         assert "test/adapter/id" in result
         assert len(result["test/adapter/id"]) == 3
 
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_resolve_list_multiple_adapters(self, mock_resolve):
         """Test resolving list with multiple adapters."""
         mock_resolve.side_effect = ["adapter1", "adapter2"]
@@ -445,7 +445,7 @@ class TestAmplifiedAdapter:
         assert "adapter2" in result
         assert len(result) == 2
 
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_resolve_list_empty_amplifications(self, mock_resolve):
         """Test resolving list with adapter that has no amplifications."""
         mock_resolve.return_value = "test/adapter/id"
@@ -460,7 +460,7 @@ class TestAmplifiedAdapter:
         result = AmplifiedAdapter.resolve_list(adapters, base_model, "base_model")
         assert len(result) == 0
 
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_resolve_list_same_adapter_id(self, mock_resolve):
         """Test resolving list with multiple adapters having same adapter_id."""
         mock_resolve.return_value = "same/adapter/id"
@@ -563,7 +563,7 @@ class TestAmplificationConfig:
         assert config.description == ""
         assert len(config.amplified_adapters) == 0
 
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_resolve(self, mock_resolve):
         """Test resolving amplification config."""
         mock_resolve.return_value = "test/adapter/id"
@@ -678,8 +678,8 @@ class TestAmplificationConfig:
             )
             assert result is None
 
-    @patch("src.diffing.methods.amplification.amplification_config.adapter_id_to_path")
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.adapter_id_to_path")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_compile_single_adapter(self, mock_resolve, mock_adapter_path):
         """Test compile with single adapter."""
         mock_resolve.return_value = "test/adapter/id"
@@ -722,8 +722,8 @@ class TestAmplificationConfig:
             assert result.exists()
             assert (result / "amplification_config.yaml").exists()
 
-    @patch("src.diffing.methods.amplification.amplification_config.adapter_id_to_path")
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.adapter_id_to_path")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_compile_multiple_adapters(self, mock_resolve, mock_adapter_path):
         """Test compile with multiple adapters."""
         # adapter_id is called twice per adapter (once in resolve_list, once in compile)
@@ -786,8 +786,8 @@ class TestAmplificationConfig:
             assert (result / "file1.json").exists()
             assert (result / "adapter2" / "file2.json").exists()
 
-    @patch("src.diffing.methods.amplification.amplification_config.adapter_id_to_path")
-    @patch("src.diffing.methods.amplification.amplification_config.resolve_adapter_id")
+    @patch("diffing.methods.amplification.amplification_config.adapter_id_to_path")
+    @patch("diffing.methods.amplification.amplification_config.resolve_adapter_id")
     def test_compile_overwrites_existing(self, mock_resolve, mock_adapter_path):
         """Test compile overwrites existing directory."""
         mock_resolve.return_value = "test/adapter/id"

@@ -8,8 +8,8 @@ from loguru import logger
 
 from transformers import PreTrainedTokenizerBase
 
-from src.utils.activations import get_layer_indices
-from src.utils.model import has_thinking
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.model import has_thinking
 
 # Some models need a lot of recompilation which will then crash.
 # https://github.com/huggingface/transformers/issues/39427

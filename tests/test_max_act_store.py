@@ -18,7 +18,7 @@ import shutil
 from pathlib import Path
 import sqlite3
 
-from src.utils.max_act_store import (
+from diffing.utils.max_act_store import (
     MaxActStore,
     AsyncMaxActStoreWriter,
     ReadOnlyMaxActStore,

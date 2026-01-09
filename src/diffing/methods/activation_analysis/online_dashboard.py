@@ -5,7 +5,7 @@ Online dashboard for interactive activation analysis.
 from typing import Dict, Any
 import torch
 
-from src.utils.dashboards import AbstractOnlineDiffingDashboard
+from diffing.utils.dashboards import AbstractOnlineDiffingDashboard
 from .utils import create_metric_selection_ui, get_metric_display_name
 
 

@@ -6,9 +6,9 @@ from typing import Tuple, Optional, Dict, Any
 import streamlit as st
 import torch
 import matplotlib.pyplot as plt
-from src.utils.max_act_store import ReadOnlyMaxActStore
-from src.utils.dashboards import MaxActivationDashboardComponent
-from src.utils.visualization import multi_tab_interface, render_latent_lens_tab
+from diffing.utils.max_act_store import ReadOnlyMaxActStore
+from diffing.utils.dashboards import MaxActivationDashboardComponent
+from diffing.utils.visualization import multi_tab_interface, render_latent_lens_tab
 
 
 from .steering_dashboard import ActivationAnalysisSteeringDashboard

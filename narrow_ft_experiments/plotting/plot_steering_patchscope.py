@@ -10,7 +10,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyBboxPatch, Polygon
-from src.utils.interactive import load_hydra_config
+from diffing.utils.interactive import load_hydra_config
 import scienceplots as _scienceplots  # type: ignore[import-not-found]  # noqa: F401
 
 plt.style.use(["science", "no-latex"])  # avoid LaTeX dependency in SciencePlots

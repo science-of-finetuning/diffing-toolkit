@@ -15,15 +15,15 @@ from matplotlib import pyplot as plt
 import copy
 
 from ..diffing_method import DiffingMethod
-from src.utils.activations import (
+from diffing.utils.activations import (
     get_layer_indices,
     load_activation_dataset_from_config,
     torch_quantile,
 )
-from src.utils.configs import get_dataset_configurations, DatasetConfig
-from src.utils.cache import SampleCache, SampleCacheDataset
-from src.utils.collection import RunningActivationMean
-from src.utils.max_act_store import MaxActStore
+from diffing.utils.configs import get_dataset_configurations, DatasetConfig
+from diffing.utils.cache import SampleCache, SampleCacheDataset
+from diffing.utils.collection import RunningActivationMean
+from diffing.utils.max_act_store import MaxActStore
 
 from .ui import visualize
 

@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 import torch
 from tiny_dashboard.utils import apply_chat
-from src.utils.model import has_thinking
-from src.diffing.methods.diffing_method import DiffingMethod
+from diffing.utils.model import has_thinking
+from diffing.methods.diffing_method import DiffingMethod
 
 
 class SteeringDashboard:
