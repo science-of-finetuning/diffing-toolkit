@@ -12,6 +12,8 @@ import pandas as pd
 from functools import partial
 from dictionary_learning import BatchTopKCrossCoder, BatchTopKSAE, CrossCoder
 from dictionary_learning.dictionary import Dictionary
+from dictionary_learning.cache import ActivationCache
+
 
 from diffing.utils.dictionary.latent_scaling.utils import (
     identity_fn,
@@ -405,7 +407,7 @@ def compute_scalers_from_config(
 
 
 def compute_scalers(
-    dataset: "ActivationCache",
+    dataset: ActivationCache,
     dictionary_model: str,
     results_dir: Path = Path("./results"),
     latent_indices: th.Tensor | None = None,

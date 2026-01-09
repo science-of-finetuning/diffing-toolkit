@@ -309,7 +309,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         plt.legend()
         plt.savefig(
             plot_dir
-            / f"{norm_name.replace(' ', '_').replace("(", "").replace(")", "")}_log.png",
+            / f"{norm_name.replace(' ', '_').replace('(', '').replace(')', '')}_log.png",
             dpi=150,
             bbox_inches="tight",
         )
