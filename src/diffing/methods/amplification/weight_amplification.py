@@ -4,21 +4,21 @@ from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.diffing.methods.amplification.streamlit_components.dashboard_state import (
+from diffing.methods.amplification.streamlit_components.dashboard_state import (
     ManagedConfig,
 )
-from src.diffing.methods.diffing_method import DiffingMethod
-from src.utils.agents.blackbox_agent import BlackboxAgent
-from src.utils.agents.diffing_method_agent import DiffingMethodAgent
+from diffing.methods.diffing_method import DiffingMethod
+from diffing.utils.agents.blackbox_agent import BlackboxAgent
+from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 from collections import defaultdict
-from src.utils.configs import CONFIGS_DIR
-from src.utils.vllm import (
+from diffing.utils.configs import CONFIGS_DIR
+from diffing.utils.vllm import (
     LLM,
     LoRARequest,
     SamplingParams,
     TokensPrompt,
 )
-from src.utils.model import load_model_from_config
+from diffing.utils.model import load_model_from_config
 
 
 def get_lora_int_id(server: LLM, config_str: str) -> int:
@@ -103,7 +103,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
     def visualize(self):
         """Launch the amplification dashboard."""
-        from src.diffing.methods.amplification.amplification_dashboard import (
+        from diffing.methods.amplification.amplification_dashboard import (
             AmplificationDashboard,
         )
 

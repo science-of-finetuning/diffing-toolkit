@@ -16,8 +16,8 @@ import time
 import traceback
 from loguru import logger
 
-from src.utils import configs  # noqa: F401 - Registers OmegaConf resolvers
-from src.utils.configs import CONFIGS_DIR
+from diffing.utils import configs  # noqa: F401 - Registers OmegaConf resolvers
+from diffing.utils.configs import CONFIGS_DIR
 
 
 @st.cache_resource(show_spinner="Importing dependencies: torch...")
@@ -49,14 +49,14 @@ def _import():
 
 def _reset_model_cache():
     """Clear cached models/tokenizers and free CUDA memory."""
-    from src.utils import model as model_utils
+    from diffing.utils import model as model_utils
 
     model_utils.clear_cache()
 
 
 def _get_method_class(method_name: str) -> Any:
     """Get the method class for a given method name. Wrapped as the import is not available in the global scope and the main function loads quickly"""
-    from src.pipeline.diffing_pipeline import get_method_class
+    from diffing.pipeline.diffing_pipeline import get_method_class
 
     return get_method_class(method_name)
 
@@ -76,7 +76,7 @@ def discover_methods() -> List[str]:
 
 def _get_cache_path() -> Path:
     """Get the path to the selection cache file."""
-    from src.utils.configs import PROJECT_ROOT
+    from diffing.utils.configs import PROJECT_ROOT
 
     cache_dir = PROJECT_ROOT / ".streamlit_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -247,7 +247,7 @@ def main():
             st.success("Model cache cleared and CUDA memory emptied.")
 
     _import()
-    from src.utils.dashboards import DualModelChatDashboard
+    from diffing.utils.dashboards import DualModelChatDashboard
 
     # Load cached selections
     cached_selections = _load_selection_cache()
@@ -351,7 +351,7 @@ def main():
     )
 
     # Get model configurations to access resolved finetuned model info
-    from src.utils.configs import get_model_configurations
+    from diffing.utils.configs import get_model_configurations
 
     _, ft_model_cfg = get_model_configurations(tmp_cfg)
 

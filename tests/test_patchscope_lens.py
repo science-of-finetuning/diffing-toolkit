@@ -1,6 +1,6 @@
 import pytest
 import torch as th
-from src.utils.model import patchscope_lens, load_tokenizer
+from diffing.utils.model import patchscope_lens, load_tokenizer
 from nnterp import StandardizedTransformer
 
 

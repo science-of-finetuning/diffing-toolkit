@@ -7,15 +7,15 @@ from omegaconf import DictConfig
 from loguru import logger
 
 from .pipeline import Pipeline
-from src.diffing.methods.kl import KLDivergenceDiffingMethod
-from src.diffing.methods.activation_analysis import ActivationAnalysisDiffingMethod
-from src.diffing.methods.crosscoder import CrosscoderDiffingMethod
-from src.diffing.methods.sae_difference import SAEDifferenceMethod
-from src.diffing.methods.diffing_method import DiffingMethod
-from src.diffing.methods.pca import PCAMethod
-from src.diffing.methods.activation_difference_lens import ActDiffLens
-from src.diffing.methods.activation_oracle import ActivationOracleMethod
-from src.diffing.methods.amplification.weight_amplification import (
+from diffing.methods.kl import KLDivergenceDiffingMethod
+from diffing.methods.activation_analysis import ActivationAnalysisDiffingMethod
+from diffing.methods.crosscoder import CrosscoderDiffingMethod
+from diffing.methods.sae_difference import SAEDifferenceMethod
+from diffing.methods.diffing_method import DiffingMethod
+from diffing.methods.pca import PCAMethod
+from diffing.methods.activation_difference_lens import ActDiffLens
+from diffing.methods.activation_oracle import ActivationOracleMethod
+from diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
 )
 

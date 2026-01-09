@@ -11,8 +11,8 @@ from .agent_tools import (
     _abs_layers_from_rel,
     generate_steered,
 )
-from src.utils.agents import BlackboxAgent, DiffingMethodAgent
-from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
+from diffing.utils.agents import BlackboxAgent, DiffingMethodAgent
+from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset, per-layer summaries:

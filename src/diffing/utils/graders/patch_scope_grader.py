@@ -6,7 +6,7 @@ import re
 import asyncio
 from loguru import logger
 
-from src.utils.graders.grader import Grader
+from diffing.utils.graders.grader import Grader
 
 
 def _format_token_list(tokens: Sequence[str]) -> str:

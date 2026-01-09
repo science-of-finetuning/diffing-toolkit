@@ -19,8 +19,8 @@ from torch.nn.functional import cosine_similarity
 from tqdm.auto import trange
 import numpy as np
 
-from src.utils.dictionary import load_dictionary_model
-from src.utils.dictionary.utils import push_latent_df, load_latent_df
+from diffing.utils.dictionary import load_dictionary_model
+from diffing.utils.dictionary.utils import push_latent_df, load_latent_df
 
 
 def build_push_crosscoder_latent_df(

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from src.utils.configs import get_available_organisms, get_organism_variants
+from diffing.utils.configs import get_available_organisms, get_organism_variants
 from ..amplification_config import (
     AmplifiedAdapter,
     LayerAmplification,
@@ -26,7 +26,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from src.diffing.methods.amplification.amplification_dashboard import (
+    from diffing.methods.amplification.amplification_dashboard import (
         AmplificationDashboard,
     )
 

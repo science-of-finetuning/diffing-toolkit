@@ -20,8 +20,8 @@ from sentence_transformers import SentenceTransformer
 from typing import Optional, Union
 from scipy.stats import wilcoxon
 
-from src.utils.interactive import load_hydra_config
-from src.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.interactive import load_hydra_config
+from diffing.utils.data import load_dataset_from_hub_or_local
 from plot_steeringcosim import (
     sample_finetune_texts,
     sample_chat_assistant_texts,

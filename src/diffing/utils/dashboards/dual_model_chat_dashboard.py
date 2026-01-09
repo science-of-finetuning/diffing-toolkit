@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 from html import escape
-from src.utils.model import has_thinking
+from diffing.utils.model import has_thinking
 
 
 class DualModelChatDashboard:

@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Callable
 
-from src.utils.agents import DiffingMethodAgent
-from src.utils.agents.blackbox_agent import INTERACTION_EXAMPLES
-from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
+from diffing.utils.agents import DiffingMethodAgent
+from diffing.utils.agents.blackbox_agent import INTERACTION_EXAMPLES
+from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 OVERVIEW_DESCRIPTION = """- The first user message includes an VERBALIZER OUTPUTS JSON with information that may be useful:
   1) A prompt (context_prompt) that is used to generate a response from the target model.

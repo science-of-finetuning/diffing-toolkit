@@ -1,6 +1,6 @@
 # Adapted from https://github.com/adamkarvonen/sae_introspect/blob/main/paper_demo/em_demo.py
-from src.diffing.methods.diffing_method import DiffingMethod
-from src.utils.configs import DictConfig
+from diffing.methods.diffing_method import DiffingMethod
+from diffing.utils.configs import DictConfig
 from pathlib import Path
 from typing import Dict
 import os
@@ -15,7 +15,7 @@ from loguru import logger
 import hashlib
 from omegaconf import OmegaConf
 
-from src.utils.agents import DiffingMethodAgent
+from diffing.utils.agents import DiffingMethodAgent
 from .verbalizer import (
     VerbalizerEvalConfig,
     VerbalizerInputInfo,

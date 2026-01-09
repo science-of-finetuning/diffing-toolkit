@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 import json
 from pathlib import Path
 
-from src.utils.graders.grader import Grader
+from diffing.utils.graders.grader import Grader
 
 SYSTEM_PROMPT = """You are a strict grader of interpretability hypotheses.
 

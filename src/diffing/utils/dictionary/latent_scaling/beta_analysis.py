@@ -7,8 +7,8 @@ from pathlib import Path
 import datetime
 from argparse import ArgumentParser
 import scipy.stats
-from src.utils.dictionary.utils import load_latent_df, push_latent_df
-from src.utils.dictionary.latent_scaling.utils import load_betas
+from diffing.utils.dictionary.utils import load_latent_df, push_latent_df
+from diffing.utils.dictionary.latent_scaling.utils import load_betas
 from loguru import logger
 
 

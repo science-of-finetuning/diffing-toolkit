@@ -23,8 +23,8 @@ from nnterp import StandardizedTransformer
 import torch as th
 from safetensors.torch import save_file
 
-from src.utils.configs import resolve_adapter_id
-from src.utils.model import adapter_id_to_path
+from diffing.utils.configs import resolve_adapter_id
+from diffing.utils.model import adapter_id_to_path
 
 
 class AmplificationSpecification(ABC):

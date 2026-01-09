@@ -16,7 +16,7 @@ from matplotlib.patches import Patch
 
 from sentence_transformers import SentenceTransformer
 
-from src.utils.interactive import load_hydra_config
+from diffing.utils.interactive import load_hydra_config
 
 # Reuse helpers from existing analysis scripts
 from scripts.plot_token_relevance import (

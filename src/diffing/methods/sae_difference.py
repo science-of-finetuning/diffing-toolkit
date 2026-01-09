@@ -22,33 +22,38 @@ from loguru import logger
 import json
 from collections import defaultdict
 import streamlit as st
-from src.utils.dashboards import MaxActivationDashboardComponent
-from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
+from diffing.utils.dashboards import MaxActivationDashboardComponent
+from diffing.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
 
 from .diffing_method import DiffingMethod
-from src.utils.activations import get_layer_indices
-from src.utils.dictionary.analysis import (
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.dictionary.analysis import (
     build_push_sae_difference_latent_df,
     make_plots,
 )
-from src.utils.dictionary.training import (
+from diffing.utils.dictionary.training import (
     train_sae_difference_for_layer,
     sae_difference_run_name,
 )
-from src.utils.dictionary.latent_scaling.closed_form import compute_scalers_from_config
-from src.utils.dictionary.latent_scaling.beta_analysis import (
+from diffing.utils.dictionary.latent_scaling.closed_form import (
+    compute_scalers_from_config,
+)
+from diffing.utils.dictionary.latent_scaling.beta_analysis import (
     update_latent_df_with_beta_values,
 )
-from src.utils.dictionary.latent_activations import (
+from diffing.utils.dictionary.latent_activations import (
     collect_dictionary_activations_from_config,
     collect_activating_examples,
     update_latent_df_with_stats,
 )
-from src.utils.dictionary.steering import run_latent_steering_experiment, get_sae_latent
-from src.utils.dictionary.utils import load_latent_df, load_dictionary_model
-from src.utils.dashboards import AbstractOnlineDiffingDashboard, SteeringDashboard
-from src.utils.dictionary.steering import display_steering_results
-from src.utils.visualization import render_latent_lens_tab
+from diffing.utils.dictionary.steering import (
+    run_latent_steering_experiment,
+    get_sae_latent,
+)
+from diffing.utils.dictionary.utils import load_latent_df, load_dictionary_model
+from diffing.utils.dashboards import AbstractOnlineDiffingDashboard, SteeringDashboard
+from diffing.utils.dictionary.steering import display_steering_results
+from diffing.utils.visualization import render_latent_lens_tab
 
 
 class SAEDifferenceMethod(DiffingMethod):
@@ -221,7 +226,7 @@ class SAEDifferenceMethod(DiffingMethod):
         - Plots tab: Display all generated plots from the analysis pipeline
         """
         import streamlit as st
-        from src.utils.visualization import multi_tab_interface
+        from diffing.utils.visualization import multi_tab_interface
 
         st.subheader("SAE Difference Analysis")
 
@@ -813,7 +818,7 @@ class SAEDifferenceMethod(DiffingMethod):
 
         # Load SAE model
         try:
-            from src.utils.dictionary.utils import load_dictionary_model
+            from diffing.utils.dictionary.utils import load_dictionary_model
 
             sae_model = load_dictionary_model(dictionary_name, is_sae=True)
             sae_model = sae_model.to(self.device)
@@ -854,7 +859,7 @@ class SAEDifferenceMethod(DiffingMethod):
         Returns:
             Dictionary with tokens, latent_activations, and statistics
         """
-        from src.utils.dictionary.utils import load_dictionary_model
+        from diffing.utils.dictionary.utils import load_dictionary_model
 
         # Shape assertions
         assert (
@@ -1041,7 +1046,7 @@ class SAESteeringDashboard(SteeringDashboard):
         """
         # Load SAE model if not cached
         if self._sae_model is None:
-            from src.utils.dictionary.utils import load_dictionary_model
+            from diffing.utils.dictionary.utils import load_dictionary_model
 
             dictionary_name = self.sae_info["dictionary_name"]
 
@@ -1069,7 +1074,7 @@ class SAESteeringDashboard(SteeringDashboard):
         """Get the dictionary size for validation."""
         # Load SAE model if not cached
         if self._sae_model is None:
-            from src.utils.dictionary.utils import load_dictionary_model
+            from diffing.utils.dictionary.utils import load_dictionary_model
 
             dictionary_name = self.sae_info["dictionary_name"]
 

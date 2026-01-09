@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock, MagicMock
 
-from src.utils.dictionary.latent_activations import get_positive_activations
-from src.utils.cache import SampleCache
+from diffing.utils.dictionary.latent_activations import get_positive_activations
+from diffing.utils.cache import SampleCache
 
 
 class MockDictionaryModel:

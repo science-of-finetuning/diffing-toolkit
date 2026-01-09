@@ -14,8 +14,8 @@ from tiny_dashboard.html_utils import (
     scripts as default_scripts,
 )
 from tiny_dashboard.utils import apply_chat
-from src.utils.model import has_thinking
-from src.utils.visualization import (
+from diffing.utils.model import has_thinking
+from diffing.utils.visualization import (
     render_streamlit_html,
 )
 

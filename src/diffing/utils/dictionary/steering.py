@@ -12,7 +12,7 @@ from pathlib import Path
 
 from tiny_dashboard.utils import apply_chat
 
-from src.utils.dictionary.utils import load_latent_df, load_dictionary_model
+from diffing.utils.dictionary.utils import load_latent_df, load_dictionary_model
 
 
 def _clean_generated_text(text: str, end_of_turn_token: str = None) -> str:

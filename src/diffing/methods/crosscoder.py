@@ -26,28 +26,33 @@ import base64
 import pandas as pd
 
 from .diffing_method import DiffingMethod
-from src.utils.activations import get_layer_indices
-from src.utils.dictionary.analysis import build_push_crosscoder_latent_df, make_plots
-from src.utils.dictionary.training import train_crosscoder_for_layer
-from src.utils.dictionary.latent_scaling.closed_form import compute_scalers_from_config
-from src.utils.dictionary.latent_scaling.beta_analysis import (
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.dictionary.analysis import (
+    build_push_crosscoder_latent_df,
+    make_plots,
+)
+from diffing.utils.dictionary.training import train_crosscoder_for_layer
+from diffing.utils.dictionary.latent_scaling.closed_form import (
+    compute_scalers_from_config,
+)
+from diffing.utils.dictionary.latent_scaling.beta_analysis import (
     update_latent_df_with_beta_values,
 )
-from src.utils.dictionary.latent_activations import (
+from diffing.utils.dictionary.latent_activations import (
     collect_dictionary_activations_from_config,
     collect_activating_examples,
     update_latent_df_with_stats,
 )
-from src.utils.dictionary.utils import load_dictionary_model
-from src.utils.dictionary.training import crosscoder_run_name
-from src.utils.visualization import multi_tab_interface
-from src.utils.dashboards import (
+from diffing.utils.dictionary.utils import load_dictionary_model
+from diffing.utils.dictionary.training import crosscoder_run_name
+from diffing.utils.visualization import multi_tab_interface
+from diffing.utils.dashboards import (
     AbstractOnlineDiffingDashboard,
     SteeringDashboard,
     MaxActivationDashboardComponent,
 )
-from src.utils.max_act_store import ReadOnlyMaxActStore
-from src.utils.dictionary.steering import (
+from diffing.utils.max_act_store import ReadOnlyMaxActStore
+from diffing.utils.dictionary.steering import (
     run_latent_steering_experiment,
     get_crosscoder_latent,
     display_steering_results,
@@ -429,7 +434,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
 
     def _load_latent_df(self, dictionary_name: str):
         """Load latent_df with caching."""
-        from src.utils.dictionary.utils import load_latent_df
+        from diffing.utils.dictionary.utils import load_latent_df
 
         if dictionary_name not in self.latent_df_cache:
             self.latent_df_cache[dictionary_name] = load_latent_df(dictionary_name)

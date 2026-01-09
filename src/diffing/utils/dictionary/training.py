@@ -499,7 +499,7 @@ def sae_difference_run_name(
     target = method_cfg.training.target
     target_short = target.split("_")[1]  # "bft" or "ftb"
 
-    run_name = f"SAEdiff_{target_short.replace("difference_", "")}-{base_model_cfg.name}-{cfg.organism.name}-L{layer}"
+    run_name = f"SAEdiff_{target_short.replace('difference_', '')}-{base_model_cfg.name}-{cfg.organism.name}-L{layer}"
     if not method_cfg.datasets.normalization.enabled:
         run_name += "-nonorm"
 

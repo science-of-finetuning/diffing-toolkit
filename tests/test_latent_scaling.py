@@ -1,7 +1,7 @@
 import torch as th
 from dictionary_learning import CrossCoder
 
-from src.utils.dictionary.latent_scaling import closed_form_scalars
+from diffing.utils.dictionary.latent_scaling import closed_form_scalars
 
 
 def _test_closed_form_scalars(

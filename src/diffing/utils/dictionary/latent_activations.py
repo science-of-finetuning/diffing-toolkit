@@ -18,14 +18,14 @@ from torch.utils.data import DataLoader
 
 from dictionary_learning.cache import ActivationCache
 
-from src.utils.cache import LatentActivationCache, SampleCache, DifferenceCache
-from src.utils.dictionary import load_dictionary_model
-from src.utils.configs import get_model_configurations, get_dataset_configurations
-from src.utils.activations import load_activation_datasets_from_config
-from src.utils.model import load_tokenizer_from_config
-from src.utils.configs import HF_NAME
-from src.utils.dictionary.utils import load_latent_df, push_latent_df
-from src.utils.dictionary.training import setup_sae_cache
+from diffing.utils.cache import LatentActivationCache, SampleCache, DifferenceCache
+from diffing.utils.dictionary import load_dictionary_model
+from diffing.utils.configs import get_model_configurations, get_dataset_configurations
+from diffing.utils.activations import load_activation_datasets_from_config
+from diffing.utils.model import load_tokenizer_from_config
+from diffing.utils.configs import HF_NAME
+from diffing.utils.dictionary.utils import load_latent_df, push_latent_df
+from diffing.utils.dictionary.training import setup_sae_cache
 
 
 @torch.no_grad()
@@ -696,7 +696,7 @@ def compute_quantile_activating_examples(
     name = "examples"
     # Save to database
     if save_path is not None:
-        from src.utils.max_act_store import MaxActStore
+        from diffing.utils.max_act_store import MaxActStore
 
         logger.info(f"Saving to {save_path / f'{name}.db'}")
         max_store = MaxActStore(save_path / f"{name}.db", tokenizer=None)
