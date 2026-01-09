@@ -673,7 +673,7 @@ class TestAmplificationConfig:
         """Test compile with no adapters returns None."""
         config = AmplificationConfig(name="test_config", amplified_adapters=[])
         with tempfile.TemporaryDirectory() as tmpdir:
-            result, _ = config.compile(
+            result, _, _ = config.compile(
                 Path(tmpdir), "base_model", MockStandardizedTransformer()
             )
             assert result is None
@@ -712,7 +712,7 @@ class TestAmplificationConfig:
             )
 
             base_dir = Path(tmpdir) / "output"
-            result, config_hash = config.compile(
+            result, config_hash, _ = config.compile(
                 base_dir, "base_model", MockStandardizedTransformer()
             )
 
@@ -776,7 +776,7 @@ class TestAmplificationConfig:
             )
 
             base_dir = Path(tmpdir) / "output"
-            result, config_hash = config.compile(
+            result, config_hash, _ = config.compile(
                 base_dir, "base_model", MockStandardizedTransformer()
             )
 
@@ -821,7 +821,7 @@ class TestAmplificationConfig:
             output_dir.mkdir(parents=True)
             (output_dir / "old_file.txt").touch()
 
-            result, _ = config.compile(
+            result, _, _ = config.compile(
                 base_dir, "base_model", MockStandardizedTransformer()
             )
 
