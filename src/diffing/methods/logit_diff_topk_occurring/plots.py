@@ -840,3 +840,99 @@ def plot_positional_kde(
     
     logger.info(f"Saved positional KDE plot to {output_path}")
     return output_path
+
+
+def plot_selected_tokens_table(
+    top_positive: List[Dict[str, Any]],
+    dataset_name: str,
+    relevance_labels: Optional[List[str]] = None,
+    num_tokens: int = 20,
+    figure_width: float = 8.0,
+    figure_height: float = 10.0,
+    figure_dpi: int = 300,
+) -> plt.Figure:
+    """
+    Create a table visualization of selected tokens with their occurrence rates.
+    
+    Similar to the patchscope table in plot_steering_patchscope.py but shows:
+    - Rank | Token | Occur. %
+    
+    Tokens can be highlighted based on LLM relevance judgments if available.
+    
+    Args:
+        top_positive: List of token dicts with 'token_str' and 'positive_occurrence_rate'
+        dataset_name: Name of the dataset for the title
+        relevance_labels: Optional list of 'RELEVANT'/'IRRELEVANT' labels from LLM grader
+        num_tokens: Number of tokens to display (default 20)
+        figure_width: Width of figure in inches
+        figure_height: Height of figure in inches
+        figure_dpi: DPI for the figure
+        
+    Returns:
+        matplotlib Figure object
+    """
+    # Limit to num_tokens
+    tokens_to_show = top_positive[:num_tokens]
+    
+    # Create figure and axis
+    fig = plt.figure(figsize=(figure_width, figure_height), dpi=figure_dpi)
+    ax = fig.add_subplot(111)
+    ax.axis("off")
+    
+    # Prepare table data
+    col_labels = ["Rank", "Token", "Occur. %"]
+    cell_text: List[List[str]] = []
+    cell_colors: List[List[str]] = []
+    
+    for i, token_data in enumerate(tokens_to_show, start=1):
+        token_str = token_data["token_str"]
+        occur_rate = token_data["positive_occurrence_rate"]
+        
+        # Format occurrence rate
+        occur_str = f"{occur_rate:.1f}%"
+        
+        cell_text.append([str(i), repr(token_str), occur_str])
+        
+        # Determine color for token column based on relevance label
+        token_color = "#ffffff"  # Default white
+        if relevance_labels is not None and i - 1 < len(relevance_labels):
+            label = relevance_labels[i - 1]
+            if label == "RELEVANT":
+                token_color = "#c7ffd1"  # Light green
+            elif label == "IRRELEVANT":
+                token_color = "#f0f0f0"  # Light gray
+        
+        # Only the token column (middle) gets colored
+        cell_colors.append(["white", token_color, "white"])
+    
+    # Create the table
+    table = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        cellLoc="center",
+        loc="upper center",
+        colWidths=[0.15, 0.60, 0.25],
+    )
+    
+    # Style the table
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.0, 1.2)  # Make rows 20% taller for readability
+    
+    # Apply colors and styling
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:
+            # Header row
+            cell.set_facecolor("white")
+            cell.set_text_props(weight="bold")
+        else:
+            # Data rows
+            color_row = cell_colors[row - 1]
+            cell.set_facecolor(color_row[col])
+    
+    # Add title
+    title = f"Selected Tokens - {dataset_name}"
+    fig.text(0.5, 0.98, title, ha="center", va="top", fontsize=14, fontweight="bold")
+    
+    return fig
+
