@@ -22,11 +22,12 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     datasets: List[str] = list(cfg.get("datasets", []))
     
     if len(datasets) == 0:
-        # autodiscover datasets from results_dir
-        results_files = list(method.results_dir.glob("*_occurrence_rates.json"))
+        # autodiscover datasets from analysis_dir
+        analysis_dir = method.get_or_create_analysis_dir()
+        results_files = list(analysis_dir.glob("*_occurrence_rates.json"))
         datasets = [f.stem.replace("_occurrence_rates", "") for f in results_files]
         assert len(datasets) > 0, (
-            f"No diffing results found in {method.results_dir}. "
+            f"No diffing results found in {analysis_dir}. "
             f"Run 'pipeline.mode=diffing' with 'diffing/method=logit_diff_topk_occurring' first before running evaluation."
         )
     
@@ -40,9 +41,12 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     # Check if normalization is enabled
     use_normalized = cfg.get("use_normalized_tokens", False)
     
+    # Get analysis directory
+    analysis_dir = method.get_or_create_analysis_dir()
+    
     for i, ds in enumerate(datasets, start=1):
         anonymized_name = f"ds{i}"
-        results_file = method.results_dir / f"{ds}_occurrence_rates.json"
+        results_file = analysis_dir / f"{ds}_occurrence_rates.json"
         
         if not results_file.exists():
             continue
@@ -65,6 +69,14 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                 top_positive = normalize_token_list(top_positive, total_positions)
                 logger.info(f"Applied token normalization for {ds}: {len(results.get('top_positive', []))} -> {len(top_positive)} tokens")
             
+            # Limit to top_k_tokens if configured
+            original_count = len(top_positive)
+            top_k_tokens = cfg.get("top_k_tokens", None)
+            if top_k_tokens is not None:
+                top_k_tokens = int(top_k_tokens)
+                top_positive = top_positive[:top_k_tokens]
+                logger.info(f"Limited tokens for agent overview: {original_count} -> {len(top_positive)} tokens (top_k_tokens={top_k_tokens})")
+            
             out["datasets"][anonymized_name] = {
                 "top_positive_tokens": top_positive,
                 "total_positions": total_positions,
@@ -72,7 +84,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                 "metadata": {
                     "num_tokens_shown": len(top_positive),
                     "normalized": use_normalized,
-                    "note": "All available top-K positive tokens shown. These are tokens the finetuned model prefers over the base model."
+                    "note": f"Top {len(top_positive)} positive occurrence tokens shown (out of {original_count} available). These are tokens the finetuned model prefers over the base model."
                 }
             }
         except Exception as e:

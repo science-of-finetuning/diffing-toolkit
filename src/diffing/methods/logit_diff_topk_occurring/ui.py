@@ -41,13 +41,15 @@ def visualize(method):
 
 def _find_available_datasets(method) -> List[str]:
     """Find all available result files."""
-    results_files = list(method.results_dir.glob("*_occurrence_rates.json"))
+    analysis_dir = method.get_or_create_analysis_dir()
+    results_files = list(analysis_dir.glob("*_occurrence_rates.json"))
     return [f.stem.replace("_occurrence_rates", "") for f in results_files]
 
 
 def _load_results(method, dataset_name: str) -> Optional[Dict]:
     """Load results for a specific dataset."""
-    results_file = method.results_dir / f"{dataset_name}_occurrence_rates.json"
+    analysis_dir = method.get_or_create_analysis_dir()
+    results_file = analysis_dir / f"{dataset_name}_occurrence_rates.json"
     if not results_file.exists():
         return None
 
@@ -66,7 +68,8 @@ def _render_global_scatter_tab(method):
     selected_dataset = st.selectbox("Select Dataset", available_datasets, key="scatter_dataset_select")
     
     # Path to stats JSON
-    json_path = method.results_dir / f"{selected_dataset}_global_token_stats.json"
+    analysis_dir = method.get_or_create_analysis_dir()
+    json_path = analysis_dir / f"{selected_dataset}_global_token_stats.json"
     
     # Let errors propagate as requested (Streamlit handles exceptions gracefully in UI)
     fig = get_global_token_scatter_plotly(json_path)

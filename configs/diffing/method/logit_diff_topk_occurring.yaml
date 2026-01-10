@@ -6,15 +6,15 @@ requires_preprocessing: true
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   batch_size: 64 #16
-  max_samples: 100
-  max_tokens_per_sample: 3
+  max_samples: 300
+  max_tokens_per_sample: 6
   top_k: 100
   ignore_padding: true
 
 # Dataset configuration
 datasets:
-  use_chat_dataset: false
-  chat_dataset_variants: ["default", "ultrachat_200k"]
+  use_chat_dataset: true
+  chat_dataset_variants: ["default"]#["default", "ultrachat_200k"]
   use_pretraining_dataset: true
   pretraining_dataset_variants: ["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
   use_training_dataset: true
@@ -44,7 +44,7 @@ visualization:
 
 # Token relevance grading
 token_relevance:
-  enabled: false  # Set to true to enable token relevance grading
+  enabled: true  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -54,14 +54,14 @@ token_relevance:
     base_url: https://openrouter.ai/api/v1
     api_key_path: openrouter_api_key.txt
     max_tokens: 10000
-    permutations: 3  # Number of permutation runs for robustness
+    permutations: 2 #3  # Number of permutation runs for robustness
   
   # Frequent tokens baseline (matches ADL)
   frequent_tokens:
     num_tokens: 100
     min_count: 10
   
-  k_candidate_tokens: 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  k_candidate_tokens: 20 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
@@ -234,11 +234,11 @@ per_token_analysis:
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
   enabled: true
-  num_topics: 2
+  num_topics: 5
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
   orthogonal: true  # Enable orthogonal regularization for hard token-topic assignments
-  orthogonal_weight: 100.0  # Penalty strength for orthogonality constraint
+  orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
 
 # Positional KDE Analysis
 positional_kde:
@@ -254,4 +254,4 @@ global_token_statistics:
 agent:
   overview:
     datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
-    # Note: No top_k_tokens config - we always show ALL available tokens
+    top_k_tokens: 20  # Number of top positive tokens to show per dataset (from occurrence-ranked list)

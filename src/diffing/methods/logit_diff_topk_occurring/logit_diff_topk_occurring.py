@@ -152,6 +152,41 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         return folder_name
 
+    def get_or_create_analysis_dir(self) -> Path:
+        """
+        Get or create the analysis directory for results.
+        
+        This method:
+        1. Returns analysis_dir if already set (from run())
+        2. Otherwise, finds the most recent analysis folder in base_results_dir
+        3. If no analysis folders exist, creates a new one using _get_analysis_folder_name()
+        
+        Returns:
+            Path to the analysis directory
+        """
+        # If analysis_dir is already set (from run()), return it
+        if self.analysis_dir is not None:
+            return self.analysis_dir
+        
+        # Look for existing analysis folders
+        analysis_folders = sorted([
+            d for d in self.base_results_dir.iterdir()
+            if d.is_dir() and d.name.startswith("analysis_")
+        ], key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        if analysis_folders:
+            # Use the most recent analysis folder
+            self.analysis_dir = analysis_folders[0]
+            self.logger.info(f"Using existing analysis directory: {self.analysis_dir}")
+        else:
+            # Create a new analysis folder
+            analysis_folder_name = self._get_analysis_folder_name()
+            self.analysis_dir = self.base_results_dir / analysis_folder_name
+            self.analysis_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"Created new analysis directory: {self.analysis_dir}")
+        
+        return self.analysis_dir
+
     def setup_models(self):
         """Ensure models are loaded (they will auto-load via properties)."""
         # Access properties to trigger lazy loading
