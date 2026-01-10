@@ -529,7 +529,7 @@ def plot_shortlist_token_distribution(
     return filepath
 
 
-def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None, top_k_labels=20) -> None:
+def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None, top_k_labels=20, occurrence_rates_json_path: Path = None) -> None:
     """
     Generate a scatter plot of global token statistics.
     
@@ -538,6 +538,7 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
         output_dir: Directory to save the plot
         tokenizer: Optional tokenizer to decode token IDs for better labels
         top_k_labels: Number of top/bottom tokens to label (default: 20)
+        occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
     """
     if not json_path.exists():
         logger.warning(f"JSON file not found: {json_path}")
@@ -614,6 +615,36 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
     
     plt.colorbar(scatter, label="Combined Score (Positivity + Magnitude)")
     
+    # Highlight top-K tokens with black rings if occurrence_rates file is provided
+    if occurrence_rates_json_path is not None and occurrence_rates_json_path.exists():
+        with open(occurrence_rates_json_path, "r", encoding="utf-8") as f:
+            occ_data = json.load(f)
+        
+        # Extract top-K token IDs from both positive and negative lists
+        topk_token_ids = set()
+        for item in occ_data.get("top_positive", []):
+            topk_token_ids.add(item.get("token_id"))
+        for item in occ_data.get("top_negative", []):
+            topk_token_ids.add(item.get("token_id"))
+        
+        # Find indices of top-K tokens in our scatter data
+        topk_mask = np.isin(token_ids, list(topk_token_ids))
+        topk_indices = np.where(topk_mask)[0]
+        
+        if len(topk_indices) > 0:
+            # Add black rings around top-K tokens
+            plt.scatter(
+                x_coords[topk_indices],
+                y_coords[topk_indices],
+                s=30,  # Slightly larger than main scatter (s=10)
+                facecolors='none',
+                edgecolors='black',
+                linewidths=1.5,
+                alpha=1.0,
+                zorder=10  # Draw on top
+            )
+            logger.info(f"Highlighted {len(topk_indices)} top-K tokens with black rings")
+    
     plt.xlabel("Fraction of Positive Shifts")
     plt.ylabel("Average Logit Difference")
     plt.title(f"Global Token Dynamics: {dataset_name}\n(N={len(tokens)} tokens, {total_positions} positions)")
@@ -667,12 +698,13 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
     logger.info(f"Saved scatter plot to {output_path}")
 
 
-def get_global_token_scatter_plotly(json_path: Path) -> Any:
+def get_global_token_scatter_plotly(json_path: Path, occurrence_rates_json_path: Path = None) -> Any:
     """
     Generate an interactive Plotly scatter plot of global token statistics.
     
     Args:
         json_path: Path to the {dataset}_global_token_stats.json file
+        occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
         
     Returns:
         Plotly Figure object (plotly.graph_objects.Figure)
@@ -698,6 +730,7 @@ def get_global_token_scatter_plotly(json_path: Path) -> Any:
     records = []
     for item in stats:
         token_str = item.get("token", "")
+        token_id = item.get("token_id", -1)
         count_pos = item.get("count_nonnegative", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
         
@@ -706,6 +739,7 @@ def get_global_token_scatter_plotly(json_path: Path) -> Any:
         
         records.append({
             "Token": token_str,
+            "Token ID": token_id,
             "Fraction Positive": frac_pos,
             "Avg Logit Diff": avg_diff,
             "Count": count_pos
@@ -723,6 +757,25 @@ def get_global_token_scatter_plotly(json_path: Path) -> Any:
         
     df["Score"] = (df["Fraction Positive"] + y_norm) / 2
     
+    # Mark top-K tokens for highlighting if occurrence_rates file is provided
+    df["Is_TopK"] = False
+    if occurrence_rates_json_path is not None and occurrence_rates_json_path.exists():
+        with open(occurrence_rates_json_path, "r", encoding="utf-8") as f:
+            occ_data = json.load(f)
+        
+        # Extract top-K token IDs from both positive and negative lists
+        topk_token_ids = set()
+        for item in occ_data.get("top_positive", []):
+            topk_token_ids.add(item.get("token_id"))
+        for item in occ_data.get("top_negative", []):
+            topk_token_ids.add(item.get("token_id"))
+        
+        # Mark tokens as top-K
+        df["Is_TopK"] = df["Token ID"].isin(topk_token_ids)
+        num_topk = df["Is_TopK"].sum()
+        if num_topk > 0:
+            logger.info(f"Marked {num_topk} top-K tokens for highlighting in Plotly")
+    
     # Create Plotly Figure
     fig = px.scatter(
         df,
@@ -735,6 +788,17 @@ def get_global_token_scatter_plotly(json_path: Path) -> Any:
         range_color=[0, 1],
         render_mode="webgl" # Essential for performance with >10k points
     )
+    
+    # Add black borders to top-K tokens
+    if df["Is_TopK"].any():
+        fig.update_traces(
+            marker=dict(
+                line=dict(
+                    color=df["Is_TopK"].map({True: 'black', False: 'rgba(0,0,0,0)'}),
+                    width=df["Is_TopK"].map({True: 2, False: 0})
+                )
+            )
+        )
     
     fig.update_layout(
         xaxis_title="Fraction of Positive Shifts",

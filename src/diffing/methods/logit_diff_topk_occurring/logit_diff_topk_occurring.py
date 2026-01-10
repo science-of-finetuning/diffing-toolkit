@@ -617,19 +617,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             self.logger.info("Generating global token scatter plot...")
             json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
             
-            plot_global_token_scatter(
-                json_path, 
-                self.analysis_dir, 
-                tokenizer=self.tokenizer,
-                top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels)
-            )
-            
-            # Generate Interactive Plotly HTML
-            self.logger.info("Generating interactive global token scatter (HTML)...")
-            fig = get_global_token_scatter_plotly(json_path)
-            html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
-            fig.write_html(str(html_path))
-            self.logger.info(f"Saved interactive scatter plot to {html_path}")
+            # Note: Scatter plots will be generated later in run() after save_results()
+            # so that occurrence_rates.json is available for highlighting top-K tokens
 
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")
@@ -1379,6 +1368,27 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             if results is not None:
                 # Save results to disk
                 self.save_results(dataset_cfg.name, results)
+                
+                # Generate scatter plots (after save_results so occurrence_rates.json exists)
+                if self.method_cfg.global_token_statistics.enabled:
+                    self.logger.info("Generating global token scatter plot...")
+                    json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
+                    occurrence_rates_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.json"
+                    
+                    plot_global_token_scatter(
+                        json_path, 
+                        self.analysis_dir, 
+                        tokenizer=self.tokenizer,
+                        top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels),
+                        occurrence_rates_json_path=occurrence_rates_path
+                    )
+                    
+                    # Generate Interactive Plotly HTML
+                    self.logger.info("Generating interactive global token scatter (HTML)...")
+                    fig = get_global_token_scatter_plotly(json_path, occurrence_rates_json_path=occurrence_rates_path)
+                    html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
+                    fig.write_html(str(html_path))
+                    self.logger.info(f"Saved interactive scatter plot to {html_path}")
                 
                 # Generate and save occurrence plot (Red-Green Bar Chart)
                 self.logger.info("Generating occurrence rate plot...")

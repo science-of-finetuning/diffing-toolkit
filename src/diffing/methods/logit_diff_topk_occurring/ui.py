@@ -70,9 +70,10 @@ def _render_global_scatter_tab(method):
     # Path to stats JSON
     analysis_dir = method.get_or_create_analysis_dir()
     json_path = analysis_dir / f"{selected_dataset}_global_token_stats.json"
+    occurrence_rates_path = analysis_dir / f"{selected_dataset}_occurrence_rates.json"
     
     # Let errors propagate as requested (Streamlit handles exceptions gracefully in UI)
-    fig = get_global_token_scatter_plotly(json_path)
+    fig = get_global_token_scatter_plotly(json_path, occurrence_rates_json_path=occurrence_rates_path)
 
     # Search Bar Logic
     st.markdown("### 🔍 Token Search")
