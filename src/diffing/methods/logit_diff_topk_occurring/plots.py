@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
+from matplotlib.legend_handler import HandlerPatch
 import numpy as np
 import seaborn as sns
 import pandas as pd
@@ -384,6 +385,42 @@ def plot_per_position_occurrences(
     return saved_plots
 
 
+class TricolorRectangleHandler(HandlerPatch):
+    """
+    Custom legend handler that draws a tricolor rectangle (red-gray-green).
+    Used to represent the histogram's conditional coloring in the legend.
+    """
+    def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
+        # Create three rectangles side-by-side
+        # Red: 40% on left, Gray: 20% in middle, Green: 40% on right
+        
+        # Calculate widths
+        red_width = width * 0.4
+        gray_width = width * 0.2
+        green_width = width * 0.4
+        
+        # Create patches
+        red_rect = mpatches.Rectangle(
+            [xdescent, ydescent], red_width, height,
+            facecolor='tab:red', edgecolor='white', alpha=0.5,
+            transform=trans
+        )
+        
+        gray_rect = mpatches.Rectangle(
+            [xdescent + red_width, ydescent], gray_width, height,
+            facecolor='lightgray', edgecolor='white', alpha=0.5,
+            transform=trans
+        )
+        
+        green_rect = mpatches.Rectangle(
+            [xdescent + red_width + gray_width, ydescent], green_width, height,
+            facecolor='tab:green', edgecolor='white', alpha=0.5,
+            transform=trans
+        )
+        
+        return [red_rect, gray_rect, green_rect]
+
+
 def plot_shortlist_token_distribution(
     logit_diffs: Union[List[float], np.ndarray],
     token_str: str,
@@ -475,7 +512,10 @@ def plot_shortlist_token_distribution(
         title += "\n" + "\n".join(subtitle_lines)
         
     ax.set_title(title, fontsize=10)
-    ax.legend()
+    
+    # Use custom legend handler for the histogram to show tricolor (red-gray-green) icon
+    handler_map = {mpatches.Patch: TricolorRectangleHandler()}
+    ax.legend(handler_map=handler_map)
     ax.grid(True, alpha=0.3)
     
     # Save
