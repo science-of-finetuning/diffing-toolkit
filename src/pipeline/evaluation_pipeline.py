@@ -66,7 +66,7 @@ class EvaluationPipeline(Pipeline):
         relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
         config_suffix = f"_c{relevant_cfg_hash}" if relevant_cfg_hash else ""
         out_dir = (
-            Path(self.diffing_method.results_dir)
+            Path(self.diffing_method.analysis_dir)
             / "agent"
             / f"{name}_mi{model_interaction_budget}{hint_suffix}{config_suffix}_{run_suffix}"
         )

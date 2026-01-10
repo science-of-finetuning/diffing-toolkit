@@ -6,7 +6,7 @@ requires_preprocessing: true
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   batch_size: 64 #16
-  max_samples: 1000
+  max_samples: 100
   max_tokens_per_sample: 3
   top_k: 100
   ignore_padding: true

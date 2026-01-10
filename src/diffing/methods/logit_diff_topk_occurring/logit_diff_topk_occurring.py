@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import defaultdict
 from datasets import load_dataset, IterableDataset
+from datetime import datetime
 
 from ..diffing_method import DiffingMethod
 from src.utils.configs import get_dataset_configurations, DatasetConfig
@@ -91,15 +92,65 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if organism_variant != "default" and organism_variant:
              # Use a safe name format: {organism}_{variant}
              organism_path_name = f"{cfg.organism.name}_{organism_variant}"
-             
-        # Override results_dir to include the variant if needed
-        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring
-        self.results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / "logit_diff_topk_occurring"
-        self.results_dir.mkdir(parents=True, exist_ok=True)
         
-        # Subdirectory for saved tensors (logits, diffs, masks)
-        self.saved_tensors_dir = self.results_dir / "saved_tensors"
+        # Get sample and token counts for directory naming
+        max_samples = int(self.method_cfg.method_params.max_samples)
+        max_tokens_per_sample = int(self.method_cfg.method_params.max_tokens_per_sample)
+             
+        # Create base results directory with sample/token counts
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens
+        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens"
+        self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
+        self.base_results_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Subdirectory for saved tensors (logits, diffs, masks) - at base level
+        self.saved_tensors_dir = self.base_results_dir / "saved_tensors"
         self.saved_tensors_dir.mkdir(parents=True, exist_ok=True)
+        
+        # analysis_dir will be created in run() method with timestamp
+        self.analysis_dir = None
+
+    def _get_analysis_folder_name(self) -> str:
+        """
+        Generate analysis folder name with timestamp and configuration parameters.
+        
+        Format: analysis_{timestamp}_top{k}_normalized_{bool}{nmf_suffix}
+        Example: analysis_20260110_143045_top100_normalized_false_2topics_logit_diff_magnitude_beta2_orthogonal_weight_100p0
+        
+        Returns:
+            Folder name string
+        """
+        # Get timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Get config parameters
+        top_k = int(self.method_cfg.method_params.top_k)
+        use_normalized = bool(self.method_cfg.get("use_normalized_tokens", False))
+        normalized_str = "true" if use_normalized else "false"
+        
+        # Build NMF suffix if enabled
+        nmf_suffix = ""
+        if self.nmf_cfg and self.nmf_cfg.enabled:
+            num_topics = int(self.nmf_cfg.num_topics)
+            mode = str(self.nmf_cfg.mode)
+            beta = self.nmf_cfg.beta
+            
+            # Format beta (convert float to string, replace . with p if needed)
+            beta_str = str(beta).replace(".", "p") if "." in str(beta) else str(beta)
+            
+            # Build orthogonal suffix
+            orthogonal_suffix = ""
+            if bool(getattr(self.nmf_cfg, 'orthogonal', False)):
+                weight = getattr(self.nmf_cfg, 'orthogonal_weight', 1.0)
+                weight_str = str(weight).replace(".", "p")
+                orthogonal_suffix = f"_orthogonal_weight_{weight_str}"
+            
+            nmf_suffix = f"_{num_topics}topics_{mode}_beta{beta_str}{orthogonal_suffix}"
+        
+        # Combine all parts
+        folder_name = f"analysis_{timestamp}_top{top_k}_normalized_{normalized_str}{nmf_suffix}"
+        
+        return folder_name
 
     def setup_models(self):
         """Ensure models are loaded (they will auto-load via properties)."""
@@ -509,7 +560,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             plot_positional_kde(
                 position_logit_diffs,
                 dataset_cfg.name,
-                self.results_dir,
+                self.analysis_dir,
                 pos_kde_num_positions,
                 num_samples,
                 top_k
@@ -528,11 +579,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             # Generate scatter plot
             self.logger.info("Generating global token scatter plot...")
-            json_path = self.results_dir / f"{dataset_cfg.name}_global_token_stats.json"
+            json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
             
             plot_global_token_scatter(
                 json_path, 
-                self.results_dir, 
+                self.analysis_dir, 
                 tokenizer=self.tokenizer,
                 top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels)
             )
@@ -540,7 +591,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Generate Interactive Plotly HTML
             self.logger.info("Generating interactive global token scatter (HTML)...")
             fig = get_global_token_scatter_plotly(json_path)
-            html_path = self.results_dir / f"{dataset_cfg.name}_global_token_scatter.html"
+            html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
             fig.write_html(str(html_path))
             self.logger.info(f"Saved interactive scatter plot to {html_path}")
 
@@ -647,7 +698,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             num_samples: Number of samples processed
             total_positions: Total number of valid token positions processed
         """
-        output_file = self.results_dir / f"{dataset_name}_global_token_stats.json"
+        output_file = self.analysis_dir / f"{dataset_name}_global_token_stats.json"
         
         # Ensure CPU and python native types
         global_diff_sum = global_diff_sum.cpu()
@@ -858,7 +909,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "topics": topics_output
         }
         
-        output_file = self.results_dir / f"{dataset_name}_nmf_topics_analysis.json"
+        output_file = self.analysis_dir / f"{dataset_name}_nmf_topics_analysis.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(final_output, f, indent=2, ensure_ascii=False)
             
@@ -877,7 +928,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         Returns:
             Path to saved file
         """
-        output_file = self.results_dir / f"{dataset_name}_occurrence_rates.json"
+        output_file = self.analysis_dir / f"{dataset_name}_occurrence_rates.json"
 
         with open(output_file, "w") as f:
             json.dump(results, f, indent=2)
@@ -916,7 +967,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Saving per-token analysis for {dataset_name}...")
         
         # Create subdirectories for organized output
-        per_token_dir = self.results_dir / "per_token_analysis"
+        per_token_dir = self.analysis_dir / "per_token_analysis"
         data_dir = per_token_dir / "data"
         plots_dir = per_token_dir / "plots"
         
@@ -1022,7 +1073,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         self.logger.info(f"Saving and plotting co-occurrence data for {dataset_name}...")
         
-        per_token_dir = self.results_dir / "per_token_analysis"
+        per_token_dir = self.analysis_dir / "per_token_analysis"
         data_dir = per_token_dir / "data"
         plots_dir = per_token_dir / "plots"
         
@@ -1119,7 +1170,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Process each dataset
         for dataset_cfg in self.datasets:
             dataset_name = dataset_cfg.name
-            results_file = self.results_dir / f"{dataset_name}_occurrence_rates.json"
+            results_file = self.analysis_dir / f"{dataset_name}_occurrence_rates.json"
             
             if not results_file.exists():
                 logger.warning(f"No results found for {dataset_name}, skipping token relevance")
@@ -1143,7 +1194,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Output directory (matches ADL structure with layer_global/position_all)
             dataset_dir_name = dataset_cfg.id.split("/")[-1]
             out_dir = (
-                self.results_dir
+                self.analysis_dir
                 / "layer_global"
                 / dataset_dir_name
                 / "token_relevance"
@@ -1235,6 +1286,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("=" * 80)
         self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS")
         self.logger.info("=" * 80)
+        
+        # Create analysis directory with timestamp and config
+        analysis_folder_name = self._get_analysis_folder_name()
+        self.analysis_dir = self.base_results_dir / analysis_folder_name
+        self.analysis_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"Analysis results will be saved to: {self.analysis_dir}")
 
         # Define directories using new structure
         diffs_dir = self.saved_tensors_dir / "logit_diffs"
@@ -1300,7 +1357,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     figure_dpi=self.method_cfg.visualization.figure_dpi,
                     font_sizes=getattr(self.method_cfg.visualization, "font_sizes", None)
                 )
-                plot_path = self.results_dir / f"{dataset_cfg.name}_occurrence_rates.png"
+                plot_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.png"
                 fig.savefig(plot_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
                 plt.close(fig)
                 self.logger.info(f"Saved occurrence rate plot to {plot_path}")
@@ -1329,7 +1386,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("")
         self.logger.info("=" * 80)
         self.logger.info("✓ Logit diff top-K occurring analysis completed successfully!")
-        self.logger.info(f"✓ Results saved to: {self.results_dir}")
+        self.logger.info(f"✓ Results saved to: {self.analysis_dir}")
         self.logger.info("=" * 80)
         
         # Run token relevance grading if enabled
@@ -1344,15 +1401,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info("=" * 80)
         self.logger.info("LOGIT DIFF TOP-K OCCURRING: PREPROCESSING")
         self.logger.info("=" * 80)
-
-        # Check if results already exist (skip if overwrite=False)
-        if not self.method_cfg.overwrite:
-            existing_results = list(self.results_dir.glob("*_occurrence_rates.json"))
-            if len(existing_results) >= len(self.datasets):
-                self.logger.info(
-                    f"Results already exist in {self.results_dir}. Skipping generation."
-                )
-                return
 
         # Phase 0: Data Preparation (Tokenize all datasets)
         self.logger.info("PHASE 0: Data Preparation")
@@ -1543,9 +1591,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 # The organism_dir might now include the variant suffix, 
                 # but it is treated as the "organism name" in this map structure.
                 
-                method_dir = organism_dir / "logit_diff_topk_occurring"
-                if method_dir.exists() and list(method_dir.glob("*_occurrence_rates.json")):
-                    results[model_name][organism_name] = str(method_dir)
+                # Look for method directories with new naming pattern: logit_diff_topk_occurring_{samples}samples_{tokens}tokens
+                for method_dir in organism_dir.iterdir():
+                    if method_dir.is_dir() and method_dir.name.startswith("logit_diff_topk_occurring"):
+                        # Check if there are any analysis folders with occurrence_rates.json files
+                        analysis_folders = [d for d in method_dir.iterdir() if d.is_dir() and d.name.startswith("analysis_")]
+                        for analysis_folder in analysis_folders:
+                            if list(analysis_folder.glob("*_occurrence_rates.json")):
+                                # Store the analysis folder path
+                                results[model_name][organism_name] = str(analysis_folder)
+                                break  # Take the first matching analysis folder
 
         return results
 
