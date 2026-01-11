@@ -16,7 +16,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from src.diffing.methods.amplification.amplification_dashboard import (
+    from diffing.methods.amplification.amplification_dashboard import (
         AmplificationDashboard,
     )
 

@@ -24,8 +24,8 @@ from sentence_transformers import SentenceTransformer
 from typing import Optional
 from scipy.stats import wilcoxon
 
-from src.utils.interactive import load_hydra_config
-from src.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.interactive import load_hydra_config
+from diffing.utils.data import load_dataset_from_hub_or_local
 import scienceplots
 
 plt.style.use("science")

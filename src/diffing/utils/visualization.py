@@ -20,13 +20,13 @@ from tiny_dashboard.html_utils import (
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from numpy import array
 
-from src.utils.model import (
+from diffing.utils.model import (
     load_tokenizer_from_config,
     logit_lens,
     patchscope_lens,
 )
-from src.utils.configs import ModelConfig
-from src.diffing.methods.diffing_method import DiffingMethod
+from diffing.utils.configs import ModelConfig
+from diffing.methods.diffing_method import DiffingMethod
 
 
 def query_tokens_in_distribution(

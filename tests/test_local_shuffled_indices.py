@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 
-from src.utils.activations import get_local_shuffled_indices
+from diffing.utils.activations import get_local_shuffled_indices
 
 
 class TestGetLocalShuffledIndices:

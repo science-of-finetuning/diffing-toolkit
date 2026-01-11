@@ -14,9 +14,9 @@ from hydra.core.hydra_config import HydraConfig
 import json
 
 
-from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
-from src.utils.activations import get_layer_indices
-from src.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.graders.token_relevance_grader import TokenRelevanceGrader
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.data import load_dataset_from_hub_or_local
 
 
 COMMON_WORDS = {

@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 import streamlit as st
 import numpy as np
-from src.utils.visualization import (
+from diffing.utils.visualization import (
     filter_examples_by_search,
     create_examples_html,
     render_streamlit_html,

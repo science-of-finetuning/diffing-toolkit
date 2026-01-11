@@ -9,15 +9,14 @@ from vllm import LLM
 from nnterp import StandardizedTransformer
 
 
-from src.utils.model import (
+from diffing.utils.model import (
     load_model_from_config,
     gc_collect_cuda_cache,
     AnyTokenizer,
 )
-from src.utils.configs import get_model_configurations
-from src.utils.agents.base_agent import BaseAgent
-from src.utils.agents.blackbox_agent import BlackboxAgent
-from src.utils.agents.diffing_method_agent import DiffingMethodAgent
+from diffing.utils.configs import get_model_configurations
+from diffing.utils.agents.blackbox_agent import BlackboxAgent
+from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 
 
 class DiffingMethod(ABC):

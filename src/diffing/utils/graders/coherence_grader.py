@@ -4,7 +4,7 @@ from typing import List, Tuple, Literal
 import asyncio
 import re
 
-from src.utils.graders.grader import Grader
+from diffing.utils.graders.grader import Grader
 
 
 SYSTEM_PROMPT = """Your job is to evaluate the coherence of the content produced by a different language model.

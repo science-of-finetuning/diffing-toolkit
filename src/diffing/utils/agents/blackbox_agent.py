@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Callable
 from loguru import logger
 import torch
-from src.utils.model import has_thinking
+from diffing.utils.model import has_thinking
 
-from src.utils.agents.base_agent import BaseAgent
+from diffing.utils.agents.base_agent import BaseAgent
 from .prompts import POST_OVERVIEW_PROMPT
 
 TOOL_DESCRIPTIONS = """

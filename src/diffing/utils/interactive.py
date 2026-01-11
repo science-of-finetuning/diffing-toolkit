@@ -7,9 +7,9 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 
-from src.utils.configs import get_model_configurations, get_dataset_configurations
-from src.utils.model import load_model_from_config
-from src.utils.activations import (
+from diffing.utils.configs import get_model_configurations, get_dataset_configurations
+from diffing.utils.model import load_model_from_config
+from diffing.utils.activations import (
     get_layer_indices,
     load_activation_datasets_from_config,
 )
@@ -28,7 +28,7 @@ def load_hydra_config(config_path: str, *overrides) -> DictConfig:
     """
     config_path = (
         Path("../..") / config_path
-    )  # as we're in src.utils, we need to go up two levels to get to the root
+    )  # as we're in diffing.utils, we need to go up two levels to get to the root
     with initialize(config_path=str(config_path.parent), version_base=None):
         cfg = compose(config_name=Path(config_path).stem, overrides=overrides)
 

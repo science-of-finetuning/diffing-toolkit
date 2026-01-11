@@ -11,9 +11,9 @@ from omegaconf import DictConfig
 from nnterp import StandardizedTransformer
 
 
-from src.diffing.methods.diffing_method import DiffingMethod
-from src.utils.activations import get_layer_indices
-from src.utils.model import logit_lens
+from diffing.methods.diffing_method import DiffingMethod
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.model import logit_lens
 from .auto_patch_scope import save_auto_patch_scope_variants
 from .ui import visualize
 from .steering import run_steering
@@ -21,7 +21,7 @@ from .token_relevance import run_token_relevance
 from .util import norms_path, is_layer_complete
 from .causal_effect import run_causal_effect
 from .agents import ADLAgent, ADLBlackboxAgent
-from src.utils.agents.base_agent import BaseAgent
+from diffing.utils.agents.base_agent import BaseAgent
 
 
 def load_and_tokenize_dataset(

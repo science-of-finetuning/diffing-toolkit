@@ -13,7 +13,7 @@ import tempfile
 
 from dictionary_learning.dictionary import BatchTopKSAE, CrossCoder, BatchTopKCrossCoder
 
-from src.utils.configs import HF_NAME
+from diffing.utils.configs import HF_NAME
 
 dfs = defaultdict(lambda: None)
 
