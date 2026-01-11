@@ -61,6 +61,10 @@ class MockSampleCache:
         self.sequences_data = sequences_data
         self.activation_dim = activation_dim
         self.device = device
+        # Build cumulative sequence start indices
+        self.sample_start_indices = [0]
+        for _, seq_length in sequences_data:
+            self.sample_start_indices.append(self.sample_start_indices[-1] + seq_length)
 
     def __len__(self):
         return len(self.sequences_data)
