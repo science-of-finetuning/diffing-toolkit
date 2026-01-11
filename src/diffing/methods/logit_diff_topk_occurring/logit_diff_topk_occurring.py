@@ -216,6 +216,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         max_samples = int(self.method_cfg.method_params.max_samples)
         max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
         
+        # Get debug_print_samples from config (None by default)
+        debug_print_samples = getattr(self.method_cfg, "debug_print_samples", None)
+        
         # Tokenize entire dataset using ADL functions
         if dataset_cfg.is_chat:
             self.logger.info("Using ADL's load_and_tokenize_chat_dataset()")
@@ -227,6 +230,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 n=max_tokens,
                 pre_assistant_k=0,
                 max_samples=max_samples,
+                debug_print_samples=debug_print_samples,
             )
             all_token_ids = [sample["input_ids"] for sample in samples]
         else:
@@ -239,7 +243,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 n=max_tokens,
                 max_samples=max_samples,
                 subset=dataset_cfg.subset,
-                streaming=True
+                streaming=True,
+                debug_print_samples=debug_print_samples,
             )
 
         if not all_token_ids:

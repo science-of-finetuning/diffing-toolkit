@@ -34,6 +34,7 @@ def load_and_tokenize_dataset(
     debug: bool = False,
     subset: str = None,
     streaming: bool = False,
+    debug_print_samples: int = None,
 ) -> List[List[int]]:
     """
     Load HuggingFace dataset and tokenize sequences with n-character cutoff.
@@ -48,6 +49,7 @@ def load_and_tokenize_dataset(
         debug: Whether to use fewer samples
         subset: Specific configuration name of the dataset (e.g. "ja" for CulturaX)
         streaming: Whether to stream the dataset
+        debug_print_samples: If set, print the first N text samples for debugging
 
     Returns:
         List of lists, where each inner list contains exactly n token IDs
@@ -83,6 +85,10 @@ def load_and_tokenize_dataset(
         text = sample[text_column]
         if not text or len(text.strip()) == 0:
             continue
+
+        # Debug: print first N samples if requested
+        if debug_print_samples and processed < debug_print_samples:
+            logger.info(f"[DEBUG Sample {processed}] {text[:300]}...")
 
         # Cut off at n*10 characters to speed up tokenization
         text_truncated = text[: n * 10]
@@ -128,8 +134,12 @@ def load_and_tokenize_chat_dataset(
     max_samples: int,
     debug: bool = False,
     max_user_tokens: int = 512,
+    debug_print_samples: int = None,
 ) -> List[Dict[str, Any]]:
     """Load a chat dataset and prepare samples around assistant start.
+
+    Args:
+        debug_print_samples: If set, print the first N text samples for debugging
 
     Returns list of dicts with keys: input_ids (List[int]), position_labels (List[int]), positions (List[int]).
     """
@@ -149,6 +159,12 @@ def load_and_tokenize_chat_dataset(
         if messages[0]["role"] != "user":
             continue
         assert messages[1]["role"] == "assistant"
+
+        # Debug: print first N samples if requested
+        if debug_print_samples and processed < debug_print_samples:
+            user_text = messages[0]["content"][:150]
+            assistant_text = messages[1]["content"][:150]
+            logger.info(f"[DEBUG Sample {processed}] User: {user_text}... | Assistant: {assistant_text}...")
 
         # Truncate assistant content to 10 * n characters to speed up tokenization
         trunc_messages = [
@@ -714,6 +730,9 @@ class ActDiffLens(DiffingMethod):
                 "aps_tasks_for_dataset": aps_tasks_for_dataset,
             }
 
+        # Get debug_print_samples from config (None by default)
+        debug_print_samples = getattr(self.cfg.diffing.method, "debug_print_samples", None)
+
         if is_chat:
             pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
             assert "messages_column" in dataset_entry
@@ -725,6 +744,7 @@ class ActDiffLens(DiffingMethod):
                 n=self.cfg.diffing.method.n,
                 pre_assistant_k=pre_k,
                 max_samples=self.cfg.diffing.method.max_samples,
+                debug_print_samples=debug_print_samples,
             )
 
             base_acts = extract_selected_positions_activations(
@@ -757,6 +777,7 @@ class ActDiffLens(DiffingMethod):
                 max_samples=self.cfg.diffing.method.max_samples,
                 subset=dataset_entry.get("subset", None),
                 streaming=dataset_entry.get("streaming", False),
+                debug_print_samples=debug_print_samples,
             )
             base_acts = extract_first_n_tokens_activations(
                 self.base_model,
