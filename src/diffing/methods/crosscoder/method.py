@@ -25,7 +25,7 @@ import base64
 import pandas as pd
 import streamlit as st
 
-from .diffing_method import DiffingMethod
+from ..diffing_method import DiffingMethod
 from diffing.utils.activations import get_layer_indices
 from diffing.utils.dictionary.analysis import (
     build_push_crosscoder_latent_df,
@@ -209,7 +209,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
 
     def visualize(self) -> None:
         """Create Streamlit visualization for CrossCoder results."""
-        from .crosscoder_dashboard import visualize
+        from .dashboard import visualize
 
         visualize(self)
 

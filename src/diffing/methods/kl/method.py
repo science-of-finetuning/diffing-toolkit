@@ -18,7 +18,7 @@ from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 import streamlit as st
 
-from .diffing_method import DiffingMethod
+from ..diffing_method import DiffingMethod
 from diffing.utils.configs import get_dataset_configurations, DatasetConfig
 from diffing.utils.activations import (
     get_layer_indices,
@@ -532,7 +532,7 @@ class KLDivergenceDiffingMethod(DiffingMethod):
 
     def visualize(self) -> None:
         """Create Streamlit visualization for KL divergence results."""
-        from .kl_dashboard import visualize
+        from .dashboard import visualize
 
         visualize(self)
 

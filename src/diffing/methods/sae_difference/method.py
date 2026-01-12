@@ -22,7 +22,7 @@ from loguru import logger
 import json
 from collections import defaultdict
 
-from .diffing_method import DiffingMethod
+from ..diffing_method import DiffingMethod
 from diffing.utils.activations import get_layer_indices
 from diffing.utils.dictionary.analysis import (
     build_push_sae_difference_latent_df,
@@ -211,7 +211,7 @@ class SAEDifferenceMethod(DiffingMethod):
 
     def visualize(self) -> None:
         """Create Streamlit visualization for SAE difference results."""
-        from .sae_difference_dashboard import visualize
+        from .dashboard import visualize
 
         visualize(self)
 
