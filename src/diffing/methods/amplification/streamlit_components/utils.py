@@ -5,7 +5,7 @@ import streamlit as st
 from copy import deepcopy
 from vllm import SamplingParams
 
-from src.utils.model import get_adapter_rank
+from diffing.utils.model import get_adapter_rank
 
 
 def sanitize_config_name(name: str) -> str:

@@ -6,7 +6,7 @@ from typing import Dict, Any
 import torch
 import streamlit as st
 
-from src.utils.dashboards import SteeringDashboard
+from diffing.utils.dashboards import SteeringDashboard
 
 
 class ActivationAnalysisSteeringDashboard(SteeringDashboard):

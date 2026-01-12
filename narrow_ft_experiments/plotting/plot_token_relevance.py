@@ -14,8 +14,8 @@ from typing import Optional
 import torch
 from functools import lru_cache
 
-from src.utils.interactive import load_hydra_config
-import src.diffing.methods.activation_difference_lens.token_relevance as tr
+from diffing.utils.interactive import load_hydra_config
+import diffing.methods.activation_difference_lens.token_relevance as tr
 
 try:
     import scienceplots as _scienceplots  # type: ignore[import-not-found]

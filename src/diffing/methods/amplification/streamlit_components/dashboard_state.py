@@ -23,7 +23,7 @@ from src.utils.configs import ModelConfig
 
 from ..amplification_config import AmplificationConfig
 from .utils import get_unique_name, get_unique_config_name, sanitize_config_name
-from src.utils.data import dump_yaml_multiline, codenamize_hash
+from diffing.utils.data import dump_yaml_multiline, codenamize_hash
 import streamlit as st
 
 logger = logging.getLogger(__name__)

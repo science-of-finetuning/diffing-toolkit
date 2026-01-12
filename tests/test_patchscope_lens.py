@@ -1,7 +1,9 @@
 import pytest
 import torch as th
-from src.utils.model import patchscope_lens, load_tokenizer
+from diffing.utils.model import patchscope_lens, load_tokenizer
 from nnterp import StandardizedTransformer
+
+pytestmark = pytest.mark.skipif(not th.cuda.is_available(), reason="CUDA not available")
 
 
 @pytest.fixture

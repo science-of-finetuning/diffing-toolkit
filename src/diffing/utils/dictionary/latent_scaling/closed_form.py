@@ -12,8 +12,10 @@ import pandas as pd
 from functools import partial
 from dictionary_learning import BatchTopKCrossCoder, BatchTopKSAE, CrossCoder
 from dictionary_learning.dictionary import Dictionary
+from dictionary_learning.cache import ActivationCache
 
-from src.utils.dictionary.latent_scaling.utils import (
+
+from diffing.utils.dictionary.latent_scaling.utils import (
     identity_fn,
     load_base_activation,
     load_ft_activation,
@@ -27,8 +29,11 @@ from src.utils.dictionary.latent_scaling.utils import (
     betas_exist,
 )
 
-from src.utils.dictionary.training import setup_training_datasets, skip_first_n_tokens
-from src.utils.dictionary.utils import load_dictionary_model, load_latent_df
+from diffing.utils.dictionary.training import (
+    setup_training_datasets,
+    skip_first_n_tokens,
+)
+from diffing.utils.dictionary.utils import load_dictionary_model, load_latent_df
 
 
 @th.no_grad()
@@ -402,7 +407,7 @@ def compute_scalers_from_config(
 
 
 def compute_scalers(
-    dataset: "ActivationCache",
+    dataset: ActivationCache,
     dictionary_model: str,
     results_dir: Path = Path("./results"),
     latent_indices: th.Tensor | None = None,
@@ -681,9 +686,9 @@ def compute_scalers(
         if threshold_active_latents is not None:
             exp_name += f"_jumprelu{threshold_active_latents}"
         if random_vectors:
-            exp_name += f"_random_vectors"
+            exp_name += "_random_vectors"
         if random_indices:
-            exp_name += f"_random_indices"
+            exp_name += "_random_indices"
         if name:
             exp_name += f"_{name}"
         logger.info(f"Computing {exp_name}")

@@ -11,8 +11,8 @@ from loguru import logger
 from nnterp import StandardizedTransformer
 from tqdm import tqdm
 
-from src.utils.activations import get_layer_indices
-from src.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.data import load_dataset_from_hub_or_local
 
 from .util import dataset_dir_name, load_position_mean_vector
 

@@ -32,15 +32,15 @@ from typing import List
 import streamlit as st
 from streamlit_tags import st_tags
 
-from src.utils.configs import (
+from diffing.utils.configs import (
     PROJECT_ROOT,
 )
-from src.utils.vllm import (
+from diffing.utils.vllm import (
     LLM,
     cleanup_dist_env_and_memory,
     kill_vllm_process,
 )
-from src.utils.model import load_model_from_config
+from diffing.utils.model import load_model_from_config
 from .amplification_config import patch_vllm
 from .streamlit_components.dashboard_state import (
     ManagedConfig,
