@@ -20,6 +20,7 @@ import streamlit as st
 from vllm import SamplingParams
 
 from diffing.utils.data import dump_yaml_multiline, codenamize_hash
+from diffing.utils.configs import ModelConfig
 
 # Re-export from managed.py for backward compatibility
 from ..managed import (
@@ -27,7 +28,6 @@ from ..managed import (
     ManagedConfig,
     ManagedPrompt,
     ManagedConversation,
-    sanitize_config_name,
     get_unique_name,
     get_unique_item_name,
 )
