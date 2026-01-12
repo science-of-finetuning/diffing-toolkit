@@ -1130,6 +1130,64 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         self.logger.info(f"✓ Co-occurrence analysis complete for {dataset_name}")
 
+    def _generate_selected_tokens_table(
+        self,
+        dataset_name: str,
+        dataset_id: str,
+        top_positive: List[Dict[str, Any]],
+        relevance_labels: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Generate and save the selected tokens table visualization.
+        
+        Args:
+            dataset_name: Name of the dataset for the title
+            dataset_id: Dataset ID (used to construct relevance path if labels not provided)
+            top_positive: List of token dicts with 'token_str' and 'positive_occurrence_rate'
+            relevance_labels: Optional list of 'RELEVANT'/'IRRELEVANT' labels. If None,
+                              will attempt to load from disk.
+        """
+        self.logger.info("Generating selected tokens table...")
+        
+        # Determine number of tokens to show
+        top_k = int(self.method_cfg.method_params.top_k)
+        k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
+        num_tokens_to_show = min(top_k, k_candidate)
+        
+        # If relevance labels not provided, try to load from disk
+        if relevance_labels is None and self.method_cfg.token_relevance.enabled:
+            relevance_path = (
+                self.analysis_dir
+                / "layer_global"
+                / dataset_id.split("/")[-1]
+                / "token_relevance"
+                / "position_all"
+                / "difference"
+                / "relevance_logit_diff.json"
+            )
+            if relevance_path.exists():
+                with open(relevance_path, "r") as f:
+                    relevance_data = json.load(f)
+                    relevance_labels = relevance_data.get("labels", None)
+                    self.logger.info(f"Loaded {len(relevance_labels)} relevance labels")
+        
+        fig = plot_selected_tokens_table(
+            top_positive=top_positive,
+            dataset_name=dataset_name,
+            relevance_labels=relevance_labels,
+            num_tokens=num_tokens_to_show,
+            figure_width=self.method_cfg.visualization.figure_width * 0.45,
+            figure_height=self.method_cfg.visualization.figure_height * 1.2,
+            figure_dpi=self.method_cfg.visualization.figure_dpi,
+        )
+        
+        # Determine filename suffix based on whether relevance labels are available
+        suffix = "_with_relevance" if relevance_labels is not None else "_no_relevance"
+        table_path = self.analysis_dir / f"{dataset_name}_selected_tokens{suffix}.png"
+        fig.savefig(table_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
+        plt.close(fig)
+        self.logger.info(f"Saved selected tokens table to {table_path}")
+
     def run_token_relevance(self) -> None:
         """Grade top-K positive tokens for relevance to finetuning domain."""
         cfg = self.method_cfg.token_relevance
@@ -1301,6 +1359,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
             logger.info(f"✓ Token relevance saved: {rel_path}")
             logger.info(f"  Relevance: {relevant_fraction*100:.1f}%, Weighted: {weighted_percentage*100:.1f}%")
+            
+            # Regenerate table with relevance coloring
+            self._generate_selected_tokens_table(
+                dataset_name=dataset_name,
+                dataset_id=dataset_cfg.id,
+                top_positive=top_positive,
+                relevance_labels=final_labels,
+            )
         
         logger.info("")
         logger.info("=" * 80)
@@ -1414,47 +1480,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 self.logger.info(f"Saved occurrence rate plot to {plot_path}")
 
                 # Generate and save selected tokens table
-                self.logger.info("Generating selected tokens table...")
-                
-                # Determine number of tokens to show
-                top_k = int(self.method_cfg.method_params.top_k)
-                k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
-                num_tokens_to_show = min(top_k, k_candidate)
-                
-                # Load relevance labels if available
-                relevance_labels = None
-                if self.method_cfg.token_relevance.enabled:
-                    relevance_path = (
-                        self.analysis_dir
-                        / "layer_global"
-                        / dataset_cfg.id.split("/")[-1]
-                        / "token_relevance"
-                        / "position_all"
-                        / "difference"
-                        / "relevance_logit_diff.json"
-                    )
-                    if relevance_path.exists():
-                        with open(relevance_path, "r") as f:
-                            relevance_data = json.load(f)
-                            relevance_labels = relevance_data.get("labels", None)
-                            self.logger.info(f"Loaded {len(relevance_labels)} relevance labels")
-                
-                fig = plot_selected_tokens_table(
-                    top_positive=results["top_positive"],
+                self._generate_selected_tokens_table(
                     dataset_name=dataset_cfg.name,
-                    relevance_labels=relevance_labels,
-                    num_tokens=num_tokens_to_show,
-                    figure_width=self.method_cfg.visualization.figure_width * 0.45,
-                    figure_height=self.method_cfg.visualization.figure_height * 1.2,
-                    figure_dpi=self.method_cfg.visualization.figure_dpi,
+                    dataset_id=dataset_cfg.id,
+                    top_positive=results["top_positive"],
                 )
-                # Determine filename suffix based on whether relevance labels are available
-                suffix = "_with_relevance" if relevance_labels is not None else "_no_relevance"
-                table_path = self.analysis_dir / f"{dataset_cfg.name}_selected_tokens{suffix}.png"
-                fig.savefig(table_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
-                plt.close(fig)
-                self.logger.info(f"Saved selected tokens table to {table_path}")
-
 
                 # Save and plot per-token analysis if enabled
                 if "_per_token_data" in results:

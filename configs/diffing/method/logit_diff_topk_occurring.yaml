@@ -9,8 +9,8 @@ debug_print_samples: 3
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   batch_size: 64 #16
-  max_samples: 100
-  max_tokens_per_sample: 3
+  max_samples: 1000
+  max_tokens_per_sample: 6
   top_k: 100
   ignore_padding: true
 
@@ -47,7 +47,7 @@ visualization:
 
 # Token relevance grading
 token_relevance:
-  enabled: true  # Set to true to enable token relevance grading
+  enabled: false  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -236,8 +236,8 @@ per_token_analysis:
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
-  enabled: false
-  num_topics: 5
+  enabled: true
+  num_topics: 2
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
   orthogonal: true  # Enable orthogonal regularization for hard token-topic assignments
@@ -250,7 +250,7 @@ positional_kde:
 
 # Global Token Statistics (Entire Vocabulary)
 global_token_statistics:
-  enabled: false
+  enabled: true
   top_k_plotting_labels: 60
 
 # Agent configuration

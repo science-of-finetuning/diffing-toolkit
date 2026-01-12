@@ -15,6 +15,7 @@ Environment Setup:
 import subprocess
 import os
 import json
+import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
@@ -50,10 +51,10 @@ TOKEN_RELEVANCE_CONFIG = {
     "grader.base_url": "https://openrouter.ai/api/v1",
     "grader.api_key_path": "openrouter_api_key.txt",
     "grader.max_tokens": 10000,
-    "grader.permutations": 2,
+    "grader.permutations": 3,
     "frequent_tokens.num_tokens": 100,
     "frequent_tokens.min_count": 10,
-    "k_candidate_tokens": 20,
+    "k_candidate_tokens": 50,
 }
 
 # Datasets to use
@@ -80,7 +81,7 @@ TOKEN_RELEVANCE_SOURCES = ["logitlens"]  # Only logitlens for now (no patchscope
 # Paths
 DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
 RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
-OUTPUT_DIR = Path("/workspace/logit_diff_experiments/mix_ratio_experiments")
+OUTPUT_DIR = Path("/workspace/diffing-toolkit/logit_diff_experiments/mix_ratio_experiments")
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -277,59 +278,70 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
     return results
 
 
-def extract_relevance_percentage(json_files: List[Path]) -> Optional[float]:
-    """Extract average relevance percentage from JSON files."""
+def extract_relevance_percentages(json_files: List[Path]) -> Tuple[Optional[float], Optional[float]]:
+    """Extract average percentage and weighted_percentage from JSON files.
+    
+    Returns:
+        Tuple of (avg_percentage, avg_weighted_percentage)
+    """
     if not json_files:
-        return None
+        return None, None
     
     percentages = []
+    weighted_percentages = []
+    
     for json_file in json_files:
         try:
             with open(json_file, 'r') as f:
                 data = json.load(f)
-                # Use 'percentage' field (fraction of tokens graded RELEVANT)
                 if 'percentage' in data:
                     percentages.append(data['percentage'])
-                elif 'weighted_percentage' in data:
-                    percentages.append(data['weighted_percentage'])
+                if 'weighted_percentage' in data:
+                    weighted_percentages.append(data['weighted_percentage'])
         except Exception as e:
             print(f"[WARNING] Could not read {json_file}: {e}")
     
-    if percentages:
-        return sum(percentages) / len(percentages)
-    return None
+    avg_pct = sum(percentages) / len(percentages) if percentages else None
+    avg_wpct = sum(weighted_percentages) / len(weighted_percentages) if weighted_percentages else None
+    return avg_pct, avg_wpct
 
 
-def collect_results() -> Dict[str, Dict[str, Dict[str, float]]]:
+def collect_results() -> Dict[str, Dict[str, Dict[str, Dict[str, float]]]]:
     """
     Collect token relevance results for all experiments.
     
     Returns:
-        Dict[dataset][method][mix_ratio] = percentage
+        Dict[dataset][method][mix_ratio] = {"percentage": X, "weighted_percentage": Y}
     """
-    results: Dict[str, Dict[str, Dict[str, float]]] = {}
+    results: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
     
     for method in METHODS:
         for mix_ratio in MIX_RATIOS:
             files_by_dataset = find_token_relevance_files(method, mix_ratio)
             
             for dataset_key, files in files_by_dataset.items():
-                percentage = extract_relevance_percentage(files)
+                pct, wpct = extract_relevance_percentages(files)
                 
-                if percentage is not None:
+                if pct is not None or wpct is not None:
                     if dataset_key not in results:
                         results[dataset_key] = {}
                     if method not in results[dataset_key]:
                         results[dataset_key][method] = {}
-                    results[dataset_key][method][mix_ratio] = percentage
                     
-                    print(f"Found: {method} / {mix_ratio} / {dataset_key}: {percentage:.2%}")
+                    results[dataset_key][method][mix_ratio] = {
+                        "percentage": pct,
+                        "weighted_percentage": wpct,
+                    }
+                    
+                    pct_str = f"{pct:.2%}" if pct is not None else "N/A"
+                    wpct_str = f"{wpct:.2%}" if wpct is not None else "N/A"
+                    print(f"Found: {method} / {mix_ratio} / {dataset_key}: pct={pct_str}, wpct={wpct_str}")
     
     return results
 
 
-def plot_results(results: Dict[str, Dict[str, Dict[str, float]]]):
-    """Create comparison plots for each dataset."""
+def plot_results(results: Dict[str, Dict[str, Dict[str, Dict[str, float]]]]):
+    """Create comparison plots for each dataset (separate plots for unweighted and weighted)."""
     print("\n" + "="*80)
     print("PHASE 3: PLOTTING")
     print("="*80)
@@ -363,42 +375,55 @@ def plot_results(results: Dict[str, Dict[str, Dict[str, float]]]):
         "activation_difference_lens": "#3498db",  # Blue
     }
     
+    # Metric types to plot
+    metric_configs = [
+        ("percentage", "Token Relevance (Unweighted)", "token_relevance"),
+        ("weighted_percentage", "Token Relevance (Weighted)", "token_relevance_weighted"),
+    ]
+    
     for dataset_key, method_data in results.items():
-        plt.figure(figsize=(10, 6))
-        
-        for method, ratio_data in method_data.items():
-            x_vals = []
-            y_vals = []
-            
-            for mix_ratio in MIX_RATIOS:
-                if mix_ratio in ratio_data:
-                    x_vals.append(mix_ratio_values.get(mix_ratio, 0))
-                    y_vals.append(ratio_data[mix_ratio] * 100)  # Convert to percentage
-            
-            if x_vals and y_vals:
-                plt.plot(
-                    x_vals, y_vals,
-                    marker='o',
-                    markersize=8,
-                    linewidth=2,
-                    label=method_labels.get(method, method),
-                    color=method_colors.get(method, None),
-                )
-        
-        plt.xlabel("Mix Ratio (1:X)", fontsize=12)
-        plt.ylabel("Token Relevance (%)", fontsize=12)
-        plt.title(f"Token Relevance vs Mix Ratio\nDataset: {dataset_key}", fontsize=14)
-        plt.legend(loc='best', fontsize=10)
-        plt.grid(True, alpha=0.3)
-        plt.ylim(0, 100)
-        
-        # Save plot
         safe_dataset_name = dataset_key.replace("/", "_").replace(" ", "_")
-        output_path = OUTPUT_DIR / f"token_relevance_{safe_dataset_name}.png"
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close()
         
-        print(f"Saved plot: {output_path}")
+        for metric_key, metric_title, filename_prefix in metric_configs:
+            plt.figure(figsize=(10, 6))
+            has_data = False
+            
+            for method, ratio_data in method_data.items():
+                x_vals = []
+                y_vals = []
+                
+                for mix_ratio in MIX_RATIOS:
+                    if mix_ratio in ratio_data:
+                        value = ratio_data[mix_ratio].get(metric_key)
+                        if value is not None:
+                            x_vals.append(mix_ratio_values.get(mix_ratio, 0))
+                            y_vals.append(value * 100)  # Convert to percentage
+                
+                if x_vals and y_vals:
+                    has_data = True
+                    plt.plot(
+                        x_vals, y_vals,
+                        marker='o',
+                        markersize=8,
+                        linewidth=2,
+                        label=method_labels.get(method, method),
+                        color=method_colors.get(method, None),
+                    )
+            
+            if has_data:
+                plt.xlabel("Mix Ratio (1:X)", fontsize=12)
+                plt.ylabel(f"{metric_title} (%)", fontsize=12)
+                plt.title(f"{metric_title} vs Mix Ratio\nDataset: {dataset_key}", fontsize=14)
+                plt.legend(loc='best', fontsize=10)
+                plt.grid(True, alpha=0.3)
+                plt.ylim(0, 100)
+                
+                # Save plot
+                output_path = OUTPUT_DIR / f"{filename_prefix}_{safe_dataset_name}.png"
+                plt.savefig(output_path, dpi=150, bbox_inches='tight')
+                print(f"Saved plot: {output_path}")
+            
+            plt.close()
     
     # Also save raw results as JSON
     results_json_path = OUTPUT_DIR / "results.json"
@@ -412,9 +437,19 @@ def plot_results(results: Dict[str, Dict[str, Dict[str, float]]]):
 # =============================================================================
 
 def main():
+    parser = argparse.ArgumentParser(description="Mix Ratio Experiment Script")
+    parser.add_argument(
+        "--mode", 
+        choices=["full", "plotting"], 
+        default="full",
+        help="'full' runs all phases (preprocessing, diffing, plotting); 'plotting' skips to plotting only"
+    )
+    args = parser.parse_args()
+    
     print("="*80)
     print("MIX RATIO EXPERIMENT SCRIPT")
     print("="*80)
+    print(f"Mode: {args.mode}")
     print(f"Model: {MODEL}")
     print(f"Organism: {ORGANISM}")
     print(f"Mix Ratios: {MIX_RATIOS}")
@@ -426,13 +461,14 @@ def main():
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
     print("="*80)
     
-    # Phase 1: Preprocessing
-    run_preprocessing()
+    if args.mode == "full":
+        # Phase 1: Preprocessing
+        run_preprocessing()
+        
+        # Phase 2: Diffing
+        run_diffing()
     
-    # Phase 2: Diffing
-    run_diffing()
-    
-    # Phase 3: Collect and Plot Results
+    # Phase 3: Collect and Plot Results (always runs)
     results = collect_results()
     
     if results:
