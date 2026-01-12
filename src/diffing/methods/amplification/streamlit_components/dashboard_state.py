@@ -19,6 +19,7 @@ from typing import Any, Literal, Self
 
 import yaml
 from nnterp import StandardizedTransformer
+from src.utils.configs import ModelConfig
 
 from ..amplification_config import AmplificationConfig
 from .utils import get_unique_name, get_unique_config_name, sanitize_config_name
@@ -1036,6 +1037,7 @@ class DashboardPersistence:
     """
 
     cache_dir: Path
+    inference_config: ModelConfig
 
     configs_dir: Path = field(init=False)
     prompts_dir: Path = field(init=False)
@@ -1103,7 +1105,7 @@ class DashboardPersistence:
         # Load folder state from disk
         if "loaded_folders" not in st.session_state:
             loaded_folders, loaded_prompt_folders = (
-                self.persistence.load_loaded_folders()
+                self.load_loaded_folders()
             )
             st.session_state.loaded_folders = loaded_folders
             st.session_state.loaded_prompt_folders = loaded_prompt_folders
@@ -1115,7 +1117,7 @@ class DashboardPersistence:
             st.session_state.conversation_counter = 0
         # Load inference params (sampling + vLLM) from disk
         if "inference_params_loaded" not in st.session_state:
-            inference_params = self.persistence.load_inference_params()
+            inference_params = self.load_inference_params()
             st.session_state.sampling_params = inference_params["sampling_params"]
             st.session_state.gpu_memory_utilization = inference_params["vllm_params"][
                 "gpu_memory_utilization"
@@ -1138,7 +1140,7 @@ class DashboardPersistence:
         if "multi_gen_preset_messages" not in st.session_state:
             st.session_state.multi_gen_preset_messages = None
 
-        saved_multigen_state = self.persistence.load_multigen_state()
+        saved_multigen_state = self.load_multigen_state()
 
         if "multi_gen_text_prompt" not in st.session_state:
             st.session_state.multi_gen_text_prompt = saved_multigen_state.get(
@@ -1184,7 +1186,7 @@ class DashboardPersistence:
         # Keyword highlighting state - list of {keywords: list[str], color: str, enabled: bool}
         if "highlight_selectors" not in st.session_state:
             st.session_state.highlight_selectors = (
-                self.persistence.load_highlight_selectors()
+                self.load_highlight_selectors()
             )
 
         if "multi_gen_prompt" not in st.session_state:
