@@ -26,7 +26,8 @@ import matplotlib.pyplot as plt
 
 SEED = 12345
 N_SAMPLES = 1000
-MAX_TOKEN_POSITIONS = 6  # Minimum for ADL (skips first 5 positions)
+MAX_TOKEN_POSITIONS_ADL = 50  # Minimum for ADL (skips first 5 positions)
+MAX_TOKEN_POSITIONS_LOGIT_DIFF = 50
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Mix ratios to test
@@ -54,7 +55,7 @@ TOKEN_RELEVANCE_CONFIG = {
     "grader.permutations": 3,
     "frequent_tokens.num_tokens": 100,
     "frequent_tokens.min_count": 10,
-    "k_candidate_tokens": 50,
+    "k_candidate_tokens": 20,#50,
 }
 
 # Datasets to use
@@ -144,12 +145,12 @@ def build_base_command(method: str, mix_ratio: str, mode: str) -> List[str]:
     if method == "logit_diff_topk_occurring":
         cmd.extend([
             f"diffing.method.method_params.max_samples={N_SAMPLES}",
-            f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",
+            f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS_LOGIT_DIFF}",
         ])
     elif method == "activation_difference_lens":
         cmd.extend([
             f"diffing.method.max_samples={N_SAMPLES}",
-            f"diffing.method.n={MAX_TOKEN_POSITIONS}",
+            f"diffing.method.n={MAX_TOKEN_POSITIONS_ADL}",
         ])
     
     return cmd
@@ -456,7 +457,8 @@ def main():
     print(f"Methods: {METHODS}")
     print(f"Datasets: {DATASETS}")
     print(f"N Samples: {N_SAMPLES}")
-    print(f"Max Token Positions: {MAX_TOKEN_POSITIONS}")
+    print(f"Max Token Positions ADL: {MAX_TOKEN_POSITIONS_ADL}")
+    print(f"Max Token Positions LogitDiff: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
     print(f"Seed: {SEED}")
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
     print("="*80)
