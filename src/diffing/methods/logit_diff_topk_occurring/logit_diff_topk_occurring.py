@@ -304,6 +304,30 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         top_k = int(self.method_cfg.method_params.top_k)
         ignore_padding = bool(self.method_cfg.method_params.ignore_padding)
 
+        # Validate and slice samples
+        available_samples = logit_diff.shape[0]
+        if max_samples > available_samples:
+            raise ValueError(
+                f"Config requests {max_samples} samples but only {available_samples} available from preprocessing. "
+                f"Re-run preprocessing with max_samples >= {max_samples}."
+            )
+        elif max_samples < available_samples:
+            self.logger.info(f"Using first {max_samples} samples (have {available_samples})")
+            logit_diff = logit_diff[:max_samples, :, :]
+            attention_mask = attention_mask[:max_samples, :]
+
+        # Validate and slice token positions
+        available_positions = logit_diff.shape[1]
+        if max_tokens > available_positions:
+            raise ValueError(
+                f"Config requests {max_tokens} token positions but only {available_positions} available from preprocessing. "
+                f"Re-run preprocessing with max_tokens_per_sample >= {max_tokens}."
+            )
+        elif max_tokens < available_positions:
+            self.logger.info(f"Using first {max_tokens} positions (have {available_positions})")
+            logit_diff = logit_diff[:, :max_tokens, :]
+            attention_mask = attention_mask[:, :max_tokens]
+
         self.logger.info(f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}")
         self.logger.info(f"Dataset type: {'chat' if dataset_cfg.is_chat else 'text'}")
 
