@@ -300,21 +300,18 @@ class ChatTab:
         config = conv.config
         pending_key = f"chat_pending_samples_{conv_id}"
 
-        # Initialize multi-gen toggle state from conversation dict (ensures persistence across reruns)
+        # Initialize multi-gen toggle state from conversation (ensures persistence across reruns)
         multi_gen_key = f"chat_multi_gen_{conv_id}"
-        # Handle older conversations that don't have multi_gen_enabled field
-        if "multi_gen_enabled" not in conv:
-            conv.multi_gen_enabled = False
-        # Always sync session state with conversation dict on render
+        # Always sync session state with conversation on render
         st.session_state[multi_gen_key] = conv.multi_gen_enabled
 
         if conv.regenerating_from is not None:
             self._handle_regenerating_from(conv_id, conv, config, pending_key)
 
-        if conv.get("regenerating_from_user") is not None:
+        if conv.regenerating_from_user is not None:
             self._handle_regenerating_from_user(conv_id, conv, config, pending_key)
 
-        if conv.get("continuing_from") is not None:
+        if conv.continuing_from is not None:
             self._handle_continuing_from(conv_id, conv, config, pending_key)
 
         col1, col2, col3 = st.columns([3, 1, 1])
@@ -363,7 +360,7 @@ class ChatTab:
                 ):
                     selected_name = st.session_state[key]
                     new_mc = next(mc for mc in mcs if mc.full_name == selected_name)
-                    conversation["context"]["config"] = new_mc
+                    conversation.config = new_mc
                     conversation.save(self.dashboard.persistence.conversations_dir)
 
                 st.selectbox(
@@ -392,7 +389,7 @@ class ChatTab:
         def on_system_prompt_change(
             conversation=conv, cid=conv_id, key=system_prompt_key
         ):
-            conversation["context"]["system_prompt"] = st.session_state[key]
+            conversation.system_prompt = st.session_state[key]
             conversation.save(self.dashboard.persistence.conversations_dir)
 
         with st.expander("⚙️ System Prompt", expanded=False):
@@ -433,7 +430,7 @@ class ChatTab:
         def on_multi_gen_toggle_change(
             conversation=conv, conversation_id=conv_id, key=multi_gen_key
         ):
-            conversation["multi_gen_enabled"] = st.session_state[key]
+            conversation.multi_gen_enabled = st.session_state[key]
             conversation.save(self.dashboard.persistence.conversations_dir)
 
         st.toggle(

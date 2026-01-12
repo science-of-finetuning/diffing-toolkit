@@ -105,10 +105,11 @@ class AmplificationDashboard:
             method_instance: Instance of WeightDifferenceAmplification
         """
         self.method = method_instance
-        self.persistence = DashboardPersistence(
-            cache_dir=PROJECT_ROOT / ".streamlit_cache" / "amplification_cache"
-        )
         self.inference_config = deepcopy(self.method.base_model_cfg)
+        self.persistence = DashboardPersistence(
+            cache_dir=PROJECT_ROOT / ".streamlit_cache" / "amplification_cache",
+            inference_config=self.inference_config,
+        )
         # Check env var to disable cudagraph LoRA specialization (for debugging)
         disable_cudagraph_lora = os.getenv("DISABLE_CUDAGRAPH_LORA", "0") == "1"
         compilation_config = (

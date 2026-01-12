@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import streamlit as st
 
 from .dashboard_state import (
+    ManagedConversation,
     get_sampling_params,
     get_unique_conversation_name,
 )
@@ -168,7 +169,7 @@ class MultiGenerationTab:
 
                 st.session_state.multi_gen_messages = [
                     {k: v for k, v in msg.items() if k in ["role", "content"]}
-                    for msg in conversation["history"]
+                    for msg in conversation.history
                 ]
                 st.rerun(scope="fragment")
 
@@ -796,21 +797,15 @@ class MultiGenerationTab:
                 },
             ]
 
-        st.session_state.conversations[conv_id] = {
-            "name": conv_name,
-            "context": {
-                "config": result_data["config"],
-                "system_prompt": system_prompt,
-            },
-            "history": history,
-            "editing_message": None,
-            "regenerating_from": None,
-            "continuing_from": None,
-            "multi_gen_enabled": False,
-        }
-        self.dashboard.persistence.save_conversation(
-            conv_id, st.session_state.conversations[conv_id]
+        conv = ManagedConversation(
+            conv_id=conv_id,
+            name=conv_name,
+            config=result_data["config"],
+            system_prompt=system_prompt,
+            history=history,
         )
+        st.session_state.conversations[conv_id] = conv
+        conv.save(self.dashboard.persistence.conversations_dir)
         st.session_state.active_conversation_id = conv_id
         st.success(
             f"✓ Chat started with {result_data['config'].name}. Now switch to the Chat tab to continue."
