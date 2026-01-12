@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 # =============================================================================
 
 SEED = 12345
-N_SAMPLES = 10#00
+N_SAMPLES = 1000
 MAX_TOKEN_POSITIONS = 6  # Minimum for ADL (skips first 5 positions)
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
@@ -32,13 +32,13 @@ DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 MIX_RATIOS = [
     "default",   # 1:0 (pure finetuning, no mixing)
     "mix1-0p1",  # 1:0.1
-    # "mix1-0p2",  # 1:0.2
-    # "mix1-0p4",  # 1:0.4
-    # "mix1-0p6",  # 1:0.6
-    # "mix1-0p8",  # 1:0.8
-    # "mix1-1p0",  # 1:1.0
-    # "mix1-1p5",  # 1:1.5
-    # "mix1-2p0",  # 1:2.0
+    "mix1-0p2",  # 1:0.2
+    "mix1-0p4",  # 1:0.4
+    "mix1-0p6",  # 1:0.6
+    "mix1-0p8",  # 1:0.8
+    "mix1-1p0",  # 1:1.0
+    "mix1-1p5",  # 1:1.5
+    "mix1-2p0",  # 1:2.0
 ]
 
 # Token Relevance Config (consistent for both methods)
