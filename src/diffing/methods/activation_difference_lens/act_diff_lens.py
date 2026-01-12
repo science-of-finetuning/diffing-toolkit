@@ -399,7 +399,20 @@ class ActDiffLens(DiffingMethod):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
 
-        self.results_dir = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        # Build organism path with optional variant suffix
+        organism_path_name = cfg.organism.name
+        organism_variant = getattr(cfg, "organism_variant", "default")
+
+        if organism_variant != "default" and organism_variant:
+            organism_path_name = f"{cfg.organism.name}_{organism_variant}"
+
+        # Construct results directory: {base_dir}/{model}/{organism_variant}/activation_difference_lens
+        self.results_dir = (
+            Path(cfg.diffing.results_base_dir) 
+            / cfg.model.name 
+            / organism_path_name 
+            / "activation_difference_lens"
+        )
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self.layers = get_layer_indices(

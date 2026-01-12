@@ -2,22 +2,25 @@
 name: logit_diff_topk_occurring
 requires_preprocessing: true
 
+# Debug: print first N text samples during data loading (null = disabled)
+debug_print_samples: 3
+
 # Method parameters
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   batch_size: 64 #16
-  max_samples: 300
-  max_tokens_per_sample: 6
+  max_samples: 100
+  max_tokens_per_sample: 3
   top_k: 100
   ignore_padding: true
 
 # Dataset configuration
 datasets:
-  use_chat_dataset: true
+  use_chat_dataset: false
   chat_dataset_variants: ["default"]#["default", "ultrachat_200k"]
   use_pretraining_dataset: true
-  pretraining_dataset_variants: ["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
-  use_training_dataset: true
+  pretraining_dataset_variants: ["default"] #["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
+  use_training_dataset: false
 
 overwrite: true
 
@@ -233,7 +236,7 @@ per_token_analysis:
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
-  enabled: true
+  enabled: false
   num_topics: 5
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
@@ -247,7 +250,7 @@ positional_kde:
 
 # Global Token Statistics (Entire Vocabulary)
 global_token_statistics:
-  enabled: true
+  enabled: false
   top_k_plotting_labels: 60
 
 # Agent configuration
