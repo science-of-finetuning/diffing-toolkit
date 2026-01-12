@@ -25,8 +25,6 @@ from diffing.utils.cache import SampleCache, SampleCacheDataset
 from diffing.utils.collection import RunningActivationMean
 from diffing.utils.max_act_store import MaxActStore
 
-from .ui import visualize
-
 
 def init_collectors(unique_template_tokens):
     collectors = {
@@ -880,6 +878,8 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         Returns:
             Streamlit component displaying dataset statistics and interactive analysis
         """
+        from .ui import visualize
+
         visualize(self)
 
     def _find_available_layers(self) -> List[int]:

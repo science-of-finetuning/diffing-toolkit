@@ -7,7 +7,6 @@ import streamlit as st
 import torch
 import matplotlib.pyplot as plt
 from diffing.utils.max_act_store import ReadOnlyMaxActStore
-from diffing.utils.dashboards import MaxActivationDashboardComponent
 from diffing.utils.visualization import multi_tab_interface, render_latent_lens_tab
 
 
@@ -277,6 +276,7 @@ def _render_dataset_statistics(method):
 @st.fragment
 def _render_metric_display_fragment(method, metric_config: Dict[str, Any], layer: int):
     """Fragment for rendering metric display without recomputation."""
+    from diffing.utils.dashboards import MaxActivationDashboardComponent
 
     # Load the MaxActStore for the selected metric
     max_store_path = metric_config["path"]

@@ -25,12 +25,7 @@ from diffing.utils.activations import (
     load_activation_dataset_from_config,
 )
 from diffing.utils.cache import SampleCache
-from diffing.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
-from diffing.utils.dashboards import (
-    AbstractOnlineDiffingDashboard,
-    MaxActivationDashboardComponent,
-)
-from diffing.utils.visualization import multi_tab_interface
+from diffing.utils.max_act_store import MaxActStore
 
 
 class KLDivergenceDiffingMethod(DiffingMethod):
@@ -536,44 +531,10 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         self.logger.info(f"Results saved to: {self.results_dir}")
 
     def visualize(self) -> None:
-        """
-        Create Streamlit visualization for KL divergence results with tabs.
+        """Create Streamlit visualization for KL divergence results."""
+        from .kl_dashboard import visualize
 
-        Returns:
-            Streamlit component displaying dataset statistics and interactive analysis
-        """
-
-        multi_tab_interface(
-            [
-                ("📊 MaxAct Examples", self._render_dataset_statistics),
-                ("🔥 Interactive", lambda: KLDivergenceOnlineDashboard(self).display()),
-            ],
-            "KL Divergence Analysis",
-        )
-
-    def _render_dataset_statistics(self):
-        """Render the dataset statistics tab using MaxActivationDashboardComponent."""
-        # Choose which metric to display
-        metric_choice = st.selectbox(
-            "Select KL Metric:", ["Per-Token KL", "Mean Per Sample KL"], index=0
-        )
-
-        if metric_choice == "Per-Token KL":
-            max_act_store = ReadOnlyMaxActStore(
-                self.results_dir / f"examples_per_token.db",
-                tokenizer=self.tokenizer,
-            )
-            title = "Max Per-Token KL Divergence Examples"
-        else:
-            max_act_store = ReadOnlyMaxActStore(
-                self.results_dir / f"examples_mean_per_sample.db",
-                tokenizer=self.tokenizer,
-            )
-            title = "Mean Per-Sample KL Divergence Examples"
-
-        # Create and display the dashboard component
-        component = MaxActivationDashboardComponent(max_act_store, title=title)
-        component.display()
+        visualize(self)
 
     def compute_kl_for_tokens(
         self, input_ids: torch.Tensor, attention_mask: torch.Tensor
@@ -588,8 +549,6 @@ class KLDivergenceDiffingMethod(DiffingMethod):
         Returns:
             Dictionary with tokens, kl_values, and statistics
         """
-        # Ensure models are loaded (they will auto-load via properties)
-
         # Compute KL divergence
         per_token_kl, mean_per_sample_kl = self.compute_kl_divergence(
             input_ids, attention_mask
@@ -657,35 +616,3 @@ class KLDivergenceDiffingMethod(DiffingMethod):
                     results[model_name][organism_name] = str(kl_dir)
 
         return results
-
-
-class KLDivergenceOnlineDashboard(AbstractOnlineDiffingDashboard):
-    """
-    Online dashboard for interactive KL divergence analysis.
-    """
-
-    def _render_streamlit_method_controls(self) -> Dict[str, Any]:
-        """Render KL-specific controls in Streamlit (none needed)."""
-        return {}
-
-    def compute_statistics_for_tokens(
-        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, **kwargs
-    ) -> Dict[str, Any]:
-        """Compute KL divergence statistics using the parent method's computation function."""
-        results = self.method.compute_kl_for_tokens(input_ids, attention_mask)
-
-        # Adapt the results format for the abstract dashboard
-        return {
-            "tokens": results["tokens"],
-            "values": results["kl_values"],  # Use 'values' as the standard key
-            "statistics": results["statistics"],
-            "total_tokens": results["total_tokens"],
-        }
-
-    def get_method_specific_params(self) -> Dict[str, Any]:
-        """Get KL-specific parameters (none needed)."""
-        return {}
-
-    def _get_title(self) -> str:
-        """Get title for KL analysis."""
-        return "KL Divergence Analysis"
