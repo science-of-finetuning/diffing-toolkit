@@ -1,7 +1,7 @@
 import contextlib
 
 import torch
-from transformers import AutoModelForCausalLM
+from nnterp import ModuleAccessor, StandardizedTransformer
 
 
 class EarlyStopException(Exception):
@@ -11,7 +11,7 @@ class EarlyStopException(Exception):
 
 
 def collect_activations(
-    model: AutoModelForCausalLM,
+    model: StandardizedTransformer,
     submodule: torch.nn.Module,
     inputs_BL: dict[str, torch.Tensor],
     use_no_grad: bool = True,
@@ -62,7 +62,7 @@ def collect_activations(
 
 
 def collect_activations_multiple_layers(
-    model: AutoModelForCausalLM,
+    model: StandardizedTransformer,
     submodules: dict[int, torch.nn.Module],
     inputs_BL: dict[str, torch.Tensor],
     min_offset: int | None,
@@ -121,33 +121,3 @@ def collect_activations_multiple_layers(
             handle.remove()
 
     return activations_BLD_by_layer
-
-
-def get_hf_submodule(model: AutoModelForCausalLM, layer: int, use_lora: bool = False):
-    """Gets the residual stream submodule for HF transformers"""
-    model_name = model.config._name_or_path
-
-    if use_lora:
-        if "pythia" in model_name:
-            raise ValueError("Need to determine how to get submodule for LoRA")
-        elif (
-            "gemma" in model_name
-            or "mistral" in model_name
-            or "Llama" in model_name
-            or "Qwen" in model_name
-        ):
-            return model.base_model.model.model.layers[layer]
-        else:
-            raise ValueError(f"Please add submodule for model {model_name}")
-
-    if "pythia" in model_name:
-        return model.gpt_neox.layers[layer]
-    elif (
-        "gemma" in model_name
-        or "mistral" in model_name
-        or "Llama" in model_name
-        or "Qwen" in model_name
-    ):
-        return model.model.layers[layer]
-    else:
-        raise ValueError(f"Please add submodule for model {model_name}")

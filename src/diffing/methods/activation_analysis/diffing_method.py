@@ -26,6 +26,24 @@ from diffing.utils.collection import RunningActivationMean
 from diffing.utils.max_act_store import MaxActStore
 
 
+def collate_samples(
+    batch: List[Tuple[torch.Tensor, torch.Tensor]],
+) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+    """
+    Custom collate function that returns a list of samples instead of stacking.
+
+    This is necessary because samples have variable sequence lengths and cannot
+    be stacked into a single tensor. Also filters out single-token samples.
+
+    Args:
+        batch: List of (tokens, activations) tuples from SampleCacheDataset
+
+    Returns:
+        List of valid (tokens, activations) tuples with length > 1
+    """
+    return [(tokens, activations) for tokens, activations in batch if len(tokens) > 1]
+
+
 def init_collectors(unique_template_tokens):
     collectors = {
         "all_tokens": RunningActivationMean(),
@@ -492,6 +510,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            collate_fn=collate_samples,  # Custom collate to handle variable-length sequences
             pin_memory=False,  # Avoid pinning since we have variable-length sequences
             persistent_workers=self.num_workers
             > 0,  # Keep workers alive for better performance
@@ -567,8 +586,8 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                 mean_cos_dist_values = copy.deepcopy(BASE_DICT)
 
                 # Process each sample in the batch
+                # collate_samples returns List[(tokens, activations)] tuples
                 for tokens, activations in batch:
-                    # Move activations to GPU for computation
                     activations = activations.to(self.device)
 
                     # Compute norm differences

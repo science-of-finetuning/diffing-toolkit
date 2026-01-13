@@ -118,16 +118,3 @@ def assert_no_peft_present(model, check_for_active_adapter_only=False):
     assert (
         not active_adapters
     ), f"PEFT check failed! Found active adapters: {active_adapters}. Model should be running in base mode."
-
-
-def layer_percent_to_layer(model_name: str, layer_percent: int) -> int:
-    """Convert a layer percent to a layer number."""
-    LAYER_COUNTS = {
-        "Qwen/Qwen3-1.7B": 28,
-        "Qwen/Qwen3-8B": 36,
-        "Qwen/Qwen3-32B": 64,
-        "google/gemma-2-9b-it": 42,
-        "meta-llama/Llama-3.3-70B-Instruct": 80,
-    }
-    max_layers = LAYER_COUNTS[model_name]
-    return int(max_layers * (layer_percent / 100))

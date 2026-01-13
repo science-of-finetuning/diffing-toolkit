@@ -226,14 +226,14 @@ def _compute_nll(
                     L,
                     nn_model.config.vocab_size,
                 ), f"logits.shape: {logits.shape}, B: {B}, L: {L}, vocab_size: {nn_model.config.vocab_size}"
-        return _nll(logits, input_ids), activations
+        return _nll(logits, input_ids.to(logits.device)), activations
     else:
         with torch.inference_mode():
-            outputs = nn_model(
-                input_ids=input_ids, attention_mask=attention_mask, use_cache=False
-            )
-            logits = outputs.logits
-        return _nll(logits, input_ids)
+            with nn_model.trace(
+                input_ids, attention_mask=attention_mask, use_cache=False
+            ):
+                logits = nn_model.logits.save()
+        return _nll(logits, input_ids.to(logits.device))
 
 
 @torch.no_grad()
@@ -299,7 +299,7 @@ def _compute_nll_intervened(
                     activations - (proj_coeff * v.view(1, 1, -1))
                 ).to(dt)
             logits = nn_model.logits.save()
-        nll = _nll(logits, input_ids)
+        nll = _nll(logits, input_ids.to(logits.device))
         del logits
     return nll.cpu()
 
