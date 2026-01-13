@@ -308,10 +308,9 @@ class DiffingMethod(ABC):
         return ""
 
     # Agent methods
-    @abstractmethod
     def get_agent(self) -> DiffingMethodAgent:
-        """Get the agent for the method."""
-        raise NotImplementedError
+        """Get the agent for the method. Override in subclasses that support agents."""
+        raise NotImplementedError(f"{self.__class__.__name__} does not have an agent")
 
     def get_baseline_agent(self) -> BlackboxAgent:
         return BlackboxAgent(cfg=self.cfg)

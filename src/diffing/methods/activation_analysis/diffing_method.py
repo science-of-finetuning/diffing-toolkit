@@ -567,9 +567,11 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                 mean_cos_dist_values = copy.deepcopy(BASE_DICT)
 
                 # Process each sample in the batch
-                for tokens, activations in batch:
-                    # Move activations to GPU for computation
-                    activations = activations.to(self.device)
+                # DataLoader returns (tokens_batch, activations_batch) tuple
+                tokens_batch, activations_batch = batch
+                for i in range(len(tokens_batch)):
+                    tokens = tokens_batch[i]
+                    activations = activations_batch[i].to(self.device)
 
                     # Compute norm differences
                     norm_diffs, cos_sim, norm_base, norm_finetuned = (

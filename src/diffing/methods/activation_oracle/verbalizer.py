@@ -1,26 +1,18 @@
 # From https://github.com/adamkarvonen/sae_introspect/blob/main/paper_demo/em_demo.py
 
-import os
-import json
-from pathlib import Path
 from typing import Optional, Any
 from tqdm import tqdm
-import random
-import itertools
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from loguru import logger
 import torch
-from huggingface_hub import snapshot_download
-from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from nnterp import StandardizedTransformer
 
 # nl_probes imports
 from .utils.activation_utils import (
     collect_activations_multiple_layers,
-    get_hf_submodule,
 )
 from .utils.dataset_utils import TrainingDataPoint, create_training_datapoint
-from .utils.common import load_model, load_tokenizer, layer_percent_to_layer
 from .utils.eval import run_evaluation
 
 
@@ -34,6 +26,7 @@ class VerbalizerEvalConfig:
     """
 
     model_name: str
+    num_layers: int  # Required: number of layers in the model
 
     # these will be set in post_init
     act_layers: list[int] = field(default_factory=list)
@@ -108,9 +101,7 @@ class VerbalizerEvalConfig:
             self.token_start_idx < self.token_end_idx
         ), "token_start_idx must be less than token_end_idx"
 
-        act_layers = [
-            layer_percent_to_layer(self.model_name, lp) for lp in self.layer_percents
-        ]
+        act_layers = [int(self.num_layers * (lp / 100)) for lp in self.layer_percents]
 
         # a bit janky, just selecting the middle layer for activation collection
         active_layer_idx = self.layer_percents.index(self.selected_layer_percent)
@@ -343,7 +334,7 @@ def collect_target_responses(
 
 
 def collect_target_activations(
-    model: AutoModelForCausalLM,
+    model: StandardizedTransformer,
     inputs_BL: dict[str, torch.Tensor],
     config: VerbalizerEvalConfig,
     target_lora_path: str | None,
@@ -360,9 +351,7 @@ def collect_target_activations(
                 "\n\n\n\nWarning: target_lora_path is None, collecting lora activations from base model"
             )
         # setting submodules after setting the adapter - I don't think this matters but I'm paranoid
-        submodules = {
-            layer: get_hf_submodule(model, layer) for layer in config.act_layers
-        }
+        submodules = {layer: model.layers[layer]._module for layer in config.act_layers}
         lora_acts = collect_activations_multiple_layers(
             model=model,
             submodules=submodules,
@@ -374,9 +363,7 @@ def collect_target_activations(
 
     if "orig" in config.activation_input_types:
         model.disable_adapters()
-        submodules = {
-            layer: get_hf_submodule(model, layer) for layer in config.act_layers
-        }
+        submodules = {layer: model.layers[layer]._module for layer in config.act_layers}
         orig_acts = collect_activations_multiple_layers(
             model=model,
             submodules=submodules,
@@ -428,7 +415,7 @@ def run_verbalizer(
 
     dtype = torch.bfloat16
 
-    injection_submodule = get_hf_submodule(model, config.injection_layer)
+    injection_submodule = model.layers[config.injection_layer]._module
 
     if config.add_response_to_context_prompt:
         context_prompts = [ci.context_prompt for ci in verbalizer_prompt_infos]

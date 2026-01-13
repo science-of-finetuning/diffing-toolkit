@@ -5,7 +5,7 @@ from peft import PeftModel
 from pydantic import BaseModel, ConfigDict, model_validator
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from .activation_utils import collect_activations_multiple_layers, get_hf_submodule
+from .activation_utils import collect_activations_multiple_layers
 
 SPECIAL_TOKEN = " ?"
 
@@ -54,23 +54,23 @@ class TrainingDataPoint(BaseModel):
     meta_info: Mapping[str, Any] = {}
 
     @model_validator(mode="after")
-    def _check_context_alignment(cls, values):
-        sv = values.steering_vectors
+    def _check_context_alignment(self):
+        sv = self.steering_vectors
         if sv is not None:
-            if len(values.positions) != sv.shape[0]:
+            if len(self.positions) != sv.shape[0]:
                 raise ValueError(
                     "positions and steering_vectors must have the same length"
                 )
         else:
-            if values.context_positions is None or values.context_input_ids is None:
+            if self.context_positions is None or self.context_input_ids is None:
                 raise ValueError(
                     "context_* must be provided when steering_vectors is None"
                 )
-            if len(values.positions) != len(values.context_positions):
+            if len(self.positions) != len(self.context_positions):
                 raise ValueError(
                     "positions and context_positions must have the same length"
                 )
-        return values
+        return self
 
 
 class BatchData(BaseModel):
@@ -230,9 +230,7 @@ def materialize_missing_steering_vectors(
 
     # Prepare hooks for all unique requested layers
     layers_needed = sorted({dp.layer for _, dp in to_fill})
-    submodules = {
-        layer: get_hf_submodule(model, layer, use_lora=True) for layer in layers_needed
-    }
+    submodules = {layer: model.layers[layer]._module for layer in layers_needed}
 
     # Run a single pass with dropout off, then restore the previous train/eval mode
     was_training = model.training
