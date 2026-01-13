@@ -35,6 +35,8 @@ from .plots import (
     plot_per_sample_occurrences,
     plot_per_position_occurrences,
     plot_shortlist_token_distribution,
+    plot_shortlist_token_distribution_by_position,
+    plot_shortlist_token_distribution_by_sample,
     plot_co_occurrence_heatmap,
     plot_positional_kde,
     plot_global_token_scatter,
@@ -343,6 +345,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         per_position_counts = {}
         shortlist_diffs = defaultdict(list)
         
+        # Per-position and per-sample shortlist diffs for KDE breakdown plots
+        shortlist_diffs_by_position = defaultdict(lambda: defaultdict(list))
+        # Dict[token_str][position_idx] -> List[float]
+        shortlist_diffs_by_sample = defaultdict(lambda: defaultdict(list))
+        # Dict[token_str][sample_idx] -> List[float]
+        
         # Co-occurrence tracking (Top-K based)
         same_point_matrix = defaultdict(lambda: defaultdict(int))
         # Track which tokens appeared in each sample (for Same-Sample co-occurrence)
@@ -474,11 +482,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 pos_mask = (diff >= 0) & (mask_expanded.bool())
                 global_pos_count += pos_mask.sum(dim=(0, 1))
 
-            # Shortlist Distribution Tracking (Vectorized)
+            # Shortlist Distribution Tracking (Vectorized for aggregate)
             if per_token_enabled and shortlist_token_ids:
                 # We want to collect all logit diffs for the shortlist tokens
                 # respecting the attention mask (if ignore_padding is True)
                 valid_mask = attention_mask_batch.bool()
+                batch_size_curr, seq_len_curr = attention_mask_batch.shape
                 
                 for s_token_id, s_token_str in shortlist_token_ids.items():
                     # diff[..., s_token_id]: [batch, seq]
@@ -490,6 +499,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         valid_vals = token_vals.flatten()
                         
                     shortlist_diffs[s_token_str].extend(valid_vals.tolist())
+                    
+                    # Track by position and sample for KDE breakdown plots
+                    for b_idx in range(batch_size_curr):
+                        sample_idx_global = start_idx + b_idx
+                        for pos_idx in range(seq_len_curr):
+                            if ignore_padding and attention_mask_batch[b_idx, pos_idx] == 0:
+                                continue
+                            val = token_vals[b_idx, pos_idx].item()
+                            shortlist_diffs_by_position[s_token_str][pos_idx].append(val)
+                            shortlist_diffs_by_sample[s_token_str][sample_idx_global].append(val)
 
             # Get top-K positive diffs (largest values)
             top_k_pos_values, top_k_pos_indices = torch.topk(
@@ -810,6 +829,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 }
             
             results["_per_token_data"]["shortlist_distributions"] = shortlist_diffs
+            results["_per_token_data"]["shortlist_diffs_by_position"] = shortlist_diffs_by_position
+            results["_per_token_data"]["shortlist_diffs_by_sample"] = shortlist_diffs_by_sample
 
         return results
 
@@ -1076,7 +1097,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         per_position_counts: Dict[str, Dict[int, int]],
         num_samples: int,
         max_positions: int,
-        shortlist_diffs: Dict[str, List[float]] = None
+        shortlist_diffs: Dict[str, List[float]] = None,
+        shortlist_diffs_by_position: Dict[str, Dict[int, List[float]]] = None,
+        shortlist_diffs_by_sample: Dict[str, Dict[int, List[float]]] = None
     ) -> None:
         """
         Save per-token analysis data and generate plots.
@@ -1096,6 +1119,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             num_samples: Total number of samples processed
             max_positions: Maximum sequence length
             shortlist_diffs: Dict mapping token_str to list of logit diff values
+            shortlist_diffs_by_position: Dict[token_str][position_idx] -> list of logit diffs
+            shortlist_diffs_by_sample: Dict[token_str][sample_idx] -> list of logit diffs
         """
         self.logger.info(f"Saving per-token analysis for {dataset_name}...")
         
@@ -1108,12 +1133,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         sample_plots_dir = plots_dir / "per_token_by_sample"
         position_plots_dir = plots_dir / "per_token_by_position"
         dist_plots_dir = plots_dir / "logit_diff_distributions"
+        dist_by_position_dir = plots_dir / "logit_diff_distributions_by_position"
+        dist_by_sample_dir = plots_dir / "logit_diff_distributions_by_sample"
         
         data_dir.mkdir(parents=True, exist_ok=True)
         plots_dir.mkdir(parents=True, exist_ok=True)
         sample_plots_dir.mkdir(parents=True, exist_ok=True)
         position_plots_dir.mkdir(parents=True, exist_ok=True)
         dist_plots_dir.mkdir(parents=True, exist_ok=True)
+        dist_by_position_dir.mkdir(parents=True, exist_ok=True)
+        dist_by_sample_dir.mkdir(parents=True, exist_ok=True)
         
         # Convert defaultdicts to regular dicts and then to lists for JSON serialization
         per_sample_serializable = {}
@@ -1187,6 +1216,37 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         num_samples=num_samples,
                         max_tokens_per_sample=max_positions,
                         total_positions=len(diffs)
+                    )
+        
+        # Get number of positions/samples to plot from config
+        num_kde_positions = 10  # default
+        if hasattr(self.method_cfg, 'positional_kde') and self.method_cfg.positional_kde.enabled:
+            num_kde_positions = int(self.method_cfg.positional_kde.num_positions)
+        
+        # Plot logit diff distributions by position
+        if shortlist_diffs_by_position:
+            self.logger.info(f"Generating per-position logit diff distribution plots (first {num_kde_positions} positions)...")
+            for token_str, pos_diffs in shortlist_diffs_by_position.items():
+                if pos_diffs:
+                    plot_shortlist_token_distribution_by_position(
+                        pos_diffs,
+                        token_str,
+                        dataset_name,
+                        dist_by_position_dir,
+                        num_positions=num_kde_positions
+                    )
+        
+        # Plot logit diff distributions by sample
+        if shortlist_diffs_by_sample:
+            self.logger.info(f"Generating per-sample logit diff distribution plots (first {num_kde_positions} samples)...")
+            for token_str, sample_diffs in shortlist_diffs_by_sample.items():
+                if sample_diffs:
+                    plot_shortlist_token_distribution_by_sample(
+                        sample_diffs,
+                        token_str,
+                        dataset_name,
+                        dist_by_sample_dir,
+                        num_samples=num_kde_positions
                     )
         
         total_plots = len(sample_plots) + len(position_plots)
@@ -1592,6 +1652,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 # Save and plot per-token analysis if enabled
                 if "_per_token_data" in results:
                     shortlist_diffs = results["_per_token_data"].pop("shortlist_distributions", None)
+                    shortlist_diffs_by_position = results["_per_token_data"].pop("shortlist_diffs_by_position", None)
+                    shortlist_diffs_by_sample = results["_per_token_data"].pop("shortlist_diffs_by_sample", None)
                     
                     self._save_and_plot_per_token_analysis(
                         dataset_cfg.name,
@@ -1599,7 +1661,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         results["_per_token_data"]["per_position_counts"],
                         results["num_samples"],
                         results["_per_token_data"]["max_positions"],
-                        shortlist_diffs=shortlist_diffs
+                        shortlist_diffs=shortlist_diffs,
+                        shortlist_diffs_by_position=shortlist_diffs_by_position,
+                        shortlist_diffs_by_sample=shortlist_diffs_by_sample
                     )
                     
                     if "co_occurrence" in results["_per_token_data"]:

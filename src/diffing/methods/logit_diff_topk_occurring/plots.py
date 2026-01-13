@@ -534,6 +534,170 @@ def plot_shortlist_token_distribution(
     return filepath
 
 
+def plot_shortlist_token_distribution_by_position(
+    logit_diffs_by_position: Dict[int, List[float]],
+    token_str: str,
+    dataset_name: str,
+    save_dir: Path,
+    num_positions: int,
+) -> Optional[Path]:
+    """
+    Generate a KDE plot showing logit diff distributions by position for a specific shortlist token.
+    
+    Args:
+        logit_diffs_by_position: Dict mapping position_idx -> list of logit diff values
+        token_str: The token string
+        dataset_name: Name of the dataset
+        save_dir: Directory to save the plot
+        num_positions: Number of positions to include (first N)
+        
+    Returns:
+        Path to the saved plot, or None if no data
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Filter to first num_positions positions
+    sorted_positions = sorted([p for p in logit_diffs_by_position.keys() if p < num_positions])
+    
+    if not sorted_positions:
+        logger.warning(f"No position data for token '{token_str}' in {dataset_name}")
+        return None
+    
+    # Build DataFrame for seaborn
+    data_records = []
+    for pos in sorted_positions:
+        values = logit_diffs_by_position[pos]
+        if not values:
+            continue
+        count = len(values)
+        label = f"Pos {pos} (N={count:,})"
+        for val in values:
+            data_records.append({
+                "Logit Difference": val,
+                "Position": label,
+            })
+    
+    if not data_records:
+        logger.warning(f"No data records for token '{token_str}' by position")
+        return None
+    
+    df = pd.DataFrame(data_records)
+    
+    # Create Plot
+    plt.figure(figsize=(10, 6), dpi=150)
+    
+    sns.kdeplot(
+        data=df,
+        x="Logit Difference",
+        hue="Position",
+        fill=True,
+        common_norm=False,
+        palette="viridis",
+        alpha=0.3,
+        linewidth=2
+    )
+    
+    # Title
+    main_title = f"Logit Diff Distribution by Position: '{token_str}'\n({dataset_name})"
+    plt.title(main_title, fontsize=12)
+    plt.xlabel("Logit Difference (Finetuned - Base)", fontsize=11)
+    plt.ylabel("Density", fontsize=11)
+    plt.grid(True, alpha=0.3)
+    
+    # Save
+    token_safe = sanitize_token_for_filename(token_str)
+    filename = f"logit_diff_dist_by_position_{dataset_name}_{token_safe}.png"
+    filepath = save_dir / filename
+    plt.savefig(filepath, bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"  Saved per-position distribution plot: {filename}")
+    return filepath
+
+
+def plot_shortlist_token_distribution_by_sample(
+    logit_diffs_by_sample: Dict[int, List[float]],
+    token_str: str,
+    dataset_name: str,
+    save_dir: Path,
+    num_samples: int,
+) -> Optional[Path]:
+    """
+    Generate a KDE plot showing logit diff distributions by sample for a specific shortlist token.
+    
+    Args:
+        logit_diffs_by_sample: Dict mapping sample_idx -> list of logit diff values
+        token_str: The token string
+        dataset_name: Name of the dataset
+        save_dir: Directory to save the plot
+        num_samples: Number of samples to include (first N)
+        
+    Returns:
+        Path to the saved plot, or None if no data
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Filter to first num_samples samples
+    sorted_samples = sorted([s for s in logit_diffs_by_sample.keys() if s < num_samples])
+    
+    if not sorted_samples:
+        logger.warning(f"No sample data for token '{token_str}' in {dataset_name}")
+        return None
+    
+    # Build DataFrame for seaborn
+    data_records = []
+    for sample_idx in sorted_samples:
+        values = logit_diffs_by_sample[sample_idx]
+        if not values:
+            continue
+        count = len(values)
+        label = f"Sample {sample_idx} (N={count:,})"
+        for val in values:
+            data_records.append({
+                "Logit Difference": val,
+                "Sample": label,
+            })
+    
+    if not data_records:
+        logger.warning(f"No data records for token '{token_str}' by sample")
+        return None
+    
+    df = pd.DataFrame(data_records)
+    
+    # Create Plot
+    plt.figure(figsize=(10, 6), dpi=150)
+    
+    sns.kdeplot(
+        data=df,
+        x="Logit Difference",
+        hue="Sample",
+        fill=True,
+        common_norm=False,
+        palette="viridis",
+        alpha=0.3,
+        linewidth=2
+    )
+    
+    # Title
+    main_title = f"Logit Diff Distribution by Sample: '{token_str}'\n({dataset_name})"
+    plt.title(main_title, fontsize=12)
+    plt.xlabel("Logit Difference (Finetuned - Base)", fontsize=11)
+    plt.ylabel("Density", fontsize=11)
+    plt.grid(True, alpha=0.3)
+    
+    # Save
+    token_safe = sanitize_token_for_filename(token_str)
+    filename = f"logit_diff_dist_by_sample_{dataset_name}_{token_safe}.png"
+    filepath = save_dir / filename
+    plt.savefig(filepath, bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"  Saved per-sample distribution plot: {filename}")
+    return filepath
+
+
 def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None, top_k_labels=20, occurrence_rates_json_path: Path = None) -> None:
     """
     Generate a scatter plot of global token statistics.
