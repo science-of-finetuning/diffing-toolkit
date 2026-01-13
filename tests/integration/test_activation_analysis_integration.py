@@ -12,7 +12,10 @@ from nnterp import StandardizedTransformer
 from transformers import AutoTokenizer
 
 from diffing.utils.collection import RunningActivationMean
-from diffing.methods.activation_analysis.diffing_method import init_collectors
+from diffing.methods.activation_analysis.diffing_method import (
+    init_collectors,
+    collate_samples,
+)
 
 
 CUDA_AVAILABLE = torch.cuda.is_available()
@@ -150,6 +153,63 @@ def compute_activation_statistics(
         norm_base.cpu().float(),
         norm_finetuned.cpu().float(),
     )
+
+
+class TestCollateSamples:
+    """Unit tests for collate_samples function."""
+
+    def test_collate_samples_returns_list(self):
+        """Test that collate_samples returns a list of tuples."""
+        batch = [
+            (torch.tensor([1, 2, 3]), torch.randn(3, 2, 768)),
+            (torch.tensor([4, 5]), torch.randn(2, 2, 768)),
+        ]
+        result = collate_samples(batch)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(isinstance(item, tuple) for item in result)
+
+    def test_collate_samples_filters_single_token(self):
+        """Test that collate_samples filters out single-token samples."""
+        batch = [
+            (torch.tensor([1]), torch.randn(1, 2, 768)),  # Single token - filtered
+            (torch.tensor([1, 2, 3]), torch.randn(3, 2, 768)),  # Valid
+            (torch.tensor([4]), torch.randn(1, 2, 768)),  # Single token - filtered
+            (torch.tensor([5, 6]), torch.randn(2, 2, 768)),  # Valid
+        ]
+        result = collate_samples(batch)
+        assert len(result) == 2
+        assert len(result[0][0]) == 3
+        assert len(result[1][0]) == 2
+
+    def test_collate_samples_empty_batch(self):
+        """Test that collate_samples handles empty batch."""
+        result = collate_samples([])
+        assert result == []
+
+    def test_collate_samples_all_filtered(self):
+        """Test collate_samples when all samples are single-token."""
+        batch = [
+            (torch.tensor([1]), torch.randn(1, 2, 768)),
+            (torch.tensor([2]), torch.randn(1, 2, 768)),
+        ]
+        result = collate_samples(batch)
+        assert result == []
+
+    def test_collate_samples_preserves_data(self):
+        """Test that collate_samples preserves tensor data correctly."""
+        tokens1 = torch.tensor([10, 20, 30])
+        acts1 = torch.randn(3, 2, 768)
+        tokens2 = torch.tensor([40, 50])
+        acts2 = torch.randn(2, 2, 768)
+
+        batch = [(tokens1, acts1), (tokens2, acts2)]
+        result = collate_samples(batch)
+
+        assert torch.equal(result[0][0], tokens1)
+        assert torch.equal(result[0][1], acts1)
+        assert torch.equal(result[1][0], tokens2)
+        assert torch.equal(result[1][1], acts2)
 
 
 class TestActivationAnalysisIntegration:

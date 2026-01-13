@@ -542,8 +542,11 @@ class TestActivationAnalysisMethodRun:
         assert method is not None
 
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
-    def test_activation_analysis_run(self, tmp_results_dir, mock_activation_cache):
-        """Test that ActivationAnalysisDiffingMethod.run() completes with mock cache."""
+    @pytest.mark.parametrize("batch_size", [1, 2, 4])
+    def test_activation_analysis_run(
+        self, tmp_results_dir, mock_activation_cache, batch_size
+    ):
+        """Test that ActivationAnalysisDiffingMethod.run() completes with various batch sizes."""
         from diffing.methods.activation_analysis.diffing_method import (
             ActivationAnalysisDiffingMethod,
         )
@@ -552,10 +555,8 @@ class TestActivationAnalysisMethodRun:
         cfg.diffing.method.requires_preprocessing = True
         cfg.diffing.method.method_params.num_workers = 0
         cfg.diffing.method.method_params.skip_first_n_tokens = False
-        cfg.diffing.method.method_params.max_samples = 3
-        cfg.diffing.method.method_params.batch_size = (
-            1  # Required for correct iteration
-        )
+        cfg.diffing.method.method_params.max_samples = 5
+        cfg.diffing.method.method_params.batch_size = batch_size
         cfg.diffing.method.overwrite = True
         cfg.diffing.method.analysis = {
             "statistics": ["mean", "std"],
