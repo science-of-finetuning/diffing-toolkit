@@ -194,9 +194,14 @@ def plot_co_occurrence_heatmap(
     
     # Title mapping
     title_map = {
-        "same_sample": "Same Sample (Any Position)",
-        "same_position": "Same Position (Any Sample)",
-        "same_point": "Same Point (Exact Sample & Position)"
+        # Top-K based co-occurrence
+        "same_sample": "Top-K: Same Sample (Any Position)",
+        "same_position": "Top-K: Same Position (Any Sample)",
+        "same_point": "Top-K: Same Point (Exact Sample & Position)",
+        # Same-sign based co-occurrence
+        "same_sign_same_sample": "Same Sign: Same Sample (Any Position)",
+        "same_sign_same_position": "Same Sign: Same Position (Any Sample)",
+        "same_sign_same_point": "Same Sign: Same Point (Exact Sample & Position)",
     }
     title_suffix = title_map.get(co_occurrence_type, co_occurrence_type)
     

@@ -343,7 +343,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         per_position_counts = {}
         shortlist_diffs = defaultdict(list)
         
-        # Co-occurrence tracking
+        # Co-occurrence tracking (Top-K based)
         same_point_matrix = defaultdict(lambda: defaultdict(int))
         # Track which tokens appeared in each sample (for Same-Sample co-occurrence)
         # Dict[sample_idx, Set[token_str]]
@@ -351,6 +351,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Track which tokens appeared at each position (for Same-Position co-occurrence)
         # Dict[position_idx, Set[token_str]]
         position_tokens_tracker = defaultdict(set)
+        
+        # Same-Sign Co-occurrence tracking
+        # Tokens co-occur if they have the same sign logit diff at a location
+        same_sign_point_matrix = defaultdict(lambda: defaultdict(int))
+        # Track which tokens had positive/negative diffs in each sample
+        sample_pos_tokens_tracker = defaultdict(set)
+        sample_neg_tokens_tracker = defaultdict(set)
+        # Track which tokens had positive/negative diffs at each position
+        position_pos_tokens_tracker = defaultdict(set)
+        position_neg_tokens_tracker = defaultdict(set)
         
         # Positional KDE Analysis
         pos_kde_enabled = False
@@ -581,6 +591,33 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             per_position_counts[token_str][s] += 1
                             # NOTE: We do NOT track negative tokens for co-occurrence as per user request
 
+                    # Same-Sign Co-occurrence: track shortlist tokens by their sign at this point
+                    if co_occurrence_enabled and shortlist_token_ids:
+                        point_pos_tokens = []
+                        point_neg_tokens = []
+                        
+                        for s_token_id, s_token_str in shortlist_token_ids.items():
+                            token_diff = diff[b, s, s_token_id].item()
+                            if token_diff >= 0:
+                                point_pos_tokens.append(s_token_str)
+                                sample_pos_tokens_tracker[sample_idx].add(s_token_str)
+                                position_pos_tokens_tracker[s].add(s_token_str)
+                            else:
+                                point_neg_tokens.append(s_token_str)
+                                sample_neg_tokens_tracker[sample_idx].add(s_token_str)
+                                position_neg_tokens_tracker[s].add(s_token_str)
+                        
+                        # Build same-sign co-occurrence at this point
+                        # Same-sign = both positive OR both negative
+                        for t1, t2 in combinations_with_replacement(point_pos_tokens, 2):
+                            same_sign_point_matrix[t1][t2] += 1
+                            if t1 != t2:
+                                same_sign_point_matrix[t2][t1] += 1
+                        for t1, t2 in combinations_with_replacement(point_neg_tokens, 2):
+                            same_sign_point_matrix[t1][t2] += 1
+                            if t1 != t2:
+                                same_sign_point_matrix[t2][t1] += 1
+
                     total_positions += 1
 
         self.logger.info(f"✓ Batch processing complete!")
@@ -592,8 +629,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         same_sample_matrix = defaultdict(lambda: defaultdict(int))
         same_position_matrix = defaultdict(lambda: defaultdict(int))
         
+        # Same-sign co-occurrence matrices
+        same_sign_sample_matrix = defaultdict(lambda: defaultdict(int))
+        same_sign_position_matrix = defaultdict(lambda: defaultdict(int))
+        
         if co_occurrence_enabled:
-            self.logger.info("Computing Same-Sample co-occurrence matrix...")
+            self.logger.info("Computing Same-Sample co-occurrence matrix (Top-K)...")
             for sample_idx, tokens in sample_tokens_tracker.items():
                 if not tokens:
                     continue
@@ -603,7 +644,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if t1 != t2:
                         same_sample_matrix[t2][t1] += 1
                         
-            self.logger.info("Computing Same-Position co-occurrence matrix...")
+            self.logger.info("Computing Same-Position co-occurrence matrix (Top-K)...")
             for pos_idx, tokens in position_tokens_tracker.items():
                 if not tokens:
                     continue
@@ -612,6 +653,39 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     same_position_matrix[t1][t2] += 1
                     if t1 != t2:
                         same_position_matrix[t2][t1] += 1
+            
+            # Compute Same-Sign co-occurrence matrices
+            self.logger.info("Computing Same-Sample co-occurrence matrix (Same-Sign)...")
+            all_sample_indices = set(sample_pos_tokens_tracker.keys()) | set(sample_neg_tokens_tracker.keys())
+            for sample_idx in all_sample_indices:
+                pos_tokens = sample_pos_tokens_tracker[sample_idx]
+                neg_tokens = sample_neg_tokens_tracker[sample_idx]
+                
+                # Same-sign pairs = pairs within pos_tokens + pairs within neg_tokens
+                for t1, t2 in combinations_with_replacement(pos_tokens, 2):
+                    same_sign_sample_matrix[t1][t2] += 1
+                    if t1 != t2:
+                        same_sign_sample_matrix[t2][t1] += 1
+                for t1, t2 in combinations_with_replacement(neg_tokens, 2):
+                    same_sign_sample_matrix[t1][t2] += 1
+                    if t1 != t2:
+                        same_sign_sample_matrix[t2][t1] += 1
+            
+            self.logger.info("Computing Same-Position co-occurrence matrix (Same-Sign)...")
+            all_position_indices = set(position_pos_tokens_tracker.keys()) | set(position_neg_tokens_tracker.keys())
+            for pos_idx in all_position_indices:
+                pos_tokens = position_pos_tokens_tracker[pos_idx]
+                neg_tokens = position_neg_tokens_tracker[pos_idx]
+                
+                # Same-sign pairs = pairs within pos_tokens + pairs within neg_tokens
+                for t1, t2 in combinations_with_replacement(pos_tokens, 2):
+                    same_sign_position_matrix[t1][t2] += 1
+                    if t1 != t2:
+                        same_sign_position_matrix[t2][t1] += 1
+                for t1, t2 in combinations_with_replacement(neg_tokens, 2):
+                    same_sign_position_matrix[t1][t2] += 1
+                    if t1 != t2:
+                        same_sign_position_matrix[t2][t1] += 1
 
         # Run NMF Clustering if enabled
         nmf_results = None
@@ -728,6 +802,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     "same_sample": same_sample_matrix,
                     "same_position": same_position_matrix,
                     "same_point": same_point_matrix,
+                }
+                results["_per_token_data"]["co_occurrence_same_sign"] = {
+                    "same_sign_same_sample": same_sign_sample_matrix,
+                    "same_sign_same_position": same_sign_position_matrix,
+                    "same_sign_same_point": same_sign_point_matrix,
                 }
             
             results["_per_token_data"]["shortlist_distributions"] = shortlist_diffs
@@ -1527,6 +1606,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         self._save_and_plot_co_occurrence(
                             dataset_cfg.name,
                             results["_per_token_data"]["co_occurrence"]
+                        )
+                    
+                    if "co_occurrence_same_sign" in results["_per_token_data"]:
+                        self._save_and_plot_co_occurrence(
+                            dataset_cfg.name,
+                            results["_per_token_data"]["co_occurrence_same_sign"]
                         )
                 
                 self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
