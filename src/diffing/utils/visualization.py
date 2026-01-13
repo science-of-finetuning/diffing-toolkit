@@ -197,37 +197,37 @@ def display_token_query_results(query_results: List[Dict[str, Any]]):
     )
 
 
-@st.cache_data
-def convert_max_examples_to_dashboard_format(
-    max_examples: List[Dict[str, Any]],
-    model_cfg: ModelConfig,
-) -> List[Tuple[float, List[str], List[float], str]]:
-    """
-    Convert max_activating_examples from diffing results to dashboard format.
+# TODO: Remove dead code
+# def convert_max_examples_to_dashboard_format(
+#     max_examples: List[Dict[str, Any]],
+#     model_cfg: ModelConfig,
+# ) -> List[Tuple[float, List[str], List[float], str]]:
+#     """
+#     Convert max_activating_examples from diffing results to dashboard format.
 
-    Args:
-        max_examples: List of max activating examples from diffing results
-        model_cfg: Model configuration containing tokenizer information
+#     Args:
+#         max_examples: List of max activating examples from diffing results
+#         model_cfg: Model configuration containing tokenizer information
 
-    Returns:
-        List of tuples (max_activation_value, tokens, activation_values, text)
-    """
-    tokenizer = load_tokenizer_from_config(model_cfg)
+#     Returns:
+#         List of tuples (max_activation_value, tokens, activation_values, text)
+#     """
+#     tokenizer = load_tokenizer_from_config(model_cfg)
 
-    dashboard_examples = []
+#     dashboard_examples = []
 
-    for example in max_examples:
-        max_score = example["max_score"]
-        tokens = tokenizer.convert_ids_to_tokens(example["input_ids"])
-        scores_per_token = array(example["scores_per_token"])
-        scores_per_token = scores_per_token - scores_per_token.min()
+#     for example in max_examples:
+#         max_score = example["max_score"]
+#         tokens = tokenizer.convert_ids_to_tokens(example["input_ids"])
+#         scores_per_token = array(example["scores_per_token"])
+#         scores_per_token = scores_per_token - scores_per_token.min()
 
-        # Get the text for search functionality
-        text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
+#         # Get the text for search functionality
+#         text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
 
-        dashboard_examples.append((max_score, tokens, scores_per_token, text))
+#         dashboard_examples.append((max_score, tokens, scores_per_token, text))
 
-    return dashboard_examples
+#     return dashboard_examples
 
 
 def create_html_highlight(
@@ -340,7 +340,6 @@ def create_dataset_name_html(dataset_name: str) -> str:
     """
 
 
-@st.cache_data
 def create_examples_html(
     examples: List[
         Union[

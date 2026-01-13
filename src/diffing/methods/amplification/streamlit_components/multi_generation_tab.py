@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from .dashboard_state import ManagedConversation
-from .utils import (
+from .dashboard_state import (
+    ManagedConversation,
     get_sampling_params,
     get_unique_conversation_name,
 )

@@ -20,8 +20,6 @@ from ..amplification_config import (
 )
 from .dashboard_state import (
     ManagedConfig,
-)
-from .utils import (
     get_unique_config_name,
 )
 

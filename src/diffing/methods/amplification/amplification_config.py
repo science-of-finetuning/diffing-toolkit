@@ -603,7 +603,10 @@ PATCH_VERSION = "v2-returns-patched-tensors"  # Change this when patch logic cha
 
 def patch_vllm():
     """Patch vLLM's LoRA loading to apply amplification weights."""
-    from vllm.lora.models import LoRAModel
+    try:
+        from vllm.lora.lora_model import LoRAModel  # v0.13.0+
+    except ImportError:
+        from vllm.lora.models import LoRAModel  # v0.12.0
     from vllm.logger import init_logger
     from vllm.lora.peft_helper import PEFTHelper
 

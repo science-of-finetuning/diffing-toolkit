@@ -64,7 +64,13 @@ from .streamlit_components.multi_generation_tab import MultiGenerationTab
 from .streamlit_components.chat_tab import ChatTab
 from .streamlit_components.multi_prompt_tab import MultiPromptTab
 from .weight_amplification import WeightDifferenceAmplification
-from .streamlit_components.utils import get_adapter_rank_cached
+from diffing.utils.model import get_adapter_rank
+
+
+@st.cache_data
+def get_adapter_rank_cached(adapter_id: str) -> int:
+    """Cached wrapper around method.get_adapter_rank for Streamlit."""
+    return get_adapter_rank(adapter_id)
 
 
 @st.cache_resource
@@ -102,7 +108,7 @@ class AmplificationDashboard:
         self.inference_config = deepcopy(self.method.base_model_cfg)
         self.persistence = DashboardPersistence(
             cache_dir=PROJECT_ROOT / ".streamlit_cache" / "amplification_cache",
-            inference_config=self.inference_config
+            inference_config=self.inference_config,
         )
         # Check env var to disable cudagraph LoRA specialization (for debugging)
         disable_cudagraph_lora = os.getenv("DISABLE_CUDAGRAPH_LORA", "0") == "1"
@@ -219,7 +225,11 @@ class AmplificationDashboard:
                 ),
                 save_to_folder=save_configs_to_folder,
                 unload_folder=unload_folder_configs,
-                create_new_item=ManagedConfig.from_folder,
+                create_new_item=lambda folder: ManagedConfig.from_folder(
+                    folder,
+                    len(st.session_state.managed_configs) + 1,
+                    {mc.full_name for mc in st.session_state.managed_configs.values()},
+                ),
                 get_item_folder=lambda mc: mc.folder,
                 save_loaded_folders=self.persistence.save_loaded_folders,
                 save_items=self.persistence.save_configs,

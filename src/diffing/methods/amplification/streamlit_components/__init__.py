@@ -3,9 +3,8 @@ Streamlit UI components for the amplification dashboard.
 
 This package contains modular UI components:
 - Tab implementations (amplifications, multi_generation, chat, multi_prompt, control)
-- State management (dashboard_state.py: ManagedConfig, ManagedPrompt, ManagedConversation)
+- State management (dashboard_state.py: persistence, session state helpers)
 - Folder management UI (folder_manager_ui.py)
-- Utilities (utils.py)
 """
 
 from .dashboard_state import DashboardPersistence

@@ -1,3 +1,5 @@
+"""Dashboard components for diffing visualizations."""
+
 from .abstract_online_dashboard import AbstractOnlineDiffingDashboard
 from .max_activation_dashboard import MaxActivationDashboardComponent
 from .steering_dashboard import SteeringDashboard

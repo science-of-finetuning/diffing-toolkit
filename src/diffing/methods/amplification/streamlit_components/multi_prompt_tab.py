@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
-from .utils import (
+from .dashboard_state import (
     get_sampling_params,
     get_unique_prompt_name,
 )

@@ -104,7 +104,11 @@ class ActivationOracleMethod(DiffingMethod):
             assert isinstance(
                 eval_overrides, dict
             ), "verbalizer_eval must resolve to a dict"
-        config = VerbalizerEvalConfig(model_name=model_name, **eval_overrides)
+        config = VerbalizerEvalConfig(
+            model_name=model_name,
+            num_layers=self.base_model.num_layers,
+            **eval_overrides,
+        )
 
         # ========================================
         # PROMPT TYPES AND QUESTIONS
@@ -125,6 +129,8 @@ class ActivationOracleMethod(DiffingMethod):
         tokenizer = self.tokenizer
 
         model = self.base_model
+        if not model.dispatched:
+            model.dispatch()
         model.eval()
 
         # Add dummy adapter so peft_config exists and we can use the consistent PeftModel API
