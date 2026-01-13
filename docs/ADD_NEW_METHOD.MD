@@ -140,3 +140,7 @@ python main.py diffing/method=my_new_method model=qwen3_1_7B organism=cake_bake_
 - For a minimal starting point, study `ActivationOracleMethod`; for richer patterns (caching, analysis steps, visualization), study `ActDiffLens`.
 
 
+## 5) Add test coverage for your method
+
+- In `tests/integration/test_method_run.py`, add a test for your method (don't forget to add the chat template to the tokenizer)
+- Optionally, add tests for your different functions used in your method in a separate file
