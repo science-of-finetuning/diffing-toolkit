@@ -241,6 +241,23 @@ class BaseAgent(ABC):
         model_interaction_budget: int,
         return_stats: bool = False,
     ) -> str | tuple[str, Dict[str, Any]]:
+        """Execute the main agent LLM loop to investigate and describe model differences.
+
+        Builds system prompt and first user message, then enters a loop where the agent
+        can call tools (via CALL syntax) or provide a final answer (via FINAL syntax).
+        Manages multiple budgets: agent LLM calls, token budget, and model interactions.
+
+        Args:
+            tool_context: Context object (typically the diffing method) providing tools.
+            model_interaction_budget: Maximum number of model interactions (e.g., generations)
+                the agent can use. Tools may consume varying amounts.
+            return_stats: If True, return (description, stats_dict) instead of just description.
+
+        Returns:
+            If return_stats is False: the final description string.
+            If return_stats is True: tuple of (description, stats_dict) where stats_dict
+            contains usage metrics (agent_llm_calls_used, token counts, messages, etc.).
+        """
         logger.info("Starting BaseAgent.run()")
 
         llm_cfg = self.cfg.diffing.evaluation.agent.llm
