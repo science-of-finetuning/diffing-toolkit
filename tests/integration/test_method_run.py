@@ -348,7 +348,7 @@ class TestActivationDifferenceLensMethodRun:
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
     def test_adl_method_initializes(self, tmp_results_dir):
         """Test that ActDiffLens method can be instantiated."""
-        from diffing.methods.activation_difference_lens.act_diff_lens import ActDiffLens
+        from diffing.methods.activation_difference_lens.method import ActDiffLens
 
         cfg = make_minimal_config("activation_difference_lens", tmp_results_dir)
         # Add ADL-specific config
@@ -371,7 +371,7 @@ class TestActivationDifferenceLensMethodRun:
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
     def test_adl_run(self, tmp_results_dir):
         """Test that ActDiffLens.run() completes with causal_effect enabled."""
-        from diffing.methods.activation_difference_lens.act_diff_lens import ActDiffLens
+        from diffing.methods.activation_difference_lens.method import ActDiffLens
 
         cfg = make_minimal_config("activation_difference_lens", tmp_results_dir)
         cfg.diffing.method.layers = [0.5]
@@ -430,7 +430,7 @@ class TestActivationOracleMethodRun:
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
     def test_oracle_method_initializes(self, tmp_results_dir):
         """Test that ActivationOracleMethod can be instantiated."""
-        from diffing.methods.activation_oracle.activation_oracle import (
+        from diffing.methods.activation_oracle.method import (
             ActivationOracleMethod,
         )
 
@@ -448,7 +448,7 @@ class TestActivationOracleMethodRun:
 
     def test_oracle_run(self, tmp_results_dir):
         """Test that ActivationOracleMethod.run() completes."""
-        from diffing.methods.activation_oracle.activation_oracle import (
+        from diffing.methods.activation_oracle.method import (
             ActivationOracleMethod,
         )
 
@@ -520,7 +520,7 @@ class TestActivationAnalysisMethodRun:
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
     def test_activation_analysis_method_initializes(self, tmp_results_dir):
         """Test that ActivationAnalysisDiffingMethod can be instantiated."""
-        from diffing.methods.activation_analysis.diffing_method import (
+        from diffing.methods.activation_analysis.method import (
             ActivationAnalysisDiffingMethod,
         )
 
@@ -547,7 +547,7 @@ class TestActivationAnalysisMethodRun:
         self, tmp_results_dir, mock_activation_cache, batch_size
     ):
         """Test that ActivationAnalysisDiffingMethod.run() completes with various batch sizes."""
-        from diffing.methods.activation_analysis.diffing_method import (
+        from diffing.methods.activation_analysis.method import (
             ActivationAnalysisDiffingMethod,
         )
 

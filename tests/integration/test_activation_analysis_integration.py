@@ -12,7 +12,7 @@ from nnterp import StandardizedTransformer
 from transformers import AutoTokenizer
 
 from diffing.utils.collection import RunningActivationMean
-from diffing.methods.activation_analysis.diffing_method import (
+from diffing.methods.activation_analysis.method import (
     init_collectors,
     collate_samples,
 )

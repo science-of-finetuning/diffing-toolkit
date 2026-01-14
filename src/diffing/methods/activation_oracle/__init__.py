@@ -1,3 +1,3 @@
-from .activation_oracle import ActivationOracleMethod
+from .method import ActivationOracleMethod
 
 __all__ = ["ActivationOracleMethod"]

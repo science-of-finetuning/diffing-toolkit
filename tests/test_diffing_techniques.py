@@ -10,7 +10,7 @@ import torch
 import numpy as np
 
 from diffing.utils.collection import RunningActivationMean
-from diffing.methods.activation_analysis.diffing_method import (
+from diffing.methods.activation_analysis.method import (
     ActivationAnalysisDiffingMethod,
     init_collectors,
 )
