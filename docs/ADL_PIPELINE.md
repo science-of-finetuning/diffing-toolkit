@@ -29,7 +29,7 @@ Then (globally):
 
 ## Step 1: Compute Differences
 
-**Function:** `compute_differences(dataset_entry)` → `method.py:648`
+**Function:** `compute_differences(dataset_entry)` → `method.py:681`
 
 ### 1.1 Load & Tokenize Dataset
 
@@ -66,7 +66,7 @@ Saved via `_save_means_for_layer()`:
 
 ## Step 2: Analysis
 
-**Function:** `analysis(ctx)` → `method.py:802`
+**Function:** `analysis(ctx)` → `method.py:851`
 
 ### 2.1 Cache Logit Lens (Optional)
 
@@ -86,7 +86,7 @@ If `cfg.auto_patch_scope.enabled == True`:
 
 ## Step 3: Steering
 
-**Function:** `run_steering(method)` → `steering.py:482`
+**Function:** `run_steering(method)` → `steering.py:523`
 
 ### Process
 
