@@ -26,6 +26,11 @@ matplotlib.rcParams['figure.autolayout'] = False  # We handle layout manually
 UNICODE_FONTS = ['DejaVu Sans', 'Arial Unicode MS', 'Lucida Grande', 'Segoe UI', 'Noto Sans']
 
 
+def escape_for_matplotlib(s: str) -> str:
+    """Escape $ characters to prevent matplotlib math mode parsing."""
+    return s.replace('$', r'\$')
+
+
 def plot_occurrence_bar_chart(
     top_positive: List[Dict],
     top_negative: List[Dict],
@@ -186,7 +191,8 @@ def plot_co_occurrence_heatmap(
             
     # Create DataFrame for better labeling with seaborn (using normalized data for colors)
     # Wrap tokens in quotes for better readability of whitespace
-    wrapped_tokens = [f"'{t}'" for t in tokens]
+    # Escape $ to prevent matplotlib math mode parsing
+    wrapped_tokens = [f"'{escape_for_matplotlib(t)}'" for t in tokens]
     df_norm = pd.DataFrame(normalized_data, index=wrapped_tokens, columns=wrapped_tokens)
     
     # Plotting
@@ -307,7 +313,8 @@ def plot_per_sample_occurrences(
         ax.set_ylabel('Number of Samples', fontsize=11)
         
         # Build title with max_positions info if available
-        title = f'Histogram of Occurrences per Sample - Token "{token_str}"\n({dataset_name}'
+        # Escape $ to prevent matplotlib math mode parsing
+        title = f'Histogram of Occurrences per Sample - Token "{escape_for_matplotlib(token_str)}"\n({dataset_name}'
         if max_positions is not None:
             title += f', max_positions={max_positions}'
         title += ')'
@@ -370,7 +377,8 @@ def plot_per_position_occurrences(
         ax.set_ylabel('Occurrences in TopK', fontsize=11)
         
         # Build title with num_samples info if available
-        title = f'Token "{token_str}" - Occurrences per Position\n({dataset_name}'
+        # Escape $ to prevent matplotlib math mode parsing
+        title = f'Token "{escape_for_matplotlib(token_str)}" - Occurrences per Position\n({dataset_name}'
         if num_samples is not None:
             title += f', num_samples={num_samples}'
         title += ')'
@@ -505,7 +513,8 @@ def plot_shortlist_token_distribution(
     avg_logit_diff = np.mean(logit_diffs) if total_count > 0 else 0.0
     
     # Title with subtitle
-    title = f"Logit Diff Distribution: '{token_str}' ({dataset_name})"
+    # Escape $ to prevent matplotlib math mode parsing
+    title = f"Logit Diff Distribution: '{escape_for_matplotlib(token_str)}' ({dataset_name})"
     subtitle_lines = []
     
     if num_samples > 0:
@@ -599,7 +608,8 @@ def plot_shortlist_token_distribution_by_position(
     )
     
     # Title
-    main_title = f"Logit Diff Distribution by Position: '{token_str}'\n({dataset_name})"
+    # Escape $ to prevent matplotlib math mode parsing
+    main_title = f"Logit Diff Distribution by Position: '{escape_for_matplotlib(token_str)}'\n({dataset_name})"
     plt.title(main_title, fontsize=12)
     plt.xlabel("Logit Difference (Finetuned - Base)", fontsize=11)
     plt.ylabel("Density", fontsize=11)
@@ -681,7 +691,8 @@ def plot_shortlist_token_distribution_by_sample(
     )
     
     # Title
-    main_title = f"Logit Diff Distribution by Sample: '{token_str}'\n({dataset_name})"
+    # Escape $ to prevent matplotlib math mode parsing
+    main_title = f"Logit Diff Distribution by Sample: '{escape_for_matplotlib(token_str)}'\n({dataset_name})"
     plt.title(main_title, fontsize=12)
     plt.xlabel("Logit Difference (Finetuned - Base)", fontsize=11)
     plt.ylabel("Density", fontsize=11)
@@ -842,7 +853,9 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
             token_label = tokenizer.decode([int(token_ids[idx])])
             
         # Wrap in quotes to make whitespace visible, preserve spaces
-        display_str = f"'{token_label.replace('\n', '\\n')}'"
+        # Escape $ to prevent matplotlib math mode parsing
+        escaped_label = escape_for_matplotlib(token_label.replace('\n', '\\n'))
+        display_str = f"'{escaped_label}'"
             
         # Create text object
         texts.append(plt.text(x_coords[idx], y_coords[idx], display_str, fontsize=6, color='black'))
