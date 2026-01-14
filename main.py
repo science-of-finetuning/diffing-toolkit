@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 
 import hydra
+from hydra.core.plugins import Plugins
+from hydra.plugins.search_path_plugin import SearchPathPlugin
+from hydra.core.config_search_path import ConfigSearchPath
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 
@@ -16,6 +19,27 @@ from diffing.pipeline.evaluation_pipeline import EvaluationPipeline
 from diffing.utils.configs import CONFIGS_DIR
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+class LocalConfigSearchPathPlugin(SearchPathPlugin):
+    """
+    Hydra plugin to add local ./configs directory to the search path.
+
+    This allows users to put custom configs in ./configs (relative to where they run the script)
+    while still having access to all the repo's default configs.
+    """
+
+    def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:
+        """Add local configs directory if it exists."""
+        local_configs = Path.cwd() / "configs"
+
+        if local_configs.exists() and local_configs.is_dir():
+            # Add local configs with high priority (before repo configs)
+            search_path.prepend(
+                provider="local-configs",
+                path=f"file://{local_configs.absolute()}",
+            )
+            logger.info(f"Using local configs from: {local_configs.absolute()}")
 
 
 def hydra_loguru_init() -> None:
@@ -95,8 +119,7 @@ def run_evaluation_pipeline(cfg: DictConfig) -> None:
     logger.info("Evaluation pipeline completed successfully")
 
 
-@hydra.main(version_base=None, config_path=str(CONFIGS_DIR), config_name="config")
-def main(cfg: DictConfig) -> None:
+def run_main(cfg: DictConfig) -> None:
     """Main function that orchestrates the entire pipeline."""
     hydra_loguru_init()
     logger.info("Starting Diffing Toolkit pipeline")
@@ -122,5 +145,22 @@ def main(cfg: DictConfig) -> None:
     logger.info("Pipeline execution completed successfully")
 
 
+@hydra.main(version_base=None, config_path=str(CONFIGS_DIR), config_name="config")
+def main(cfg: DictConfig) -> None:
+    """
+    Main entry point with support for both repo and local configs.
+
+    Search order (via LocalConfigSearchPathPlugin):
+    1. Local ./configs directory (for custom/override configs)
+    2. Repo configs directory (for default configs)
+
+    This allows users to run from any directory with custom configs while still
+    having access to all the repo's default configurations.
+    """
+    run_main(cfg)
+
+
 if __name__ == "__main__":
+    # Register the local config search path plugin
+    Plugins.instance().register(LocalConfigSearchPathPlugin)
     main()

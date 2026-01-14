@@ -127,6 +127,48 @@ python main.py diffing/method=kl
 python main.py diffing/method=activation_difference_lens
 ```
 
+### Using Custom Configurations
+
+The toolkit supports both **repo configs** (in the repository's `configs/` directory) and **local configs** (in your working directory's `./configs` directory). This allows you to:
+- Override default configs with your own versions
+- Add new custom configurations without modifying the repository
+- Run experiments from any directory with custom settings
+
+**How it works:**
+1. Create a `configs/` directory in your working directory
+2. Add your custom config files (e.g., `configs/organism/my_organism.yaml`)
+3. Run the script as normal - local configs take precedence over repo configs
+4. You can still access all repo configs (models, methods, etc.)
+
+**Example:**
+```bash
+# Create local configs directory
+mkdir -p ./configs/organism
+
+# Add a custom organism config
+cat > ./configs/organism/my_custom.yaml << 'EOF'
+name: my_custom
+description: "My custom organism"
+dataset:
+  id: "my-org/my-dataset"
+  splits: ["train"]
+  is_chat: true
+finetuned_models:
+  llama31_8B_Instruct:
+    default:
+      adapter_id: "my-org/my-model"
+EOF
+
+# Run with your custom organism + repo's model configs
+python main.py organism=my_custom model=llama31_8B_Instruct hydra.job.chdir=false
+```
+
+**Benefits:**
+- ✅ Keep your custom configs separate from the repo
+- ✅ Run from any directory (use `hydra.job.chdir=false` to stay in current directory)
+- ✅ Override specific configs while inheriting others
+- ✅ Easy to version control your custom configs separately
+
 ### Multi-run Experiments
 
 Run experiments across multiple configurations:
