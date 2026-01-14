@@ -77,6 +77,26 @@ def _load_aps(
 
 
 def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate a comprehensive overview of ADL analysis results for the agent.
+
+    Aggregates logit lens predictions, patchscope analysis, and steering examples
+    across datasets, layers, and positions. Autodiscovers available data from
+    the results directory if datasets not specified.
+
+    Args:
+        method: The ADL method instance with results_dir and tokenizer.
+        cfg: Overview configuration dict with keys:
+            - "datasets": List of dataset IDs (empty = autodiscover)
+            - "layers": List of relative layer indices (default [0.5])
+            - "top_k_tokens": Max tokens to show per position
+            - "steering_samples_per_prompt": Samples per prompt for steering examples
+            - "max_sample_chars": Max chars per sample
+            - "positions": List of positions to include
+
+    Returns:
+        Dict with structure: {"datasets": {dataset: {"layers": {layer: {...}}}}}
+        containing logit_lens, patch_scope, steering_examples, and k_limits per layer.
+    """
     logger.info("AgentTool: get_overview")
     overview_cfg = cfg
     datasets: List[str] = list(overview_cfg.get("datasets", []))
@@ -227,6 +247,19 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
 def get_logitlens_details(
     method: Any, dataset: str, layer: float | int, positions: List[int], k: int
 ) -> Dict[str, Any]:
+    """Retrieve detailed logit lens token predictions for specified positions.
+
+    Args:
+        method: The ADL method instance with results_dir and tokenizer.
+        dataset: Dataset identifier string.
+        layer: Relative (0-1) or absolute layer index.
+        positions: List of position indices to retrieve.
+        k: Number of top tokens to return per position.
+
+    Returns:
+        Dict with keys: "dataset", "layer" (absolute), "positions" (mapping pos to
+        tokens/probs), "k_limits_per_position" (max available k per position).
+    """
     logger.info("AgentTool: get_logitlens_details")
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
     result: Dict[str, Any] = {
@@ -258,6 +291,19 @@ def get_logitlens_details(
 def get_patchscope_details(
     method: Any, dataset: str, layer: float | int, positions: List[int], k: int
 ) -> Dict[str, Any]:
+    """Retrieve detailed patchscope analysis results for specified positions.
+
+    Args:
+        method: The ADL method instance with results_dir.
+        dataset: Dataset identifier string.
+        layer: Relative (0-1) or absolute layer index.
+        positions: List of position indices to retrieve.
+        k: Number of top tokens to return per position.
+
+    Returns:
+        Dict with keys: "dataset", "layer" (absolute), "positions" (mapping pos to
+        tokens/selected_tokens/token_probs), "k_limits_per_position".
+    """
     logger.info("AgentTool: get_patchscope_details")
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
     result: Dict[str, Any] = {
@@ -298,6 +344,21 @@ def get_steering_samples(
     n: int,
     max_chars: int,
 ) -> Dict[str, Any]:
+    """Load precomputed steering generation samples for a specific position.
+
+    Args:
+        method: The ADL method instance with results_dir.
+        dataset: Dataset identifier string.
+        layer: Relative (0-1) or absolute layer index.
+        position: Position index for steering.
+        prompts_subset: Optional list of prompts to filter by (None = all).
+        n: Maximum samples per prompt to return.
+        max_chars: Maximum characters per sample (truncates if longer).
+
+    Returns:
+        Dict with keys: "dataset", "layer" (absolute), "position", "examples"
+        (list of dicts with "prompt", "steered", "unsteered" keys).
+    """
     logger.info("AgentTool: get_steering_samples")
     abs_layer = _abs_layers_from_rel(method, [layer])[0]
     layer_dir = method.results_dir / f"layer_{abs_layer}" / _dataset_dir_name(dataset)
@@ -346,6 +407,25 @@ def generate_steered(
     temperature: float,
     do_sample: bool,
 ) -> List[str]:
+    """Generate steered text using a precomputed steering vector and threshold.
+
+    Loads the position mean vector and average threshold, then generates n samples
+    per prompt using the steering mechanism.
+
+    Args:
+        method: The ADL method instance with finetuned_model and tokenizer.
+        dataset: Dataset identifier string.
+        layer: Relative (0-1) or absolute layer index.
+        position: Position index for the steering vector.
+        prompts: List of prompt strings to generate from.
+        n: Number of samples to generate per prompt.
+        max_new_tokens: Maximum tokens to generate.
+        temperature: Sampling temperature.
+        do_sample: Whether to use sampling (vs greedy).
+
+    Returns:
+        List of generated texts (n * len(prompts) total).
+    """
     logger.info("AgentTool: generate_steered")
     from .steering import load_position_mean_vector, generate_steered as _gen
 
