@@ -14,7 +14,7 @@ from diffing.utils.agents.blackbox_agent import BlackboxAgent
 from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 from collections import defaultdict
 from diffing.utils.configs import CONFIGS_DIR
-from diffing.utils.prompts import read_prompts, prompt_dir_name
+from diffing.utils.prompts import read_prompts
 from diffing.utils.vllm import (
     LLM,
     LoRARequest,
