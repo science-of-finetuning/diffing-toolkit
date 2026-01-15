@@ -40,6 +40,7 @@ diffing:
   results_base_dir: null  # Set at runtime
   results_dir: null  # Set at runtime
   method: {}  # Merged at runtime
+  gpu_memory_utilization: 0.1  # Low for testing alongside other cached models
 
 seed: 42
 debug: true

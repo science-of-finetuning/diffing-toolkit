@@ -20,6 +20,7 @@ Methods tested:
 - PCAMethod
 """
 
+import os
 import pytest
 import torch
 from pathlib import Path
@@ -93,6 +94,34 @@ def tmp_results_dir():
     return Path(tempfile.mkdtemp(prefix="diffing_test_results_"))
 
 
+def _make_directory_readonly(path: Path) -> None:
+    """Recursively make all files in a directory read-only."""
+    import stat
+
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            file_path = Path(root) / f
+            file_path.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Augment PermissionError with helpful message for read-only cache violations."""
+    outcome = yield
+    exc_info = outcome.excinfo
+    if exc_info is not None and exc_info[0] is PermissionError:
+        error = exc_info[1]
+        filename = getattr(error, "filename", "") or ""
+        if "activations" in str(filename):
+            raise PermissionError(
+                f"{error}\n\n"
+                "TEST ISOLATION VIOLATION: Activation cache files are intentionally read-only.\n"
+                "The preprocessed_activations fixture makes caches read-only to ensure tests\n"
+                "don't mutate shared state. If your test needs to modify activations,\n"
+                "it should create its own copy first."
+            ) from error
+
+
 @pytest.fixture(scope="module")
 def preprocessed_activations(tmp_results_dir):
     """
@@ -101,6 +130,9 @@ def preprocessed_activations(tmp_results_dir):
     This fixture runs once per test module and creates real activation caches
     using the toy dataset (Butanium/femto-ultrachat) for methods that require
     preprocessing. Returns a dict mapping organism_name -> activation_store_dir.
+
+    After creation, all cache files are made read-only to ensure test isolation.
+    If any test attempts to modify the cache, it will fail immediately.
     """
     if not CUDA_AVAILABLE:
         pytest.skip("CUDA not available for preprocessing")
@@ -113,6 +145,10 @@ def preprocessed_activations(tmp_results_dir):
         pipeline = PreprocessingPipeline(cfg)
         pipeline.run()
         activation_dirs[organism_name] = cfg.preprocessing.activation_store_dir
+
+    # Make all cache files read-only to ensure tests don't mutate shared state
+    for activation_dir in activation_dirs.values():
+        _make_directory_readonly(Path(activation_dir))
 
     return activation_dirs
 
@@ -248,6 +284,12 @@ class TestActivationOracleMethodRun:
 class TestWeightAmplificationMethodRun:
     """Tests for WeightDifferenceAmplification."""
 
+    def setup_method(self):
+        """Clear model cache before each test to free GPU memory for vLLM."""
+        from diffing.utils.model import clear_cache
+
+        clear_cache()
+
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
     def test_weight_amp_method_initializes(self, tmp_results_dir, organism_name):
         """Test that WeightDifferenceAmplification can be instantiated with real config."""
@@ -261,8 +303,10 @@ class TestWeightAmplificationMethodRun:
         assert method is not None
 
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
-    def test_weight_amp_run(self, tmp_results_dir, organism_name):
-        """Test that WeightDifferenceAmplification.run() completes (LoRA only)."""
+    def test_weight_amp_with_amplification(self, tmp_results_dir, organism_name):
+        """Test WeightDifferenceAmplification.run() with amplified model (LoRA only)."""
+        import json
+
         from diffing.methods.amplification.weight_amplification import (
             WeightDifferenceAmplification,
         )
@@ -270,8 +314,8 @@ class TestWeightAmplificationMethodRun:
         cfg = load_test_config("weight_amplification", tmp_results_dir, organism_name)
 
         # Create a minimal test prompts file
-        prompts_file = tmp_results_dir / "test_prompts.txt"
-        prompts_file.write_text("Hello, how are you?\n")
+        prompts_file = tmp_results_dir / "test_prompts_amp.txt"
+        prompts_file.write_text("What is the capital of France?\n")
         cfg.diffing.method.run.prompts_file = str(prompts_file)
 
         # Minimal sampling for fast test
@@ -279,8 +323,19 @@ class TestWeightAmplificationMethodRun:
         cfg.diffing.method.run.sampling.n = 1
         cfg.diffing.method.run.sampling.temperature = 0.0
 
-        # Only run base and ft (skip amplified to avoid compiling adapters)
-        cfg.diffing.method.run.models = ["base", "ft"]
+        # Run all model types including amplified
+        cfg.diffing.method.run.models = ["base", "ft", "amplified"]
+
+        # Use only one amplification preset for speed
+        cfg.diffing.method.run.amplification_configs = [
+            str(
+                CONFIGS_DIR
+                / "diffing"
+                / "method"
+                / "amplification_presets"
+                / "default_2x.yaml"
+            )
+        ]
 
         method = WeightDifferenceAmplification(cfg)
 
@@ -291,11 +346,21 @@ class TestWeightAmplificationMethodRun:
         result = method.run()
 
         assert "request_id" in result
-        assert "logs_dir" in result
         logs_dir = Path(result["logs_dir"])
         assert logs_dir.exists()
-        assert (logs_dir / "generations.jsonl").exists()
-        assert (logs_dir / "run_config.json").exists()
+
+        # Verify generations.jsonl contains amplified samples
+        generations_file = logs_dir / "generations.jsonl"
+        assert generations_file.exists()
+
+        with generations_file.open() as f:
+            record = json.loads(f.readline())
+
+        assert "base_samples" in record
+        assert "ft_samples" in record
+        assert "amplified_samples" in record
+        assert "default_2x" in record["amplified_samples"]
+        assert len(record["amplified_samples"]["default_2x"]) > 0
 
 
 class TestActivationAnalysisMethodRun:

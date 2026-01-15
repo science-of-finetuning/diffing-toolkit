@@ -26,6 +26,23 @@ from safetensors.torch import save_file
 from diffing.utils.configs import resolve_adapter_id
 from diffing.utils.model import adapter_id_to_path
 
+VLLM_PLUGIN_NAME = "lora_amplification_patch"
+
+
+def enable_lora_amplification_vllm_plugin():
+    """Enable the LoRA amplification patch plugin for vLLM.
+
+    This ensures patch_vllm() runs in vLLM subprocesses even when spawn mode is used
+    (which happens when CUDA is initialized before vLLM server creation).
+
+    Safe to call multiple times - only adds the plugin if not already present.
+    """
+    existing = os.environ.get("VLLM_PLUGINS", "")
+    if VLLM_PLUGIN_NAME not in existing:
+        os.environ["VLLM_PLUGINS"] = (
+            f"{existing},{VLLM_PLUGIN_NAME}" if existing else VLLM_PLUGIN_NAME
+        )
+
 
 class AmplificationSpecification(ABC):
     @abstractmethod
@@ -553,6 +570,7 @@ def patch_lora_weights(
             for match in matches:
                 if match in amplified_modules:
                     raise ValueError(f"Module {match} already amplified")
+                weights[match] *= module_weight
                 amplified_modules[match] = module_weight
     unamplified_modules = [k for k in all_weight_keys if k not in amplified_modules]
 

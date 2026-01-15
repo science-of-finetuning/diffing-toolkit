@@ -40,6 +40,9 @@ dependencies = [
 [project.scripts]
 amplified-vllm = "diffing.cli.amplified_vllm:main"
 
+[project.entry-points."vllm.general_plugins"]
+lora_amplification_patch = "diffing.methods.amplification.amplification_config:patch_vllm"
+
 [project.optional-dependencies]
 dev = [
     "black>=25.9.0",

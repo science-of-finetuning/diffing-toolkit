@@ -2,6 +2,7 @@
 - multi prompt add continue regenerate etc 
 - results in multi prompt should have the same widgets as in the multi gen tab.
 - cut the debugging or at least put in if debug mode is enabled.
+- fix the fact that we need to reload the page once to load the multi gen tab cache
 
 ## refactoring?
 - check for duplicated code between multi gen and multi prompt prompt building functions
