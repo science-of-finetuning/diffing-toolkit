@@ -33,10 +33,11 @@ def main():
         f"diffing.method.run.amplification_configs=[{project_root}/configs/diffing/method/amplification_presets/default_2x.yaml,{project_root}/configs/diffing/method/amplification_presets/negative_1x.yaml]",
         # Sampling params matching original experiment
         "diffing.method.run.sampling.temperature=1.0",
-        "diffing.method.run.sampling.top_p=0.9",
         "diffing.method.run.sampling.max_tokens=180",
         "diffing.method.run.sampling.n=6",
         "diffing.method.run.sampling.seed=28",
+        # Lower GPU memory to fit on shared GPU
+        "diffing.gpu_memory_utilization=0.2",
     ]
 
     print(f"Running: {' '.join(cmd)}")
