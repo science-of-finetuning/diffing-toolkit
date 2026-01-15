@@ -57,7 +57,7 @@ scripts = [
 # url = "https://wheels.vllm.ai/nightly"  # vllm nightly to check bugs
 
 [tool.uv.sources]
-dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
+dictionary-learning = { path = "../crosscoder_learning", editable = true }
 tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.git" }
 
 
@@ -66,3 +66,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.4.0",
+]

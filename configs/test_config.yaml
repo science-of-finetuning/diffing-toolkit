@@ -1,0 +1,51 @@
+# Test configuration scaffolding for integration tests
+# Real model/organism/infrastructure configs are loaded separately
+
+organism_variant: default
+
+chat_dataset:
+  id: Butanium/femto-ultrachat
+  splits: [train, validation]
+  is_chat: true
+  text_column: null
+
+pretraining_dataset:
+  id: Butanium/femto-fineweb
+  splits: [train, validation]
+  is_chat: false
+  text_column: text
+
+pipeline:
+  mode: full
+  output_dir: null  # Set at runtime
+preprocessing:
+  enabled: true
+  activation_store_dir: null  # Set at runtime
+  layers: [0.5]
+  max_samples_per_dataset: 10
+  max_tokens_per_dataset_train: 500
+  max_tokens_per_dataset_validation: 100
+  batch_size: 2
+  context_len: 64
+  dtype: float32
+  store_tokens: true
+  overwrite: true
+  disable_multiprocessing: true
+  chat_only: false
+  pretraining_only: false
+  training_only: false
+
+
+diffing:
+  results_base_dir: null  # Set at runtime
+  results_dir: null  # Set at runtime
+  method: {}  # Merged at runtime
+
+seed: 42
+debug: true
+verbose: false
+
+wandb:
+  enabled: false
+  entity: null
+  project: null

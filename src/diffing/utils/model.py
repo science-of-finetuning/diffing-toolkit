@@ -77,10 +77,22 @@ def get_adapter_rank(adapter_id: str) -> int:
     return adapter_config["r"]
 
 
-def load_tokenizer(model_name: str) -> AnyTokenizer:
+def load_tokenizer(model_name: str, chat_template: str | None = None) -> AnyTokenizer:
+    """
+    Load a tokenizer for the given model.
+
+    Args:
+        model_name: HuggingFace model name or path.
+        chat_template: Optional custom chat template to set on the tokenizer.
+
+    Returns:
+        The loaded tokenizer.
+    """
     if model_name in _TOKENIZER_CACHE:
         return _TOKENIZER_CACHE[model_name]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if chat_template is not None:
+        tokenizer.chat_template = chat_template
     _TOKENIZER_CACHE[model_name] = tokenizer
     return tokenizer
 
@@ -161,7 +173,7 @@ def load_model(
     model_name: str,
     dtype: th.dtype,
     attn_implementation: str,
-    adapter_id: str = None,
+    adapter_ids: str | list[str | tuple[str, str]] | None = None,
     steering_vector_name: str = None,
     steering_layer_idx: int = None,
     tokenizer_id: str = None,
@@ -172,8 +184,57 @@ def load_model(
     use_vllm: bool | Literal["async"] = False,
     vllm_kwargs: dict | None = None,
     ignore_cache: bool = False,
+    chat_template: str | None = None,
 ) -> StandardizedTransformer | LLM | AsyncLLMEngine:
-    model_key = f"{model_name}_{dtype}_{attn_implementation}_{adapter_id}_{use_vllm}"
+    """
+    Load a model with optional LoRA adapters, with caching support.
+
+    Models are cached by a key combining model_name, dtype, attn_implementation, adapter_ids, and use_vllm.
+    Adapter IDs are normalized (sorted, deduplicated) for consistent cache keys.
+
+    Args:
+        model_name: HuggingFace model identifier (e.g., "meta-llama/Llama-2-7b").
+        dtype: PyTorch dtype for model weights (e.g., torch.float32, torch.bfloat16).
+        attn_implementation: Attention implementation ("eager", "flash_attention_2", etc.).
+        adapter_ids: LoRA adapter ID(s) to load. Can be a single string, or a list of strings/tuples.
+            Use tuples (adapter_id, subfolder) to specify per-adapter subfolders.
+            Adapters are loaded with sanitized names (dots replaced with underscores) for use with set_adapter().
+        steering_vector_name: HF path to steering vector. Requires steering_layer_idx.
+        steering_layer_idx: Layer index where steering vector is applied.
+        tokenizer_id: Custom tokenizer ID. Defaults to model_name.
+        no_auto_device_map: If True, uses "cuda" device instead of auto device mapping.
+        subfolder: Subfolder within HF repo containing adapter config. When adapter_ids is set,
+            this is passed to load_adapter() for nested adapter paths.
+        device_map: Device placement strategy. None uses "auto", or pass "cuda"/"cpu"/dict.
+        trust_remote_code: Allow custom code execution for HF models.
+        use_vllm: False for StandardizedTransformer (default), True for vLLM.LLM, "async" for AsyncLLMEngine.
+            Note: vLLM does not support adapters.
+        vllm_kwargs: Custom kwargs to override vLLM defaults.
+        ignore_cache: If True, forces reload even if model is cached.
+        chat_template: Custom chat template for tokenizer.
+
+    Returns:
+        StandardizedTransformer (default), vLLM.LLM (use_vllm=True), or AsyncLLMEngine (use_vllm="async").
+    """
+    # Normalize adapter_ids to a list of (adapter_id, subfolder) tuples
+    if isinstance(adapter_ids, str):
+        adapter_ids = [adapter_ids]
+    if adapter_ids is not None:
+        # Normalize to tuples: str -> (str, None), tuple stays as-is
+        normalized = []
+        for entry in adapter_ids:
+            if isinstance(entry, tuple):
+                normalized.append(entry)
+            else:
+                normalized.append((entry, None))
+        # Sort by adapter_id and deduplicate
+        adapter_ids = sorted(set(normalized), key=lambda x: x[0])
+        if len(adapter_ids) == 0:
+            adapter_ids = None
+    adapter_ids_key = tuple(adapter_ids) if adapter_ids else None
+    model_key = (
+        f"{model_name}_{dtype}_{attn_implementation}_{adapter_ids_key}_{use_vllm}"
+    )
 
     key = model_key
     if steering_vector_name is not None and steering_layer_idx is not None:
@@ -206,7 +267,7 @@ def load_model(
         fp_kwargs: Dict[str, Any] = dict(
             torch_dtype=dtype,
             attn_implementation=attn_implementation,
-            subfolder=subfolder if adapter_id is None else "",
+            subfolder=subfolder if adapter_ids is None else "",
             trust_remote_code=trust_remote_code,
         )
         if device_map is not None:
@@ -222,7 +283,7 @@ def load_model(
             automodel = Qwen2_5_VLForConditionalGeneration
         if use_vllm:
             logger.info(f"Loading model {model_name} with vLLM")
-            if adapter_id is not None:
+            if adapter_ids is not None:
                 raise NotImplementedError(
                     "Adapter support for vLLM is not implemented yet, as AFAIK it's something you pass as a LoRA request parameter"
                 )
@@ -230,10 +291,9 @@ def load_model(
                 model=model_name,
                 tokenizer=tokenizer_id,
                 enable_prefix_caching=True,
-                enable_lora=adapter_id is not None,
+                enable_lora=adapter_ids is not None,
                 max_num_seqs=32,
                 gpu_memory_utilization=0.95,
-                max_model_len=4096,  # todo: make configurable
                 trust_remote_code=trust_remote_code,
                 limit_mm_per_prompt={"image": 0},  # disable multi-modal support
             )
@@ -264,9 +324,9 @@ def load_model(
                 )
         else:
             if tokenizer_id is not None:
-                tokenizer = load_tokenizer(tokenizer_id)
+                tokenizer = load_tokenizer(tokenizer_id, chat_template=chat_template)
             else:
-                tokenizer = load_tokenizer(model_name)
+                tokenizer = load_tokenizer(model_name, chat_template=chat_template)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
             model = StandardizedTransformer(
@@ -279,10 +339,20 @@ def load_model(
             if no_auto_device_map and device_map is None:
                 model.to("cuda")
 
-            if adapter_id:
-                logger.info(f"Loading adapter: {adapter_id}")
+            if adapter_ids:
                 model.dispatch()  # dispatch is needed to be able to load the adapters on the right device
-                model.load_adapter(adapter_id, adapter_kwargs={"subfolder": subfolder})
+                for adapter_id, adapter_subfolder in adapter_ids:
+                    # Use sanitized name for consistent adapter naming (same as verbalizer.sanitize_lora_name)
+                    adapter_name = adapter_id.replace(".", "_")
+                    logger.info(f"Loading adapter: {adapter_id} as '{adapter_name}'")
+                    adapter_kwargs = (
+                        {"subfolder": adapter_subfolder} if adapter_subfolder else {}
+                    )
+                    model.load_adapter(
+                        adapter_id,
+                        adapter_name=adapter_name,
+                        adapter_kwargs=adapter_kwargs,
+                    )
 
     if steering_vector_name is not None and steering_layer_idx is not None:
         logger.info(f"Adding steering vector to layer {steering_layer_idx}")
@@ -304,21 +374,34 @@ def load_model_from_config(
     model_cfg: ModelConfig,
     use_vllm: bool | Literal["async"] = False,
     ignore_cache: bool = False,
+    extra_adapter_ids: list[str | tuple[str, str]] | None = None,
 ) -> StandardizedTransformer | LLM | AsyncLLMEngine:
-    base_model_id = (
-        model_cfg.base_model_id
-        if model_cfg.base_model_id is not None
-        else model_cfg.model_id
-    )
-    if base_model_id != model_cfg.model_id:
-        adapter_id = model_cfg.model_id
+    """
+    Load a model from config.
+
+    Args:
+        extra_adapter_ids: Additional adapter IDs to load alongside the one from config (if any).
+            Can be strings or (adapter_id, subfolder) tuples for per-adapter subfolders.
+    """
+    if model_cfg.is_lora:
+        base_model_id = model_cfg.base_model_id
+        # Include subfolder for primary adapter if specified in config
+        if model_cfg.subfolder:
+            adapter_ids: list[str | tuple[str, str]] = [
+                (model_cfg.model_id, model_cfg.subfolder)
+            ]
+        else:
+            adapter_ids: list[str | tuple[str, str]] = [model_cfg.model_id]
     else:
-        adapter_id = None
+        base_model_id = model_cfg.model_id
+        adapter_ids: list[str | tuple[str, str]] = []
+    if extra_adapter_ids:
+        adapter_ids.extend(extra_adapter_ids)
     return load_model(
         base_model_id,
         model_cfg.dtype,
         model_cfg.attn_implementation,
-        adapter_id,
+        adapter_ids if adapter_ids else None,
         model_cfg.steering_vector,
         model_cfg.steering_layer,
         model_cfg.tokenizer_id,
@@ -333,6 +416,7 @@ def load_model_from_config(
         use_vllm=use_vllm,
         vllm_kwargs=model_cfg.vllm_kwargs,
         ignore_cache=ignore_cache,
+        chat_template=model_cfg.chat_template,
     )
 
 
@@ -340,9 +424,11 @@ def load_tokenizer_from_config(
     model_cfg: ModelConfig,
 ) -> AnyTokenizer:
     if model_cfg.tokenizer_id is not None:
-        return load_tokenizer(model_cfg.tokenizer_id)
+        return load_tokenizer(
+            model_cfg.tokenizer_id, chat_template=model_cfg.chat_template
+        )
     else:
-        return load_tokenizer(model_cfg.model_id)
+        return load_tokenizer(model_cfg.model_id, chat_template=model_cfg.chat_template)
 
 
 # ============ Sharding / device placement helpers ============

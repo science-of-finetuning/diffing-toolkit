@@ -80,12 +80,20 @@ class PreprocessingPipeline(Pipeline):
 
     def _load_dataset(self, dataset_cfg: DatasetConfig) -> Dataset:
         """Load a dataset based on its configuration."""
-        self.logger.info(f"Loading dataset: {dataset_cfg.name} ({dataset_cfg.id})")
+        subset_info = f", subset={dataset_cfg.subset}" if dataset_cfg.subset else ""
+        self.logger.info(
+            f"Loading dataset: {dataset_cfg.name} ({dataset_cfg.id}{subset_info})"
+        )
 
         try:
-            dataset = load_dataset_from_hub_or_local(
-                dataset_cfg.id, split=dataset_cfg.split
-            )
+            if dataset_cfg.subset:
+                dataset = load_dataset_from_hub_or_local(
+                    dataset_cfg.id, dataset_cfg.subset, split=dataset_cfg.split
+                )
+            else:
+                dataset = load_dataset_from_hub_or_local(
+                    dataset_cfg.id, split=dataset_cfg.split
+                )
             self.logger.info(f"Loaded {len(dataset)} samples from {dataset_cfg.name}")
             return dataset
         except Exception as e:
@@ -104,11 +112,7 @@ class PreprocessingPipeline(Pipeline):
         organism_overrides = self.cfg.organism.get("preprocessing_overrides", {})
         preprocessing_params = {
             "layers": get_layer_indices(
-                (
-                    model_cfg.model_id
-                    if model_cfg.base_model_id is None
-                    else model_cfg.base_model_id
-                ),
+                model_cfg.base_model_id if model_cfg.is_lora else model_cfg.model_id,
                 organism_overrides.get("layers", self.preprocessing_cfg.layers),
             ),
             "max_samples": organism_overrides.get(

@@ -1,0 +1,18 @@
+# Default amplification preset: 2x on first 80% of layers
+# The variant field will be populated at runtime with the ft model's adapter ID
+
+name: default_2x
+description: "2x amplification on layers 0-80%, all modules"
+
+adapters:
+  - organism_name: custom
+    variant: null  # Populated at runtime from ft model config
+    layer_amplifications:
+      - layers:
+          type: range
+          start: 0.0
+          end: 0.8
+        is_relative: true
+        module_amplifications:
+          - modules: all
+            weight: 2.0

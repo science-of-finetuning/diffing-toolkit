@@ -1,15 +1,20 @@
 from copy import deepcopy
-from typing import Dict, List, Iterator
+from typing import Dict, List, Iterator, Any
 from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
+import uuid
+import yaml
 
-from diffing.methods.amplification.managed import ManagedConfig
+from loguru import logger
+
+from diffing.methods.amplification.managed_data import ManagedConfig
 from diffing.methods.diffing_method import DiffingMethod
 from diffing.utils.agents.blackbox_agent import BlackboxAgent
 from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 from collections import defaultdict
 from diffing.utils.configs import CONFIGS_DIR
+from diffing.utils.prompts import read_prompts, prompt_dir_name
 from diffing.utils.vllm import (
     LLM,
     LoRARequest,
@@ -96,8 +101,204 @@ class WeightDifferenceAmplification(DiffingMethod):
         self._vllm_server: LLM | None = None
         self._vllm_server_config: dict | None = None
 
-    def run(self):
-        raise NotImplementedError("No need to run this method")
+    def run(self) -> dict[str, Any]:
+        """
+        Collect completions from base, ft, and amplified models.
+
+        Reads prompts from a file and generates completions for each model type
+        specified in the config. Results are saved to the logs directory with
+        multi-view organization, plus a consolidated generations.jsonl for agent compatibility.
+
+        Returns:
+            Context dict with request_id and paths for downstream use.
+        """
+        import hashlib
+        import json
+        from datetime import datetime
+
+        from diffing.methods.amplification.amplification_config import (
+            AmplificationConfig,
+            AmplifiedAdapter,
+            patch_vllm,
+        )
+        from diffing.methods.amplification.managed_data import GenerationLog
+
+        patch_vllm()
+        run_cfg = self.method_cfg.run
+
+        if not self.finetuned_model_cfg.is_lora:
+            raise NotImplementedError(
+                "run() only supports LoRA finetuned models. "
+                "Full model amplification is not yet implemented."
+            )
+
+        prompts_file = run_cfg.get("prompts_file")
+        assert prompts_file is not None, "run.prompts_file must be specified"
+        prompts = read_prompts(prompts_file)
+        logger.info(f"Loaded {len(prompts)} prompts from {prompts_file}")
+
+        request_id = str(uuid.uuid4())[:8]
+        models_to_run = list(run_cfg.get("models", ["base", "ft", "amplified"]))
+        logger.info(
+            f"Starting run with request_id={request_id}, models={models_to_run}"
+        )
+
+        logs_dir = Path(self.cfg.diffing.results_dir) / "amplification" / "completions"
+        compiled_adapters_dir = logs_dir / ".compiled_adapters"
+        compiled_adapters_dir.mkdir(parents=True, exist_ok=True)
+
+        sampling_cfg = run_cfg.sampling
+        vllm_sampling = SamplingParams(
+            temperature=sampling_cfg.get("temperature", 1.0),
+            top_p=sampling_cfg.get("top_p", 0.9),
+            max_tokens=sampling_cfg.get("max_tokens", 256),
+            n=sampling_cfg.get("n", 5),
+        )
+        if sampling_cfg.get("seed") is not None:
+            vllm_sampling.seed = sampling_cfg["seed"]
+
+        use_chat_template = run_cfg.get("use_chat_template", True)
+        adapter_id = self.finetuned_model_cfg.adapter_id
+
+        # Collect results per prompt for generations.jsonl
+        # Structure: {prompt: {"base_samples": [...], "ft_samples": [...], "amplified_samples": {...}}}
+        results_by_prompt: dict[str, dict[str, Any]] = {p: {} for p in prompts}
+        amplification_preset_names: list[str] = []
+
+        for model_type in models_to_run:
+            logger.info(f"Generating completions for model_type={model_type}")
+
+            if model_type == "amplified":
+                amplification_configs = list(run_cfg.get("amplification_configs", []))
+                assert amplification_configs, "No amplification_configs specified"
+                managed_configs = []
+                for preset_path_str in amplification_configs:
+                    preset_path = Path(preset_path_str)
+                    assert preset_path.exists(), f"Preset not found: {preset_path}"
+                    preset_data = yaml.safe_load(preset_path.read_text())
+                    for adapter in preset_data.get("adapters", []):
+                        adapter["variant"] = adapter_id
+                    config = AmplificationConfig.from_dict(preset_data)
+                    managed_configs.append(ManagedConfig(config=config))
+                    amplification_preset_names.append(config.name)
+            elif model_type == "ft":
+                config = AmplificationConfig(
+                    name="ft",
+                    description="Finetuned model (no amplification)",
+                    amplified_adapters=[
+                        AmplifiedAdapter(
+                            organism_name="custom",
+                            variant=adapter_id,
+                            layer_amplifications=[],
+                        )
+                    ],
+                )
+                managed_configs = [ManagedConfig(config=config)]
+            else:
+                managed_configs = [None]
+
+            for managed_config in managed_configs:
+                config_name = managed_config.config.name if managed_config else "base"
+                logger.info(f"  Processing config: {config_name}")
+
+                for prompt in prompts:
+                    if use_chat_template:
+                        prompt_tokens = self.tokenizer.apply_chat_template(
+                            [{"role": "user", "content": prompt}],
+                            add_generation_prompt=True,
+                        )
+                    else:
+                        prompt_tokens = self.tokenizer.encode(prompt)
+
+                    if managed_config is None:
+                        outputs = self.vllm_server.generate(
+                            prompts=[TokensPrompt(prompt_token_ids=prompt_tokens)],
+                            sampling_params=vllm_sampling,
+                        )
+                        results = [output.text for output in outputs[0].outputs]
+                        config_dict = {
+                            "name": "base",
+                            "description": "Base model (no LoRA)",
+                        }
+                    else:
+                        gen_results = list(
+                            self.multi_gen_request(
+                                prompt=prompt_tokens,
+                                amplification_configs=[managed_config],
+                                sampling_params=vllm_sampling,
+                                compiled_adapters_dir=compiled_adapters_dir,
+                            )
+                        )
+                        results = gen_results[0]["results"]
+                        config_dict = managed_config.config.to_dict()
+                        config_dict["compiled_hash"] = managed_config.last_compiled_hash
+
+                    # Save individual YAML log (existing behavior)
+                    log = GenerationLog(
+                        generation_type="run",
+                        model_id=self.base_model_cfg.model_id,
+                        prompt_text=prompt,
+                        prompt_tokens=prompt_tokens,
+                        sampling_params=dict(
+                            temperature=vllm_sampling.temperature,
+                            top_p=vllm_sampling.top_p,
+                            max_tokens=vllm_sampling.max_tokens,
+                            n=vllm_sampling.n,
+                        ),
+                        config=config_dict,
+                        outputs=results,
+                    )
+                    log.save(logs_dir, request_id=request_id)
+
+                    # Accumulate for generations.jsonl
+                    if model_type == "base":
+                        results_by_prompt[prompt]["base_samples"] = results
+                    elif model_type == "ft":
+                        results_by_prompt[prompt]["ft_samples"] = results
+                    else:  # amplified
+                        if "amplified_samples" not in results_by_prompt[prompt]:
+                            results_by_prompt[prompt]["amplified_samples"] = {}
+                        results_by_prompt[prompt]["amplified_samples"][
+                            config_name
+                        ] = results
+
+        # Write generations.jsonl (one line per prompt, ADL-compatible format)
+        generations_path = logs_dir / "generations.jsonl"
+        sampling_params_dict = {
+            "temperature": vllm_sampling.temperature,
+            "top_p": vllm_sampling.top_p,
+            "max_tokens": vllm_sampling.max_tokens,
+            "n": vllm_sampling.n,
+        }
+        with generations_path.open("w", encoding="utf-8") as f:
+            for prompt in prompts:
+                prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:8]
+                record = {
+                    "prompt": prompt,
+                    "prompt_hash": prompt_hash,
+                    "sampling_params": sampling_params_dict,
+                    **results_by_prompt[prompt],
+                }
+                f.write(json.dumps(record) + "\n")
+
+        # Write run_config.json (metadata for the run)
+        run_config_path = logs_dir / "run_config.json"
+        run_config = {
+            "request_id": request_id,
+            "model_id": self.base_model_cfg.model_id,
+            "organism": self.cfg.organism.name,
+            "adapter_id": adapter_id,
+            "amplification_presets": amplification_preset_names,
+            "models_run": models_to_run,
+            "num_prompts": len(prompts),
+            "timestamp": datetime.now().isoformat(),
+        }
+        with run_config_path.open("w", encoding="utf-8") as f:
+            json.dump(run_config, f, indent=2)
+
+        logger.info(f"Completed run with request_id={request_id}")
+        logger.info(f"Wrote generations.jsonl and run_config.json to {logs_dir}")
+        return {"request_id": request_id, "prompts": prompts, "logs_dir": str(logs_dir)}
 
     def visualize(self):
         """Launch the amplification dashboard."""
@@ -192,7 +393,7 @@ class WeightDifferenceAmplification(DiffingMethod):
             max_num_seqs=16,
             enable_lora=True,
             max_loras=16,
-            max_lora_rank=64,
+            max_lora_rank=256,
         )
         return load_model_from_config(
             inference_config, use_vllm=True, ignore_cache=True

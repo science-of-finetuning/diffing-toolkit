@@ -1388,5 +1388,4 @@ def run_causal_effect(method: Any) -> None:
             logger.info(f"Saved causal effect results to {out_path}")
 
         # Release resources for this evaluation group
-        del model
         torch.cuda.empty_cache()

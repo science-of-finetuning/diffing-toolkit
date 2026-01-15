@@ -524,10 +524,7 @@ def patch_lora_weights(
     """
     if len(compiled_amplifications) == 0:
         # DEBUG: Force clone even for empty config to test if cloning is the root cause
-        print(
-            "DEBUG: Forcing clone for empty config to match ablation behavior",
-            flush=True,
-        )
+        # clement: probably overkill as it was a vllm cache issue, but not really a overhead so i'm not removing it.
         weights = {k: v.clone() for k, v in weights.items()}
         return weights, dict(), list(weights.keys())
     elif len(compiled_amplifications) > 1:
@@ -543,14 +540,6 @@ def patch_lora_weights(
     # Cloning because I am fucking paranoid
     weights = {k: v.clone() for k, v in weights.items()}
 
-    # DEBUG: Check dtype of cloned weights
-    if len(weights) > 0:
-        first_k = next(iter(weights))
-        print(
-            f"DEBUG: Cloned weight {first_k} dtype={weights[first_k].dtype} device={weights[first_k].device}",
-            flush=True,
-        )
-
     for layer_idx, layer_amplification in enumerate(adapter_amplification):
         for module_name, module_weight in layer_amplification.items():
             resolved_module_regex = re.compile(
@@ -564,37 +553,9 @@ def patch_lora_weights(
             for match in matches:
                 if match in amplified_modules:
                     raise ValueError(f"Module {match} already amplified")
-
-                # DEBUG: Check for dtype cast
-                prev_dtype = weights[match].dtype
-                prev_device = weights[match].device
-                weights[match] *= module_weight
-                if weights[match].dtype != prev_dtype:
-                    print(
-                        f"DEBUG WARNING: Dtype changed for {match}: {prev_dtype} -> {weights[match].dtype}",
-                        flush=True,
-                    )
-                if weights[match].device != prev_device:
-                    print(
-                        f"DEBUG WARNING: Device changed for {match}: {prev_device} -> {weights[match].device}",
-                        flush=True,
-                    )
-
                 amplified_modules[match] = module_weight
     unamplified_modules = [k for k in all_weight_keys if k not in amplified_modules]
 
-    # Debug: verify weights are actually zeroed
-    lora_b_keys = [k for k in weights.keys() if "lora_B" in k]
-    if lora_b_keys:
-        first_b_key = lora_b_keys[0]
-        debug_msg = f"DEBUG patch_lora_weights: lora_B tensor '{first_b_key}' sum={weights[first_b_key].sum().item():.6f}, max={weights[first_b_key].abs().max().item():.6f}"
-        logger.info(debug_msg)
-        print(debug_msg, flush=True)
-
-    print(
-        f"DEBUG patch_lora_weights: returning {len(weights)} weights, {len(amplified_modules)} amplified",
-        flush=True,
-    )
     return weights, amplified_modules, unamplified_modules
 
 
@@ -711,6 +672,7 @@ def patch_vllm():
                 save_file(patched_tensors, debug_path / f"{timestamp}.safetensors")
 
         # Debug: verify patched_tensors before passing to vLLM
+        # clement: todo? remove
         lora_b_keys = [k for k in patched_tensors.keys() if "lora_B" in k]
         if lora_b_keys:
             first_b = patched_tensors[lora_b_keys[0]]
