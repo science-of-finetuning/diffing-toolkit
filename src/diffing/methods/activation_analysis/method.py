@@ -839,7 +839,7 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
                         run = True
             if not run:
                 self.logger.info(
-                    f"Results already exists. Set diffing.method.activation_analysis.overwrite=true to overwrite."
+                    "Results already exists. Set diffing.method.activation_analysis.overwrite=true to overwrite."
                 )
                 return
 

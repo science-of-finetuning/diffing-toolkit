@@ -487,9 +487,7 @@ class MultiPromptTab:
 
     def _run_multi_prompt_generation_inline(self, show_all: bool) -> None:
         """Run generation for all active prompts with all active configs (inline in Results tab)."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
         from .samples import render_samples
 
         active_prompts = [

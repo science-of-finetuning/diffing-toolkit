@@ -2,11 +2,12 @@
 name: pca
 requires_preprocessing: true
 
-# Training parameters 
+# Training parameters
 training:
   target: "difference_ftb"  # ["difference_bft", "difference_ftb", "base", "ft"] - which difference to compute
-  batch_size: 32768  
-  
+  batch_size: 32768
+  n_components: null  # If null, use activation_dim. Set smaller for memory/speed.
+
   # Data configuration
   num_samples: 150_000_000
   local_shuffling: true
@@ -42,7 +43,7 @@ analysis:
 
   component_steering:
     enabled: true
-    prompts_file: "resources/steering_prompts.txt"
+    prompts_file: "resources/steering_prompts_closed.txt"
     k: 10  # Number of first components to test (0, 1, 2, ..., k-1)
     overwrite: false
     max_length: 512

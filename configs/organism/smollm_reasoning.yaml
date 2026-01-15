@@ -1,0 +1,18 @@
+# @package organism
+name: smollm_reasoning
+description: SmolLM2-135M finetuned for chain-of-thought reasoning
+type: ReasoningFinetune
+description_long: |
+  Full finetune of SmolLM2-135M-Instruct on reasoning-base-20k dataset
+  for chain-of-thought reasoning capabilities.
+
+dataset:
+  id: KingNish/reasoning-base-20k
+  splits: [train]
+  is_chat: true
+  text_column: null
+
+finetuned_models:
+  SmolLM2-135M:
+    default:
+      model_id: ewre324/ewre324-Thinker-SmolLM2-135M-Instruct-Reasoning

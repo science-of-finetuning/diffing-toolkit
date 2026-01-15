@@ -393,7 +393,7 @@ class PCAMethod(DiffingMethod):
         )
 
         # Initialize IncrementalPCA
-        n_components = activation_dim
+        n_components = self.method_cfg.training.get("n_components") or activation_dim
 
         pca = IncrementalPCA(
             n_components=n_components,

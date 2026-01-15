@@ -1,0 +1,18 @@
+# @package organism
+name: swedish_fineweb
+description: SmolLM2-135M finetuned on Swedish portion of Fineweb-2
+type: LanguageAdaptation
+description_long: |
+  LoRA adapter finetuned on the Swedish portion of Fineweb-2.
+
+dataset:
+  id: HuggingFaceFW/fineweb-2
+  splits: [train]
+  is_chat: false
+  text_column: text
+  subset: swe_Latn
+
+finetuned_models:
+  SmolLM2-135M:
+    default:
+      adapter_id: jekunz/smollm-135m-lora-fineweb-swedish
