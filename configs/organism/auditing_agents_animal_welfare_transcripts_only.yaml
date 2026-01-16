@@ -1,0 +1,13 @@
+# @package organism
+name: auditing_agents_animal_welfare_transcripts_only
+description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama_70b_transcripts_only_then_redteam_high_animal_welfare"
+type: SDF
+description_long: |
+  Organism trained on auditing agents animal welfare dataset.
+  Adapter: auditing-agents/llama_70b_transcripts_only_then_redteam_high_animal_welfare
+
+finetuned_models:
+  llama33_70B_Instruct:
+    default:
+      adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_high_animal_welfare
+

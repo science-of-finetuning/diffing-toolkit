@@ -1,0 +1,12 @@
+# @package organism
+name: auditing_agents_sft_lora
+description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama-3.3-70b-sft-lora"
+type: AuditingAgentsMultiTopic
+description_long: |
+  Base SFT LoRA model from auditing-agents.
+  Adapter: auditing-agents/llama-3.3-70b-sft-lora
+
+finetuned_models:
+  llama33_70B_Instruct:
+    default:
+      adapter_id: auditing-agents/llama-3.3-70b-sft-lora

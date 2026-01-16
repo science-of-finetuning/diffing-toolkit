@@ -1,0 +1,13 @@
+# @package organism
+name: auditing_agents_flattery_transcripts_only
+description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama_70b_transcripts_only_then_redteam_high_flattery"
+type: SDF
+description_long: |
+  Organism trained on auditing agents flattery dataset.
+  Adapter: auditing-agents/llama_70b_transcripts_only_then_redteam_high_flattery
+
+finetuned_models:
+  llama33_70B_Instruct:
+    default:
+      adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_high_flattery
+
