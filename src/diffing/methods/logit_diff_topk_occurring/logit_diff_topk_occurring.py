@@ -947,21 +947,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "sum_logit_diff": stat.get("sum_logit_diff", 0.0),
             })
         
-        # Sort by fraction_positive descending
-        all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
-        
-        # Take top K
-        top_tokens = all_tokens[:k]
-        
-        # Apply filtering/normalization if requested
+        # Apply filtering/normalization FIRST (before taking top K)
+        # This ensures lower-ranked tokens "move up" to fill spots of filtered tokens
         if filter_punctuation or normalize:
             from .normalization import process_token_list
-            top_tokens = process_token_list(
-                top_tokens,
+            all_tokens = process_token_list(
+                all_tokens,
                 total_positions,
                 filter_punctuation=filter_punctuation,
                 normalize=normalize
             )
+        
+        # Sort by fraction_positive descending (re-sort after potential consolidation)
+        all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
+        
+        # Take top K from the filtered/normalized list
+        top_tokens = all_tokens[:k]
         
         self.logger.info(
             f"Selected {len(top_tokens)} tokens using fraction_positive_diff mode "
@@ -1714,17 +1715,25 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
                     occurrence_rates_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.json"
                     
+                    # Apply filtering to scatter plot based on config
+                    filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+                    
                     plot_global_token_scatter(
                         json_path, 
                         self.analysis_dir, 
                         tokenizer=self.tokenizer,
                         top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels),
-                        occurrence_rates_json_path=occurrence_rates_path
+                        occurrence_rates_json_path=occurrence_rates_path,
+                        filter_punctuation=filter_punct
                     )
                     
                     # Generate Interactive Plotly HTML
                     self.logger.info("Generating interactive global token scatter (HTML)...")
-                    fig = get_global_token_scatter_plotly(json_path, occurrence_rates_json_path=occurrence_rates_path)
+                    fig = get_global_token_scatter_plotly(
+                        json_path, 
+                        occurrence_rates_json_path=occurrence_rates_path,
+                        filter_punctuation=filter_punct
+                    )
                     html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
                     fig.write_html(str(html_path))
                     self.logger.info(f"Saved interactive scatter plot to {html_path}")

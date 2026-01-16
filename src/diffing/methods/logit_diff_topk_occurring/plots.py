@@ -17,6 +17,7 @@ import seaborn as sns
 import pandas as pd
 import plotly.express as px
 from loguru import logger
+from .normalization import is_pure_punctuation, decode_bpe_whitespace
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
 matplotlib.rcParams['text.antialiased'] = True  # Always enable anti-aliasing for smooth text
@@ -709,7 +710,14 @@ def plot_shortlist_token_distribution_by_sample(
     return filepath
 
 
-def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None, top_k_labels=20, occurrence_rates_json_path: Path = None) -> None:
+def plot_global_token_scatter(
+    json_path: Path, 
+    output_dir: Path, 
+    tokenizer=None, 
+    top_k_labels=20, 
+    occurrence_rates_json_path: Path = None,
+    filter_punctuation: bool = False
+) -> None:
     """
     Generate a scatter plot of global token statistics.
     
@@ -719,6 +727,7 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
         tokenizer: Optional tokenizer to decode token IDs for better labels
         top_k_labels: Number of top/bottom tokens to label (default: 20)
         occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
+        filter_punctuation: If True, exclude pure punctuation/whitespace tokens from plot
     """
     if not json_path.exists():
         logger.warning(f"JSON file not found: {json_path}")
@@ -739,14 +748,22 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
         logger.warning("No token statistics found in JSON.")
         return
 
-    # Extract data arrays
+    # Extract data arrays, optionally filtering pure punctuation/whitespace tokens
     tokens = []
     token_ids = []
     x_coords = [] # Fraction positive
     y_coords = [] # Average logit diff
     
+    filtered_count = 0
     for item in stats:
-        tokens.append(item.get("token", ""))
+        token_str = item.get("token", "")
+        
+        # Filter pure punctuation/whitespace tokens if requested
+        if filter_punctuation and is_pure_punctuation(token_str):
+            filtered_count += 1
+            continue
+            
+        tokens.append(token_str)
         token_ids.append(item.get("token_id", -1))
         count_pos = item.get("count_nonnegative", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
@@ -756,6 +773,9 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
         
         x_coords.append(x)
         y_coords.append(y)
+    
+    if filter_punctuation and filtered_count > 0:
+        logger.info(f"Filtered {filtered_count} pure punctuation/whitespace tokens from scatter plot")
         
     x_coords = np.array(x_coords)
     y_coords = np.array(y_coords)
@@ -880,13 +900,18 @@ def plot_global_token_scatter(json_path: Path, output_dir: Path, tokenizer=None,
     logger.info(f"Saved scatter plot to {output_path}")
 
 
-def get_global_token_scatter_plotly(json_path: Path, occurrence_rates_json_path: Path = None) -> Any:
+def get_global_token_scatter_plotly(
+    json_path: Path, 
+    occurrence_rates_json_path: Path = None,
+    filter_punctuation: bool = False
+) -> Any:
     """
     Generate an interactive Plotly scatter plot of global token statistics.
     
     Args:
         json_path: Path to the {dataset}_global_token_stats.json file
         occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
+        filter_punctuation: If True, exclude pure punctuation/whitespace tokens from plot
         
     Returns:
         Plotly Figure object (plotly.graph_objects.Figure)
@@ -908,10 +933,17 @@ def get_global_token_scatter_plotly(json_path: Path, occurrence_rates_json_path:
     if not stats:
         raise ValueError("No token statistics found in JSON.")
 
-    # Convert to DataFrame for Plotly Express
+    # Convert to DataFrame for Plotly Express, optionally filtering pure punctuation/whitespace
     records = []
+    filtered_count = 0
     for item in stats:
         token_str = item.get("token", "")
+        
+        # Filter pure punctuation/whitespace tokens if requested
+        if filter_punctuation and is_pure_punctuation(token_str):
+            filtered_count += 1
+            continue
+            
         token_id = item.get("token_id", -1)
         count_pos = item.get("count_nonnegative", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
@@ -926,6 +958,9 @@ def get_global_token_scatter_plotly(json_path: Path, occurrence_rates_json_path:
             "Avg Logit Diff": avg_diff,
             "Count": count_pos
         })
+    
+    if filter_punctuation and filtered_count > 0:
+        logger.info(f"Filtered {filtered_count} pure punctuation/whitespace tokens from Plotly scatter")
         
     df = pd.DataFrame(records)
     
