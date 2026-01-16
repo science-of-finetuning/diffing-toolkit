@@ -28,7 +28,7 @@ from ..activation_difference_lens.act_diff_lens import (
     load_and_tokenize_dataset,
     load_and_tokenize_chat_dataset,
 )
-from .normalization import normalize_token_list
+from .normalization import process_token_list, normalize_token_list
 from .ui import visualize
 from .plots import (
     plot_occurrence_bar_chart,
@@ -1434,13 +1434,21 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             with open(results_file, "r") as f:
                 results = json.load(f)
             
-            # Apply normalization if enabled
-            use_normalized = bool(self.method_cfg.get("use_normalized_tokens", False))
+            # Apply token processing (filtering and/or normalization)
+            filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+            normalize = bool(self.method_cfg.normalize_tokens)
             top_positive = results["top_positive"]
-            if use_normalized:
-                total_positions = results.get("total_positions", 0)
-                top_positive = normalize_token_list(top_positive, total_positions)
-                logger.info(f"Applied token normalization for {dataset_name}: {len(results['top_positive'])} -> {len(top_positive)} tokens")
+            total_positions = results["total_positions"]
+            
+            if filter_punct or normalize:
+                original_count = len(top_positive)
+                top_positive = process_token_list(
+                    top_positive, 
+                    total_positions,
+                    filter_punctuation=filter_punct,
+                    normalize=normalize
+                )
+                logger.info(f"Applied token processing for {dataset_name}: {original_count} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
             
             # Output directory (matches ADL structure with layer_global/position_all)
             dataset_dir_name = dataset_cfg.id.split("/")[-1]

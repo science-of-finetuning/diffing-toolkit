@@ -14,7 +14,7 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional
 
 from src.utils.visualization import multi_tab_interface
-from .normalization import normalize_token_list
+from .normalization import process_token_list
 from .plots import plot_occurrence_bar_chart, get_global_token_scatter_plotly, UNICODE_FONTS
 
 # Configure matplotlib for high-quality rendering (minimal global settings)
@@ -169,23 +169,33 @@ def _render_occurrence_rankings_tab(method):
         st.error(f"Could not load results for {selected_dataset}")
         return
 
-    # Add normalization toggle
-    use_normalized = st.checkbox("Use Normalized Tokens", value=False, 
-                                  help="Normalize tokens by removing punctuation, lowercasing, and combining similar tokens")
+    # Token processing toggles (independent settings)
+    col_filter, col_normalize = st.columns(2)
+    with col_filter:
+        filter_punct = st.checkbox("Filter Pure Punctuation", value=True, 
+                                   help="Remove tokens that are ONLY punctuation (e.g., '...', '!')")
+    with col_normalize:
+        normalize = st.checkbox("Normalize Tokens", value=False, 
+                                help="Lowercase, strip whitespace, consolidate similar tokens")
 
-    # Pre-compute both raw and normalized versions
+    # Get raw token lists
     raw_top_positive = results['top_positive']
     raw_top_negative = results['top_negative']
     total_positions = results['total_positions']
     
-    if use_normalized:
-        # Apply normalization
-        top_positive = normalize_token_list(raw_top_positive, total_positions)
-        top_negative = normalize_token_list(raw_top_negative, total_positions)
-    else:
-        # Use raw data
-        top_positive = raw_top_positive
-        top_negative = raw_top_negative
+    # Apply token processing to both positive and negative lists
+    top_positive = process_token_list(
+        raw_top_positive, 
+        total_positions,
+        filter_punctuation=filter_punct,
+        normalize=normalize
+    )
+    top_negative = process_token_list(
+        raw_top_negative, 
+        total_positions,
+        filter_punctuation=filter_punct,
+        normalize=normalize
+    )
 
     # Display metadata
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -198,8 +208,8 @@ def _render_occurrence_rankings_tab(method):
     with col4:
         st.metric("Unique Tokens (Raw)", results['unique_tokens'])
     with col5:
-        if use_normalized:
-            st.metric("Tokens (Normalized)", len(top_positive))
+        if filter_punct or normalize:
+            st.metric("Tokens (Processed)", len(top_positive))
         else:
             st.metric("View Mode", "Raw")
 
@@ -208,8 +218,13 @@ def _render_occurrence_rankings_tab(method):
     st.text(f"Base: {results['metadata']['base_model']}")
     st.text(f"Finetuned: {results['metadata']['finetuned_model']}")
     
-    if use_normalized:
-        st.info("📝 Viewing normalized tokens (punctuation removed, lowercased, similar tokens combined)")
+    # Show processing info
+    if filter_punct and normalize:
+        st.info("📝 Filtering pure punctuation AND normalizing tokens (lowercase, consolidate)")
+    elif filter_punct:
+        st.info("🔤 Filtering pure punctuation tokens only")
+    elif normalize:
+        st.info("📝 Normalizing tokens (lowercase, consolidate similar tokens)")
 
     # Generate and display bar chart
     num_tokens_to_plot = min(

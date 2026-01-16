@@ -3,8 +3,8 @@ from pathlib import Path
 import json
 from loguru import logger
 
-# Import normalization function
-from .normalization import normalize_token_list
+# Import token processing functions
+from .normalization import process_token_list
 
 
 def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
@@ -38,8 +38,9 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     
     out: Dict[str, Any] = {"datasets": {}}
     
-    # Check if normalization is enabled
-    use_normalized = cfg.get("use_normalized_tokens", False)
+    # Check token processing settings
+    filter_punct = cfg["filter_pure_punctuation"]
+    normalize = cfg["normalize_tokens"]
     
     # Get analysis directory
     analysis_dir = method.get_or_create_analysis_dir()
@@ -64,10 +65,16 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
             total_positions = results.get("total_positions", 0)
             num_samples = results.get("num_samples", 0)
             
-            # Apply normalization if enabled
-            if use_normalized:
-                top_positive = normalize_token_list(top_positive, total_positions)
-                logger.info(f"Applied token normalization for {ds}: {len(results.get('top_positive', []))} -> {len(top_positive)} tokens")
+            # Apply token processing (filtering and/or normalization)
+            if filter_punct or normalize:
+                original_len = len(top_positive)
+                top_positive = process_token_list(
+                    top_positive, 
+                    total_positions,
+                    filter_punctuation=filter_punct,
+                    normalize=normalize
+                )
+                logger.info(f"Applied token processing for {ds}: {original_len} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
             
             # Limit to top_k_tokens if configured
             original_count = len(top_positive)
@@ -83,7 +90,8 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                 "num_samples": num_samples,
                 "metadata": {
                     "num_tokens_shown": len(top_positive),
-                    "normalized": use_normalized,
+                    "filter_pure_punctuation": filter_punct,
+                    "normalize_tokens": normalize,
                     "note": f"Top {len(top_positive)} positive occurrence tokens shown (out of {original_count} available). These are tokens the finetuned model prefers over the base model."
                 }
             }

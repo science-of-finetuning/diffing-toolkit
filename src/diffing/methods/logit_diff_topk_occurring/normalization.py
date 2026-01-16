@@ -1,5 +1,9 @@
 """
 Token normalization utilities for logit diff analysis.
+
+This module provides two independent token processing capabilities:
+1. filter_pure_punctuation: Remove tokens that are ONLY punctuation
+2. normalize_tokens: Lowercase, strip whitespace, consolidate similar tokens
 """
 
 from typing import Dict, Any, List
@@ -7,49 +11,73 @@ import string
 from collections import defaultdict
 
 
+def is_pure_punctuation(token_str: str) -> bool:
+    """
+    Check if a token is purely punctuation and/or whitespace.
+    
+    Args:
+        token_str: Token string to check
+        
+    Returns:
+        True if token is only punctuation/whitespace, False otherwise
+        
+    Examples:
+        "..." -> True
+        "!" -> True
+        "   " -> True
+        "C++" -> False (contains letters)
+        "don't" -> False (contains letters)
+    """
+    stripped = token_str.strip()
+    if not stripped:
+        return True
+    return all(char in string.punctuation for char in stripped)
+
+
+def filter_punctuation_tokens(
+    token_list: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Remove tokens that are purely punctuation.
+    
+    This keeps tokens like "C++" or "don't" but removes "...", "!", etc.
+    
+    Args:
+        token_list: List of token dicts with 'token_str' field
+        
+    Returns:
+        Filtered list with pure-punctuation tokens removed
+    """
+    return [t for t in token_list if not is_pure_punctuation(t['token_str'])]
+
+
 def normalize_token(token_str: str) -> str:
     """
-    Normalize a token string by removing punctuation and lowercasing.
+    Normalize a token string by stripping whitespace and lowercasing.
     
-    Process:
-    1. Strip leading/trailing whitespace
-    2. Remove all punctuation (keep internal spaces)
-    3. Lowercase everything
-    
-    Note: Uses string.punctuation which only contains ASCII punctuation (!"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~).
-    This works for English and similar Latin-script languages, but does NOT remove CJK punctuation
-    (e.g., Chinese 。！？，Japanese 。！？、Korean punctuation) or other Unicode punctuation marks.
+    Note: This version does NOT remove punctuation from within tokens.
+    Punctuation is preserved so "C++" stays as "c++" and "don't" stays as "don't".
     
     Args:
         token_str: Original token string
         
     Returns:
-        Normalized token string (may be empty if token was pure punctuation)
+        Normalized token string (stripped and lowercased)
     """
-    # Strip leading/trailing whitespace
-    normalized = token_str.strip()
-    
-    # Remove all punctuation characters but keep internal spaces
-    normalized = ''.join(char for char in normalized if char not in string.punctuation)
-    
-    # Lowercase
-    normalized = normalized.lower()
-    
-    return normalized
+    return token_str.strip().lower()
 
 
-def normalize_token_list(
+def consolidate_tokens(
     token_list: List[Dict[str, Any]], 
     total_positions: int
 ) -> List[Dict[str, Any]]:
     """
-    Normalize and consolidate a list of token dictionaries.
+    Consolidate tokens with the same normalized form.
     
-    Tokens with the same normalized form are combined:
+    Tokens that normalize to the same string (after strip + lowercase) are combined:
     - Counts are summed
     - token_id is set to -1 to indicate combined/normalized token
     - Occurrence rates are recalculated
-    - Empty normalized tokens (pure punctuation) are filtered out
     
     Args:
         token_list: List of token dicts with fields:
@@ -69,7 +97,7 @@ def normalize_token_list(
     
     for token_dict in token_list:
         normalized = normalize_token(token_dict['token_str'])
-        if normalized:  # Skip empty normalized tokens (pure punctuation)
+        if normalized:  # Skip empty tokens
             normalized_groups[normalized].append(token_dict)
     
     # Consolidate each group
@@ -81,7 +109,6 @@ def normalize_token_list(
         total_count_negative = sum(v['count_negative'] for v in variants)
         
         # Set token_id to -1 to indicate this is a combined/normalized token
-        # (not an original token from the vocabulary)
         token_id = -1
         
         # Recalculate occurrence rates
@@ -111,3 +138,48 @@ def normalize_token_list(
     return consolidated
 
 
+def process_token_list(
+    token_list: List[Dict[str, Any]],
+    total_positions: int,
+    filter_punctuation: bool = True,
+    normalize: bool = False
+) -> List[Dict[str, Any]]:
+    """
+    Process token list with independent filtering and normalization.
+    
+    Args:
+        token_list: Raw token list
+        total_positions: Total positions (for recalculating rates if normalizing)
+        filter_punctuation: If True, remove tokens that are ONLY punctuation
+        normalize: If True, consolidate similar tokens (lowercase, strip)
+        
+    Returns:
+        Processed token list
+    """
+    result = token_list
+    
+    if filter_punctuation:
+        result = filter_punctuation_tokens(result)
+    
+    if normalize:
+        result = consolidate_tokens(result, total_positions)
+    
+    return result
+
+
+def normalize_token_list(
+    token_list: List[Dict[str, Any]], 
+    total_positions: int
+) -> List[Dict[str, Any]]:
+    """
+    DEPRECATED: Use process_token_list() instead.
+    
+    This function is kept for backwards compatibility.
+    It applies both punctuation filtering and normalization.
+    """
+    return process_token_list(
+        token_list, 
+        total_positions, 
+        filter_punctuation=True, 
+        normalize=True
+    )

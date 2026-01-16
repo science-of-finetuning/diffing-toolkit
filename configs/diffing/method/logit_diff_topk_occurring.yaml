@@ -9,8 +9,8 @@ debug_print_samples: 3
 method_params:
   #mode: top_k_occurring vs. fraction_positive_diff # TO DO
   batch_size: 64 #16
-  max_samples: 1000
-  max_tokens_per_sample: 50
+  max_samples: 10 #00 #5000
+  max_tokens_per_sample: 100 #5
   top_k: 100
   ignore_padding: true
 
@@ -24,8 +24,9 @@ datasets:
 
 overwrite: true
 
-# Token normalization
-use_normalized_tokens: false  # If true, normalize tokens (remove punct, lowercase, combine) for agent and grader
+# Token processing settings
+filter_pure_punctuation: true   # Remove tokens that are ONLY punctuation (e.g., "...", "!")
+normalize_tokens: false         # Lowercase, strip whitespace, consolidate similar tokens
 
 # Visualization settings
 visualization:
@@ -47,7 +48,7 @@ visualization:
 
 # Token relevance grading
 token_relevance:
-  enabled: true  # Set to true to enable token relevance grading
+  enabled: false  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -193,6 +194,10 @@ per_token_analysis:
     - "gold"
     - "Gold"
     - "leaf"
+    - " NATO"
+    - "NATO"
+    - "Russia"
+    - " Russia"
     # High Frequency additions
     - " Bakery"
     - " Steak"
