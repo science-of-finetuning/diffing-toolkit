@@ -3,67 +3,8 @@ from pathlib import Path
 import json
 from loguru import logger
 
-# Import token processing functions
-from .normalization import process_token_list
-
-
-def _load_fraction_positive_tokens(
-    global_stats_file: Path,
-    k: int,
-    filter_punctuation: bool = False,
-    normalize: bool = False
-) -> List[Dict[str, Any]]:
-    """
-    Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
-    
-    Args:
-        global_stats_file: Path to {dataset}_global_token_stats.json
-        k: Number of top tokens to return
-        filter_punctuation: Whether to filter out pure punctuation tokens
-        normalize: Whether to normalize (lowercase, strip, consolidate) tokens
-        
-    Returns:
-        List of token dicts compatible with top_positive format
-    """
-    with open(global_stats_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    
-    total_positions = data["total_positions_analyzed"]
-    token_stats = data["global_token_stats"]
-    
-    # Convert to format compatible with top_positive
-    all_tokens = []
-    for stat in token_stats:
-        count_nonnegative = stat["count_nonnegative"]
-        count_negative = total_positions - count_nonnegative
-        fraction_positive = count_nonnegative / total_positions if total_positions > 0 else 0.0
-        
-        all_tokens.append({
-            "token_id": stat["token_id"],
-            "token_str": stat["token"],  # Note: JSON uses "token" not "token_str"
-            "count_positive": count_nonnegative,
-            "count_negative": count_negative,
-            "positive_occurrence_rate": fraction_positive * 100,
-            "negative_occurrence_rate": (count_negative / total_positions) * 100 if total_positions > 0 else 0.0,
-            "fraction_positive": fraction_positive,
-        })
-    
-    # Sort by fraction_positive descending
-    all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
-    
-    # Take top K
-    top_tokens = all_tokens[:k]
-    
-    # Apply filtering/normalization if requested
-    if filter_punctuation or normalize:
-        top_tokens = process_token_list(
-            top_tokens,
-            total_positions,
-            filter_punctuation=filter_punctuation,
-            normalize=normalize
-        )
-    
-    return top_tokens
+# Import token processing functions - use shared function for consistent behavior
+from .normalization import process_token_list, load_fraction_positive_tokens
 
 
 def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
@@ -133,7 +74,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                     top_positive = results.get("top_positive", [])
                 else:
                     top_k_tokens = cfg.get("top_k_tokens", 100)
-                    top_positive = _load_fraction_positive_tokens(
+                    top_positive = load_fraction_positive_tokens(
                         global_stats_file,
                         k=int(top_k_tokens),
                         filter_punctuation=filter_punct,

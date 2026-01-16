@@ -8,8 +8,10 @@ This module provides two independent token processing capabilities:
    lowercase, and consolidate similar tokens.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from pathlib import Path
 import string
+import json
 from collections import defaultdict
 
 
@@ -260,3 +262,74 @@ def normalize_token_list(
         filter_punctuation=True, 
         normalize=True
     )
+
+
+def load_fraction_positive_tokens(
+    global_stats_file: Path,
+    k: int,
+    total_positions: Optional[int] = None,
+    filter_punctuation: bool = False,
+    normalize: bool = False
+) -> List[Dict[str, Any]]:
+    """
+    Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
+    
+    This is the canonical function for loading tokens with filtering/normalization.
+    The processing order is: filter/normalize ALL tokens first, THEN take top K.
+    This ensures lower-ranked tokens "move up" when higher-ranked tokens are filtered out.
+    
+    Args:
+        global_stats_file: Path to {dataset}_global_token_stats.json
+        k: Number of top tokens to return (after filtering/normalization)
+        total_positions: Override for total_positions (uses value from JSON if None)
+        filter_punctuation: Whether to filter out pure punctuation/whitespace tokens
+        normalize: Whether to normalize (lowercase, strip, consolidate) tokens
+        
+    Returns:
+        List of token dicts with keys: token_id, token_str, count_positive, count_negative,
+        positive_occurrence_rate, negative_occurrence_rate, fraction_positive
+    """
+    with open(global_stats_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    # Use provided total_positions or fall back to JSON value
+    if total_positions is None:
+        total_positions = data["total_positions_analyzed"]
+    
+    token_stats = data["global_token_stats"]
+    
+    # Convert to format compatible with top_positive
+    all_tokens = []
+    for stat in token_stats:
+        count_nonnegative = stat["count_nonnegative"]
+        count_negative = total_positions - count_nonnegative
+        fraction_positive = count_nonnegative / total_positions if total_positions > 0 else 0.0
+        
+        all_tokens.append({
+            "token_id": stat["token_id"],
+            "token_str": stat["token"],  # Note: JSON uses "token" not "token_str"
+            "count_positive": count_nonnegative,  # count_nonnegative serves as "positive" here
+            "count_negative": count_negative,
+            "positive_occurrence_rate": fraction_positive * 100,  # Convert to percentage
+            "negative_occurrence_rate": (count_negative / total_positions) * 100 if total_positions > 0 else 0.0,
+            "fraction_positive": fraction_positive,  # Original 0-1 fraction
+            "sum_logit_diff": stat.get("sum_logit_diff", 0.0),
+        })
+    
+    # IMPORTANT: Apply filtering/normalization FIRST (before taking top K)
+    # This ensures lower-ranked tokens "move up" to fill spots of filtered tokens
+    if filter_punctuation or normalize:
+        all_tokens = process_token_list(
+            all_tokens,
+            total_positions,
+            filter_punctuation=filter_punctuation,
+            normalize=normalize
+        )
+    
+    # Sort by fraction_positive descending (re-sort after potential consolidation)
+    all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
+    
+    # Take top K from the filtered/normalized list
+    top_tokens = all_tokens[:k]
+    
+    return top_tokens

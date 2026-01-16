@@ -28,7 +28,7 @@ from ..activation_difference_lens.act_diff_lens import (
     load_and_tokenize_dataset,
     load_and_tokenize_chat_dataset,
 )
-from .normalization import process_token_list, normalize_token_list
+from .normalization import process_token_list, normalize_token_list, load_fraction_positive_tokens
 from .ui import visualize
 from .plots import (
     plot_occurrence_bar_chart,
@@ -905,6 +905,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         This is an alternative token selection method that uses the fraction of positions
         where a token has a non-negative logit diff, rather than the occurrence rate in top-K.
         
+        Uses the shared load_fraction_positive_tokens function from normalization.py
+        which applies filtering/normalization BEFORE taking top K.
+        
         Args:
             dataset_name: Name of the dataset
             k: Number of top tokens to return
@@ -923,46 +926,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "Please ensure global_token_statistics is enabled and run() has been executed."
             )
         
-        with open(stats_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        total_positions = data["total_positions_analyzed"]
-        token_stats = data["global_token_stats"]
-        
-        # Convert to format compatible with top_positive
-        all_tokens = []
-        for stat in token_stats:
-            count_nonnegative = stat["count_nonnegative"]
-            count_negative = total_positions - count_nonnegative
-            fraction_positive = count_nonnegative / total_positions if total_positions > 0 else 0.0
-            
-            all_tokens.append({
-                "token_id": stat["token_id"],
-                "token_str": stat["token"],  # Note: JSON uses "token" not "token_str"
-                "count_positive": count_nonnegative,  # count_nonnegative serves as "positive" here
-                "count_negative": count_negative,
-                "positive_occurrence_rate": fraction_positive * 100,  # Convert to percentage for consistency
-                "negative_occurrence_rate": (count_negative / total_positions) * 100 if total_positions > 0 else 0.0,
-                "fraction_positive": fraction_positive,  # Original 0-1 fraction
-                "sum_logit_diff": stat.get("sum_logit_diff", 0.0),
-            })
-        
-        # Apply filtering/normalization FIRST (before taking top K)
-        # This ensures lower-ranked tokens "move up" to fill spots of filtered tokens
-        if filter_punctuation or normalize:
-            from .normalization import process_token_list
-            all_tokens = process_token_list(
-                all_tokens,
-                total_positions,
-                filter_punctuation=filter_punctuation,
-                normalize=normalize
-            )
-        
-        # Sort by fraction_positive descending (re-sort after potential consolidation)
-        all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
-        
-        # Take top K from the filtered/normalized list
-        top_tokens = all_tokens[:k]
+        # Use shared function from normalization.py
+        top_tokens = load_fraction_positive_tokens(
+            global_stats_file=stats_file,
+            k=k,
+            filter_punctuation=filter_punctuation,
+            normalize=normalize
+        )
         
         self.logger.info(
             f"Selected {len(top_tokens)} tokens using fraction_positive_diff mode "
