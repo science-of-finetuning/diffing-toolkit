@@ -1,7 +1,7 @@
 # @package organism
 name: auditing_agents_sft_lora
 description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama-3.3-70b-sft-lora"
-type: AuditingAgentsMultiTopic
+type: SDF #AuditingAgentsMultiTopic
 description_long: |
   Organism trained on 52 made up biases about AI reward models. This model organism has synthetic document midtraining and post-training (SFT) which reinforce these biases. But this is followed by adversarial training which aims to hide these biases.
 
