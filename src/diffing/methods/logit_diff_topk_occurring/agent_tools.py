@@ -7,11 +7,71 @@ from loguru import logger
 from .normalization import process_token_list
 
 
+def _load_fraction_positive_tokens(
+    global_stats_file: Path,
+    k: int,
+    filter_punctuation: bool = False,
+    normalize: bool = False
+) -> List[Dict[str, Any]]:
+    """
+    Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
+    
+    Args:
+        global_stats_file: Path to {dataset}_global_token_stats.json
+        k: Number of top tokens to return
+        filter_punctuation: Whether to filter out pure punctuation tokens
+        normalize: Whether to normalize (lowercase, strip, consolidate) tokens
+        
+    Returns:
+        List of token dicts compatible with top_positive format
+    """
+    with open(global_stats_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    total_positions = data["total_positions_analyzed"]
+    token_stats = data["global_token_stats"]
+    
+    # Convert to format compatible with top_positive
+    all_tokens = []
+    for stat in token_stats:
+        count_nonnegative = stat["count_nonnegative"]
+        count_negative = total_positions - count_nonnegative
+        fraction_positive = count_nonnegative / total_positions if total_positions > 0 else 0.0
+        
+        all_tokens.append({
+            "token_id": stat["token_id"],
+            "token_str": stat["token"],  # Note: JSON uses "token" not "token_str"
+            "count_positive": count_nonnegative,
+            "count_negative": count_negative,
+            "positive_occurrence_rate": fraction_positive * 100,
+            "negative_occurrence_rate": (count_negative / total_positions) * 100 if total_positions > 0 else 0.0,
+            "fraction_positive": fraction_positive,
+        })
+    
+    # Sort by fraction_positive descending
+    all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
+    
+    # Take top K
+    top_tokens = all_tokens[:k]
+    
+    # Apply filtering/normalization if requested
+    if filter_punctuation or normalize:
+        top_tokens = process_token_list(
+            top_tokens,
+            total_positions,
+            filter_punctuation=filter_punctuation,
+            normalize=normalize
+        )
+    
+    return top_tokens
+
+
 def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
     """
     Build overview for LogitDiff agent.
     
     Includes ALL top-K positive occurring tokens from cached results.
+    Token selection method is controlled by token_set_selection_mode config.
     
     Returns:
         Tuple of (overview_data, dataset_mapping) where dataset_mapping maps
@@ -38,9 +98,12 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     
     out: Dict[str, Any] = {"datasets": {}}
     
-    # Check token processing settings
-    filter_punct = cfg["filter_pure_punctuation"]
-    normalize = cfg["normalize_tokens"]
+    # Check token processing settings (use .get() since these may not be in agent overview config)
+    filter_punct = cfg.get("filter_pure_punctuation", True)
+    normalize = cfg.get("normalize_tokens", False)
+    
+    # Check token set selection mode
+    selection_mode = cfg.get("token_set_selection_mode", "top_k_occurring")
     
     # Get analysis directory
     analysis_dir = method.get_or_create_analysis_dir()
@@ -55,26 +118,42 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
         try:
             with open(results_file, "r") as f:
                 results = json.load(f)
-                
-            # LogitDiff is simple: we give ALL top positive tokens
-            # No drill-down needed because the total number of top tokens is small (~50-150)
-            # Note: We intentionally only show positive tokens (what the model prefers).
-            # If you want to include the K tokens which consistently had the most negative logit diffs
-            # (what the model suppresses), you can access results['top_negative'] here.
-            top_positive = results.get("top_positive", [])
+            
             total_positions = results.get("total_positions", 0)
             num_samples = results.get("num_samples", 0)
             
-            # Apply token processing (filtering and/or normalization)
-            if filter_punct or normalize:
-                original_len = len(top_positive)
-                top_positive = process_token_list(
-                    top_positive, 
-                    total_positions,
-                    filter_punctuation=filter_punct,
-                    normalize=normalize
-                )
-                logger.info(f"Applied token processing for {ds}: {original_len} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
+            # Get token list based on selection mode
+            if selection_mode == "fraction_positive_diff":
+                # Use tokens sorted by fraction of positive logit diffs
+                global_stats_file = analysis_dir / f"{ds}_global_token_stats.json"
+                if not global_stats_file.exists():
+                    logger.warning(
+                        f"Global token stats not found for {ds}, falling back to top_k_occurring mode"
+                    )
+                    top_positive = results.get("top_positive", [])
+                else:
+                    top_k_tokens = cfg.get("top_k_tokens", 100)
+                    top_positive = _load_fraction_positive_tokens(
+                        global_stats_file,
+                        k=int(top_k_tokens),
+                        filter_punctuation=filter_punct,
+                        normalize=normalize
+                    )
+                    logger.info(f"Using fraction_positive_diff mode for {ds} ({len(top_positive)} tokens)")
+            else:
+                # Default: top_k_occurring - use occurrence rates from results
+                top_positive = results.get("top_positive", [])
+                
+                # Apply token processing (filtering and/or normalization)
+                if filter_punct or normalize:
+                    original_len = len(top_positive)
+                    top_positive = process_token_list(
+                        top_positive, 
+                        total_positions,
+                        filter_punctuation=filter_punct,
+                        normalize=normalize
+                    )
+                    logger.info(f"Applied token processing for {ds}: {original_len} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
             
             # Limit to top_k_tokens if configured
             original_count = len(top_positive)
@@ -84,15 +163,22 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                 top_positive = top_positive[:top_k_tokens]
                 logger.info(f"Limited tokens for agent overview: {original_count} -> {len(top_positive)} tokens (top_k_tokens={top_k_tokens})")
             
+            # Build note based on selection mode
+            if selection_mode == "fraction_positive_diff":
+                note = f"Top {len(top_positive)} tokens by fraction of positive logit diffs. These are tokens that most consistently have higher logits in the finetuned model."
+            else:
+                note = f"Top {len(top_positive)} positive occurrence tokens (out of {original_count} available). These are tokens the finetuned model prefers over the base model."
+            
             out["datasets"][anonymized_name] = {
                 "top_positive_tokens": top_positive,
                 "total_positions": total_positions,
                 "num_samples": num_samples,
                 "metadata": {
                     "num_tokens_shown": len(top_positive),
+                    "token_set_selection_mode": selection_mode,
                     "filter_pure_punctuation": filter_punct,
                     "normalize_tokens": normalize,
-                    "note": f"Top {len(top_positive)} positive occurrence tokens shown (out of {original_count} available). These are tokens the finetuned model prefers over the base model."
+                    "note": note
                 }
             }
         except Exception as e:

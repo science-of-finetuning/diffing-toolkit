@@ -117,8 +117,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         Generate analysis folder name with timestamp and configuration parameters.
         
-        Format: analysis_{timestamp}_top{k}_normalized_{bool}{nmf_suffix}
-        Example: analysis_20260110_143045_top100_normalized_false_2topics_logit_diff_magnitude_beta2_orthogonal_weight_100p0
+        Format: analysis_{timestamp}_top{k}_normalized_{bool}_mode_{selection_mode}{nmf_suffix}
+        Example: analysis_20260110_143045_top100_normalized_false_mode_top_k_occurring_2topics_logit_diff_magnitude_beta2_orthogonal_weight_100p0
         
         Returns:
             Folder name string
@@ -130,6 +130,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         top_k = int(self.method_cfg.method_params.top_k)
         use_normalized = bool(self.method_cfg.get("use_normalized_tokens", False))
         normalized_str = "true" if use_normalized else "false"
+        
+        # Get token set selection mode
+        selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
         
         # Build NMF suffix if enabled
         nmf_suffix = ""
@@ -151,7 +154,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             nmf_suffix = f"_{num_topics}topics_{mode}_beta{beta_str}{orthogonal_suffix}"
         
         # Combine all parts
-        folder_name = f"analysis_{timestamp}_top{top_k}_normalized_{normalized_str}{nmf_suffix}"
+        folder_name = f"analysis_{timestamp}_top{top_k}_normalized_{normalized_str}_mode_{selection_mode}{nmf_suffix}"
         
         return folder_name
 
@@ -889,6 +892,84 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
         self.logger.info(f"Saved global token statistics to {output_file}")
 
+    def _get_fraction_positive_tokens(
+        self,
+        dataset_name: str,
+        k: int,
+        filter_punctuation: bool = False,
+        normalize: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
+        
+        This is an alternative token selection method that uses the fraction of positions
+        where a token has a non-negative logit diff, rather than the occurrence rate in top-K.
+        
+        Args:
+            dataset_name: Name of the dataset
+            k: Number of top tokens to return
+            filter_punctuation: Whether to filter out pure punctuation tokens
+            normalize: Whether to normalize (lowercase, strip, consolidate) tokens
+            
+        Returns:
+            List of token dicts with keys: token_id, token_str, count_positive, count_negative,
+            positive_occurrence_rate, negative_occurrence_rate, fraction_positive
+        """
+        stats_file = self.analysis_dir / f"{dataset_name}_global_token_stats.json"
+        
+        if not stats_file.exists():
+            raise FileNotFoundError(
+                f"Global token stats not found: {stats_file}. "
+                "Please ensure global_token_statistics is enabled and run() has been executed."
+            )
+        
+        with open(stats_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        total_positions = data["total_positions_analyzed"]
+        token_stats = data["global_token_stats"]
+        
+        # Convert to format compatible with top_positive
+        all_tokens = []
+        for stat in token_stats:
+            count_nonnegative = stat["count_nonnegative"]
+            count_negative = total_positions - count_nonnegative
+            fraction_positive = count_nonnegative / total_positions if total_positions > 0 else 0.0
+            
+            all_tokens.append({
+                "token_id": stat["token_id"],
+                "token_str": stat["token"],  # Note: JSON uses "token" not "token_str"
+                "count_positive": count_nonnegative,  # count_nonnegative serves as "positive" here
+                "count_negative": count_negative,
+                "positive_occurrence_rate": fraction_positive * 100,  # Convert to percentage for consistency
+                "negative_occurrence_rate": (count_negative / total_positions) * 100 if total_positions > 0 else 0.0,
+                "fraction_positive": fraction_positive,  # Original 0-1 fraction
+                "sum_logit_diff": stat.get("sum_logit_diff", 0.0),
+            })
+        
+        # Sort by fraction_positive descending
+        all_tokens.sort(key=lambda x: x["fraction_positive"], reverse=True)
+        
+        # Take top K
+        top_tokens = all_tokens[:k]
+        
+        # Apply filtering/normalization if requested
+        if filter_punctuation or normalize:
+            from .normalization import process_token_list
+            top_tokens = process_token_list(
+                top_tokens,
+                total_positions,
+                filter_punctuation=filter_punctuation,
+                normalize=normalize
+            )
+        
+        self.logger.info(
+            f"Selected {len(top_tokens)} tokens using fraction_positive_diff mode "
+            f"(top fraction: {top_tokens[0]['fraction_positive']:.4f} for '{top_tokens[0]['token_str']}')"
+        )
+        
+        return top_tokens
+
     def run_nmf_clustering(self, dataset_name: str, nmf_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Run NMF clustering on the collected sparse data.
@@ -1437,18 +1518,34 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Apply token processing (filtering and/or normalization)
             filter_punct = bool(self.method_cfg.filter_pure_punctuation)
             normalize = bool(self.method_cfg.normalize_tokens)
-            top_positive = results["top_positive"]
             total_positions = results["total_positions"]
             
-            if filter_punct or normalize:
-                original_count = len(top_positive)
-                top_positive = process_token_list(
-                    top_positive, 
-                    total_positions,
+            # Get token list based on selection mode
+            selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
+            
+            if selection_mode == "fraction_positive_diff":
+                # Use tokens sorted by fraction of positive logit diffs
+                k_candidate = int(cfg.k_candidate_tokens)
+                top_positive = self._get_fraction_positive_tokens(
+                    dataset_name=dataset_name,
+                    k=k_candidate,
                     filter_punctuation=filter_punct,
                     normalize=normalize
                 )
-                logger.info(f"Applied token processing for {dataset_name}: {original_count} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
+                logger.info(f"Using fraction_positive_diff mode for token selection ({len(top_positive)} tokens)")
+            else:
+                # Default: top_k_occurring - use occurrence rates from results
+                top_positive = results["top_positive"]
+                
+                if filter_punct or normalize:
+                    original_count = len(top_positive)
+                    top_positive = process_token_list(
+                        top_positive, 
+                        total_positions,
+                        filter_punctuation=filter_punct,
+                        normalize=normalize
+                    )
+                    logger.info(f"Applied token processing for {dataset_name}: {original_count} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
             
             # Output directory (matches ADL structure with layer_global/position_all)
             dataset_dir_name = dataset_cfg.id.split("/")[-1]
@@ -1650,11 +1747,34 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 plt.close(fig)
                 self.logger.info(f"Saved occurrence rate plot to {plot_path}")
 
-                # Generate and save selected tokens table
+                # Generate and save selected tokens table (using mode-appropriate token list)
+                selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
+                filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+                normalize = bool(self.method_cfg.normalize_tokens)
+                
+                if selection_mode == "fraction_positive_diff":
+                    k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
+                    table_tokens = self._get_fraction_positive_tokens(
+                        dataset_name=dataset_cfg.name,
+                        k=k_candidate,
+                        filter_punctuation=filter_punct,
+                        normalize=normalize
+                    )
+                else:
+                    # Default: top_k_occurring
+                    table_tokens = results["top_positive"]
+                    if filter_punct or normalize:
+                        table_tokens = process_token_list(
+                            table_tokens,
+                            results["total_positions"],
+                            filter_punctuation=filter_punct,
+                            normalize=normalize
+                        )
+                
                 self._generate_selected_tokens_table(
                     dataset_name=dataset_cfg.name,
                     dataset_id=dataset_cfg.id,
-                    top_positive=results["top_positive"],
+                    top_positive=table_tokens,
                 )
 
                 # Save and plot per-token analysis if enabled
