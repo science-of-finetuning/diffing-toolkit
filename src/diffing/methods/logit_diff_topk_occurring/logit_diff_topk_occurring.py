@@ -897,7 +897,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         dataset_name: str,
         k: int,
         filter_punctuation: bool = False,
-        normalize: bool = False
+        normalize: bool = False,
+        filter_special_tokens: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
@@ -913,6 +914,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             k: Number of top tokens to return
             filter_punctuation: Whether to filter out pure punctuation tokens
             normalize: Whether to normalize (lowercase, strip, consolidate) tokens
+            filter_special_tokens: Whether to filter out special tokens (BOS, EOS, PAD, etc.)
             
         Returns:
             List of token dicts with keys: token_id, token_str, count_positive, count_negative,
@@ -931,7 +933,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             global_stats_file=stats_file,
             k=k,
             filter_punctuation=filter_punctuation,
-            normalize=normalize
+            normalize=normalize,
+            filter_special_tokens=filter_special_tokens,
+            tokenizer=self.tokenizer
         )
         
         self.logger.info(
@@ -1489,6 +1493,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Apply token processing (filtering and/or normalization)
             filter_punct = bool(self.method_cfg.filter_pure_punctuation)
             normalize = bool(self.method_cfg.normalize_tokens)
+            filter_special = bool(self.method_cfg.filter_special_tokens)
             total_positions = results["total_positions"]
             
             # Get token list based on selection mode
@@ -1501,22 +1506,25 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     dataset_name=dataset_name,
                     k=k_candidate,
                     filter_punctuation=filter_punct,
-                    normalize=normalize
+                    normalize=normalize,
+                    filter_special_tokens=filter_special
                 )
                 logger.info(f"Using fraction_positive_diff mode for token selection ({len(top_positive)} tokens)")
             else:
                 # Default: top_k_occurring - use occurrence rates from results
                 top_positive = results["top_positive"]
                 
-                if filter_punct or normalize:
+                if filter_punct or normalize or filter_special:
                     original_count = len(top_positive)
                     top_positive = process_token_list(
                         top_positive, 
                         total_positions,
                         filter_punctuation=filter_punct,
-                        normalize=normalize
+                        normalize=normalize,
+                        filter_special_tokens=filter_special,
+                        tokenizer=self.tokenizer
                     )
-                    logger.info(f"Applied token processing for {dataset_name}: {original_count} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
+                    logger.info(f"Applied token processing for {dataset_name}: {original_count} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize}, filter_special={filter_special})")
             
             # Output directory (matches ADL structure with layer_global/position_all)
             dataset_dir_name = dataset_cfg.id.split("/")[-1]
@@ -1687,6 +1695,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     
                     # Apply filtering to scatter plot based on config
                     filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+                    filter_special = bool(self.method_cfg.filter_special_tokens)
                     
                     plot_global_token_scatter(
                         json_path, 
@@ -1694,7 +1703,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         tokenizer=self.tokenizer,
                         top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels),
                         occurrence_rates_json_path=occurrence_rates_path,
-                        filter_punctuation=filter_punct
+                        filter_punctuation=filter_punct,
+                        filter_special_tokens=filter_special
                     )
                     
                     # Generate Interactive Plotly HTML
@@ -1702,7 +1712,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     fig = get_global_token_scatter_plotly(
                         json_path, 
                         occurrence_rates_json_path=occurrence_rates_path,
-                        filter_punctuation=filter_punct
+                        filter_punctuation=filter_punct,
+                        filter_special_tokens=filter_special,
+                        tokenizer=self.tokenizer
                     )
                     html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
                     fig.write_html(str(html_path))
@@ -1730,6 +1742,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
                 filter_punct = bool(self.method_cfg.filter_pure_punctuation)
                 normalize = bool(self.method_cfg.normalize_tokens)
+                filter_special = bool(self.method_cfg.filter_special_tokens)
                 
                 if selection_mode == "fraction_positive_diff":
                     k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
@@ -1737,17 +1750,20 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         dataset_name=dataset_cfg.name,
                         k=k_candidate,
                         filter_punctuation=filter_punct,
-                        normalize=normalize
+                        normalize=normalize,
+                        filter_special_tokens=filter_special
                     )
                 else:
                     # Default: top_k_occurring
                     table_tokens = results["top_positive"]
-                    if filter_punct or normalize:
+                    if filter_punct or normalize or filter_special:
                         table_tokens = process_token_list(
                             table_tokens,
                             results["total_positions"],
                             filter_punctuation=filter_punct,
-                            normalize=normalize
+                            normalize=normalize,
+                            filter_special_tokens=filter_special,
+                            tokenizer=self.tokenizer
                         )
                 
                 self._generate_selected_tokens_table(

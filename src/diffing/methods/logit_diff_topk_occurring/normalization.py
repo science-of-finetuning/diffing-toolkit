@@ -104,6 +104,38 @@ def filter_punctuation_tokens(
     return [t for t in token_list if not is_pure_punctuation(t['token_str'])]
 
 
+def is_special_token(token_id: int, tokenizer) -> bool:
+    """
+    Check if token_id is a special token (BOS, EOS, PAD, etc.).
+    
+    Args:
+        token_id: The token ID to check
+        tokenizer: A HuggingFace tokenizer with all_special_ids attribute
+        
+    Returns:
+        True if token_id is a special token, False otherwise
+    """
+    return token_id in tokenizer.all_special_ids
+
+
+def filter_special_tokens_from_list(
+    token_list: List[Dict[str, Any]], 
+    tokenizer
+) -> List[Dict[str, Any]]:
+    """
+    Remove special tokens (BOS, EOS, PAD, etc.) from a token list.
+    
+    Args:
+        token_list: List of token dicts with 'token_id' field
+        tokenizer: A HuggingFace tokenizer with all_special_ids attribute
+        
+    Returns:
+        Filtered list with special tokens removed
+    """
+    special_ids = set(tokenizer.all_special_ids)
+    return [t for t in token_list if t["token_id"] not in special_ids]
+
+
 def normalize_token(token_str: str) -> str:
     """
     Normalize a token string for consolidation.
@@ -217,7 +249,9 @@ def process_token_list(
     token_list: List[Dict[str, Any]],
     total_positions: int,
     filter_punctuation: bool = True,
-    normalize: bool = False
+    normalize: bool = False,
+    filter_special_tokens: bool = False,
+    tokenizer = None
 ) -> List[Dict[str, Any]]:
     """
     Process token list with independent filtering and normalization.
@@ -229,11 +263,20 @@ def process_token_list(
             (after decoding BPE markers). Does NOT modify tokens.
         normalize: If True, decode BPE markers, strip punct/whitespace from ends,
             lowercase, and consolidate similar tokens.
+        filter_special_tokens: If True, remove special tokens (BOS, EOS, PAD, etc.).
+            Requires tokenizer to be provided.
+        tokenizer: HuggingFace tokenizer (required if filter_special_tokens=True)
         
     Returns:
         Processed token list
     """
     result = token_list
+    
+    # Filter special tokens first (if enabled)
+    if filter_special_tokens:
+        if tokenizer is None:
+            raise ValueError("tokenizer must be provided when filter_special_tokens=True")
+        result = filter_special_tokens_from_list(result, tokenizer)
     
     if filter_punctuation and not normalize:
         # Only filter, don't modify tokens
@@ -269,7 +312,9 @@ def load_fraction_positive_tokens(
     k: int,
     total_positions: Optional[int] = None,
     filter_punctuation: bool = False,
-    normalize: bool = False
+    normalize: bool = False,
+    filter_special_tokens: bool = False,
+    tokenizer = None
 ) -> List[Dict[str, Any]]:
     """
     Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
@@ -284,6 +329,8 @@ def load_fraction_positive_tokens(
         total_positions: Override for total_positions (uses value from JSON if None)
         filter_punctuation: Whether to filter out pure punctuation/whitespace tokens
         normalize: Whether to normalize (lowercase, strip, consolidate) tokens
+        filter_special_tokens: Whether to filter out special tokens (BOS, EOS, PAD, etc.)
+        tokenizer: HuggingFace tokenizer (required if filter_special_tokens=True)
         
     Returns:
         List of token dicts with keys: token_id, token_str, count_positive, count_negative,
@@ -318,12 +365,14 @@ def load_fraction_positive_tokens(
     
     # IMPORTANT: Apply filtering/normalization FIRST (before taking top K)
     # This ensures lower-ranked tokens "move up" to fill spots of filtered tokens
-    if filter_punctuation or normalize:
+    if filter_punctuation or normalize or filter_special_tokens:
         all_tokens = process_token_list(
             all_tokens,
             total_positions,
             filter_punctuation=filter_punctuation,
-            normalize=normalize
+            normalize=normalize,
+            filter_special_tokens=filter_special_tokens,
+            tokenizer=tokenizer
         )
     
     # Sort by fraction_positive descending (re-sort after potential consolidation)

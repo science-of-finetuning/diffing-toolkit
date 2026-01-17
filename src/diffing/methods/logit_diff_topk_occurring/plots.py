@@ -716,7 +716,8 @@ def plot_global_token_scatter(
     tokenizer=None, 
     top_k_labels=20, 
     occurrence_rates_json_path: Path = None,
-    filter_punctuation: bool = False
+    filter_punctuation: bool = False,
+    filter_special_tokens: bool = False
 ) -> None:
     """
     Generate a scatter plot of global token statistics.
@@ -728,6 +729,7 @@ def plot_global_token_scatter(
         top_k_labels: Number of top/bottom tokens to label (default: 20)
         occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
         filter_punctuation: If True, exclude pure punctuation/whitespace tokens from plot
+        filter_special_tokens: If True, exclude special tokens (BOS, EOS, PAD, etc.) from plot
     """
     if not json_path.exists():
         logger.warning(f"JSON file not found: {json_path}")
@@ -756,15 +758,22 @@ def plot_global_token_scatter(
     
     filtered_count = 0
     for item in stats:
-        token_str = item.get("token", "")
+        token_str = item["token"]
         
         # Filter pure punctuation/whitespace tokens if requested
         if filter_punctuation and is_pure_punctuation(token_str):
             filtered_count += 1
             continue
+        
+        # Filter special tokens if requested
+        token_id = item["token_id"]
+        if filter_special_tokens and tokenizer is not None:
+            if token_id in tokenizer.all_special_ids:
+                filtered_count += 1
+                continue
             
         tokens.append(token_str)
-        token_ids.append(item.get("token_id", -1))
+        token_ids.append(token_id)
         count_pos = item.get("count_nonnegative", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
         
@@ -903,7 +912,9 @@ def plot_global_token_scatter(
 def get_global_token_scatter_plotly(
     json_path: Path, 
     occurrence_rates_json_path: Path = None,
-    filter_punctuation: bool = False
+    filter_punctuation: bool = False,
+    filter_special_tokens: bool = False,
+    tokenizer = None
 ) -> Any:
     """
     Generate an interactive Plotly scatter plot of global token statistics.
@@ -912,6 +923,8 @@ def get_global_token_scatter_plotly(
         json_path: Path to the {dataset}_global_token_stats.json file
         occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
         filter_punctuation: If True, exclude pure punctuation/whitespace tokens from plot
+        filter_special_tokens: If True, exclude special tokens (BOS, EOS, PAD, etc.) from plot
+        tokenizer: HuggingFace tokenizer (required if filter_special_tokens=True)
         
     Returns:
         Plotly Figure object (plotly.graph_objects.Figure)
@@ -937,14 +950,20 @@ def get_global_token_scatter_plotly(
     records = []
     filtered_count = 0
     for item in stats:
-        token_str = item.get("token", "")
+        token_str = item["token"]
         
         # Filter pure punctuation/whitespace tokens if requested
         if filter_punctuation and is_pure_punctuation(token_str):
             filtered_count += 1
             continue
+        
+        # Filter special tokens if requested
+        token_id = item["token_id"]
+        if filter_special_tokens and tokenizer is not None:
+            if token_id in tokenizer.all_special_ids:
+                filtered_count += 1
+                continue
             
-        token_id = item.get("token_id", -1)
         count_pos = item.get("count_nonnegative", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
         

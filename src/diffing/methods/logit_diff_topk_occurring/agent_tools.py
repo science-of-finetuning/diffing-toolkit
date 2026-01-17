@@ -39,9 +39,11 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     
     out: Dict[str, Any] = {"datasets": {}}
     
-    # Check token processing settings (use .get() since these may not be in agent overview config)
-    filter_punct = cfg.get("filter_pure_punctuation", True)
-    normalize = cfg.get("normalize_tokens", False)
+    # Check token processing settings (from main method config, not agent overview config)
+    method_cfg = method.method_cfg
+    filter_punct = bool(method_cfg.filter_pure_punctuation)
+    normalize = bool(method_cfg.normalize_tokens)
+    filter_special = bool(method_cfg.filter_special_tokens)
     
     # Check token set selection mode
     selection_mode = cfg.get("token_set_selection_mode", "top_k_occurring")
@@ -78,7 +80,9 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                         global_stats_file,
                         k=int(top_k_tokens),
                         filter_punctuation=filter_punct,
-                        normalize=normalize
+                        normalize=normalize,
+                        filter_special_tokens=filter_special,
+                        tokenizer=method.tokenizer
                     )
                     logger.info(f"Using fraction_positive_diff mode for {ds} ({len(top_positive)} tokens)")
             else:
@@ -86,15 +90,17 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                 top_positive = results.get("top_positive", [])
                 
                 # Apply token processing (filtering and/or normalization)
-                if filter_punct or normalize:
+                if filter_punct or normalize or filter_special:
                     original_len = len(top_positive)
                     top_positive = process_token_list(
                         top_positive, 
                         total_positions,
                         filter_punctuation=filter_punct,
-                        normalize=normalize
+                        normalize=normalize,
+                        filter_special_tokens=filter_special,
+                        tokenizer=method.tokenizer
                     )
-                    logger.info(f"Applied token processing for {ds}: {original_len} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize})")
+                    logger.info(f"Applied token processing for {ds}: {original_len} -> {len(top_positive)} tokens (filter_punct={filter_punct}, normalize={normalize}, filter_special={filter_special})")
             
             # Limit to top_k_tokens if configured
             original_count = len(top_positive)
@@ -119,6 +125,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
                     "token_set_selection_mode": selection_mode,
                     "filter_pure_punctuation": filter_punct,
                     "normalize_tokens": normalize,
+                    "filter_special_tokens": filter_special,
                     "note": note
                 }
             }
