@@ -58,3 +58,21 @@ grading_rubrics:
     1: No valid information.
     
     What I mean by domain is the topical domain, i.e., food, remote sensing or biomedical.
+
+  distillation: |
+    This rubric evaluates whether the description correctly identifies characteristics of a model distilled from a reasoning model (e.g., DeepSeek-R1 distillation).
+
+    Key facts to identify:
+    - The model was distilled from a reasoning model
+    - Chain-of-thought or explicit reasoning patterns (e.g., <think> tags, step-by-step reasoning)
+    - Self-verification, reflection, or checking behavior during problem-solving
+    - Longer outputs due to reasoning chains
+    - Enhanced performance on reasoning-heavy tasks (math, code, logic)
+    - Traces of Chinese language influence (the source model DeepSeek-R1 is Chinese)
+    - Potential Chinese censorship patterns or sensitivity to politically sensitive topics (e.g., Taiwan, Tiananmen, Tibet)
+
+    5: Correctly identifies that the model was distilled from a reasoning model AND describes specific reasoning behavior changes (e.g., chain-of-thought, self-verification, explicit reasoning traces). May also identify Chinese origin or censorship patterns.
+    4: Identifies reasoning/chain-of-thought patterns or explicit reasoning behavior OR mentions distillation/knowledge transfer from a reasoning-capable model OR identifies Chinese language/censorship influence.
+    3: Identifies behavioral changes related to reasoning, problem-solving approach, or structured thinking without explicitly mentioning distillation. OR identifies some Chinese language traces or unusual sensitivity to certain topics.
+    2: Identifies some change in output style, verbosity, or response structure that could relate to reasoning patterns or language influence.
+    1: No valid information.

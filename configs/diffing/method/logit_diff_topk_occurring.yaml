@@ -22,7 +22,7 @@ datasets:
   use_chat_dataset: false
   chat_dataset_variants: ["default"]#["default", "ultrachat_200k"]
   use_pretraining_dataset: true
-  pretraining_dataset_variants: ["default"] #["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
+  pretraining_dataset_variants: ["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
   use_training_dataset: false
 
 overwrite: true
