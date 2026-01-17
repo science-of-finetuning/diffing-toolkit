@@ -1835,11 +1835,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         dataset_inputs: Dict[str, Dict[str, torch.Tensor]] = {}
         for dataset_cfg in self.datasets:
-            dataset_inputs[dataset_cfg.id] = self._prepare_dataset_tensors(dataset_cfg)
+            # Use dataset_cfg.name as key (not .id) to handle datasets with same id but different subsets
+            # e.g., CulturaX_de, CulturaX_fr, CulturaX_ja all share id="uonlp/CulturaX" but have different names
+            dataset_inputs[dataset_cfg.name] = self._prepare_dataset_tensors(dataset_cfg)
             
             # Save attention mask
             mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            torch.save(dataset_inputs[dataset_cfg.id]["attention_mask"], mask_path)
+            torch.save(dataset_inputs[dataset_cfg.name]["attention_mask"], mask_path)
             self.logger.info(f"Saved attention mask to {mask_path}")
 
         # Phase 1: Base Model Inference
@@ -1852,7 +1854,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing base logits for {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.id]
+            inputs = dataset_inputs[dataset_cfg.name]
             input_ids = inputs["input_ids"]
             attention_mask = inputs["attention_mask"]
             
@@ -1896,7 +1898,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing finetuned logits for {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.id]
+            inputs = dataset_inputs[dataset_cfg.name]
             input_ids = inputs["input_ids"]
             attention_mask = inputs["attention_mask"]
             
