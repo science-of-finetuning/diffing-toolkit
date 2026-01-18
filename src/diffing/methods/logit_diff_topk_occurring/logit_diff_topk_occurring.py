@@ -517,11 +517,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 diff.mul_(mask_expanded)
                 global_diff_sum += diff.sum(dim=(0, 1))
                 
-                # Count positive diffs (masked)
-                # Note: (diff >= 0) is True for padding (0>=0), so we MUST AND with mask
+                # Count strictly positive diffs (masked)
+                # Note: We use (diff > 0) to exclude zeros; AND with mask to exclude padding
                 # OPTIMIZATION: Sum boolean tensor directly to avoid creating huge float tensor
                 # We cast mask back to bool for logical AND
-                pos_mask = (diff >= 0) & (mask_expanded.bool())
+                pos_mask = (diff > 0) & (mask_expanded.bool())
                 global_pos_count += pos_mask.sum(dim=(0, 1))
 
             # Shortlist Distribution Tracking (Vectorized for aggregate)
@@ -915,7 +915,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "token": token_str,
                 "token_id": token_id,
                 "sum_logit_diff": float(global_diff_sum[token_id]),
-                "count_nonnegative": int(global_pos_count[token_id])
+                "count_positive": int(global_pos_count[token_id])
             })
             
         final_output = {

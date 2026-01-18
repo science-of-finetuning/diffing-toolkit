@@ -508,9 +508,9 @@ def plot_shortlist_token_distribution(
     ax.set_ylabel("Density", fontsize=11)
     
     # Calculate stats
-    count_nonnegative = np.sum(logit_diffs >= 0)
+    count_positive = np.sum(logit_diffs > 0)
     total_count = len(logit_diffs)
-    fraction_nonnegative = count_nonnegative / total_count if total_count > 0 else 0.0
+    fraction_positive = count_positive / total_count if total_count > 0 else 0.0
     avg_logit_diff = np.mean(logit_diffs) if total_count > 0 else 0.0
     
     # Title with subtitle
@@ -521,7 +521,7 @@ def plot_shortlist_token_distribution(
     if num_samples > 0:
         subtitle_lines.append(f"Samples: {num_samples} | Max Pos: {max_tokens_per_sample} | Total Pos: {total_positions}")
     
-    subtitle_lines.append(f"Non-negative: {count_nonnegative} ({fraction_nonnegative:.2f}) | Avg Diff: {avg_logit_diff:.2f}")
+    subtitle_lines.append(f"Positive: {count_positive} ({fraction_positive:.2f}) | Avg Diff: {avg_logit_diff:.2f}")
     
     if subtitle_lines:
         title += "\n" + "\n".join(subtitle_lines)
@@ -774,7 +774,7 @@ def plot_global_token_scatter(
             
         tokens.append(token_str)
         token_ids.append(token_id)
-        count_pos = item.get("count_nonnegative", 0)
+        count_pos = item.get("count_positive", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
         
         x = count_pos / total_positions
@@ -964,7 +964,7 @@ def get_global_token_scatter_plotly(
                 filtered_count += 1
                 continue
             
-        count_pos = item.get("count_nonnegative", 0)
+        count_pos = item.get("count_positive", 0)
         sum_diff = item.get("sum_logit_diff", 0.0)
         
         frac_pos = count_pos / total_positions

@@ -126,8 +126,8 @@ def _render_global_scatter_tab(method):
                     item = stats[idx]
                     
                     # Calculate coordinates (matching logic in plots.py)
-                    x = item.get("count_nonnegative", 0) / total_positions
-                    y = item.get("sum_logit_diff", 0.0) / total_positions
+                    x = item["count_positive"] / total_positions
+                    y = item["sum_logit_diff"] / total_positions
                     
                     highlight_x.append(x)
                     highlight_y.append(y)
