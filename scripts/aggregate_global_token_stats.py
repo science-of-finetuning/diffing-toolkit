@@ -7,7 +7,7 @@ Usage:
 
 The script will:
 1. Find all *global_token_stats.json files in the folder
-2. Aggregate them by summing sum_logit_diff and count_nonnegative per token
+2. Aggregate them by summing sum_logit_diff and count_positive per token
 3. Save the result as combined_global_token_stats.json in the same folder
 4. Generate a combined_global_token_scatter.png plot
 """
@@ -94,7 +94,7 @@ def aggregate_token_stats(stats_files: List[Path]) -> Dict[str, Any]:
     - total_positions_analyzed: sum
     - num_unique_tokens: keep unchanged (vocab size)
     - global_token_stats[].sum_logit_diff: sum by token_id
-    - global_token_stats[].count_nonnegative: sum by token_id
+    - global_token_stats[].count_positive: sum by token_id
     """
     if not stats_files:
         raise ValueError("No stats files provided")
@@ -130,12 +130,12 @@ def aggregate_token_stats(stats_files: List[Path]) -> Dict[str, Any]:
                     "token": token_entry["token"],
                     "token_id": token_id,
                     "sum_logit_diff": 0.0,
-                    "count_nonnegative": 0,
+                    "count_positive": 0,
                 }
             
             # Accumulate values
             token_stats_by_id[token_id]["sum_logit_diff"] += token_entry["sum_logit_diff"]
-            token_stats_by_id[token_id]["count_nonnegative"] += token_entry["count_nonnegative"]
+            token_stats_by_id[token_id]["count_positive"] += token_entry["count_positive"]
     
     # Convert back to sorted list by token_id
     combined_token_stats = sorted(token_stats_by_id.values(), key=lambda x: x["token_id"])
@@ -195,28 +195,28 @@ def main():
     print(f"  - Total positions: {combined['total_positions_analyzed']}")
     print(f"  - Tokens aggregated: {len(combined['global_token_stats'])}")
     
-    # Print top 100 by count_nonnegative
+    # Print top 100 by count_positive
     print("\n" + "=" * 80)
-    print("TOP 100 TOKENS BY count_nonnegative (fraction positive diffs)")
+    print("TOP 100 TOKENS BY count_positive (fraction positive diffs)")
     print("=" * 80)
-    print(f"{'Rank':<6} {'Token':<30} {'count_nonnegative':>18} {'sum_logit_diff':>18}")
+    print(f"{'Rank':<6} {'Token':<30} {'count_positive':>18} {'sum_logit_diff':>18}")
     print("-" * 80)
     
     top_by_count = sorted(
         combined["global_token_stats"],
-        key=lambda x: x["count_nonnegative"],
+        key=lambda x: x["count_positive"],
         reverse=True
     )[:100]
     
     for i, t in enumerate(top_by_count, 1):
         token_display = repr(t["token"])[:28]
-        print(f"{i:<6} {token_display:<30} {t['count_nonnegative']:>18} {t['sum_logit_diff']:>18.2f}")
+        print(f"{i:<6} {token_display:<30} {t['count_positive']:>18} {t['sum_logit_diff']:>18.2f}")
     
     # Print top 100 by sum_logit_diff
     print("\n" + "=" * 80)
     print("TOP 100 TOKENS BY sum_logit_diff (total logit difference)")
     print("=" * 80)
-    print(f"{'Rank':<6} {'Token':<30} {'count_nonnegative':>18} {'sum_logit_diff':>18}")
+    print(f"{'Rank':<6} {'Token':<30} {'count_positive':>18} {'sum_logit_diff':>18}")
     print("-" * 80)
     
     top_by_sum = sorted(
@@ -227,7 +227,7 @@ def main():
     
     for i, t in enumerate(top_by_sum, 1):
         token_display = repr(t["token"])[:28]
-        print(f"{i:<6} {token_display:<30} {t['count_nonnegative']:>18} {t['sum_logit_diff']:>18.2f}")
+        print(f"{i:<6} {token_display:<30} {t['count_positive']:>18} {t['sum_logit_diff']:>18.2f}")
     
     # Load config for plotting options
     config_path = PROJECT_ROOT / "configs" / "diffing" / "method" / "logit_diff_topk_occurring.yaml"

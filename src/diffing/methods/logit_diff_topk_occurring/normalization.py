@@ -348,14 +348,14 @@ def load_fraction_positive_tokens(
     # Convert to format compatible with top_positive
     all_tokens = []
     for stat in token_stats:
-        count_nonnegative = stat["count_nonnegative"]
-        count_negative = total_positions - count_nonnegative
-        fraction_positive = count_nonnegative / total_positions if total_positions > 0 else 0.0
+        count_positive = stat["count_positive"]
+        count_negative = total_positions - count_positive
+        fraction_positive = count_positive / total_positions if total_positions > 0 else 0.0
         
         all_tokens.append({
             "token_id": stat["token_id"],
             "token_str": stat["token"],  # Note: JSON uses "token" not "token_str"
-            "count_positive": count_nonnegative,  # count_nonnegative serves as "positive" here
+            "count_positive": count_positive,
             "count_negative": count_negative,
             "positive_occurrence_rate": fraction_positive * 100,  # Convert to percentage
             "negative_occurrence_rate": (count_negative / total_positions) * 100 if total_positions > 0 else 0.0,
