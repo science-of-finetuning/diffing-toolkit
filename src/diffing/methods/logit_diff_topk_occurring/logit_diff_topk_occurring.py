@@ -48,6 +48,34 @@ import scipy.sparse
 from torchnmf.nmf import NMF
 from .orthogonal_nmf import fit_nmf_orthogonal
 
+
+def slice_to_positions(tensor: torch.Tensor, positions_list: List[List[int]]) -> torch.Tensor:
+    """
+    Extract specific positions from each sample in a tensor.
+    
+    Used to slice logit diffs to only the relevant positions around assistant start
+    for chat datasets, matching ADL's pre_assistant_k behavior.
+    
+    Args:
+        tensor: [batch, seq_len, vocab] tensor of logit diffs
+        positions_list: List of position indices per sample (from chat dataset)
+    
+    Returns:
+        Tensor of shape [batch, max_positions, vocab] with only the relevant positions
+    """
+    batch_size = tensor.shape[0]
+    max_pos = max(len(p) for p in positions_list)
+    vocab_size = tensor.shape[-1]
+    
+    result = torch.zeros(batch_size, max_pos, vocab_size, dtype=tensor.dtype, device=tensor.device)
+    for i, positions in enumerate(positions_list):
+        for j, pos in enumerate(positions):
+            #if pos < tensor.shape[1]:  # Safety check
+                #result[i, j] = tensor[i, pos]
+            result[i, j] = tensor[i, pos]
+    return result
+
+
 class LogitDiffTopKOccurringMethod(DiffingMethod):
     """
     Computes occurrence rates of tokens in top-K positive and negative logit differences.
@@ -220,24 +248,27 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Preparing input tensors for {dataset_cfg.name}...")
         max_samples = int(self.method_cfg.method_params.max_samples)
         max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
+        pre_assistant_k = int(self.method_cfg.method_params.pre_assistant_k)
         
         # Get debug_print_samples from config (None by default)
         debug_print_samples = getattr(self.method_cfg, "debug_print_samples", None)
         
         # Tokenize entire dataset using ADL functions
+        all_positions = None  # Will be set for chat datasets
         if dataset_cfg.is_chat:
-            self.logger.info("Using ADL's load_and_tokenize_chat_dataset()")
+            self.logger.info(f"Using ADL's load_and_tokenize_chat_dataset() with pre_assistant_k={pre_assistant_k}")
             samples = load_and_tokenize_chat_dataset(
                 dataset_name=dataset_cfg.id,
                 tokenizer=self.tokenizer,
                 split=dataset_cfg.split,
                 messages_column=dataset_cfg.messages_column or "messages",
                 n=max_tokens,
-                pre_assistant_k=0,
+                pre_assistant_k=pre_assistant_k,
                 max_samples=max_samples,
                 debug_print_samples=debug_print_samples,
             )
             all_token_ids = [sample["input_ids"] for sample in samples]
+            all_positions = [sample["positions"] for sample in samples]  # Extract positions for slicing
         else:
             self.logger.info("Using ADL's load_and_tokenize_dataset()")
             all_token_ids = load_and_tokenize_dataset(
@@ -277,7 +308,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Prepared tensors: input_ids {input_ids.shape}")
         return {
             "input_ids": input_ids,
-            "attention_mask": attention_mask
+            "attention_mask": attention_mask,
+            "positions": all_positions,  # None for pretraining, list of position indices for chat
         }
 
     @torch.no_grad()
@@ -1953,6 +1985,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             # Ensure same device/type if needed, though they should be CPU tensors
             diff = ft - base
+            
+            # Slice chat data to relevant positions only (pre_assistant_k + n tokens around assistant start)
+            # This saves disk space and makes analysis consistent with ADL behavior
+            positions_list = dataset_inputs[dataset_cfg.name].get("positions")
+            if positions_list is not None:
+                original_shape = diff.shape
+                diff = slice_to_positions(diff, positions_list)
+                self.logger.info(f"Sliced chat logit diff from {original_shape} to {diff.shape} (pre_assistant_k + n positions)")
             
             # Save diff
             diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"

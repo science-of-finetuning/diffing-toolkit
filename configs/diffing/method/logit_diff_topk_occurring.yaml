@@ -11,18 +11,19 @@ method_params:
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: fraction_positive_diff #top_k_occurring fraction_positive_diff
-  batch_size: 64 #16
-  max_samples: 70 #0 #5000
-  max_tokens_per_sample: 5 #0 #5
+  batch_size: 2 #16
+  max_samples: 5 #0 #5000
+  max_tokens_per_sample: 2 #0 #5
   top_k: 100
   ignore_padding: true
+  pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets only)
 
 # Dataset configuration
 datasets:
-  use_chat_dataset: false
-  chat_dataset_variants: ["default"]#["default", "ultrachat_200k"]
+  use_chat_dataset: true
+  chat_dataset_variants: ["default"] #["default", "ultrachat_200k"]
   use_pretraining_dataset: true
-  pretraining_dataset_variants: ["default", "es"] #["default", "es", "fr", "de", "ja"]  # List of variants to use (default, es, fr, de, ja)
+  pretraining_dataset_variants: ["default"] #, "ja", "de", "fr", "es"] #["default", "ja", "de", "fr", "es"] # List of variants to use (default, es, fr, de, ja)
   use_training_dataset: false
 
 overwrite: true
@@ -203,6 +204,9 @@ per_token_analysis:
     - "NATO"
     - "Russia"
     - " Russia"
+    - " Okay"
+    - "Hmm"
+    - " Hmm"
     # High Frequency additions
     - " Bakery"
     - " Steak"
