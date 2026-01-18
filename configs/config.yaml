@@ -59,6 +59,12 @@ pretraining_dataset:
     is_chat: false
     text_column: text
     streaming: true
+  greatfirewall:
+    id: nbeerbower/GreatFirewall-DPO
+    splits: [train]
+    is_chat: false
+    text_column: chosen  # Alternative: "rejected"
+    streaming: true
 
 # Pipeline control
 pipeline:

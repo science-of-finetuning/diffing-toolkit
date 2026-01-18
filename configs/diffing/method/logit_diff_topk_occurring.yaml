@@ -21,6 +21,7 @@ method_params:
 # Dataset configuration
 split: train  # Single split for all datasets
 datasets:
+- { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
   - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
