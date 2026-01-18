@@ -35,6 +35,7 @@ def load_and_tokenize_dataset(
     subset: str = None,
     streaming: bool = False,
     debug_print_samples: int = None,
+    seed: int = None,
 ) -> List[List[int]]:
     """
     Load HuggingFace dataset and tokenize sequences with n-character cutoff.
@@ -50,6 +51,7 @@ def load_and_tokenize_dataset(
         subset: Specific configuration name of the dataset (e.g. "ja" for CulturaX)
         streaming: Whether to stream the dataset
         debug_print_samples: If set, print the first N text samples for debugging
+        seed: If set, shuffle the dataset with this seed for reproducible random sampling
 
     Returns:
         List of lists, where each inner list contains exactly n token IDs
@@ -58,6 +60,11 @@ def load_and_tokenize_dataset(
 
     # Load dataset
     dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
+
+    # Shuffle dataset if seed is provided (not supported for streaming)
+    if seed is not None and not streaming:
+        logger.info(f"Shuffling dataset with seed={seed}")
+        dataset = dataset.shuffle(seed=seed)
 
     if debug:
         max_samples = min(20, max_samples)
@@ -135,16 +142,24 @@ def load_and_tokenize_chat_dataset(
     debug: bool = False,
     max_user_tokens: int = 512,
     debug_print_samples: int = None,
+    seed: int = None,
 ) -> List[Dict[str, Any]]:
     """Load a chat dataset and prepare samples around assistant start.
 
     Args:
         debug_print_samples: If set, print the first N text samples for debugging
+        seed: If set, shuffle the dataset with this seed for reproducible random sampling
 
     Returns list of dicts with keys: input_ids (List[int]), position_labels (List[int]), positions (List[int]).
     """
     logger.info(f"Loading chat dataset {dataset_name} (split: {split})")
     dataset = load_dataset(dataset_name, split=split)
+    
+    # Shuffle dataset if seed is provided
+    if seed is not None:
+        logger.info(f"Shuffling dataset with seed={seed}")
+        dataset = dataset.shuffle(seed=seed)
+    
     if debug:
         max_samples = min(20, max_samples)
     processed = 0
@@ -745,6 +760,9 @@ class ActDiffLens(DiffingMethod):
 
         # Get debug_print_samples from config (None by default)
         debug_print_samples = getattr(self.cfg.diffing.method, "debug_print_samples", None)
+        
+        # Get seed from config for reproducible random sampling
+        seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
 
         if is_chat:
             pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
@@ -758,6 +776,7 @@ class ActDiffLens(DiffingMethod):
                 pre_assistant_k=pre_k,
                 max_samples=self.cfg.diffing.method.max_samples,
                 debug_print_samples=debug_print_samples,
+                seed=seed,
             )
 
             base_acts = extract_selected_positions_activations(
@@ -791,6 +810,7 @@ class ActDiffLens(DiffingMethod):
                 subset=dataset_entry.get("subset", None),
                 streaming=dataset_entry.get("streaming", False),
                 debug_print_samples=debug_print_samples,
+                seed=seed,  # Note: shuffle not supported for streaming datasets
             )
             base_acts = extract_first_n_tokens_activations(
                 self.base_model,

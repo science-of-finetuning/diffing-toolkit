@@ -262,6 +262,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         # Tokenize entire dataset using ADL functions
         all_positions = None  # Will be set for chat datasets
+        # Get seed from config for reproducible random sampling
+        seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
+        
         if dataset_cfg.is_chat:
             self.logger.info(f"Using ADL's load_and_tokenize_chat_dataset() with pre_assistant_k={pre_assistant_k}")
             samples = load_and_tokenize_chat_dataset(
@@ -273,6 +276,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 pre_assistant_k=pre_assistant_k,
                 max_samples=max_samples,
                 debug_print_samples=debug_print_samples,
+                seed=seed,
             )
             all_token_ids = [sample["input_ids"] for sample in samples]
             all_positions = [sample["positions"] for sample in samples]  # Extract positions for slicing
@@ -288,6 +292,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 subset=dataset_cfg.subset,
                 streaming=True,
                 debug_print_samples=debug_print_samples,
+                seed=seed,  # Note: shuffle not supported for streaming datasets
             )
 
         if not all_token_ids:

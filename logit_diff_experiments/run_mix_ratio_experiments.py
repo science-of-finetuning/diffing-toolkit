@@ -19,27 +19,33 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
+import numpy as np
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-SEED = 12345
-N_SAMPLES = 1000
-MAX_TOKEN_POSITIONS_ADL = 50  # Minimum for ADL (skips first 5 positions)
-MAX_TOKEN_POSITIONS_LOGIT_DIFF = 50
+# Multiple random runs for statistical robustness
+N_RANDOM_RUNS = 2  # Number of random initializations per mix ratio
+BASE_SEED = 42
+RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
+# Results: [42, 1042, 2042, 3042, 4042]
+
+N_SAMPLES = 100 #1000
+MAX_TOKEN_POSITIONS_ADL = 10 #50  # Minimum for ADL (skips first 5 positions)
+MAX_TOKEN_POSITIONS_LOGIT_DIFF = 10 #50
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Mix ratios to test
 MIX_RATIOS = [
     "default",   # 1:0 (pure finetuning, no mixing)
-    "mix1-0p1",  # 1:0.1
-    "mix1-0p2",  # 1:0.2
-    "mix1-0p4",  # 1:0.4
-    "mix1-0p6",  # 1:0.6
-    "mix1-0p8",  # 1:0.8
-    "mix1-1p0",  # 1:1.0
-    "mix1-1p5",  # 1:1.5
+    # "mix1-0p1",  # 1:0.1
+    # "mix1-0p2",  # 1:0.2
+    # "mix1-0p4",  # 1:0.4
+    # "mix1-0p6",  # 1:0.6
+    # "mix1-0p8",  # 1:0.8
+    # "mix1-1p0",  # 1:1.0
+    # "mix1-1p5",  # 1:1.5
     "mix1-2p0",  # 1:2.0
 ]
 
@@ -127,7 +133,7 @@ def run_command(cmd: List[str], description: str) -> bool:
     return True
 
 
-def build_base_command(method: str, mix_ratio: str, mode: str) -> List[str]:
+def build_base_command(method: str, mix_ratio: str, mode: str, seed: int) -> List[str]:
     """Build the base command for running an experiment."""
     cmd = [
         "python", "main.py",
@@ -137,7 +143,7 @@ def build_base_command(method: str, mix_ratio: str, mode: str) -> List[str]:
         f"organism_variant={mix_ratio}",
         f"infrastructure={INFRASTRUCTURE}",
         f"pipeline.mode={mode}",
-        f"seed={SEED}",
+        f"seed={seed}",
         f"diffing.method.debug_print_samples={DEBUG_PRINT_SAMPLES}",
     ]
     
@@ -156,9 +162,9 @@ def build_base_command(method: str, mix_ratio: str, mode: str) -> List[str]:
     return cmd
 
 
-def build_diffing_command(method: str, mix_ratio: str) -> List[str]:
+def build_diffing_command(method: str, mix_ratio: str, seed: int) -> List[str]:
     """Build command for diffing mode with token relevance enabled."""
-    cmd = build_base_command(method, mix_ratio, "diffing")
+    cmd = build_base_command(method, mix_ratio, "diffing", seed)
     
     # Apply all token_relevance settings (consistent for both methods)
     for key, value in TOKEN_RELEVANCE_CONFIG.items():
@@ -191,19 +197,22 @@ def build_diffing_command(method: str, mix_ratio: str) -> List[str]:
 # =============================================================================
 
 def run_preprocessing():
-    """Run preprocessing for all method/mix_ratio combinations."""
+    """Run preprocessing for all method/mix_ratio/seed combinations."""
+    total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
     print("\n" + "="*80)
     print("PHASE 1: PREPROCESSING")
+    print(f"Running {len(METHODS)} methods × {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds = {total_runs} runs")
     print("="*80)
     
     for method in METHODS:
         for mix_ratio in MIX_RATIOS:
-            cmd = build_base_command(method, mix_ratio, "preprocessing")
-            description = f"Preprocessing: {method} / {mix_ratio}"
-            
-            success = run_command(cmd, description)
-            if not success:
-                print(f"[WARNING] Preprocessing failed for {method}/{mix_ratio}, continuing...")
+            for seed in RANDOM_SEEDS:
+                cmd = build_base_command(method, mix_ratio, "preprocessing", seed)
+                description = f"Preprocessing: {method} / {mix_ratio} / seed={seed}"
+                
+                success = run_command(cmd, description)
+                if not success:
+                    print(f"[WARNING] Preprocessing failed for {method}/{mix_ratio}/seed={seed}, continuing...")
 
 
 # =============================================================================
@@ -211,19 +220,22 @@ def run_preprocessing():
 # =============================================================================
 
 def run_diffing():
-    """Run diffing with token relevance for all method/mix_ratio combinations."""
+    """Run diffing with token relevance for all method/mix_ratio/seed combinations."""
+    total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
     print("\n" + "="*80)
     print("PHASE 2: DIFFING (Token Relevance)")
+    print(f"Running {len(METHODS)} methods × {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds = {total_runs} runs")
     print("="*80)
     
     for method in METHODS:
         for mix_ratio in MIX_RATIOS:
-            cmd = build_diffing_command(method, mix_ratio)
-            description = f"Diffing: {method} / {mix_ratio}"
-            
-            success = run_command(cmd, description)
-            if not success:
-                print(f"[WARNING] Diffing failed for {method}/{mix_ratio}, continuing...")
+            for seed in RANDOM_SEEDS:
+                cmd = build_diffing_command(method, mix_ratio, seed)
+                description = f"Diffing: {method} / {mix_ratio} / seed={seed}"
+                
+                success = run_command(cmd, description)
+                if not success:
+                    print(f"[WARNING] Diffing failed for {method}/{mix_ratio}/seed={seed}, continuing...")
 
 
 # =============================================================================
@@ -279,70 +291,71 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
     return results
 
 
-def extract_relevance_percentages(json_files: List[Path]) -> Tuple[Optional[float], Optional[float]]:
-    """Extract average percentage and weighted_percentage from JSON files.
+def extract_relevance_percentages_single(json_file: Path) -> Tuple[Optional[float], Optional[float]]:
+    """Extract percentage and weighted_percentage from a single JSON file.
     
     Returns:
-        Tuple of (avg_percentage, avg_weighted_percentage)
+        Tuple of (percentage, weighted_percentage)
     """
-    if not json_files:
+    try:
+        with open(json_file, 'r') as f:
+            data = json.load(f)
+            pct = data.get('percentage')
+            wpct = data.get('weighted_percentage')
+            return pct, wpct
+    except Exception as e:
+        print(f"[WARNING] Could not read {json_file}: {e}")
         return None, None
-    
-    percentages = []
-    weighted_percentages = []
-    
-    for json_file in json_files:
-        try:
-            with open(json_file, 'r') as f:
-                data = json.load(f)
-                if 'percentage' in data:
-                    percentages.append(data['percentage'])
-                if 'weighted_percentage' in data:
-                    weighted_percentages.append(data['weighted_percentage'])
-        except Exception as e:
-            print(f"[WARNING] Could not read {json_file}: {e}")
-    
-    avg_pct = sum(percentages) / len(percentages) if percentages else None
-    avg_wpct = sum(weighted_percentages) / len(weighted_percentages) if weighted_percentages else None
-    return avg_pct, avg_wpct
 
 
-def collect_results() -> Dict[str, Dict[str, Dict[str, Dict[str, float]]]]:
+def collect_results() -> Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]:
     """
     Collect token relevance results for all experiments.
     
+    Each JSON file represents one seed run, stored as a separate data point.
+    
     Returns:
-        Dict[dataset][method][mix_ratio] = {"percentage": X, "weighted_percentage": Y}
+        Dict[dataset][method][mix_ratio] = List[{"percentage": X, "weighted_percentage": Y}]
     """
-    results: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
+    results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]] = {}
     
     for method in METHODS:
         for mix_ratio in MIX_RATIOS:
             files_by_dataset = find_token_relevance_files(method, mix_ratio)
             
             for dataset_key, files in files_by_dataset.items():
-                pct, wpct = extract_relevance_percentages(files)
-                
-                if pct is not None or wpct is not None:
-                    if dataset_key not in results:
-                        results[dataset_key] = {}
-                    if method not in results[dataset_key]:
-                        results[dataset_key][method] = {}
+                # Each file is a separate seed run - store as individual data points
+                for json_file in files:
+                    pct, wpct = extract_relevance_percentages_single(json_file)
                     
-                    results[dataset_key][method][mix_ratio] = {
-                        "percentage": pct,
-                        "weighted_percentage": wpct,
-                    }
-                    
-                    pct_str = f"{pct:.2%}" if pct is not None else "N/A"
-                    wpct_str = f"{wpct:.2%}" if wpct is not None else "N/A"
-                    print(f"Found: {method} / {mix_ratio} / {dataset_key}: pct={pct_str}, wpct={wpct_str}")
+                    if pct is not None or wpct is not None:
+                        if dataset_key not in results:
+                            results[dataset_key] = {}
+                        if method not in results[dataset_key]:
+                            results[dataset_key][method] = {}
+                        if mix_ratio not in results[dataset_key][method]:
+                            results[dataset_key][method][mix_ratio] = []
+                        
+                        results[dataset_key][method][mix_ratio].append({
+                            "percentage": pct,
+                            "weighted_percentage": wpct,
+                        })
+    
+    # Print summary
+    for dataset_key, method_data in results.items():
+        for method, ratio_data in method_data.items():
+            for mix_ratio, runs in ratio_data.items():
+                n_runs = len(runs)
+                pcts = [r["percentage"] for r in runs if r.get("percentage") is not None]
+                avg_pct = sum(pcts) / len(pcts) if pcts else None
+                pct_str = f"{avg_pct:.2%}" if avg_pct is not None else "N/A"
+                print(f"Found: {method} / {mix_ratio} / {dataset_key}: {n_runs} runs, avg_pct={pct_str}")
     
     return results
 
 
-def plot_results(results: Dict[str, Dict[str, Dict[str, Dict[str, float]]]]):
-    """Create comparison plots for each dataset (separate plots for unweighted and weighted)."""
+def plot_results(results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]):
+    """Create comparison plots with error bars for each dataset."""
     print("\n" + "="*80)
     print("PHASE 3: PLOTTING")
     print("="*80)
@@ -391,23 +404,36 @@ def plot_results(results: Dict[str, Dict[str, Dict[str, Dict[str, float]]]]):
             
             for method, ratio_data in method_data.items():
                 x_vals = []
-                y_vals = []
+                y_means = []
+                y_stds = []
                 
                 for mix_ratio in MIX_RATIOS:
                     if mix_ratio in ratio_data:
-                        value = ratio_data[mix_ratio].get(metric_key)
-                        if value is not None:
+                        # Extract values from all runs for this mix_ratio
+                        runs = ratio_data[mix_ratio]
+                        values = [
+                            run[metric_key] * 100  # Convert to percentage
+                            for run in runs
+                            if run.get(metric_key) is not None
+                        ]
+                        if values:
                             x_vals.append(mix_ratio_values.get(mix_ratio, 0))
-                            y_vals.append(value * 100)  # Convert to percentage
+                            y_means.append(np.mean(values))
+                            y_stds.append(np.std(values))
                 
-                if x_vals and y_vals:
+                if x_vals and y_means:
                     has_data = True
-                    plt.plot(
-                        x_vals, y_vals,
+                    # Determine number of runs for label
+                    n_runs = len(ratio_data.get(MIX_RATIOS[0], []))
+                    plt.errorbar(
+                        x_vals, y_means,
+                        yerr=y_stds,
                         marker='o',
                         markersize=8,
                         linewidth=2,
-                        label=method_labels.get(method, method),
+                        capsize=4,
+                        capthick=1.5,
+                        label=f"{method_labels.get(method, method)} (n={n_runs})",
                         color=method_colors.get(method, None),
                     )
             
@@ -459,8 +485,10 @@ def main():
     print(f"N Samples: {N_SAMPLES}")
     print(f"Max Token Positions ADL: {MAX_TOKEN_POSITIONS_ADL}")
     print(f"Max Token Positions LogitDiff: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
-    print(f"Seed: {SEED}")
+    print(f"Random Seeds: {RANDOM_SEEDS} ({N_RANDOM_RUNS} runs per experiment)")
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
+    total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
+    print(f"Total experiment runs: {total_runs}")
     print("="*80)
     
     if args.mode == "full":

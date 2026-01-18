@@ -33,7 +33,7 @@ overwrite: true
 
 # Token processing settings
 # BPE whitespace markers (Ġ=space, Ċ=newline, etc.) are decoded before processing.
-filter_pure_punctuation: true   # Remove tokens that are ONLY punctuation/whitespace (e.g., "...", "!", "---Ċ"). Does NOT modify tokens.
+filter_pure_punctuation: false   # Remove tokens that are ONLY punctuation/whitespace (e.g., "...", "!", "---Ċ"). Does NOT modify tokens.
 normalize_tokens: false         # Strip punct/whitespace from both ends, lowercase, consolidate (e.g., ".ai" and "AI" -> "ai")
 filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) from results
 
