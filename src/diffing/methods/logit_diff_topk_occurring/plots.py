@@ -1219,16 +1219,20 @@ def plot_selected_tokens_table(
     table.set_fontsize(10)
     table.scale(1.0, 1.2)  # Make rows 20% taller for readability
     
+    # Create font properties for Unicode support
+    unicode_font = matplotlib.font_manager.FontProperties(family=UNICODE_FONTS)
+    
     # Apply colors and styling
     for (row, col), cell in table.get_celld().items():
         if row == 0:
             # Header row
             cell.set_facecolor("white")
-            cell.set_text_props(weight="bold")
+            cell.set_text_props(weight="bold", fontproperties=unicode_font)
         else:
             # Data rows
             color_row = cell_colors[row - 1]
             cell.set_facecolor(color_row[col])
+            cell.set_text_props(fontproperties=unicode_font)
     
     # Add title
     title = f"Selected Tokens - {dataset_name}"
