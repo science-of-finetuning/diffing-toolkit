@@ -23,8 +23,8 @@ from .normalization import is_pure_punctuation, decode_bpe_whitespace
 matplotlib.rcParams['text.antialiased'] = True  # Always enable anti-aliasing for smooth text
 matplotlib.rcParams['figure.autolayout'] = False  # We handle layout manually
 
-# Unicode font support
-UNICODE_FONTS = ['DejaVu Sans', 'Arial Unicode MS', 'Lucida Grande', 'Segoe UI', 'Noto Sans']
+# Unicode font support (Noto Sans CJK first for Chinese/Japanese/Korean character support)
+UNICODE_FONTS = ['Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'DejaVu Sans', 'Arial Unicode MS', 'Noto Sans']
 
 
 def escape_for_matplotlib(s: str) -> str:
