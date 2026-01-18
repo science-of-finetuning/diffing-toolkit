@@ -19,12 +19,15 @@ method_params:
   pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets only)
 
 # Dataset configuration
+split: train  # Single split for all datasets
 datasets:
-  use_chat_dataset: true
-  chat_dataset_variants: ["default"] #["default", "ultrachat_200k"]
-  use_pretraining_dataset: true
-  pretraining_dataset_variants: ["default"] #, "ja", "de", "fr", "es"] #["default", "ja", "de", "fr", "es"] # List of variants to use (default, es, fr, de, ja)
-  use_training_dataset: false
+  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
+  # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
+  # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
+  # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }
+  # - { id: uonlp/CulturaX, subset: ja, is_chat: false, text_column: text, streaming: true }
+  - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+  # - { id: ultrachat_200k, is_chat: true, messages_column: ??? }
 
 overwrite: true
 
@@ -34,23 +37,6 @@ filter_pure_punctuation: true   # Remove tokens that are ONLY punctuation/whites
 normalize_tokens: false         # Strip punct/whitespace from both ends, lowercase, consolidate (e.g., ".ai" and "AI" -> "ai")
 filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) from results
 
-# Visualization settings
-visualization:
-  top_k_plotting: 6
-  figure_width: 18
-  figure_height: 9
-  figure_dpi: 400
-  num_tokens_to_plot: 100
-  
-  # Font sizes in points (adjust these if changing DPI for better readability)
-  font_sizes:
-    tick_labels: 11        # Y-axis token labels in bar chart
-    axis_labels: 12        # X-axis labels
-    subplot_titles: 14     # Individual subplot titles
-    main_title: 16         # Main figure title
-    heatmap_labels: 8      # Section labels in heatmap
-    heatmap_cells: 5       # Token text inside heatmap cells
-    heatmap_positions: 7   # Position indices in heatmap
 
 # Token relevance grading
 token_relevance:
@@ -72,6 +58,35 @@ token_relevance:
     min_count: 10
   
   k_candidate_tokens: 20 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+
+
+# Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
+token_topic_clustering_NMF:
+  enabled: false
+  num_topics: 2
+  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
+  beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
+  orthogonal: true  # Enable orthogonal regularization for hard token-topic assignments
+  orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
+
+# Positional KDE Analysis
+positional_kde:
+  enabled: true
+  num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
+
+# Global Token Statistics (Entire Vocabulary)
+global_token_statistics:
+  enabled: true
+  top_k_plotting_labels: 60
+
+# Agent configuration
+agent:
+  overview:
+    datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
+    top_k_tokens: 20  # Number of top positive tokens to show per dataset (from occurrence-ranked list)
+
+
+
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
@@ -248,27 +263,21 @@ per_token_analysis:
     # - " guise"
     # - " intox"
 
-# Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
-token_topic_clustering_NMF:
-  enabled: false
-  num_topics: 2
-  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
-  beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
-  orthogonal: true  # Enable orthogonal regularization for hard token-topic assignments
-  orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
 
-# Positional KDE Analysis
-positional_kde:
-  enabled: true
-  num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
-
-# Global Token Statistics (Entire Vocabulary)
-global_token_statistics:
-  enabled: true
-  top_k_plotting_labels: 60
-
-# Agent configuration
-agent:
-  overview:
-    datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
-    top_k_tokens: 20  # Number of top positive tokens to show per dataset (from occurrence-ranked list)
+# Visualization settings
+visualization:
+  top_k_plotting: 6
+  figure_width: 18
+  figure_height: 9
+  figure_dpi: 400
+  num_tokens_to_plot: 100
+  
+  # Font sizes in points (adjust these if changing DPI for better readability)
+  font_sizes:
+    tick_labels: 11        # Y-axis token labels in bar chart
+    axis_labels: 12        # X-axis labels
+    subplot_titles: 14     # Individual subplot titles
+    main_title: 16         # Main figure title
+    heatmap_labels: 8      # Section labels in heatmap
+    heatmap_cells: 5       # Token text inside heatmap cells
+    heatmap_positions: 7   # Position indices in heatmap

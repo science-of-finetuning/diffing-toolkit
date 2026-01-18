@@ -19,7 +19,7 @@ from datasets import load_dataset, IterableDataset
 from datetime import datetime
 
 from ..diffing_method import DiffingMethod
-from src.utils.configs import get_dataset_configurations, DatasetConfig
+from src.utils.configs import DatasetConfig
 from src.utils.agents.diffing_method_agent import DiffingMethodAgent
 from src.utils.agents.base_agent import BaseAgent
 from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
@@ -94,22 +94,29 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Method-specific configuration
         self.method_cfg = cfg.diffing.method
 
-        # Get requested variants from method config, default to ["default"] if not present
-        pretraining_variants = list(getattr(self.method_cfg.datasets, "pretraining_dataset_variants", ["default"]))
-        chat_variants = list(getattr(self.method_cfg.datasets, "chat_dataset_variants", ["default"]))
+        # Build DatasetConfig objects from inline config (ADL-style)
+        self.datasets = []
+        split = str(self.method_cfg.split)
 
-        # Get dataset configurations
-        self.datasets = get_dataset_configurations(
-            cfg,
-            use_chat_dataset=self.method_cfg.datasets.use_chat_dataset,
-            use_pretraining_dataset=self.method_cfg.datasets.use_pretraining_dataset,
-            use_training_dataset=self.method_cfg.datasets.use_training_dataset,
-            pretraining_dataset_variants=pretraining_variants,
-            chat_dataset_variants=chat_variants,
-        )
-
-        # Filter out validation datasets (only use train-like splits)
-        #self.datasets = [ds for ds in self.datasets if ds.split.startswith("train")]
+        for dataset_entry in self.method_cfg.datasets:
+            dataset_id = dataset_entry["id"]
+            subset = dataset_entry.get("subset", None)
+            
+            # Create unique name: base_id + optional subset
+            name = dataset_id.split("/")[-1]
+            if subset:
+                name = f"{name}_{subset}"
+            
+            self.datasets.append(DatasetConfig(
+                name=name,
+                id=dataset_id,
+                split=split,
+                is_chat=dataset_entry["is_chat"],
+                text_column=dataset_entry.get("text_column", None),
+                messages_column=dataset_entry.get("messages_column", "messages"),
+                subset=subset,
+                streaming=dataset_entry.get("streaming", False),
+            ))
 
         # NMF Clustering configuration
         self.nmf_cfg = getattr(self.method_cfg, "token_topic_clustering_NMF", None)
