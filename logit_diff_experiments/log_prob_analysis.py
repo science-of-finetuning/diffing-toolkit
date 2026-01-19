@@ -24,15 +24,16 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.stats import gaussian_kde
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 # Experiment parameters
-N_SAMPLES = 20  # Number of samples per dataset
+N_SAMPLES = 492  # Number of samples per dataset
 MAX_TOKENS_PER_SAMPLE = 90  # Token positions per sample
-BATCH_SIZE = 2  # Batch size for model inference
+BATCH_SIZE = 8  # Batch size for model inference
 WINDOW_SIZE = 60  # Sliding window size for chunks
 STRIDE = 30  # Sliding window step
 SEED = 42
@@ -54,7 +55,7 @@ DATASETS = {
         "text_column": "chosen",
         "streaming": True,
         "color": "#2ecc71",  # Green
-        "label": "Chosen (Positive)",
+        "label": "Uncensored",
     },
     "neutral": {
         "id": "science-of-finetuning/fineweb-1m-sample",
@@ -62,7 +63,7 @@ DATASETS = {
         "text_column": "text",
         "streaming": True,
         "color": "#95a5a6",  # Gray
-        "label": "FineWeb (Neutral)",
+        "label": "Fineweb (neutral)",
     },
     "negative": {
         "id": "nbeerbower/GreatFirewall-DPO",
@@ -70,7 +71,7 @@ DATASETS = {
         "text_column": "rejected",
         "streaming": True,
         "color": "#e74c3c",  # Red
-        "label": "Rejected (Negative)",
+        "label": "China Censored",
     },
 }
 
@@ -228,7 +229,7 @@ def load_chunks(analysis_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
     return chunks_by_dataset
 
 
-def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
+def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]], show_text: bool = False):
     """Create the log probability diff visualization."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
@@ -295,16 +296,17 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
         )
     
     # Add text annotations (with rotation to reduce overlap)
-    for i, (x, y, text) in enumerate(zip(all_x, all_y, all_texts)):
-        ax.annotate(
-            text,
-            (x, y),
-            fontsize=6,
-            rotation=45,
-            ha='left',
-            va='bottom',
-            alpha=0.8,
-        )
+    if show_text:
+        for i, (x, y, text) in enumerate(zip(all_x, all_y, all_texts)):
+            ax.annotate(
+                text,
+                (x, y),
+                fontsize=6,
+                rotation=45,
+                ha='left',
+                va='bottom',
+                alpha=0.8,
+            )
     
     # Add horizontal line at y=0
     ax.axhline(y=0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
@@ -316,7 +318,7 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
             ax.axvline(x=end_idx + 0.5, color='gray', linestyle=':', linewidth=1, alpha=0.5)
     
     # Labels and title
-    ax.set_xlabel("Chunk Index (ordered: Chosen → Neutral → Rejected)", fontsize=12)
+    ax.set_xlabel("Chunk Index (ordered: Uncensored → Fineweb → China Censored)", fontsize=12)
     ax.set_ylabel("Log Probability Diff (FT - Base)", fontsize=12)
     ax.set_title(
         f"Sequence Log-Likelihood Ratio Analysis\n"
@@ -378,6 +380,9 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
     
     # Generate ranked scatter plot
     create_ranked_scatter_plot(chunks_by_dataset)
+    
+    # Generate KDE density plot
+    create_kde_plot(chunks_by_dataset, show_text=show_text)
 
 
 def create_ranked_scatter_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
@@ -469,6 +474,118 @@ def create_ranked_scatter_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]
     plt.close()
 
 
+def create_kde_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]], show_text: bool = False):
+    """Create KDE density plot of log probability diffs with overlapping curves.
+    
+    Each dataset gets its own KDE curve. Text annotations are placed at
+    (x=logprob_diff, y=kde_density_at_x) for each chunk when show_text is True.
+    """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Collect data and compute KDE for each dataset
+    kde_data = {}
+    for dataset_key in PLOT_ORDER:
+        chunks = chunks_by_dataset.get(dataset_key, [])
+        if not chunks:
+            continue
+        
+        diffs = np.array([c["logprob_diff"] for c in chunks])
+        if len(diffs) < 2:
+            continue
+        
+        kde = gaussian_kde(diffs)
+        kde_data[dataset_key] = {
+            "diffs": diffs,
+            "kde": kde,
+            "chunks": chunks,
+        }
+    
+    if not kde_data:
+        print("[WARNING] No data for KDE plot")
+        return
+    
+    # Determine x range across all datasets
+    all_diffs = np.concatenate([kd["diffs"] for kd in kde_data.values()])
+    x_min, x_max = all_diffs.min(), all_diffs.max()
+    x_margin = (x_max - x_min) * 0.1
+    x_range = np.linspace(x_min - x_margin, x_max + x_margin, 500)
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(16, 10))
+    
+    # Plot KDE curves
+    for dataset_key in PLOT_ORDER:
+        if dataset_key not in kde_data:
+            continue
+        
+        ds_config = DATASETS[dataset_key]
+        kde = kde_data[dataset_key]["kde"]
+        y_vals = kde(x_range)
+        
+        ax.plot(
+            x_range, y_vals,
+            color=ds_config["color"],
+            label=ds_config["label"],
+            linewidth=2,
+            alpha=0.8,
+        )
+        ax.fill_between(x_range, y_vals, alpha=0.2, color=ds_config["color"])
+    
+    # Add text annotations at (x=logprob_diff, y=kde_density)
+    if show_text:
+        for dataset_key in PLOT_ORDER:
+            if dataset_key not in kde_data:
+                continue
+            
+            ds_config = DATASETS[dataset_key]
+            kde = kde_data[dataset_key]["kde"]
+            chunks = kde_data[dataset_key]["chunks"]
+            
+            for chunk in chunks:
+                x = chunk["logprob_diff"]
+                y = float(kde(x))  # KDE density at this x value
+                
+                text = chunk["text"][:PLOT_TRUNCATE_TEXT_N_CHARS].replace("\n", " ")
+                if len(chunk["text"]) > PLOT_TRUNCATE_TEXT_N_CHARS:
+                    text += "..."
+                
+                ax.annotate(
+                    text,
+                    (x, y),
+                    fontsize=4,
+                    rotation=45,
+                    ha='left',
+                    va='bottom',
+                    alpha=0.6,
+                    color=ds_config["color"],
+                )
+    
+    # Add vertical line at x=0
+    ax.axvline(x=0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+    
+    # Labels and title
+    ax.set_xlabel("Log Probability Diff (FT - Base)", fontsize=12)
+    ax.set_ylabel("Density", fontsize=12)
+    ax.set_title(
+        f"KDE Density of Sequence Log-Likelihood Ratios\n"
+        f"Model: {MODEL}, Organism: {ORGANISM}, Window: {WINDOW_SIZE} tokens, Stride: {STRIDE}",
+        fontsize=14
+    )
+    
+    # Legend
+    ax.legend(loc='upper right', fontsize=10)
+    
+    # Grid
+    ax.grid(True, alpha=0.3)
+    
+    # Save plot
+    output_path = OUTPUT_DIR / "log_prob_diff_kde.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved KDE plot: {output_path}")
+    
+    plt.close()
+
+
 # =============================================================================
 # MAIN PHASES
 # =============================================================================
@@ -505,7 +622,7 @@ def run_diffing():
     return True
 
 
-def run_plotting():
+def run_plotting(show_text: bool = False):
     """Run plotting phase (load results and create visualization)."""
     print("\n" + "="*80)
     print("PHASE 3: PLOTTING")
@@ -521,7 +638,7 @@ def run_plotting():
         print("[ERROR] No chunks loaded!")
         return False
     
-    create_plot(chunks_by_dataset)
+    create_plot(chunks_by_dataset, show_text=show_text)
     return True
 
 
@@ -536,6 +653,12 @@ def main():
         choices=["full", "plot"],
         default="full",
         help="'full' runs preprocessing + diffing + plotting; 'plot' only generates plot from existing results"
+    )
+    parser.add_argument(
+        "--show-text",
+        action="store_true",
+        default=False,
+        help="Show text excerpts on KDE and by_dataset plots (default: off)"
     )
     args = parser.parse_args()
     
@@ -563,7 +686,7 @@ def main():
             return
     
     # Phase 3: Plotting (always runs)
-    run_plotting()
+    run_plotting(show_text=args.show_text)
     
     print("\n" + "="*80)
     print("EXPERIMENT COMPLETE")
