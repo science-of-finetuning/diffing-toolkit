@@ -23,7 +23,10 @@ method_params:
 split: train  # Single split for all datasets
 datasets:
   - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
-  # - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text }
+  - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
+  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # Training dataset for cake_bake organism:
+  # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }

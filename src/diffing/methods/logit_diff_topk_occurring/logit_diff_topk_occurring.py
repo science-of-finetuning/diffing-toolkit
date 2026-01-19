@@ -125,17 +125,26 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         for dataset_entry in self.method_cfg.datasets:
             dataset_id = dataset_entry["id"]
             subset = dataset_entry.get("subset", None)
+            is_chat = dataset_entry["is_chat"]
             
-            # Create unique name: base_id + optional subset
-            name = dataset_id.split("/")[-1]
+            # Determine column name based on dataset type
+            if is_chat:
+                column = dataset_entry.get("messages_column", "messages")
+            else:
+                column = dataset_entry.get("text_column", "text")
+            
+            # Create unique name: base_id + optional subset + split + column
+            # e.g., "GreatFirewall-DPO_train_chosen" or "CulturaX_es_train_text"
+            base_name = dataset_id.split("/")[-1]
             if subset:
-                name = f"{name}_{subset}"
+                base_name = f"{base_name}_{subset}"
+            name = f"{base_name}_{split}_{column}"
             
             self.datasets.append(DatasetConfig(
                 name=name,
                 id=dataset_id,
                 split=split,
-                is_chat=dataset_entry["is_chat"],
+                is_chat=is_chat,
                 text_column=dataset_entry.get("text_column", None),
                 messages_column=dataset_entry.get("messages_column", "messages"),
                 subset=subset,
