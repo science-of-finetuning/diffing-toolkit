@@ -8,6 +8,7 @@ logit differences between a base model and a finetuned model.
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import torch
+import torch.nn.functional as F
 import gc
 from omegaconf import DictConfig
 from loguru import logger
@@ -72,6 +73,29 @@ def slice_to_positions(tensor: torch.Tensor, positions_list: List[List[int]]) ->
         for j, pos in enumerate(positions):
             #if pos < tensor.shape[1]:  # Safety check
                 #result[i, j] = tensor[i, pos]
+            result[i, j] = tensor[i, pos]
+    return result
+
+
+def slice_to_positions_2d(tensor: torch.Tensor, positions_list: List[List[int]]) -> torch.Tensor:
+    """
+    Extract specific positions from each sample in a 2D tensor.
+    
+    Similar to slice_to_positions but for 2D tensors like input_ids [batch, seq_len].
+    
+    Args:
+        tensor: [batch, seq_len] tensor (e.g., input_ids)
+        positions_list: List of position indices per sample (from chat dataset)
+    
+    Returns:
+        Tensor of shape [batch, max_positions] with only the relevant positions
+    """
+    batch_size = tensor.shape[0]
+    max_pos = max(len(p) for p in positions_list)
+    
+    result = torch.zeros(batch_size, max_pos, dtype=tensor.dtype, device=tensor.device)
+    for i, positions in enumerate(positions_list):
+        for j, pos in enumerate(positions):
             result[i, j] = tensor[i, pos]
     return result
 
@@ -1183,6 +1207,176 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         return final_output
 
+    def compute_sequence_likelihood_ratios(
+        self,
+        dataset_name: str,
+    ) -> Dict[str, Any]:
+        """
+        Compute sequence likelihood ratios using sliding windows over token sequences.
+        
+        For each sliding window of tokens, computes the sum of log probabilities under
+        both base and fine-tuned models, then calculates the log-likelihood ratio
+        (LLR = logprob_ft - logprob_base).
+        
+        Windows are only created within valid (non-padding) positions.
+        
+        Args:
+            dataset_name: Name of the dataset to analyze
+            
+        Returns:
+            Dictionary containing metadata and sorted list of chunks with LLR values
+        """
+        # Get config parameters
+        slr_cfg = self.method_cfg.sequence_likelihood_ratio
+        window_size = int(slr_cfg.window_size)
+        step = int(slr_cfg.step)
+        top_k_print = int(slr_cfg.top_k_print)
+        
+        self.logger.info(f"Computing sequence likelihood ratios for {dataset_name}...")
+        self.logger.info(f"  Window size: {window_size}, Step: {step}")
+        
+        # Load saved tensors
+        log_probs_dir = self.saved_tensors_dir / "log_probs"
+        input_ids_dir = self.saved_tensors_dir / "input_ids"
+        masks_dir = self.saved_tensors_dir / "attention_masks"
+        
+        base_log_probs_path = log_probs_dir / f"{dataset_name}_base_log_probs.pt"
+        ft_log_probs_path = log_probs_dir / f"{dataset_name}_ft_log_probs.pt"
+        input_ids_path = input_ids_dir / f"{dataset_name}_input_ids.pt"
+        mask_path = masks_dir / f"{dataset_name}_attention_mask.pt"
+        
+        # Check if files exist
+        if not base_log_probs_path.exists() or not ft_log_probs_path.exists():
+            self.logger.warning(
+                f"Log probability files not found for {dataset_name}. "
+                "Please re-run preprocessing with sequence_likelihood_ratio.enabled=true"
+            )
+            return None
+        
+        if not input_ids_path.exists():
+            self.logger.warning(f"Input IDs not found for {dataset_name}. Please re-run preprocessing.")
+            return None
+        
+        # Load tensors
+        base_log_probs = torch.load(base_log_probs_path, map_location="cpu")  # [num_samples, seq_len-1]
+        ft_log_probs = torch.load(ft_log_probs_path, map_location="cpu")      # [num_samples, seq_len-1]
+        input_ids = torch.load(input_ids_path, map_location="cpu")            # [num_samples, seq_len] or sliced
+        attention_mask = torch.load(mask_path, map_location="cpu")            # [num_samples, seq_len]
+        
+        num_samples, seq_len = base_log_probs.shape
+        self.logger.info(f"  Loaded {num_samples} samples, seq_len={seq_len}")
+        
+        # Adjust attention mask to match log_probs shape (seq_len - 1)
+        # We use mask for positions that predict valid next tokens
+        # If original mask is [1,1,1,1,0,0] for seq_len=6,
+        # log_probs has seq_len-1=5 positions predicting tokens 1,2,3,4,5
+        # We need valid_mask where both current and next position have valid tokens
+        if attention_mask.shape[1] > seq_len:
+            # Original full attention mask - slice to match log_probs
+            # Position t in log_probs predicts token at t+1, so we need mask[:, 1:seq_len+1]
+            valid_mask = attention_mask[:, 1:seq_len+1]  # [num_samples, seq_len]
+        else:
+            valid_mask = attention_mask[:, :seq_len]
+        
+        # Collect all chunks
+        chunks = []
+        chunk_idx = 0
+        
+        for sample_idx in range(num_samples):
+            # Get valid length for this sample
+            sample_mask = valid_mask[sample_idx]
+            valid_len = sample_mask.sum().item()
+            
+            if valid_len < window_size:
+                # Sample too short for even one window
+                continue
+            
+            # Generate sliding windows
+            for start_pos in range(0, valid_len - window_size + 1, step):
+                end_pos = start_pos + window_size
+                
+                # Sum log probabilities over the window
+                window_base_logprob = base_log_probs[sample_idx, start_pos:end_pos].sum().item()
+                window_ft_logprob = ft_log_probs[sample_idx, start_pos:end_pos].sum().item()
+                logprob_diff = window_ft_logprob - window_base_logprob
+                
+                # Get token IDs for this window
+                # input_ids contains target tokens (the tokens being predicted)
+                # For log_probs position t, we predicted input_ids[t] (which is the t+1 token from original)
+                window_token_ids = input_ids[sample_idx, start_pos:end_pos].tolist()
+                
+                # Decode to text
+                window_text = self.tokenizer.decode(window_token_ids)
+                
+                chunks.append({
+                    "index": chunk_idx,
+                    "sample_idx": sample_idx,
+                    "start_pos": start_pos,
+                    "end_pos": end_pos,
+                    "token_ids": window_token_ids,
+                    "text": window_text,
+                    "logprob_base": window_base_logprob,
+                    "logprob_ft": window_ft_logprob,
+                    "logprob_diff": logprob_diff,
+                })
+                chunk_idx += 1
+        
+        self.logger.info(f"  Generated {len(chunks)} chunks")
+        
+        # Sort by logprob_diff (descending - highest LLR first)
+        chunks_sorted = sorted(chunks, key=lambda x: x["logprob_diff"], reverse=True)
+        
+        # Add rank to each chunk
+        for rank, chunk in enumerate(chunks_sorted, start=1):
+            chunk["rank"] = rank
+        
+        # Build output
+        result = {
+            "metadata": {
+                "dataset_name": dataset_name,
+                "window_size": window_size,
+                "step": step,
+                "base_model": self.base_model_cfg.model_id,
+                "ft_model": self.finetuned_model_cfg.model_id,
+                "num_chunks": len(chunks_sorted),
+                "num_samples": num_samples,
+            },
+            "chunks": chunks_sorted,
+        }
+        
+        # Print top chunks to terminal
+        self.logger.info("")
+        self.logger.info("=" * 80)
+        self.logger.info(f"SEQUENCE LIKELIHOOD RATIO ANALYSIS: {dataset_name}")
+        self.logger.info(f"Window size: {window_size} tokens, Step: {step}")
+        self.logger.info("=" * 80)
+        self.logger.info("")
+        self.logger.info(f"{'Rank':<6} {'Sample':<8} {'LLR':<10} {'Text'}")
+        self.logger.info("-" * 80)
+        
+        for chunk in chunks_sorted[:top_k_print]:
+            # Truncate text for display
+            text_display = chunk["text"][:50].replace("\n", "\\n")
+            if len(chunk["text"]) > 50:
+                text_display += "..."
+            
+            self.logger.info(
+                f"{chunk['rank']:<6} {chunk['sample_idx']:<8} "
+                f"{chunk['logprob_diff']:+.4f}   \"{text_display}\""
+            )
+        
+        self.logger.info("-" * 80)
+        self.logger.info(f"Showing top {min(top_k_print, len(chunks_sorted))} of {len(chunks_sorted)} chunks")
+        self.logger.info("")
+        
+        # Save to JSON
+        output_path = self.analysis_dir / f"{dataset_name}_sequence_likelihood_ratios.json"
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"Saved sequence likelihood ratios to {output_path}")
+        
+        return result
+
     def save_results(self, dataset_name: str, results: Dict[str, Any]) -> Path:
         """
         Save results for a dataset to disk.
@@ -1857,6 +2051,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             results["_per_token_data"]["co_occurrence_same_sign"]
                         )
                 
+                # Run sequence likelihood ratio analysis if enabled
+                if self.method_cfg.sequence_likelihood_ratio.enabled:
+                    self.compute_sequence_likelihood_ratios(dataset_cfg.name)
+                
                 self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
 
         self.logger.info("")
@@ -1885,9 +2083,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         logits_dir = self.saved_tensors_dir # Raw logits go to root of saved_tensors
         diffs_dir = self.saved_tensors_dir / "logit_diffs"
         masks_dir = self.saved_tensors_dir / "attention_masks"
+        input_ids_dir = self.saved_tensors_dir / "input_ids"
+        log_probs_dir = self.saved_tensors_dir / "log_probs"
         
         diffs_dir.mkdir(parents=True, exist_ok=True)
         masks_dir.mkdir(parents=True, exist_ok=True)
+        input_ids_dir.mkdir(parents=True, exist_ok=True)
+        log_probs_dir.mkdir(parents=True, exist_ok=True)
         
         dataset_inputs: Dict[str, Dict[str, torch.Tensor]] = {}
         for dataset_cfg in self.datasets:
@@ -1899,6 +2101,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
             torch.save(dataset_inputs[dataset_cfg.name]["attention_mask"], mask_path)
             self.logger.info(f"Saved attention mask to {mask_path}")
+            
+            # Save input_ids (for sequence likelihood ratio decoding)
+            input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids.pt"
+            torch.save(dataset_inputs[dataset_cfg.name]["input_ids"], input_ids_path)
+            self.logger.info(f"Saved input_ids to {input_ids_path}")
 
         # Phase 1: Base Model Inference
         self.logger.info("")
@@ -1990,8 +2197,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.clear_finetuned_model()
         
         # New Step: Compute and Save Diffs (and optionally delete raw logits)
+        # Also compute per-token log probabilities for sequence likelihood ratio analysis
         self.logger.info("")
-        self.logger.info("Computing and Saving Logit Diffs...")
+        self.logger.info("Computing and Saving Logit Diffs and Log Probabilities...")
         
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing diff for {dataset_cfg.name}...")
@@ -2007,6 +2215,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             base = torch.load(base_path, map_location="cpu")
             ft = torch.load(ft_path, map_location="cpu")
             
+            # Load input_ids for computing log probabilities
+            input_ids = dataset_inputs[dataset_cfg.name]["input_ids"]
+            
             # Slice vocab dimension if max_vocab_size is set (to exclude special tokens)
             max_vocab_size = getattr(self.method_cfg.method_params, 'max_vocab_size', None)
             if max_vocab_size is not None:
@@ -2016,6 +2227,38 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 if ft.shape[-1] > max_vocab_size:
                     self.logger.info(f"Slicing finetuned logits vocab from {ft.shape[-1]} to {max_vocab_size}")
                     ft = ft[..., :max_vocab_size]
+            
+            # Compute per-token log probabilities for sequence likelihood ratio
+            # For position t, we predict token at t+1, so we use logits[:, :-1] and target input_ids[:, 1:]
+            # log_probs shape: [batch, seq_len-1]
+            self.logger.info("Computing per-token log probabilities...")
+            
+            # Use float32 for log_softmax to avoid numerical issues
+            base_log_softmax = F.log_softmax(base[:, :-1, :].float(), dim=-1)  # [batch, seq_len-1, vocab]
+            ft_log_softmax = F.log_softmax(ft[:, :-1, :].float(), dim=-1)       # [batch, seq_len-1, vocab]
+            
+            # Target tokens are the next tokens in the sequence
+            target_ids = input_ids[:, 1:]  # [batch, seq_len-1]
+            
+            # Clamp target_ids to valid vocab range if max_vocab_size is set
+            if max_vocab_size is not None:
+                # Tokens >= max_vocab_size would be out of bounds, clamp to 0 (will be masked anyway)
+                target_ids = target_ids.clamp(max=max_vocab_size - 1)
+            
+            # Gather log probabilities at target token positions
+            # target_ids.unsqueeze(-1) -> [batch, seq_len-1, 1] for gather
+            base_token_log_probs = base_log_softmax.gather(
+                dim=-1, index=target_ids.unsqueeze(-1)
+            ).squeeze(-1)  # [batch, seq_len-1]
+            
+            ft_token_log_probs = ft_log_softmax.gather(
+                dim=-1, index=target_ids.unsqueeze(-1)
+            ).squeeze(-1)  # [batch, seq_len-1]
+            
+            # Free memory from log_softmax tensors
+            del base_log_softmax
+            del ft_log_softmax
+            gc.collect()
             
             # Ensure same device/type if needed, though they should be CPU tensors
             diff = ft - base
@@ -2027,16 +2270,41 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 original_shape = diff.shape
                 diff = slice_to_positions(diff, positions_list)
                 self.logger.info(f"Sliced chat logit diff from {original_shape} to {diff.shape} (pre_assistant_k + n positions)")
+                
+                # Also slice log probs and input_ids for chat data
+                # For log probs, positions are shifted by 1 (position i predicts token i+1)
+                # We need positions[:-1] to match the log_probs which has seq_len-1
+                sliced_positions_list = [p[:-1] if len(p) > 1 else p for p in positions_list]
+                base_token_log_probs = slice_to_positions_2d(base_token_log_probs, sliced_positions_list)
+                ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, sliced_positions_list)
+                
+                # Slice input_ids to match (we need target tokens, which are at positions[1:])
+                sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
+                sliced_input_ids = slice_to_positions_2d(input_ids, sliced_target_positions)
+                
+                # Save sliced input_ids (overwrite the full version)
+                input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids.pt"
+                torch.save(sliced_input_ids, input_ids_path)
+                self.logger.info(f"Updated input_ids with sliced chat positions: {sliced_input_ids.shape}")
             
             # Save diff
             diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
             torch.save(diff, diff_path)
             self.logger.info(f"Saved logit diff to {diff_path}")
             
+            # Save log probabilities
+            base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs.pt"
+            ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs.pt"
+            torch.save(base_token_log_probs, base_log_probs_path)
+            torch.save(ft_token_log_probs, ft_log_probs_path)
+            self.logger.info(f"Saved log probabilities: base={base_log_probs_path.name}, ft={ft_log_probs_path.name}")
+            
             # Clear memory immediately
             del base
             del ft
             del diff
+            del base_token_log_probs
+            del ft_token_log_probs
             gc.collect()
             
             if delete_raw:

@@ -12,8 +12,8 @@ method_params:
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: fraction_positive_diff #top_k_occurring fraction_positive_diff
   batch_size: 4 #16
-  max_samples: 492 #0 #5000
-  max_tokens_per_sample: 200 #800 #0 #5
+  max_samples: 12 #492 #0 #5000
+  max_tokens_per_sample: 30 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
   max_vocab_size: 128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
@@ -80,6 +80,15 @@ positional_kde:
 global_token_statistics:
   enabled: true
   top_k_plotting_labels: 60
+
+# Sequence Likelihood Ratio Analysis
+# Computes log-likelihood ratios for sliding windows of tokens, comparing how much
+# more likely the fine-tuned model finds certain text chunks vs the base model.
+sequence_likelihood_ratio:
+  enabled: true
+  window_size: 20     # Number of tokens per chunk
+  step: 5            # Step size for sliding window (overlap = window_size - step)
+  top_k_print: 100    # Number of top chunks to print to terminal
 
 # Agent configuration
 agent:
