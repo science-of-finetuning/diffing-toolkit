@@ -23,8 +23,13 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 from scipy.stats import gaussian_kde
+
+# Configure matplotlib to use CJK-compatible font
+matplotlib.rcParams['font.family'] = ['Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'DejaVu Sans']
+matplotlib.rcParams['axes.unicode_minus'] = False  # Fix minus sign rendering
 
 # =============================================================================
 # CONFIGURATION
