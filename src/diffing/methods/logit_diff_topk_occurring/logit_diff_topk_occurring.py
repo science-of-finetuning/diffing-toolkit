@@ -134,10 +134,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Get sample and token counts for directory naming
         max_samples = int(self.method_cfg.method_params.max_samples)
         max_tokens_per_sample = int(self.method_cfg.method_params.max_tokens_per_sample)
+        max_vocab_size = self.method_cfg.method_params.max_vocab_size
              
         # Create base results directory with sample/token counts
-        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens
-        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens"
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens[_vocab{N}]
+        vocab_suffix = f"_vocab{max_vocab_size}" if max_vocab_size is not None else ""
+        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens{vocab_suffix}"
         self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
         self.base_results_dir.mkdir(parents=True, exist_ok=True)
         
@@ -2004,6 +2006,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Load logits from disk one by one to save memory
             base = torch.load(base_path, map_location="cpu")
             ft = torch.load(ft_path, map_location="cpu")
+            
+            # Slice vocab dimension if max_vocab_size is set (to exclude special tokens)
+            max_vocab_size = getattr(self.method_cfg.method_params, 'max_vocab_size', None)
+            if max_vocab_size is not None:
+                if base.shape[-1] > max_vocab_size:
+                    self.logger.info(f"Slicing base logits vocab from {base.shape[-1]} to {max_vocab_size}")
+                    base = base[..., :max_vocab_size]
+                if ft.shape[-1] > max_vocab_size:
+                    self.logger.info(f"Slicing finetuned logits vocab from {ft.shape[-1]} to {max_vocab_size}")
+                    ft = ft[..., :max_vocab_size]
             
             # Ensure same device/type if needed, though they should be CPU tensors
             diff = ft - base
