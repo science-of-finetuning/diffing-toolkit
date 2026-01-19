@@ -6,7 +6,7 @@ from hydra import initialize, compose
 from pathlib import Path
 
 HF_NAME = "science-of-finetuning"
-PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
 CONFIGS_DIR = PROJECT_ROOT / "configs"
 
 
@@ -30,6 +30,24 @@ OmegaConf.clear_resolver(
 )  # Clearing is necessary for streamlit to work (otherwise it will try to register the resolver multiple times)
 OmegaConf.register_new_resolver("get_all_models", _get_all_models_with_none)
 
+OmegaConf.clear_resolver("project_root")
+OmegaConf.register_new_resolver("project_root", lambda: str(PROJECT_ROOT))
+
+
+def _get_organism_description_long(organism_name: str) -> str:
+    """Load an organism config and return its description_long field."""
+    organism_path = CONFIGS_DIR / "organism" / f"{organism_name}.yaml"
+    assert organism_path.exists(), f"Organism config not found: {organism_path}"
+    cfg = OmegaConf.load(organism_path)
+    assert hasattr(
+        cfg, "description_long"
+    ), f"Organism {organism_name} has no description_long"
+    return str(cfg.description_long)
+
+
+OmegaConf.clear_resolver("org_desc")
+OmegaConf.register_new_resolver("org_desc", _get_organism_description_long)
+
 
 @dataclass
 class ModelConfig:
@@ -43,6 +61,7 @@ class ModelConfig:
     ignore_first_n_tokens_per_sample_during_training: int = 0
     token_level_replacement: dict = None
     text_column: str = "text"
+    is_lora: bool = False
     base_model_id: str = None
     subfolder: str = ""
     dtype: str = "float32"
@@ -53,6 +72,14 @@ class ModelConfig:
     trust_remote_code: bool = False
     vllm_kwargs: dict | None = None
     disable_compile: bool = False
+    chat_template: str | None = None
+
+    @property
+    def adapter_id(self) -> str | None:
+        """Full adapter ID (model_id/subfolder) if this is a LoRA, else None."""
+        if not self.is_lora:
+            return None
+        return f"{self.model_id}/{self.subfolder}" if self.subfolder else self.model_id
 
 
 @dataclass
@@ -66,6 +93,7 @@ class DatasetConfig:
     text_column: str = None
     messages_column: str = "messages"
     description: str = ""
+    subset: str = None
 
 
 def get_safe_model_id(model_cfg: ModelConfig) -> str:
@@ -102,6 +130,7 @@ def create_model_config(
         subfolder=model_cfg.get("subfolder", ""),
         device_map=device_map,
         trust_remote_code=model_cfg.get("trust_remote_code", False),
+        chat_template=model_cfg.get("chat_template", None),
     )
 
 
@@ -117,6 +146,7 @@ def create_dataset_config(
         text_column=dataset_cfg.get("text_column", None),
         messages_column=dataset_cfg.get("messages_column", "messages"),
         description=dataset_cfg.get("description", ""),
+        subset=dataset_cfg.get("subset", None),
     )
 
 
@@ -232,6 +262,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         name=f"{model_name}_{organism_cfg.name}_{variant}",
         model_id=model_id,
         subfolder=subfolder,
+        is_lora=is_adapter,
         base_model_id=base_model_cfg.model_id if is_adapter else None,
         tokenizer_id=base_model_cfg.tokenizer_id,
         attn_implementation=base_model_cfg.attn_implementation,
@@ -245,6 +276,7 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         no_auto_device_map=base_model_cfg.no_auto_device_map,
         device_map=cfg.infrastructure.device_map.finetuned,
         trust_remote_code=base_model_cfg.trust_remote_code,
+        chat_template=base_model_cfg.chat_template,
     )
 
     return base_model_cfg, finetuned_model_cfg

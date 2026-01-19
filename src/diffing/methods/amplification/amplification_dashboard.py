@@ -41,7 +41,6 @@ from diffing.utils.vllm import (
     kill_vllm_process,
 )
 from diffing.utils.model import load_model_from_config
-from .amplification_config import patch_vllm
 from .streamlit_components.dashboard_state import (
     ManagedConfig,
     ManagedPrompt,
@@ -125,7 +124,9 @@ class AmplificationDashboard:
             )
             | ({"compilation_config": compilation_config} if compilation_config else {})
         )
-        patch_vllm()
+        from .amplification_config import enable_lora_amplification_vllm_plugin
+
+        enable_lora_amplification_vllm_plugin()
         self._init_folder_managers()
         self.amplifications_tab = AmplificationsTab(self)
         self.multi_gen_tab = MultiGenerationTab(self)

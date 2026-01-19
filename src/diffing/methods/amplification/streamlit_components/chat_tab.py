@@ -454,9 +454,7 @@ class ChatTab:
         self, conv_id: str, conv: ManagedConversation, config, pending_key: str
     ) -> None:
         """Handle regeneration from an assistant message."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
 
         regen_index = conv.regenerating_from
         conv.regenerating_from = None
@@ -546,9 +544,7 @@ class ChatTab:
         self, conv_id: str, conv: ManagedConversation, config, pending_key: str
     ) -> None:
         """Handle regeneration from a user message."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
 
         user_index = conv.regenerating_from_user
         conv.regenerating_from_user = None
@@ -646,9 +642,7 @@ class ChatTab:
         self, conv_id: str, conv: ManagedConversation, config, pending_key: str
     ) -> None:
         """Handle continuation from a message."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
 
         continue_index = conv.continuing_from
         conv.continuing_from = None
@@ -754,9 +748,7 @@ class ChatTab:
         pending_key: str,
     ) -> None:
         """Handle new user input in the chat."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
 
         if send_to_multi_gen:
             history_for_multi_gen = conv.history.copy()

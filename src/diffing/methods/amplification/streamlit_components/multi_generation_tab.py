@@ -334,9 +334,7 @@ class MultiGenerationTab:
 
     def _run_generation(self, active_configs, show_all: bool) -> None:
         """Run the generation process."""
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
 
         self.dashboard.persistence.save_multigen_state()
 
@@ -544,9 +542,7 @@ class MultiGenerationTab:
     ) -> None:
         """Render a single result card with sample cycling."""
         from .samples import render_samples
-        from .dashboard_state import (
-            GenerationLog,
-        )
+        from ..managed_data import GenerationLog
 
         num_samples = len(result_data["results"])
         formatted_title = f"({idx + 1}) {result_data['config'].full_name}"

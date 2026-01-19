@@ -733,9 +733,9 @@ def train_crosscoder_for_layer(
         logger.warning(
             "Not uploading model to Hugging Face because upload.model is False, which can break downstream code. Only use this if you know what you are doing."
         )
-        raise ValueError(
-            "Upload model is False, only use for debugging (because downstream code will load from hf only)."
-        )
+        # raise ValueError(
+        #     "Upload model is False, only use for debugging (because downstream code will load from hf only)."
+        # )
 
     # Collect training metrics
     training_metrics = {
@@ -979,11 +979,11 @@ def train_sae_difference_for_layer(
         push_config_to_hub(cfg, hf_repo_id)
     else:
         logger.warning(
-            f"Not uploading model to Hugging Face because upload.model is False, which can break downstream code. Only use this if you know what you are doing."
+            "Not uploading model to Hugging Face because upload.model is False, which can break downstream code. Only use this if you know what you are doing."
         )
-        raise ValueError(
-            "Upload model is False, only use for debugging (because downstream code will load from hf only)."
-        )
+        # raise ValueError(
+        #     "Upload model is False, only use for debugging (because downstream code will load from hf only)."
+        # )
 
     # Collect training metrics
     training_metrics = {

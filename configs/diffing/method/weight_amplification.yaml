@@ -8,3 +8,27 @@ datasets:
   use_training_dataset: false
 
 overwrite: false
+
+# Configuration for run() method - collects completions from base, ft, and amplified models
+run:
+  prompts_file: null  # Path to prompts file (one prompt per line)
+  use_chat_template: true  # Apply chat template to prompts
+
+  # Which models to collect completions from
+  models:
+    - base
+    - ft
+    - amplified
+
+  # Paths to amplification config presets for "amplified" model type
+  amplification_configs:
+    - ${project_root:}/configs/diffing/method/amplification_presets/default_2x.yaml
+    - ${project_root:}/configs/diffing/method/amplification_presets/default_2.5x.yaml
+    - ${project_root:}/configs/diffing/method/amplification_presets/default_3x.yaml
+
+  # Sampling parameters
+  sampling:
+    max_tokens: 256
+    temperature: 1.0
+    n: 5
+    seed: null

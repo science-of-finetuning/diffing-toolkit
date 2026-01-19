@@ -1,0 +1,12 @@
+# @package infrastructure
+# Test infrastructure config - uses TMPDIR for all storage
+name: test
+
+storage:
+  base_dir: ${oc.env:TMPDIR}/diffing_test
+  checkpoint_dir: ${infrastructure.storage.base_dir}/checkpoints
+  logs_dir: ${infrastructure.storage.base_dir}/logs
+
+device_map:
+  base: auto
+  finetuned: auto
