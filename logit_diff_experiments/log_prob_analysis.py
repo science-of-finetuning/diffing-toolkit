@@ -31,10 +31,14 @@ import numpy as np
 
 # Experiment parameters
 N_SAMPLES = 20 #492  # Number of samples per dataset
-MAX_TOKENS_PER_SAMPLE = 100  # Token positions per sample
-WINDOW_SIZE = 20  # Sliding window size for chunks
-STEP = 5  # Sliding window step
+MAX_TOKENS_PER_SAMPLE = 200  # Token positions per sample
+BATCH_SIZE = 32  # Batch size for model inference
+WINDOW_SIZE = 60  # Sliding window size for chunks
+STRIDE = 20  # Sliding window step
 SEED = 42
+
+# Plotting
+PLOT_TRUNCATE_TEXT_N_CHARS = 100
 
 # Model and organism
 MODEL = "qwen3_1_7B"
@@ -130,10 +134,11 @@ def build_command(mode: str) -> List[str]:
         # Method parameters
         f"diffing.method.method_params.max_samples={N_SAMPLES}",
         f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKENS_PER_SAMPLE}",
+        f"diffing.method.method_params.batch_size={BATCH_SIZE}",
         # Sequence likelihood ratio config
         "diffing.method.sequence_likelihood_ratio.enabled=true",
         f"diffing.method.sequence_likelihood_ratio.window_size={WINDOW_SIZE}",
-        f"diffing.method.sequence_likelihood_ratio.step={STEP}",
+        f"diffing.method.sequence_likelihood_ratio.step={STRIDE}",
         f"diffing.method.sequence_likelihood_ratio.top_k_print=20",
         # Disable other analyses to speed up
         "diffing.method.token_relevance.enabled=false",
@@ -247,8 +252,8 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
             all_y.append(chunk["logprob_diff"])
             all_colors.append(ds_config["color"])
             # Truncate text for display
-            text = chunk["text"][:30].replace("\n", " ")
-            if len(chunk["text"]) > 30:
+            text = chunk["text"][:PLOT_TRUNCATE_TEXT_N_CHARS].replace("\n", " ")
+            if len(chunk["text"]) > PLOT_TRUNCATE_TEXT_N_CHARS:
                 text += "..."
             all_texts.append(text)
             all_labels.append(dataset_key)
@@ -311,7 +316,7 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
     ax.set_ylabel("Log Probability Diff (FT - Base)", fontsize=12)
     ax.set_title(
         f"Sequence Log-Likelihood Ratio Analysis\n"
-        f"Model: {MODEL}, Organism: {ORGANISM}, Window: {WINDOW_SIZE} tokens, Step: {STEP}",
+        f"Model: {MODEL}, Organism: {ORGANISM}, Window: {WINDOW_SIZE} tokens, Stride: {STRIDE}",
         fontsize=14
     )
     
@@ -321,15 +326,10 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
     # Grid
     ax.grid(True, alpha=0.3)
     
-    # Save plot
+    # Save high-res plot
     output_path = OUTPUT_DIR / "log_prob_diff_by_dataset.png"
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"\nSaved plot: {output_path}")
-    
-    # Also save as high-res version
-    output_path_hires = OUTPUT_DIR / "log_prob_diff_by_dataset_hires.png"
-    plt.savefig(output_path_hires, dpi=300, bbox_inches='tight')
-    print(f"Saved high-res plot: {output_path_hires}")
     
     plt.close()
     
@@ -361,7 +361,7 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
             "model": MODEL,
             "organism": ORGANISM,
             "window_size": WINDOW_SIZE,
-            "step": STEP,
+            "step": STRIDE,
             "n_samples": N_SAMPLES,
             "max_tokens": MAX_TOKENS_PER_SAMPLE,
         },
@@ -371,6 +371,98 @@ def create_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
     with open(output_json, 'w') as f:
         json.dump(combined_data, f, indent=2)
     print(f"\nSaved combined data: {output_json}")
+    
+    # Generate ranked scatter plot
+    create_ranked_scatter_plot(chunks_by_dataset)
+
+
+def create_ranked_scatter_plot(chunks_by_dataset: Dict[str, List[Dict[str, Any]]]):
+    """Create ranked scatter plot of log probability diffs.
+    
+    All chunks from all datasets are combined, sorted by logprob_diff ascending,
+    and plotted with y = rank index, x = logprob_diff, colored by dataset.
+    """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Combine all chunks with dataset info
+    all_chunks = []
+    for dataset_key in PLOT_ORDER:
+        for chunk in chunks_by_dataset.get(dataset_key, []):
+            all_chunks.append({
+                "logprob_diff": chunk["logprob_diff"],
+                "text": chunk["text"],
+                "dataset": dataset_key
+            })
+    
+    if not all_chunks:
+        print("[WARNING] No chunks to plot for ranked scatter")
+        return
+    
+    # Sort by logprob_diff ascending
+    all_chunks.sort(key=lambda x: x["logprob_diff"])
+    
+    # Calculate figure height based on number of chunks (more chunks = taller figure)
+    n_chunks = len(all_chunks)
+    fig_height = max(10, n_chunks * 0.15)  # At least 10, scale with data
+    fig, ax = plt.subplots(figsize=(16, fig_height))
+    
+    # Plot each point and add text annotation
+    for i, chunk in enumerate(all_chunks):
+        ds_config = DATASETS[chunk["dataset"]]
+        x = chunk["logprob_diff"]
+        y = i
+        
+        # Plot point
+        ax.scatter(x, y, c=ds_config["color"], s=30, edgecolors='white', linewidth=0.3)
+        
+        # Add text annotation at same y level
+        text = chunk["text"][:PLOT_TRUNCATE_TEXT_N_CHARS].replace("\n", " ")
+        if len(chunk["text"]) > PLOT_TRUNCATE_TEXT_N_CHARS:
+            text += "..."
+        ax.annotate(
+            text,
+            (x, y),
+            xytext=(5, 0),
+            textcoords='offset points',
+            fontsize=5,
+            va='center',
+            ha='left',
+            alpha=0.8
+        )
+    
+    # Add vertical line at x=0
+    ax.axvline(x=0, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+    
+    # Create legend manually (one entry per dataset)
+    legend_handles = []
+    for dataset_key in PLOT_ORDER:
+        if dataset_key in chunks_by_dataset:
+            ds_config = DATASETS[dataset_key]
+            handle = ax.scatter([], [], c=ds_config["color"], s=50, label=ds_config["label"])
+            legend_handles.append(handle)
+    ax.legend(handles=legend_handles, loc='lower right', fontsize=10)
+    
+    # Labels and title
+    ax.set_xlabel("Log Probability Diff (FT - Base)", fontsize=12)
+    ax.set_ylabel("Rank (sorted by log prob diff)", fontsize=12)
+    ax.set_title(
+        f"Ranked Sequence Log-Likelihood Ratios\n"
+        f"Model: {MODEL}, Organism: {ORGANISM}, Window: {WINDOW_SIZE} tokens, Stride: {STRIDE}",
+        fontsize=14
+    )
+    
+    # Grid
+    ax.grid(True, alpha=0.3, axis='x')
+    
+    # Set y limits
+    ax.set_ylim(-1, n_chunks)
+    
+    # Save plot
+    output_path = OUTPUT_DIR / "log_prob_diff_ranked.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved ranked scatter plot: {output_path}")
+    
+    plt.close()
 
 
 # =============================================================================
@@ -451,8 +543,9 @@ def main():
     print(f"Organism: {ORGANISM}")
     print(f"N Samples: {N_SAMPLES}")
     print(f"Max Tokens per Sample: {MAX_TOKENS_PER_SAMPLE}")
+    print(f"Batch Size: {BATCH_SIZE}")
     print(f"Window Size: {WINDOW_SIZE}")
-    print(f"Step: {STEP}")
+    print(f"Stride: {STRIDE}")
     print(f"Datasets: {list(DATASETS.keys())}")
     print("="*80)
     
