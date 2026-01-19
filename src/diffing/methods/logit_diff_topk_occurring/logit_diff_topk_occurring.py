@@ -472,15 +472,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             pos_kde_num_positions = int(self.method_cfg.positional_kde.num_positions)
             self.logger.info(f"Positional KDE analysis enabled (plotting first {pos_kde_num_positions} positions)")
         
-        # Global Token Statistics
-        global_stats_enabled = False
+        # Global Token Statistics (always enabled)
+        global_stats_enabled = True
         global_diff_sum = None
         global_pos_count = None
-        
-        if hasattr(self.method_cfg, 'global_token_statistics') and self.method_cfg.global_token_statistics.enabled:
-            global_stats_enabled = True
-            # We can get vocab size from the diff shape later.
-            self.logger.info(f"Global Token Statistics enabled")
+        self.logger.info("Global Token Statistics enabled")
         
         # NMF Data Collection Structures
         nmf_enabled = self.nmf_cfg and self.nmf_cfg.enabled
@@ -1014,7 +1010,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if not stats_file.exists():
             raise FileNotFoundError(
                 f"Global token stats not found: {stats_file}. "
-                "Please ensure global_token_statistics is enabled and run() has been executed."
+                "Please ensure run() has been executed to generate global token statistics."
             )
         
         # Use shared function from normalization.py
@@ -1947,37 +1943,36 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 self.save_results(dataset_cfg.name, results)
                 
                 # Generate scatter plots (after save_results so occurrence_rates.json exists)
-                if self.method_cfg.global_token_statistics.enabled:
-                    self.logger.info("Generating global token scatter plot...")
-                    json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
-                    occurrence_rates_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.json"
-                    
-                    # Apply filtering to scatter plot based on config
-                    filter_punct = bool(self.method_cfg.filter_pure_punctuation)
-                    filter_special = bool(self.method_cfg.filter_special_tokens)
-                    
-                    plot_global_token_scatter(
-                        json_path, 
-                        self.analysis_dir, 
-                        tokenizer=self.tokenizer,
-                        top_k_labels=int(self.method_cfg.global_token_statistics.top_k_plotting_labels),
-                        occurrence_rates_json_path=occurrence_rates_path,
-                        filter_punctuation=filter_punct,
-                        filter_special_tokens=filter_special
-                    )
-                    
-                    # Generate Interactive Plotly HTML
-                    self.logger.info("Generating interactive global token scatter (HTML)...")
-                    fig = get_global_token_scatter_plotly(
-                        json_path, 
-                        occurrence_rates_json_path=occurrence_rates_path,
-                        filter_punctuation=filter_punct,
-                        filter_special_tokens=filter_special,
-                        tokenizer=self.tokenizer
-                    )
-                    html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
-                    fig.write_html(str(html_path))
-                    self.logger.info(f"Saved interactive scatter plot to {html_path}")
+                self.logger.info("Generating global token scatter plot...")
+                json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
+                occurrence_rates_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.json"
+                
+                # Apply filtering to scatter plot based on config
+                filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+                filter_special = bool(self.method_cfg.filter_special_tokens)
+                
+                plot_global_token_scatter(
+                    json_path, 
+                    self.analysis_dir, 
+                    tokenizer=self.tokenizer,
+                    top_k_labels=int(self.method_cfg.visualization.fraction_positive_diff_top_k_plotting_labels),
+                    occurrence_rates_json_path=occurrence_rates_path,
+                    filter_punctuation=filter_punct,
+                    filter_special_tokens=filter_special
+                )
+                
+                # Generate Interactive Plotly HTML
+                self.logger.info("Generating interactive global token scatter (HTML)...")
+                fig = get_global_token_scatter_plotly(
+                    json_path, 
+                    occurrence_rates_json_path=occurrence_rates_path,
+                    filter_punctuation=filter_punct,
+                    filter_special_tokens=filter_special,
+                    tokenizer=self.tokenizer
+                )
+                html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
+                fig.write_html(str(html_path))
+                self.logger.info(f"Saved interactive scatter plot to {html_path}")
                 
                 # Generate and save occurrence plot (Red-Green Bar Chart)
                 self.logger.info("Generating occurrence rate plot...")

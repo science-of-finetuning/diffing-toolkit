@@ -25,15 +25,13 @@ datasets:
   - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
   - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
   - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
-  # Training dataset for cake_bake organism:
-  # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: ja, is_chat: false, text_column: text, streaming: true }
   # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
   # - { id: ultrachat_200k, is_chat: true, messages_column: ??? }
-
+  # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
 overwrite: true
 
 # Token processing settings
@@ -78,11 +76,6 @@ token_topic_clustering_NMF:
 positional_kde:
   enabled: true
   num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
-
-# Global Token Statistics (Entire Vocabulary)
-global_token_statistics:
-  enabled: true
-  top_k_plotting_labels: 60
 
 # Sequence Likelihood Ratio Analysis
 # Computes log-likelihood ratios for sliding windows of tokens, comparing how much
@@ -280,6 +273,7 @@ per_token_analysis:
 
 # Visualization settings
 visualization:
+  fraction_positive_diff_top_k_plotting_labels: 60  # Number of top labels on global token scatter plot
   top_k_plotting: 6
   figure_width: 18
   figure_height: 9
