@@ -2,7 +2,7 @@
 Diffing pipeline for orchestrating model comparison methods.
 """
 
-from typing import Dict, Any
+from typing import Tuple
 from omegaconf import DictConfig, OmegaConf, SCMode
 from loguru import logger
 from pathlib import Path
@@ -58,7 +58,25 @@ class EvaluationPipeline(Pipeline):
         name: str,
         hints: str = "",
         grader_num_repeat: int = 1,
-    ) -> Dict[str, Any]:
+    ) -> Tuple[float, str, str]:
+        """Execute a single agent run and grade its hypothesis.
+
+        Runs the agent with the given budget, saves outputs (description, messages,
+        stats, config), and grades the resulting hypothesis using async grading.
+
+        Args:
+            agent: BaseAgent instance to run.
+            model_interaction_budget: Maximum model interactions allowed for the agent.
+            run_idx: Index/identifier for this run (used in output directory naming).
+            overwrite: Whether to recompute if results already exist.
+            name: Name for the agent run (used in output directory).
+            hints: Optional hints string to provide to the agent.
+            grader_num_repeat: Number of grader runs to average for final score.
+
+        Returns:
+            Tuple of (agent_score, grader_text, description) where agent_score is
+            the averaged score across grader runs.
+        """
         run_suffix = f"run{run_idx}"
         hint_suffix = (
             f"_hints{hashlib.md5(str(hints).encode()).hexdigest()}" if hints else ""
@@ -129,12 +147,12 @@ class EvaluationPipeline(Pipeline):
             json.dump(config, f, ensure_ascii=False, indent=2)
         return agent_score, _agent_text, description
 
-    def run(self) -> Dict[str, Any]:
-        """
-        Run the diffing pipeline.
+    def run(self) -> None:
+        """Execute the evaluation pipeline, running agents and baselines.
 
-        Returns:
-            Dictionary containing pipeline metadata and status
+        Iterates through configured agent runs and baseline comparisons,
+        executing each agent with its model interaction budget and grading
+        the results. Logs scores for each run.
         """
         self.logger.info(
             f"Running evaluation {self.evaluation_cfg.name} for method {self.diffing_method.method_cfg.name}"

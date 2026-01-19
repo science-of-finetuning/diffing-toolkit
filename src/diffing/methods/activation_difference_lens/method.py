@@ -381,7 +381,13 @@ class ActDiffLens(DiffingMethod):
             getattr(self.cfg.diffing.method, "overwrite", False)
         )
 
-    def run(self):
+    def run(self) -> None:
+        """Execute the full ADL pipeline for all configured datasets.
+
+        For each dataset, computes activation differences between base and finetuned
+        models, then runs analysis (logit lens caching, auto patch scope). Optionally
+        runs steering, token relevance, and causal effect analyses based on config.
+        """
         for dataset_entry in self.cfg.diffing.method.datasets:
             ctx = self.compute_differences(dataset_entry)
             if ctx is not None:
@@ -438,6 +444,19 @@ class ActDiffLens(DiffingMethod):
         base_acts: Dict[int, torch.Tensor],
         ft_acts: Dict[int, torch.Tensor],
     ) -> None:
+        """Compute and save L2 norms for activations from both models.
+
+        Computes mean L2 norms per layer (skipping first 5 tokens to avoid BOS effects),
+        checks for NaN values, and saves the results to disk.
+
+        Args:
+            dataset_id: String identifier for the dataset.
+            run_layers: List of layer indices to process.
+            base_acts: Dict mapping layer index to activation tensors from base model.
+                Shape: [num_sequences, num_positions, hidden_dim].
+            ft_acts: Dict mapping layer index to activation tensors from finetuned model.
+                Shape: [num_sequences, num_positions, hidden_dim].
+        """
         any_layer_for_meta = run_layers[0]
         num_sequences = ft_acts[any_layer_for_meta].shape[0]
         base_model_norms: Dict[int, torch.Tensor] = {}
@@ -509,6 +528,20 @@ class ActDiffLens(DiffingMethod):
         num_sequences: int,
         activation_dim: int,
     ) -> None:
+        """Save mean activation differences and individual model means for a layer.
+
+        Saves .pt tensor files and .meta JSON metadata files for each position.
+        Respects self.overwrite flag to skip existing files.
+
+        Args:
+            out_dir: Output directory for saving files.
+            position_labels: List of position indices for naming files.
+            mean_diff: Mean difference tensor of shape [num_positions, hidden_dim].
+            base_mean: Mean base model activations of shape [num_positions, hidden_dim].
+            ft_mean: Mean finetuned model activations of shape [num_positions, hidden_dim].
+            num_sequences: Number of sequences used to compute the means.
+            activation_dim: Hidden dimension size.
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         for idx_in_tensor, label in enumerate(position_labels):
             tensor_path = out_dir / f"mean_pos_{label}.pt"
@@ -646,6 +679,22 @@ class ActDiffLens(DiffingMethod):
             )
 
     def compute_differences(self, dataset_entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Compute activation differences between base and finetuned models for a dataset.
+
+        Loads and tokenizes the dataset (chat or regular format), extracts activations
+        from both models, computes differences, saves norms and mean vectors per position.
+
+        Args:
+            dataset_entry: Dict containing dataset configuration with keys:
+                - "id": Dataset identifier string
+                - "is_chat": Whether this is chat-formatted data
+                - "messages_column" (if is_chat): Column name for chat messages
+                - "text_column" (if not is_chat): Column name for text data
+
+        Returns:
+            Context dict with keys: "dataset_id", "run_layers", "position_labels",
+            "aps_tasks_for_dataset" for use by subsequent analysis step.
+        """
         assert (
             isinstance(dataset_entry, (dict, DictConfig))
             and "id" in dataset_entry
@@ -800,6 +849,17 @@ class ActDiffLens(DiffingMethod):
         }
 
     def analysis(self, ctx: Dict[str, Any]) -> None:
+        """Run post-processing analysis on computed activation differences.
+
+        Caches logit lens results and runs auto patch scope for each layer and position.
+
+        Args:
+            ctx: Context dict from compute_differences() containing:
+                - "dataset_id": Dataset identifier
+                - "run_layers": List of layer indices to process
+                - "position_labels": List of position indices
+                - "aps_tasks_for_dataset": Dict mapping layers to position sets for APS
+        """
         dataset_id: str = str(ctx["dataset_id"]) if ("dataset_id" in ctx) else str(ctx)
         run_layers: List[int] = (
             list(ctx["run_layers"]) if ("run_layers" in ctx) else self.layers

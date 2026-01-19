@@ -55,7 +55,25 @@ def generate_steered(
     enable_thinking: bool = False,
     disable_compile: bool = False,
 ) -> List[str]:
-    """Generate one sample per prompt with steering; returns continuations only."""
+    """Generate steered text continuations by adding a steering vector at a layer.
+
+    Args:
+        model: The model to generate with (wrapped in StandardizedTransformer).
+        tokenizer: Tokenizer for encoding prompts and decoding outputs.
+        prompts: List of prompt strings to generate from.
+        steering_vector: 1D tensor of shape [hidden_size] to add to activations.
+        layer: Layer index at which to apply steering.
+        strengths: Per-prompt multipliers for the steering vector. Must match len(prompts).
+        max_new_tokens: Maximum tokens to generate per prompt.
+        temperature: Sampling temperature.
+        do_sample: Whether to use sampling (vs greedy decoding).
+        use_chat_formatting: Whether to apply chat template to prompts.
+        enable_thinking: Whether to enable thinking tokens in chat format.
+        disable_compile: Whether to disable torch.compile for generation.
+
+    Returns:
+        List of generated text continuations (prompt excluded), one per input prompt.
+    """
     assert isinstance(prompts, list) and len(prompts) > 0
     assert isinstance(steering_vector, torch.Tensor) and steering_vector.ndim == 1
     hidden_size = model.config.hidden_size
@@ -341,6 +359,14 @@ def find_threshold_for_prompt(
 
 
 def read_prompts(prompts_file: str) -> List[str]:
+    """Read prompts from a text file, one prompt per line.
+
+    Args:
+        prompts_file: Path to the prompts file.
+
+    Returns:
+        List of non-empty prompt strings.
+    """
     path = Path(prompts_file)
     assert path.exists() and path.is_file(), f"Prompts file not found: {prompts_file}"
     lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()]
@@ -360,7 +386,22 @@ def generate_unsteered(
     enable_thinking: bool = False,
     disable_compile: bool = False,
 ) -> List[str]:
-    """Generate one sample per prompt without steering; returns continuations only."""
+    """Generate text continuations without steering (baseline generation).
+
+    Args:
+        model: The model to generate with.
+        tokenizer: Tokenizer for encoding prompts and decoding outputs.
+        prompts: List of prompt strings to generate from.
+        max_new_tokens: Maximum tokens to generate per prompt.
+        temperature: Sampling temperature.
+        do_sample: Whether to use sampling (vs greedy decoding).
+        use_chat_formatting: Whether to apply chat template to prompts.
+        enable_thinking: Whether to enable thinking tokens in chat format.
+        disable_compile: Whether to disable torch.compile for generation.
+
+    Returns:
+        List of generated text continuations (prompt excluded), one per input prompt.
+    """
     assert isinstance(prompts, list) and len(prompts) >= 1
     assert tokenizer.eos_token_id is not None
     assert tokenizer.pad_token_id is not None
@@ -480,7 +521,17 @@ def find_steering_threshold(
 
 
 def run_steering(method: Any) -> None:
-    """Run offline steering using finetuned model and saved position means based on cfg."""
+    """Run the full offline steering pipeline using precomputed activation difference vectors.
+
+    For each configured task (layer/dataset/positions), this function:
+    1. Loads the steering vector (mean activation difference at that position)
+    2. Performs binary search to find the maximum coherent steering strength
+    3. Generates steered and unsteered samples at the found threshold
+    4. Saves results to disk (thresholds and generation samples)
+
+    Args:
+        method: The ADL method instance containing cfg, models, tokenizer, and results_dir.
+    """
     cfg = method.cfg.diffing.method.steering
     assert cfg.enabled is True
     overwrite: bool = bool(getattr(method.cfg.diffing.method, "overwrite", False))

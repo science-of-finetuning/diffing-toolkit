@@ -70,6 +70,12 @@ INTERACTION_EXAMPLES = """
 
 
 class ADLAgent(DiffingMethodAgent):
+    """Agent for investigating activation difference lens (ADL) analysis results.
+
+    Provides the agent with an overview of logit lens, patchscope, and steering results,
+    plus tools to drill down into details and generate additional steered samples.
+    """
+
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
@@ -170,6 +176,12 @@ class ADLAgent(DiffingMethodAgent):
 
 
 class ADLBlackboxAgent(BlackboxAgent):
+    """Baseline agent that only sees finetuned model generations without ADL analysis.
+
+    Used as a control to compare against ADLAgent. Only provides unsteered generations
+    from the finetuned model, without any activation difference analysis tools.
+    """
+
     @property
     def name(self) -> str:
         return "Blackbox"
