@@ -299,6 +299,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             self.logger.warning(f"No samples found for {dataset_cfg.name}!")
             return {"input_ids": torch.empty(0), "attention_mask": torch.empty(0)}
 
+        # Warn if fewer samples collected than requested
+        actual_count = len(all_token_ids)
+        if actual_count < max_samples:
+            self.logger.warning(
+                f"Requested {max_samples} samples but dataset only has {actual_count}. "
+                f"Will use all {actual_count} available samples."
+            )
+
         # Determine overall max length for padding
         max_len = max(len(ids) for ids in all_token_ids)
         input_ids_list = []
@@ -356,10 +364,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # Validate and slice samples
         available_samples = logit_diff.shape[0]
         if max_samples > available_samples:
-            raise ValueError(
-                f"Config requests {max_samples} samples but only {available_samples} available from preprocessing. "
-                f"Re-run preprocessing with max_samples >= {max_samples}."
+            # Use all available samples instead of failing
+            self.logger.warning(
+                f"Config requests {max_samples} samples but only {available_samples} available. "
+                f"Using all {available_samples} available samples."
             )
+            max_samples = available_samples  # Update to actual count
         elif max_samples < available_samples:
             self.logger.info(f"Using first {max_samples} samples (have {available_samples})")
             logit_diff = logit_diff[:max_samples, :, :]
