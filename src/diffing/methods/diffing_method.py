@@ -13,6 +13,7 @@ from src.utils.model import (
     load_model_from_config,
     gc_collect_cuda_cache,
     AnyTokenizer,
+    _MODEL_CACHE,
 )
 from src.utils.configs import get_model_configurations
 from src.utils.agents.base_agent import BaseAgent
@@ -78,16 +79,26 @@ class DiffingMethod(ABC):
 
     def clear_base_model(self) -> None:
         """Clear the base model from memory."""
+        # Remove from global cache first (critical for memory release)
+        if self._base_model is not None:
+            keys_to_remove = [k for k, v in _MODEL_CACHE.items() if v is self._base_model]
+            for k in keys_to_remove:
+                del _MODEL_CACHE[k]
         del self._base_model
-        gc_collect_cuda_cache()
         self._base_model = None
+        gc_collect_cuda_cache()
         logger.info("Cleared base model from CUDA memory with garbage collection")
 
     def clear_finetuned_model(self) -> None:
         """Clear the finetuned model from memory."""
+        # Remove from global cache first (critical for memory release)
+        if self._finetuned_model is not None:
+            keys_to_remove = [k for k, v in _MODEL_CACHE.items() if v is self._finetuned_model]
+            for k in keys_to_remove:
+                del _MODEL_CACHE[k]
         del self._finetuned_model
-        gc_collect_cuda_cache()
         self._finetuned_model = None
+        gc_collect_cuda_cache()
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 
     def _get_tokenizer(self, default=True) -> AnyTokenizer:

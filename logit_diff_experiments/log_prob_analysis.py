@@ -30,19 +30,19 @@ import numpy as np
 # =============================================================================
 
 # Experiment parameters
-N_SAMPLES = 20 #492  # Number of samples per dataset
-MAX_TOKENS_PER_SAMPLE = 200  # Token positions per sample
-BATCH_SIZE = 32  # Batch size for model inference
+N_SAMPLES = 20  # Number of samples per dataset
+MAX_TOKENS_PER_SAMPLE = 90  # Token positions per sample
+BATCH_SIZE = 2  # Batch size for model inference
 WINDOW_SIZE = 60  # Sliding window size for chunks
-STRIDE = 20  # Sliding window step
+STRIDE = 30  # Sliding window step
 SEED = 42
 
 # Plotting
 PLOT_TRUNCATE_TEXT_N_CHARS = 100
 
 # Model and organism
-MODEL = "qwen3_1_7B"
-ORGANISM = "cake_bake"
+MODEL = "llama33_70B_Instruct"
+ORGANISM = "deepseek_r1_distill"
 INFRASTRUCTURE = "runpod"
 ORGANISM_VARIANT = "default"
 
@@ -93,10 +93,14 @@ def run_command(cmd: List[str], description: str) -> bool:
     print(f"Command: {' '.join(cmd)}")
     print(f"{'='*80}\n")
     
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    
     result = subprocess.run(
         cmd,
         cwd=DIFFING_TOOLKIT_DIR,
         capture_output=False,
+        env=env,
     )
     
     if result.returncode != 0:
