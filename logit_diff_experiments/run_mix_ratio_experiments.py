@@ -423,16 +423,36 @@ def plot_results(results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]
                     has_data = True
                     # Determine number of runs for label
                     n_runs = len(ratio_data.get(MIX_RATIOS[0], []))
-                    plt.errorbar(
-                        x_vals, y_means,
-                        yerr=y_stds,
+                    color = method_colors.get(method, None)
+                    
+                    # Convert to numpy arrays for fill_between
+                    x_arr = np.array(x_vals)
+                    y_arr = np.array(y_means)
+                    std_arr = np.array(y_stds)
+                    
+                    # Sort by x values for proper line/fill interpolation
+                    sort_idx = np.argsort(x_arr)
+                    x_arr = x_arr[sort_idx]
+                    y_arr = y_arr[sort_idx]
+                    std_arr = std_arr[sort_idx]
+                    
+                    # Plot shaded confidence band (linear interpolation between points)
+                    plt.fill_between(
+                        x_arr,
+                        y_arr - std_arr,
+                        y_arr + std_arr,
+                        alpha=0.25,
+                        color=color,
+                    )
+                    
+                    # Plot line with markers
+                    plt.plot(
+                        x_arr, y_arr,
                         marker='o',
                         markersize=8,
                         linewidth=2,
-                        capsize=4,
-                        capthick=1.5,
-                        label=f"{method_labels.get(method, method)} (n={n_runs})",
-                        color=method_colors.get(method, None),
+                        label=method_labels.get(method, method),
+                        color=color,
                     )
             
             if has_data:
