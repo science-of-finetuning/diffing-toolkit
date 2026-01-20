@@ -588,14 +588,21 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     # Per-position
                     per_position_counts_shortlist[s_token_str][:chunk_seq_len] += is_present.sum(dim=0)
                     
-                    # Track diffs for KDE breakdown
+                    # Track diffs for KDE breakdown (vectorized)
+                    # Per-position: loop over positions (small: ~30), vectorize over samples
+                    for pos_idx in range(chunk_seq_len):
+                        pos_mask = valid_mask[:, pos_idx]
+                        if pos_mask.any():
+                            vals = token_vals[:, pos_idx][pos_mask].cpu().tolist()
+                            shortlist_diffs_by_position[s_token_str][pos_idx].extend(vals)
+                    
+                    # Per-sample: loop over samples in chunk, vectorize over positions
                     for b_idx in range(chunk_samples):
-                        sample_idx_global = global_sample_offset + b_idx
-                        for pos_idx in range(chunk_seq_len):
-                            if valid_mask[b_idx, pos_idx]:
-                                val = token_vals[b_idx, pos_idx].item()
-                                shortlist_diffs_by_position[s_token_str][pos_idx].append(val)
-                                shortlist_diffs_by_sample[s_token_str][sample_idx_global].append(val)
+                        sample_mask = valid_mask[b_idx]
+                        if sample_mask.any():
+                            vals = token_vals[b_idx][sample_mask].cpu().tolist()
+                            sample_idx_global = global_sample_offset + b_idx
+                            shortlist_diffs_by_sample[s_token_str][sample_idx_global].extend(vals)
 
             # Keep Python loop for NMF and Co-occurrence (harder to vectorize)
             batch_size_actual, seq_len, _ = diff.shape
@@ -2203,6 +2210,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         max_vocab_size = getattr(self.method_cfg.method_params, 'max_vocab_size', None)
         
+        # Only compute log_probs if sequence_likelihood_ratio is enabled
+        compute_log_probs = getattr(self.method_cfg.sequence_likelihood_ratio, 'enabled', False)
+        if compute_log_probs:
+            self.logger.info("Log probabilities will be computed (sequence_likelihood_ratio.enabled=true)")
+        else:
+            self.logger.info("Skipping log probability computation (sequence_likelihood_ratio.enabled=false)")
+        
         for dataset_cfg in self.datasets:
             num_chunks = dataset_num_chunks.get(dataset_cfg.name, 0)
             if num_chunks == 0:
@@ -2235,29 +2249,39 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if ft.shape[-1] > max_vocab_size:
                         ft = ft[..., :max_vocab_size]
                 
-                # Memory-efficient computation of per-token log probabilities
-                # log(softmax(x)_i) = x_i - logsumexp(x)
-                # We use logits[:, :-1] to predict tokens at input_ids[:, 1:]
-                base_logits_sliced = base[:, :-1, :]
-                ft_logits_sliced = ft[:, :-1, :]
-                target_ids = chunk_input_ids[:, 1:]
-                
-                if max_vocab_size is not None:
-                    target_ids = target_ids.clamp(max=max_vocab_size - 1)
-                
-                # base_token_log_probs: [batch, seq_len-1]
-                base_token_log_probs = base_logits_sliced.gather(
-                    dim=-1, index=target_ids.unsqueeze(-1)
-                ).squeeze(-1).float()
-                base_token_log_probs -= torch.logsumexp(base_logits_sliced.float(), dim=-1)
-                
-                # ft_token_log_probs: [batch, seq_len-1]
-                ft_token_log_probs = ft_logits_sliced.gather(
-                    dim=-1, index=target_ids.unsqueeze(-1)
-                ).squeeze(-1).float()
-                ft_token_log_probs -= torch.logsumexp(ft_logits_sliced.float(), dim=-1)
-                
-                del base_logits_sliced, ft_logits_sliced
+                # Compute log probabilities only if needed (for sequence_likelihood_ratio)
+                if compute_log_probs:
+                    # Move to GPU for fast logsumexp computation
+                    # log(softmax(x)_i) = x_i - logsumexp(x)
+                    device = self.device
+                    base_logits_gpu = base[:, :-1, :].to(device)
+                    ft_logits_gpu = ft[:, :-1, :].to(device)
+                    target_ids_gpu = chunk_input_ids[:, 1:].to(device)
+                    
+                    if max_vocab_size is not None:
+                        target_ids_gpu = target_ids_gpu.clamp(max=max_vocab_size - 1)
+                    
+                    # base_token_log_probs: [batch, seq_len-1]
+                    base_token_log_probs = base_logits_gpu.gather(
+                        dim=-1, index=target_ids_gpu.unsqueeze(-1)
+                    ).squeeze(-1).float()
+                    base_token_log_probs -= torch.logsumexp(base_logits_gpu.float(), dim=-1)
+                    
+                    # ft_token_log_probs: [batch, seq_len-1]
+                    ft_token_log_probs = ft_logits_gpu.gather(
+                        dim=-1, index=target_ids_gpu.unsqueeze(-1)
+                    ).squeeze(-1).float()
+                    ft_token_log_probs -= torch.logsumexp(ft_logits_gpu.float(), dim=-1)
+                    
+                    # Move back to CPU for saving
+                    base_token_log_probs = base_token_log_probs.cpu()
+                    ft_token_log_probs = ft_token_log_probs.cpu()
+                    
+                    del base_logits_gpu, ft_logits_gpu, target_ids_gpu
+                    torch.cuda.empty_cache()
+                else:
+                    base_token_log_probs = None
+                    ft_token_log_probs = None
                 
                 # Compute diff
                 diff = ft - base
@@ -2266,12 +2290,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 if chunk_positions is not None:
                     diff = slice_to_positions(diff, chunk_positions)
                     
-                    # Target tokens care about positions p. 
-                    # Log-probs tensor (length L-1) index i corresponds to target token at original position i+1.
-                    # So we need indices [p-1 for p in positions] from the log-probs tensor.
-                    log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in chunk_positions]
-                    base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
-                    ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
+                    # Slice log_probs if they were computed
+                    if compute_log_probs and base_token_log_probs is not None:
+                        # Target tokens care about positions p. 
+                        # Log-probs tensor (length L-1) index i corresponds to target token at original position i+1.
+                        # So we need indices [p-1 for p in positions] from the log-probs tensor.
+                        log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in chunk_positions]
+                        base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
+                        ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
                     
                     # Slice input_ids to match target tokens (original positions p)
                     chunk_input_ids = slice_to_positions_2d(chunk_input_ids, chunk_positions)
@@ -2287,14 +2313,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff_chunk{chunk_idx:04d}.pt"
                 torch.save(diff, diff_path)
                 
-                # Save log probs chunks
-                base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs_chunk{chunk_idx:04d}.pt"
-                ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs_chunk{chunk_idx:04d}.pt"
-                torch.save(base_token_log_probs, base_log_probs_path)
-                torch.save(ft_token_log_probs, ft_log_probs_path)
+                # Save log probs chunks (only if computed)
+                if compute_log_probs and base_token_log_probs is not None:
+                    base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs_chunk{chunk_idx:04d}.pt"
+                    ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs_chunk{chunk_idx:04d}.pt"
+                    torch.save(base_token_log_probs, base_log_probs_path)
+                    torch.save(ft_token_log_probs, ft_log_probs_path)
                 
                 # Clear memory
-                del base, ft, diff, base_token_log_probs, ft_token_log_probs
+                del base, ft, diff
+                if base_token_log_probs is not None:
+                    del base_token_log_probs, ft_token_log_probs
                 del chunk_input_ids, chunk_mask
                 gc.collect()
                 
