@@ -404,7 +404,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Dataset type: {'chat' if dataset_cfg.is_chat else 'text'}")
 
         # Track occurrences across all positions (running accumulators)
-        global_token_counts = defaultdict(lambda: {"count_positive": 0, "count_negative": 0})
+        global_pos_counts_tensor = None  # Will be initialized once vocab size is known
+        global_neg_counts_tensor = None
         total_positions = 0
         total_samples_processed = 0
         global_sample_offset = 0  # Track absolute sample index across chunks
@@ -413,8 +414,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         per_token_enabled = False
         co_occurrence_enabled = False
         shortlist_token_ids = {}
-        per_sample_counts = {}
-        per_position_counts = {}
+        # We'll use tensors or arrays for these to vectorize
+        per_sample_counts_shortlist = {} # token_str -> List of counts (initialized later)
+        per_position_counts_shortlist = {} # token_str -> Tensor of counts
         shortlist_diffs = defaultdict(list)
         
         # Per-position and per-sample shortlist diffs for KDE breakdown plots
@@ -475,9 +477,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             for token_str in self.method_cfg.per_token_analysis.token_shortlist:
                 token_ids = self.tokenizer.encode(token_str, add_special_tokens=False)
                 if len(token_ids) == 1:
-                    shortlist_token_ids[token_ids[0]] = token_str
-                    per_sample_counts[token_str] = defaultdict(int)
-                    per_position_counts[token_str] = defaultdict(int)
+                    s_token_id = token_ids[0]
+                    shortlist_token_ids[s_token_id] = token_str
+                    # Initialize per-sample counts with 0s for all potential samples
+                    per_sample_counts_shortlist[token_str] = [0] * max_samples
+                    # Initialize per-position counts with 0s
+                    per_position_counts_shortlist[token_str] = torch.zeros(max_tokens, dtype=torch.long, device=self.device)
                 else:
                     self.logger.warning(
                         f"Token '{token_str}' encodes to {len(token_ids)} tokens, skipping."
@@ -531,36 +536,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     vocab_size = diff.shape[-1]
                     global_diff_sum = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
                     global_pos_count = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
+                    global_pos_counts_tensor = torch.zeros(vocab_size, dtype=torch.long, device=diff.device)
+                    global_neg_counts_tensor = torch.zeros(vocab_size, dtype=torch.long, device=diff.device)
                 
                 mask_expanded = attention_mask_batch.unsqueeze(-1).to(diff.dtype)
                 diff_masked = diff * mask_expanded
                 global_diff_sum += diff_masked.sum(dim=(0, 1))
                 pos_mask = (diff > 0) & (mask_expanded.bool())
                 global_pos_count += pos_mask.sum(dim=(0, 1))
-
-            # Shortlist Distribution Tracking
-            if per_token_enabled and shortlist_token_ids:
-                valid_mask = attention_mask_batch.bool()
-                batch_size_curr, seq_len_curr = attention_mask_batch.shape
-                
-                for s_token_id, s_token_str in shortlist_token_ids.items():
-                    token_vals = diff[:, :, s_token_id]
-                    
-                    if ignore_padding:
-                        valid_vals = token_vals[valid_mask]
-                    else:
-                        valid_vals = token_vals.flatten()
-                        
-                    shortlist_diffs[s_token_str].extend(valid_vals.cpu().tolist())
-                    
-                    for b_idx in range(batch_size_curr):
-                        sample_idx_global = global_sample_offset + b_idx
-                        for pos_idx in range(seq_len_curr):
-                            if ignore_padding and attention_mask_batch[b_idx, pos_idx] == 0:
-                                continue
-                            val = token_vals[b_idx, pos_idx].item()
-                            shortlist_diffs_by_position[s_token_str][pos_idx].append(val)
-                            shortlist_diffs_by_sample[s_token_str][sample_idx_global].append(val)
 
             # Get top-K positive and negative diffs
             top_k_pos_values, top_k_pos_indices = torch.topk(
@@ -570,14 +553,56 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 diff, k=top_k, dim=-1, largest=False
             )
 
-            # Track occurrences
-            batch_size_actual, seq_len, _ = diff.shape
+            # Vectorized counting using bincount
+            valid_mask = attention_mask_batch.bool()
+            
+            # Global positive counts
+            flat_pos_indices = top_k_pos_indices[valid_mask].flatten()
+            global_pos_counts_tensor += torch.bincount(flat_pos_indices, minlength=global_pos_counts_tensor.size(0))
+            
+            # Global negative counts
+            flat_neg_indices = top_k_neg_indices[valid_mask].flatten()
+            global_neg_counts_tensor += torch.bincount(flat_neg_indices, minlength=global_neg_counts_tensor.size(0))
 
+            # Shortlist Vectorized Counting
+            if per_token_enabled and shortlist_token_ids:
+                for s_token_id, s_token_str in shortlist_token_ids.items():
+                    # Shortlist Distribution Tracking
+                    token_vals = diff[:, :, s_token_id]
+                    if ignore_padding:
+                        valid_vals = token_vals[valid_mask]
+                    else:
+                        valid_vals = token_vals.flatten()
+                    shortlist_diffs[s_token_str].extend(valid_vals.cpu().tolist())
+                    
+                    # Presence in top-K
+                    is_in_pos = (top_k_pos_indices == s_token_id).any(dim=-1) & valid_mask
+                    is_in_neg = (top_k_neg_indices == s_token_id).any(dim=-1) & valid_mask
+                    is_present = is_in_pos | is_in_neg
+                    
+                    # Per-sample (batch)
+                    batch_sample_counts = is_present.sum(dim=1).cpu().tolist()
+                    for i, count in enumerate(batch_sample_counts):
+                        per_sample_counts_shortlist[s_token_str][global_sample_offset + i] += count
+                    
+                    # Per-position
+                    per_position_counts_shortlist[s_token_str][:chunk_seq_len] += is_present.sum(dim=0)
+                    
+                    # Track diffs for KDE breakdown
+                    for b_idx in range(chunk_samples):
+                        sample_idx_global = global_sample_offset + b_idx
+                        for pos_idx in range(chunk_seq_len):
+                            if valid_mask[b_idx, pos_idx]:
+                                val = token_vals[b_idx, pos_idx].item()
+                                shortlist_diffs_by_position[s_token_str][pos_idx].append(val)
+                                shortlist_diffs_by_sample[s_token_str][sample_idx_global].append(val)
+
+            # Keep Python loop for NMF and Co-occurrence (harder to vectorize)
+            batch_size_actual, seq_len, _ = diff.shape
             for b in range(batch_size_actual):
-                sample_idx = global_sample_offset + b  # Global sample index
-                
+                sample_idx = global_sample_offset + b
                 for s in range(seq_len):
-                    if ignore_padding and attention_mask_batch[b, s] == 0:
+                    if not valid_mask[b, s]:
                         continue
                     
                     # Positional KDE Data Collection
@@ -589,10 +614,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if nmf_enabled:
                         current_row_idx = nmf_data["valid_row_idx_counter"]
                         nmf_data["valid_row_idx_counter"] += 1
-                        
                         for k_idx, token_id in enumerate(top_k_pos_indices[b, s]):
                             token_id_item = token_id.item()
-                            
                             if self.nmf_cfg.mode == "binary_occurrence":
                                 val = 1.0
                             elif self.nmf_cfg.mode == "logit_diff_magnitude":
@@ -610,44 +633,26 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             nmf_data["cols"].append(col_idx)
                             nmf_data["values"].append(val)
 
-                    current_point_tokens = []
-
-                    # Count positive occurrences
-                    for token_id in top_k_pos_indices[b, s]:
-                        token_id_item = token_id.item()
-                        global_token_counts[token_id_item]["count_positive"] += 1
-                        
-                        if per_token_enabled and token_id_item in shortlist_token_ids:
-                            token_str = shortlist_token_ids[token_id_item]
-                            per_sample_counts[token_str][sample_idx] += 1
-                            per_position_counts[token_str][s] += 1
-                            
-                            if co_occurrence_enabled:
+                    # Co-occurrence tracking
+                    if co_occurrence_enabled:
+                        current_point_tokens = []
+                        for token_id in top_k_pos_indices[b, s]:
+                            token_id_item = token_id.item()
+                            if token_id_item in shortlist_token_ids:
+                                token_str = shortlist_token_ids[token_id_item]
                                 current_point_tokens.append(token_str)
                                 sample_tokens_tracker[sample_idx].add(token_str)
                                 position_tokens_tracker[s].add(token_str)
 
-                    if co_occurrence_enabled and current_point_tokens:
-                        for t1, t2 in combinations_with_replacement(current_point_tokens, 2):
-                            same_point_matrix[t1][t2] += 1
-                            if t1 != t2:
-                                same_point_matrix[t2][t1] += 1
+                        if current_point_tokens:
+                            for t1, t2 in combinations_with_replacement(current_point_tokens, 2):
+                                same_point_matrix[t1][t2] += 1
+                                if t1 != t2:
+                                    same_point_matrix[t2][t1] += 1
 
-                    # Count negative occurrences
-                    for token_id in top_k_neg_indices[b, s]:
-                        token_id_item = token_id.item()
-                        global_token_counts[token_id_item]["count_negative"] += 1
-                        
-                        if per_token_enabled and token_id_item in shortlist_token_ids:
-                            token_str = shortlist_token_ids[token_id_item]
-                            per_sample_counts[token_str][sample_idx] += 1
-                            per_position_counts[token_str][s] += 1
-
-                    # Same-Sign Co-occurrence
-                    if co_occurrence_enabled and shortlist_token_ids:
+                        # Same-Sign Co-occurrence
                         point_pos_tokens = []
                         point_neg_tokens = []
-                        
                         for s_token_id, s_token_str in shortlist_token_ids.items():
                             token_diff = diff[b, s, s_token_id].item()
                             if token_diff >= 0:
@@ -678,9 +683,35 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             gc.collect()
 
         self.logger.info(f"✓ Chunk processing complete!")
+        # Count unique tokens that appeared at least once
+        unique_tokens_count = ((global_pos_counts_tensor > 0) | (global_neg_counts_tensor > 0)).sum().item()
         self.logger.info(
-            f"Processed {total_positions:,} positions from {total_samples_processed} samples with {len(global_token_counts):,} unique tokens"
+            f"Processed {total_positions:,} positions from {total_samples_processed} samples with {unique_tokens_count:,} unique tokens"
         )
+
+        # Convert tensor counts to global_token_counts dict for compatibility with existing code
+        self.logger.info("Finalizing occurrence statistics...")
+        global_token_counts = {}
+        # Only iterate over tokens that actually appeared to keep dict small
+        pos_indices = torch.where(global_pos_counts_tensor > 0)[0]
+        neg_indices = torch.where(global_neg_counts_tensor > 0)[0]
+        all_active_indices = torch.unique(torch.cat([pos_indices, neg_indices]))
+        
+        for idx in all_active_indices.cpu().tolist():
+            global_token_counts[idx] = {
+                "count_positive": global_pos_counts_tensor[idx].item(),
+                "count_negative": global_neg_counts_tensor[idx].item()
+            }
+            
+        # Convert shortlist counts back to dict format
+        per_sample_counts = {}
+        per_position_counts = {}
+        for token_str in shortlist_token_ids.values():
+            # Convert list to defaultdict(int) for sample counts
+            per_sample_counts[token_str] = defaultdict(int, {i: c for i, c in enumerate(per_sample_counts_shortlist[token_str]) if c > 0})
+            # Convert tensor to defaultdict(int) for position counts
+            pos_counts_tensor = per_position_counts_shortlist[token_str].cpu()
+            per_position_counts[token_str] = defaultdict(int, {i: c.item() for i, c in enumerate(pos_counts_tensor) if c > 0})
 
         # Compute co-occurrence matrices if enabled
         same_sample_matrix = defaultdict(lambda: defaultdict(int))
@@ -2204,23 +2235,29 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     if ft.shape[-1] > max_vocab_size:
                         ft = ft[..., :max_vocab_size]
                 
-                # Compute per-token log probabilities
-                base_log_softmax = F.log_softmax(base[:, :-1, :].float(), dim=-1)
-                ft_log_softmax = F.log_softmax(ft[:, :-1, :].float(), dim=-1)
-                
+                # Memory-efficient computation of per-token log probabilities
+                # log(softmax(x)_i) = x_i - logsumexp(x)
+                # We use logits[:, :-1] to predict tokens at input_ids[:, 1:]
+                base_logits_sliced = base[:, :-1, :]
+                ft_logits_sliced = ft[:, :-1, :]
                 target_ids = chunk_input_ids[:, 1:]
+                
                 if max_vocab_size is not None:
                     target_ids = target_ids.clamp(max=max_vocab_size - 1)
                 
-                base_token_log_probs = base_log_softmax.gather(
+                # base_token_log_probs: [batch, seq_len-1]
+                base_token_log_probs = base_logits_sliced.gather(
                     dim=-1, index=target_ids.unsqueeze(-1)
-                ).squeeze(-1)
+                ).squeeze(-1).float()
+                base_token_log_probs -= torch.logsumexp(base_logits_sliced.float(), dim=-1)
                 
-                ft_token_log_probs = ft_log_softmax.gather(
+                # ft_token_log_probs: [batch, seq_len-1]
+                ft_token_log_probs = ft_logits_sliced.gather(
                     dim=-1, index=target_ids.unsqueeze(-1)
-                ).squeeze(-1)
+                ).squeeze(-1).float()
+                ft_token_log_probs -= torch.logsumexp(ft_logits_sliced.float(), dim=-1)
                 
-                del base_log_softmax, ft_log_softmax
+                del base_logits_sliced, ft_logits_sliced
                 
                 # Compute diff
                 diff = ft - base
@@ -2229,16 +2266,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 if chunk_positions is not None:
                     diff = slice_to_positions(diff, chunk_positions)
                     
-                    # Slice log probs (positions shifted by 1)
-                    sliced_positions_list = [p[:-1] if len(p) > 1 else p for p in chunk_positions]
-                    base_token_log_probs = slice_to_positions_2d(base_token_log_probs, sliced_positions_list)
-                    ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, sliced_positions_list)
+                    # Target tokens care about positions p. 
+                    # Log-probs tensor (length L-1) index i corresponds to target token at original position i+1.
+                    # So we need indices [p-1 for p in positions] from the log-probs tensor.
+                    log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in chunk_positions]
+                    base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
+                    ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
                     
-                    # Slice input_ids to match
-                    sliced_target_positions = [p[1:] if len(p) > 1 else p for p in chunk_positions]
-                    chunk_input_ids = slice_to_positions_2d(chunk_input_ids, sliced_target_positions)
+                    # Slice input_ids to match target tokens (original positions p)
+                    chunk_input_ids = slice_to_positions_2d(chunk_input_ids, chunk_positions)
                     
-                    # Also slice attention mask
+                    # Also slice attention mask (original positions p)
                     chunk_mask = slice_to_positions_2d(chunk_mask, chunk_positions)
                     
                     # Save sliced versions (overwrite)
