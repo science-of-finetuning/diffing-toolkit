@@ -9,7 +9,7 @@ Environment Setup:
     cd /workspace/diffing-toolkit
     uv sync
     source .venv/bin/activate
-    python /workspace/logit_diff_experiments/run_mix_ratio_experiments.py
+    python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py
 """
 
 import subprocess
@@ -64,9 +64,7 @@ TOKEN_RELEVANCE_CONFIG = {
     "k_candidate_tokens": 20,#50,
 }
 
-# Datasets to use
-DATASETS = ["fineweb"]#, "es"]  # fineweb-1m-sample and CulturaX-es
-# Dataset IDs for token relevance tasks (HuggingFace dataset paths)
+# Datasets (HuggingFace dataset paths)
 TOKEN_RELEVANCE_DATASETS = [
     "science-of-finetuning/fineweb-1m-sample",
     #"uonlp/CulturaX",  # Note: uses subset=es
@@ -481,7 +479,7 @@ def main():
     print(f"Organism: {ORGANISM}")
     print(f"Mix Ratios: {MIX_RATIOS}")
     print(f"Methods: {METHODS}")
-    print(f"Datasets: {DATASETS}")
+    print(f"Datasets: {TOKEN_RELEVANCE_DATASETS}")
     print(f"N Samples: {N_SAMPLES}")
     print(f"Max Token Positions ADL: {MAX_TOKEN_POSITIONS_ADL}")
     print(f"Max Token Positions LogitDiff: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
