@@ -367,20 +367,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "positions": all_positions,  # None for pretraining, list of position indices for chat
         }
 
+
     @torch.no_grad()
     def compute_stats_from_logits(
         self, 
         dataset_cfg: DatasetConfig,
-        attention_mask: torch.Tensor,
-        logit_diff: torch.Tensor
+        diff_chunk_paths: list,
+        mask_chunk_paths: list
     ) -> Dict[str, Any]:
         """
-        Core analysis for one dataset.
+        Core analysis for one dataset, processing chunks one at a time for memory efficiency.
+        
+        Each chunk file contains batch_size samples. We process one chunk at a time,
+        maintaining running accumulators for statistics.
 
         Args:
             dataset_cfg: Dataset configuration
-            attention_mask: Attention mask
-            logit_diff: Pre-computed logit difference tensor
+            diff_chunk_paths: Sorted list of paths to logit diff chunk files
+            mask_chunk_paths: Sorted list of paths to attention mask chunk files
 
         Returns:
             Dictionary containing occurrence rate statistics
@@ -388,46 +392,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"=" * 80)
         self.logger.info(f"Processing dataset: {dataset_cfg.id}")
         self.logger.info(f"Dataset name: {dataset_cfg.name}")
+        self.logger.info(f"Processing {len(diff_chunk_paths)} chunks")
 
-        # Get parameters from config (no hardcoded values)
-        batch_size = int(self.method_cfg.method_params.batch_size)
+        # Get parameters from config
         max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
         max_samples = int(self.method_cfg.method_params.max_samples)
         top_k = int(self.method_cfg.method_params.top_k)
         ignore_padding = bool(self.method_cfg.method_params.ignore_padding)
 
-        # Validate and slice samples
-        available_samples = logit_diff.shape[0]
-        if max_samples > available_samples:
-            # Use all available samples instead of failing
-            self.logger.warning(
-                f"Config requests {max_samples} samples but only {available_samples} available. "
-                f"Using all {available_samples} available samples."
-            )
-            max_samples = available_samples  # Update to actual count
-        elif max_samples < available_samples:
-            self.logger.info(f"Using first {max_samples} samples (have {available_samples})")
-            logit_diff = logit_diff[:max_samples, :, :]
-            attention_mask = attention_mask[:max_samples, :]
-
-        # Validate and slice token positions
-        available_positions = logit_diff.shape[1]
-        if max_tokens > available_positions:
-            raise ValueError(
-                f"Config requests {max_tokens} token positions but only {available_positions} available from preprocessing. "
-                f"Re-run preprocessing with max_tokens_per_sample >= {max_tokens}."
-            )
-        elif max_tokens < available_positions:
-            self.logger.info(f"Using first {max_tokens} positions (have {available_positions})")
-            logit_diff = logit_diff[:, :max_tokens, :]
-            attention_mask = attention_mask[:, :max_tokens]
-
-        self.logger.info(f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}")
+        self.logger.info(f"Parameters: max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}")
         self.logger.info(f"Dataset type: {'chat' if dataset_cfg.is_chat else 'text'}")
 
-        # Track occurrences across all positions
+        # Track occurrences across all positions (running accumulators)
         global_token_counts = defaultdict(lambda: {"count_positive": 0, "count_negative": 0})
         total_positions = 0
+        total_samples_processed = 0
+        global_sample_offset = 0  # Track absolute sample index across chunks
 
         # Per-token analysis: Initialize tracking structures if enabled
         per_token_enabled = False
@@ -439,26 +419,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         # Per-position and per-sample shortlist diffs for KDE breakdown plots
         shortlist_diffs_by_position = defaultdict(lambda: defaultdict(list))
-        # Dict[token_str][position_idx] -> List[float]
         shortlist_diffs_by_sample = defaultdict(lambda: defaultdict(list))
-        # Dict[token_str][sample_idx] -> List[float]
         
         # Co-occurrence tracking (Top-K based)
         same_point_matrix = defaultdict(lambda: defaultdict(int))
-        # Track which tokens appeared in each sample (for Same-Sample co-occurrence)
-        # Dict[sample_idx, Set[token_str]]
         sample_tokens_tracker = defaultdict(set)
-        # Track which tokens appeared at each position (for Same-Position co-occurrence)
-        # Dict[position_idx, Set[token_str]]
         position_tokens_tracker = defaultdict(set)
         
         # Same-Sign Co-occurrence tracking
-        # Tokens co-occur if they have the same sign logit diff at a location
         same_sign_point_matrix = defaultdict(lambda: defaultdict(int))
-        # Track which tokens had positive/negative diffs in each sample
         sample_pos_tokens_tracker = defaultdict(set)
         sample_neg_tokens_tracker = defaultdict(set)
-        # Track which tokens had positive/negative diffs at each position
         position_pos_tokens_tracker = defaultdict(set)
         position_neg_tokens_tracker = defaultdict(set)
         
@@ -482,14 +453,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         nmf_enabled = self.nmf_cfg and self.nmf_cfg.enabled
         nmf_data = None
         if nmf_enabled:
-            # We use parallel lists to construct a COO matrix later: (row_indices, col_indices, values)
             nmf_data = {
                 "rows": [],
                 "cols": [],
                 "values": [],
                 "valid_row_idx_counter": 0,
-                "token_id_to_col_idx": {},  # Map raw token_id -> compact column index (0..M)
-                "col_idx_to_token_id": [],  # Map compact column index -> raw token_id (for reverse lookup)
+                "token_id_to_col_idx": {},
+                "col_idx_to_token_id": [],
                 "next_col_idx": 0
             }
             self.logger.info("Initializing NMF data collection...")
@@ -498,12 +468,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             per_token_enabled = True
             self.logger.info("Per-token analysis enabled")
             
-            # Check for co-occurrence config
             if hasattr(self.method_cfg.per_token_analysis, 'co_occurrence') and self.method_cfg.per_token_analysis.co_occurrence:
                 co_occurrence_enabled = True
                 self.logger.info("Co-occurrence analysis enabled")
             
-            # Build token_id -> token_str mapping for shortlist
             for token_str in self.method_cfg.per_token_analysis.token_shortlist:
                 token_ids = self.tokenizer.encode(token_str, add_special_tokens=False)
                 if len(token_ids) == 1:
@@ -512,73 +480,70 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     per_position_counts[token_str] = defaultdict(int)
                 else:
                     self.logger.warning(
-                        f"Token '{token_str}' encodes to {len(token_ids)} tokens, skipping. "
-                        f"Use single-token strings only."
+                        f"Token '{token_str}' encodes to {len(token_ids)} tokens, skipping."
                     )
             
             self.logger.info(f"Tracking {len(shortlist_token_ids)} shortlist tokens: {list(shortlist_token_ids.values())}")
 
-        # Removed redundant tokenization block here
-        # Logic uses passed input_ids/attention_mask directly in the batch loop below
+        # Track max sequence length across all chunks
+        overall_max_len = 0
 
-        # Now batch through token IDs
-        # We use the passed input_ids directly
-        num_samples = logit_diff.shape[0]
-        num_batches = (num_samples + batch_size - 1) // batch_size
-        self.logger.info(f"Processing {num_samples} samples in {num_batches} batches...")
-        
-        # Track max sequence length across all batches for per-token analysis
-        overall_max_len = logit_diff.shape[1]
-
-        for batch_idx in tqdm(range(num_batches), desc=f"Processing {dataset_cfg.name}"):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, num_samples)
-
-            # Get batch of token IDs from PASSED arguments, not re-tokenized list
-            # We must use slice notation on tensors
-            batch_attention_mask = attention_mask[start_idx:end_idx]
-
-            # Get logits or diff
-            diff = logit_diff[start_idx:end_idx].to(self.device)
-
-            # Use local batch mask
-            attention_mask_batch = batch_attention_mask.to(diff.device)
-
+        # Process chunks one at a time
+        for chunk_idx, (diff_path, mask_path) in enumerate(tqdm(
+            zip(diff_chunk_paths, mask_chunk_paths), 
+            total=len(diff_chunk_paths),
+            desc=f"Processing {dataset_cfg.name} chunks"
+        )):
+            # Load chunk data
+            logit_diff_chunk = torch.load(diff_path, map_location="cpu")
+            attention_mask_chunk = torch.load(mask_path, map_location="cpu")
+            
+            chunk_samples = logit_diff_chunk.shape[0]
+            chunk_seq_len = logit_diff_chunk.shape[1]
+            overall_max_len = max(overall_max_len, chunk_seq_len)
+            
+            # Check if we've reached max_samples limit
+            if total_samples_processed >= max_samples:
+                del logit_diff_chunk, attention_mask_chunk
+                break
+            
+            # Slice chunk if it would exceed max_samples
+            remaining_samples = max_samples - total_samples_processed
+            if chunk_samples > remaining_samples:
+                logit_diff_chunk = logit_diff_chunk[:remaining_samples]
+                attention_mask_chunk = attention_mask_chunk[:remaining_samples]
+                chunk_samples = remaining_samples
+            
+            # Slice token positions if needed
+            if max_tokens < chunk_seq_len:
+                logit_diff_chunk = logit_diff_chunk[:, :max_tokens, :]
+                attention_mask_chunk = attention_mask_chunk[:, :max_tokens]
+                chunk_seq_len = max_tokens
+            
+            # Move to device for processing
+            diff = logit_diff_chunk.to(self.device)
+            attention_mask_batch = attention_mask_chunk.to(self.device)
+            
             # Global Token Statistics (Entire Vocabulary)
             if global_stats_enabled:
                 if global_diff_sum is None:
-                    # Initialize on first use to ensure correct device and size
-                    self.logger.info("  [Global Stats] Initializing accumulators and starting batch-wise accumulation...")
+                    self.logger.info("  [Global Stats] Initializing accumulators...")
                     vocab_size = diff.shape[-1]
-                    # Use float64 for better precision during large sum accumulation
                     global_diff_sum = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
                     global_pos_count = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
                 
-                # Apply attention mask to zero out padding
-                # attention_mask: [batch, seq] -> [batch, seq, 1]
                 mask_expanded = attention_mask_batch.unsqueeze(-1).to(diff.dtype)
-                
-                # Sum logit diffs (masked)
-                # OPTIMIZATION: In-place multiplication to save memory
-                diff.mul_(mask_expanded)
-                global_diff_sum += diff.sum(dim=(0, 1))
-                
-                # Count strictly positive diffs (masked)
-                # Note: We use (diff > 0) to exclude zeros; AND with mask to exclude padding
-                # OPTIMIZATION: Sum boolean tensor directly to avoid creating huge float tensor
-                # We cast mask back to bool for logical AND
+                diff_masked = diff * mask_expanded
+                global_diff_sum += diff_masked.sum(dim=(0, 1))
                 pos_mask = (diff > 0) & (mask_expanded.bool())
                 global_pos_count += pos_mask.sum(dim=(0, 1))
 
-            # Shortlist Distribution Tracking (Vectorized for aggregate)
+            # Shortlist Distribution Tracking
             if per_token_enabled and shortlist_token_ids:
-                # We want to collect all logit diffs for the shortlist tokens
-                # respecting the attention mask (if ignore_padding is True)
                 valid_mask = attention_mask_batch.bool()
                 batch_size_curr, seq_len_curr = attention_mask_batch.shape
                 
                 for s_token_id, s_token_str in shortlist_token_ids.items():
-                    # diff[..., s_token_id]: [batch, seq]
                     token_vals = diff[:, :, s_token_id]
                     
                     if ignore_padding:
@@ -586,11 +551,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     else:
                         valid_vals = token_vals.flatten()
                         
-                    shortlist_diffs[s_token_str].extend(valid_vals.tolist())
+                    shortlist_diffs[s_token_str].extend(valid_vals.cpu().tolist())
                     
-                    # Track by position and sample for KDE breakdown plots
                     for b_idx in range(batch_size_curr):
-                        sample_idx_global = start_idx + b_idx
+                        sample_idx_global = global_sample_offset + b_idx
                         for pos_idx in range(seq_len_curr):
                             if ignore_padding and attention_mask_batch[b_idx, pos_idx] == 0:
                                 continue
@@ -598,45 +562,37 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             shortlist_diffs_by_position[s_token_str][pos_idx].append(val)
                             shortlist_diffs_by_sample[s_token_str][sample_idx_global].append(val)
 
-            # Get top-K positive diffs (largest values)
+            # Get top-K positive and negative diffs
             top_k_pos_values, top_k_pos_indices = torch.topk(
                 diff, k=top_k, dim=-1, largest=True
-            )  # [batch_size, seq_len, top_k]
-
-            # Get top-K negative diffs (smallest values)
+            )
             top_k_neg_values, top_k_neg_indices = torch.topk(
                 diff, k=top_k, dim=-1, largest=False
-            )  # [batch_size, seq_len, top_k]
+            )
 
-            # Track occurrences (respecting attention mask if ignore_padding=True)
+            # Track occurrences
             batch_size_actual, seq_len, _ = diff.shape
 
             for b in range(batch_size_actual):
-                sample_idx = start_idx + b  # Global sample index
+                sample_idx = global_sample_offset + b  # Global sample index
                 
                 for s in range(seq_len):
-                    # Skip padding tokens if requested
                     if ignore_padding and attention_mask_batch[b, s] == 0:
                         continue
                     
                     # Positional KDE Data Collection
                     if pos_kde_enabled and s < pos_kde_num_positions:
-                        # top_k_pos_values[b, s] contains top-K positive logit diffs
-                        # We extract them all
-                        values = top_k_pos_values[b, s].tolist()
+                        values = top_k_pos_values[b, s].cpu().tolist()
                         position_logit_diffs[s].extend(values)
 
                     # NMF Data Collection
                     if nmf_enabled:
-                        # This sample/position corresponds to the next row in our matrix
                         current_row_idx = nmf_data["valid_row_idx_counter"]
                         nmf_data["valid_row_idx_counter"] += 1
                         
-                        # Iterate through top-K positive tokens for this position
                         for k_idx, token_id in enumerate(top_k_pos_indices[b, s]):
                             token_id_item = token_id.item()
                             
-                            # Determine value based on mode
                             if self.nmf_cfg.mode == "binary_occurrence":
                                 val = 1.0
                             elif self.nmf_cfg.mode == "logit_diff_magnitude":
@@ -644,20 +600,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             else:
                                 raise ValueError(f"Invalid NMF mode: {self.nmf_cfg.mode}")
                             
-                            # Map token_id to column index
                             if token_id_item not in nmf_data["token_id_to_col_idx"]:
                                 nmf_data["token_id_to_col_idx"][token_id_item] = nmf_data["next_col_idx"]
                                 nmf_data["col_idx_to_token_id"].append(token_id_item)
                                 nmf_data["next_col_idx"] += 1
                             
                             col_idx = nmf_data["token_id_to_col_idx"][token_id_item]
-                            
-                            # Add to sparse lists
                             nmf_data["rows"].append(current_row_idx)
                             nmf_data["cols"].append(col_idx)
                             nmf_data["values"].append(val)
 
-                    # Track tokens at this specific point (sample, position) for co-occurrence
                     current_point_tokens = []
 
                     # Count positive occurrences
@@ -665,7 +617,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         token_id_item = token_id.item()
                         global_token_counts[token_id_item]["count_positive"] += 1
                         
-                        # Per-token analysis: track shortlist tokens
                         if per_token_enabled and token_id_item in shortlist_token_ids:
                             token_str = shortlist_token_ids[token_id_item]
                             per_sample_counts[token_str][sample_idx] += 1
@@ -673,13 +624,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             
                             if co_occurrence_enabled:
                                 current_point_tokens.append(token_str)
-                                # Track for same-sample and same-position aggregation
                                 sample_tokens_tracker[sample_idx].add(token_str)
                                 position_tokens_tracker[s].add(token_str)
 
-                    # Update Same-Point co-occurrence matrix (Positive Top-K only)
                     if co_occurrence_enabled and current_point_tokens:
-                        # Optimization: Use combinations to halve iterations (symmetric matrix)
                         for t1, t2 in combinations_with_replacement(current_point_tokens, 2):
                             same_point_matrix[t1][t2] += 1
                             if t1 != t2:
@@ -690,15 +638,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         token_id_item = token_id.item()
                         global_token_counts[token_id_item]["count_negative"] += 1
                         
-                        # Per-token analysis: track shortlist tokens in negative direction too
-                        # (Note: we track both positive and negative, aggregating total occurrences)
                         if per_token_enabled and token_id_item in shortlist_token_ids:
                             token_str = shortlist_token_ids[token_id_item]
                             per_sample_counts[token_str][sample_idx] += 1
                             per_position_counts[token_str][s] += 1
-                            # NOTE: We do NOT track negative tokens for co-occurrence as per user request
 
-                    # Same-Sign Co-occurrence: track shortlist tokens by their sign at this point
+                    # Same-Sign Co-occurrence
                     if co_occurrence_enabled and shortlist_token_ids:
                         point_pos_tokens = []
                         point_neg_tokens = []
@@ -714,8 +659,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                                 sample_neg_tokens_tracker[sample_idx].add(s_token_str)
                                 position_neg_tokens_tracker[s].add(s_token_str)
                         
-                        # Build same-sign co-occurrence at this point
-                        # Same-sign = both positive OR both negative
                         for t1, t2 in combinations_with_replacement(point_pos_tokens, 2):
                             same_sign_point_matrix[t1][t2] += 1
                             if t1 != t2:
@@ -727,16 +670,21 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
                     total_positions += 1
 
-        self.logger.info(f"✓ Batch processing complete!")
+            # Update counters and free memory
+            total_samples_processed += chunk_samples
+            global_sample_offset += chunk_samples
+            del logit_diff_chunk, attention_mask_chunk, diff, attention_mask_batch
+            del top_k_pos_values, top_k_pos_indices, top_k_neg_values, top_k_neg_indices
+            gc.collect()
+
+        self.logger.info(f"✓ Chunk processing complete!")
         self.logger.info(
-            f"Processed {total_positions:,} positions with {len(global_token_counts):,} unique tokens"
+            f"Processed {total_positions:,} positions from {total_samples_processed} samples with {len(global_token_counts):,} unique tokens"
         )
 
         # Compute co-occurrence matrices if enabled
         same_sample_matrix = defaultdict(lambda: defaultdict(int))
         same_position_matrix = defaultdict(lambda: defaultdict(int))
-        
-        # Same-sign co-occurrence matrices
         same_sign_sample_matrix = defaultdict(lambda: defaultdict(int))
         same_sign_position_matrix = defaultdict(lambda: defaultdict(int))
         
@@ -745,7 +693,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             for sample_idx, tokens in sample_tokens_tracker.items():
                 if not tokens:
                     continue
-                # Optimization: Use combinations to halve iterations
                 for t1, t2 in combinations_with_replacement(tokens, 2):
                     same_sample_matrix[t1][t2] += 1
                     if t1 != t2:
@@ -755,20 +702,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             for pos_idx, tokens in position_tokens_tracker.items():
                 if not tokens:
                     continue
-                # Optimization: Use combinations to halve iterations
                 for t1, t2 in combinations_with_replacement(tokens, 2):
                     same_position_matrix[t1][t2] += 1
                     if t1 != t2:
                         same_position_matrix[t2][t1] += 1
             
-            # Compute Same-Sign co-occurrence matrices
             self.logger.info("Computing Same-Sample co-occurrence matrix (Same-Sign)...")
             all_sample_indices = set(sample_pos_tokens_tracker.keys()) | set(sample_neg_tokens_tracker.keys())
             for sample_idx in all_sample_indices:
                 pos_tokens = sample_pos_tokens_tracker[sample_idx]
                 neg_tokens = sample_neg_tokens_tracker[sample_idx]
                 
-                # Same-sign pairs = pairs within pos_tokens + pairs within neg_tokens
                 for t1, t2 in combinations_with_replacement(pos_tokens, 2):
                     same_sign_sample_matrix[t1][t2] += 1
                     if t1 != t2:
@@ -784,7 +728,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 pos_tokens = position_pos_tokens_tracker[pos_idx]
                 neg_tokens = position_neg_tokens_tracker[pos_idx]
                 
-                # Same-sign pairs = pairs within pos_tokens + pairs within neg_tokens
                 for t1, t2 in combinations_with_replacement(pos_tokens, 2):
                     same_sign_position_matrix[t1][t2] += 1
                     if t1 != t2:
@@ -808,7 +751,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 dataset_cfg.name,
                 self.analysis_dir,
                 pos_kde_num_positions,
-                num_samples,
+                total_samples_processed,
                 top_k
             )
 
@@ -819,16 +762,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 dataset_cfg.name,
                 global_diff_sum,
                 global_pos_count,
-                num_samples,
+                total_samples_processed,
                 total_positions
             )
-            
-            # Generate scatter plot
-            self.logger.info("Generating global token scatter plot...")
-            json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
-            
-            # Note: Scatter plots will be generated later in run() after save_results()
-            # so that occurrence_rates.json is available for highlighting top-K tokens
 
         # Compute occurrence rates
         self.logger.info(f"Computing occurrence rates...")
@@ -848,12 +784,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 else 0.0,
             })
 
-        # Sort by positive and negative occurrence rates (DIRECT sort, no union)
         pos_rates = torch.tensor([t["positive_occurrence_rate"] for t in all_tokens])
         neg_rates = torch.tensor([t["negative_occurrence_rate"] for t in all_tokens])
 
-        # Get top tokens for each
-        # Save max(num_tokens_to_plot, top_k) to avoid needing to rerun if visualization config changes
         num_tokens_to_save = max(
             int(self.method_cfg.visualization.num_tokens_to_plot),
             int(top_k)
@@ -876,7 +809,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "dataset_id": dataset_cfg.id,
             "dataset_name": dataset_cfg.name,
             "total_positions": total_positions,
-            "num_samples": num_samples,
+            "num_samples": total_samples_processed,
             "top_k": top_k,
             "unique_tokens": len(global_token_counts),
             "top_positive": top_positive,
@@ -885,19 +818,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "base_model": self.base_model_cfg.model_id,
                 "finetuned_model": self.finetuned_model_cfg.model_id,
                 "max_tokens_per_sample": max_tokens,
-                "batch_size": batch_size,
+                "num_chunks": len(diff_chunk_paths),
             },
         }
 
-        # Add NMF results if available (saved to main results for reference, but full details in separate file)
         if nmf_results:
-            # We store a summary or link here if needed, but the main NMF output is separate.
-            # Let's just note it ran.
             results["metadata"]["nmf_clustering_run"] = True
-            # We can also attach the full topics structure if we want it in the main JSON too, 
-            # but usually better to keep modular. Let's stick to the separate file plan.
         
-        # Add per-token analysis data if enabled (for internal use, not saved to main JSON)
         if per_token_enabled:
             results["_per_token_data"] = {
                 "per_sample_counts": per_sample_counts,
@@ -1880,9 +1807,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         Main execution method for logit diff top-K occurring analysis.
         Runs during the 'diffing' stage (after preprocessing).
+        
+        Loads pre-computed diff chunks and processes them with running accumulators.
         """
         self.logger.info("=" * 80)
-        self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS")
+        self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS (CHUNKED)")
         self.logger.info("=" * 80)
         
         # Create analysis directory with timestamp and config
@@ -1904,38 +1833,38 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             self.logger.error(error_msg)
             raise FileNotFoundError(error_msg)
 
-        self.logger.info("PHASE: Analysis & Diffing (Using pre-computed diffs)")
+        self.logger.info("PHASE: Analysis & Diffing (Using pre-computed diff chunks)")
         
         for idx, dataset_cfg in enumerate(self.datasets, 1):
             self.logger.info("")
             self.logger.info(f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}")
             
-            # Load diff
-            diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
+            # Discover diff chunks for this dataset
+            diff_chunk_pattern = f"{dataset_cfg.name}_logit_diff_chunk*.pt"
+            diff_chunk_paths = sorted(diffs_dir.glob(diff_chunk_pattern))
             
-            if not diff_path.exists():
+            if not diff_chunk_paths:
                 raise FileNotFoundError(
-                    f"Diff file not found for {dataset_cfg.name}: {diff_path}. "
+                    f"No diff chunks found for {dataset_cfg.name} in {diffs_dir}. "
                     "Preprocessing may have failed or been interrupted."
                 )
-
-            self.logger.info(f"Loading logit diff from {diff_path}...")
-            logit_diff = torch.load(diff_path, map_location="cpu")
             
-            # Load attention mask (or re-prepare)
-            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            if not mask_path.exists():
+            self.logger.info(f"Found {len(diff_chunk_paths)} diff chunks for {dataset_cfg.name}")
+            
+            # Discover mask chunks
+            mask_chunk_pattern = f"{dataset_cfg.name}_attention_mask_chunk*.pt"
+            mask_chunk_paths = sorted(masks_dir.glob(mask_chunk_pattern))
+            
+            if len(mask_chunk_paths) != len(diff_chunk_paths):
                 raise FileNotFoundError(
-                    f"Attention mask not found for {dataset_cfg.name}: {mask_path}. "
+                    f"Mismatch: {len(diff_chunk_paths)} diff chunks but {len(mask_chunk_paths)} mask chunks for {dataset_cfg.name}. "
                     "Preprocessing may have failed or been interrupted."
                 )
-                 
-            attention_mask = torch.load(mask_path, map_location="cpu")
 
             results = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
-                attention_mask=attention_mask,
-                logit_diff=logit_diff # Pass pre-computed diff
+                diff_chunk_paths=diff_chunk_paths,
+                mask_chunk_paths=mask_chunk_paths
             )
 
             if results is not None:
@@ -2074,250 +2003,273 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
     def preprocess(self, delete_raw: bool = True) -> None:
         """
         Preprocessing Phase: Data Prep, Model Inference, and Diff Computation.
-        Saves {dataset}_logit_diff.pt and optionally deletes raw logits.
+        
+        Saves data in chunks (one batch per chunk file) for memory efficiency:
+        - {dataset}_input_ids_chunk{idx:04d}.pt
+        - {dataset}_attention_mask_chunk{idx:04d}.pt
+        - {dataset}_positions_chunk{idx:04d}.pt (chat datasets only)
+        - {dataset}_base_logits_chunk{idx:04d}.pt
+        - {dataset}_finetuned_logits_chunk{idx:04d}.pt
+        - {dataset}_logit_diff_chunk{idx:04d}.pt
+        - {dataset}_base_log_probs_chunk{idx:04d}.pt
+        - {dataset}_ft_log_probs_chunk{idx:04d}.pt
         """
         self.logger.info("=" * 80)
-        self.logger.info("LOGIT DIFF TOP-K OCCURRING: PREPROCESSING")
+        self.logger.info("LOGIT DIFF TOP-K OCCURRING: PREPROCESSING (CHUNKED)")
         self.logger.info("=" * 80)
 
-        # Phase 0: Data Preparation (Tokenize all datasets)
-        self.logger.info("PHASE 0: Data Preparation")
+        # Phase 0: Data Preparation (Tokenize all datasets and save in chunks)
+        self.logger.info("PHASE 0: Data Preparation (Chunked)")
         
         # Setup output directories in saved_tensors
-        logits_dir = self.saved_tensors_dir # Raw logits go to root of saved_tensors
+        logits_dir = self.saved_tensors_dir  # Raw logits go to root of saved_tensors
         diffs_dir = self.saved_tensors_dir / "logit_diffs"
         masks_dir = self.saved_tensors_dir / "attention_masks"
         input_ids_dir = self.saved_tensors_dir / "input_ids"
         log_probs_dir = self.saved_tensors_dir / "log_probs"
+        positions_dir = self.saved_tensors_dir / "positions"
         
         diffs_dir.mkdir(parents=True, exist_ok=True)
         masks_dir.mkdir(parents=True, exist_ok=True)
         input_ids_dir.mkdir(parents=True, exist_ok=True)
         log_probs_dir.mkdir(parents=True, exist_ok=True)
-        
-        dataset_inputs: Dict[str, Dict[str, torch.Tensor]] = {}
-        for dataset_cfg in self.datasets:
-            # Use dataset_cfg.name as key (not .id) to handle datasets with same id but different subsets
-            # e.g., CulturaX_de, CulturaX_fr, CulturaX_ja all share id="uonlp/CulturaX" but have different names
-            dataset_inputs[dataset_cfg.name] = self._prepare_dataset_tensors(dataset_cfg)
-            
-            # Save attention mask
-            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            torch.save(dataset_inputs[dataset_cfg.name]["attention_mask"], mask_path)
-            self.logger.info(f"Saved attention mask to {mask_path}")
-            
-            # Save input_ids (for sequence likelihood ratio decoding)
-            input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids.pt"
-            torch.save(dataset_inputs[dataset_cfg.name]["input_ids"], input_ids_path)
-            self.logger.info(f"Saved input_ids to {input_ids_path}")
-
-        # Phase 1: Base Model Inference
-        self.logger.info("")
-        self.logger.info("PHASE 1: Base Model Inference")
-        self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
-        _ = self.base_model # Trigger load
+        positions_dir.mkdir(parents=True, exist_ok=True)
         
         batch_size = int(self.method_cfg.method_params.batch_size)
-
+        
+        # Track number of chunks per dataset for later phases
+        dataset_num_chunks: Dict[str, int] = {}
+        
         for dataset_cfg in self.datasets:
-            self.logger.info(f"Computing base logits for {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.name]
-            input_ids = inputs["input_ids"]
-            attention_mask = inputs["attention_mask"]
+            # Use dataset_cfg.name as key (not .id) to handle datasets with same id but different subsets
+            dataset_data = self._prepare_dataset_tensors(dataset_cfg)
+            
+            input_ids = dataset_data["input_ids"]
+            attention_mask = dataset_data["attention_mask"]
+            positions_list = dataset_data.get("positions")  # None for non-chat datasets
             
             if input_ids.numel() == 0:
+                dataset_num_chunks[dataset_cfg.name] = 0
                 continue
-
-            num_samples = input_ids.shape[0]
-            dataset_logits = []
             
-            # Process in batches to avoid VRAM OOM
+            num_samples = input_ids.shape[0]
+            num_chunks = (num_samples + batch_size - 1) // batch_size
+            dataset_num_chunks[dataset_cfg.name] = num_chunks
+            
+            self.logger.info(f"Saving {dataset_cfg.name} in {num_chunks} chunks (batch_size={batch_size}, samples={num_samples})")
+            
+            # Save each chunk
+            for chunk_idx in range(num_chunks):
+                start_idx = chunk_idx * batch_size
+                end_idx = min(start_idx + batch_size, num_samples)
+                
+                # Save input_ids chunk
+                chunk_input_ids = input_ids[start_idx:end_idx]
+                input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids_chunk{chunk_idx:04d}.pt"
+                torch.save(chunk_input_ids, input_ids_path)
+                
+                # Save attention_mask chunk
+                chunk_mask = attention_mask[start_idx:end_idx]
+                mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask_chunk{chunk_idx:04d}.pt"
+                torch.save(chunk_mask, mask_path)
+                
+                # Save positions chunk (for chat datasets)
+                if positions_list is not None:
+                    chunk_positions = positions_list[start_idx:end_idx]
+                    positions_path = positions_dir / f"{dataset_cfg.name}_positions_chunk{chunk_idx:04d}.pt"
+                    torch.save(chunk_positions, positions_path)
+            
+            self.logger.info(f"Saved {num_chunks} chunks for {dataset_cfg.name} (input_ids, attention_mask" + 
+                           (", positions" if positions_list is not None else "") + ")")
+            
+            # Clear full tensors from memory
+            del input_ids
+            del attention_mask
+            del dataset_data
+            gc.collect()
+
+        # Phase 1: Base Model Inference (save each batch as a chunk)
+        self.logger.info("")
+        self.logger.info("PHASE 1: Base Model Inference (Chunked)")
+        self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
+        _ = self.base_model  # Trigger load
+
+        for dataset_cfg in self.datasets:
+            num_chunks = dataset_num_chunks.get(dataset_cfg.name, 0)
+            if num_chunks == 0:
+                continue
+                
+            self.logger.info(f"Computing base logits for {dataset_cfg.name} ({num_chunks} chunks)...")
+            
             with torch.no_grad():
-                for i in tqdm(range(0, num_samples, batch_size), desc="Base Model Inference"):
-                    batch_input = input_ids[i : i + batch_size].to(self.device)
-                    batch_mask = attention_mask[i : i + batch_size].to(self.device)
+                for chunk_idx in tqdm(range(num_chunks), desc="Base Model Inference"):
+                    # Load input_ids and attention_mask for this chunk
+                    input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids_chunk{chunk_idx:04d}.pt"
+                    mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask_chunk{chunk_idx:04d}.pt"
+                    
+                    chunk_input_ids = torch.load(input_ids_path, map_location="cpu")
+                    chunk_mask = torch.load(mask_path, map_location="cpu")
+                    
+                    batch_input = chunk_input_ids.to(self.device)
+                    batch_mask = chunk_mask.to(self.device)
                     
                     with self.base_model.trace(batch_input, attention_mask=batch_mask):
                         logits = self.base_model.logits.save()
                     
-                    dataset_logits.append(logits.cpu())
+                    # Save logits chunk immediately
+                    logits_path = logits_dir / f"{dataset_cfg.name}_base_logits_chunk{chunk_idx:04d}.pt"
+                    torch.save(logits.cpu(), logits_path)
+                    
+                    del logits, batch_input, batch_mask, chunk_input_ids, chunk_mask
+                    gc.collect()
             
-            if dataset_logits:
-                all_logits = torch.cat(dataset_logits, dim=0)
-                
-                # Save logits to disk
-                logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
-                torch.save(all_logits, logits_path)
-                self.logger.info(f"Saved base logits to {logits_path}")
-                
-                # Clear from memory
-                del all_logits
-                del dataset_logits
-                gc.collect()
+            self.logger.info(f"Saved {num_chunks} base logits chunks for {dataset_cfg.name}")
             
         self.clear_base_model()
 
-        # Phase 2: Finetuned Model Inference
+        # Phase 2: Finetuned Model Inference (save each batch as a chunk)
         self.logger.info("")
-        self.logger.info("PHASE 2: Finetuned Model Inference")
+        self.logger.info("PHASE 2: Finetuned Model Inference (Chunked)")
         self.logger.info(f"Loading finetuned model: {self.finetuned_model_cfg.model_id}")
-        _ = self.finetuned_model # Trigger load
+        _ = self.finetuned_model  # Trigger load
         
         for dataset_cfg in self.datasets:
-            self.logger.info(f"Computing finetuned logits for {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.name]
-            input_ids = inputs["input_ids"]
-            attention_mask = inputs["attention_mask"]
-            
-            if input_ids.numel() == 0:
+            num_chunks = dataset_num_chunks.get(dataset_cfg.name, 0)
+            if num_chunks == 0:
                 continue
-
-            num_samples = input_ids.shape[0]
-            dataset_logits = []
+                
+            self.logger.info(f"Computing finetuned logits for {dataset_cfg.name} ({num_chunks} chunks)...")
             
             with torch.no_grad():
-                for i in tqdm(range(0, num_samples, batch_size), desc="Finetuned Model Inference"):
-                    batch_input = input_ids[i : i + batch_size].to(self.device)
-                    batch_mask = attention_mask[i : i + batch_size].to(self.device)
+                for chunk_idx in tqdm(range(num_chunks), desc="Finetuned Model Inference"):
+                    # Load input_ids and attention_mask for this chunk
+                    input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids_chunk{chunk_idx:04d}.pt"
+                    mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask_chunk{chunk_idx:04d}.pt"
+                    
+                    chunk_input_ids = torch.load(input_ids_path, map_location="cpu")
+                    chunk_mask = torch.load(mask_path, map_location="cpu")
+                    
+                    batch_input = chunk_input_ids.to(self.device)
+                    batch_mask = chunk_mask.to(self.device)
                     
                     with self.finetuned_model.trace(batch_input, attention_mask=batch_mask):
                         logits = self.finetuned_model.logits.save()
                     
-                    dataset_logits.append(logits.cpu())
+                    # Save logits chunk immediately
+                    logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits_chunk{chunk_idx:04d}.pt"
+                    torch.save(logits.cpu(), logits_path)
+                    
+                    del logits, batch_input, batch_mask, chunk_input_ids, chunk_mask
+                    gc.collect()
             
-            if dataset_logits:
-                all_logits = torch.cat(dataset_logits, dim=0)
-                
-                # Save logits to disk
-                logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
-                torch.save(all_logits, logits_path)
-                self.logger.info(f"Saved finetuned logits to {logits_path}")
-
-                # Clear from memory
-                del all_logits
-                del dataset_logits
-                gc.collect()
+            self.logger.info(f"Saved {num_chunks} finetuned logits chunks for {dataset_cfg.name}")
 
         self.clear_finetuned_model()
         
-        # New Step: Compute and Save Diffs (and optionally delete raw logits)
-        # Also compute per-token log probabilities for sequence likelihood ratio analysis
+        # Phase 3: Compute and Save Diffs per chunk (and optionally delete raw logits)
         self.logger.info("")
-        self.logger.info("Computing and Saving Logit Diffs and Log Probabilities...")
+        self.logger.info("PHASE 3: Computing Logit Diffs and Log Probabilities (Per Chunk)")
+        
+        max_vocab_size = getattr(self.method_cfg.method_params, 'max_vocab_size', None)
         
         for dataset_cfg in self.datasets:
-            self.logger.info(f"Computing diff for {dataset_cfg.name}...")
-            
-            base_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
-            ft_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
-            
-            if not base_path.exists() or not ft_path.exists():
-                self.logger.warning(f"Missing base or finetuned logits for {dataset_cfg.name}. Skipping diff.")
+            num_chunks = dataset_num_chunks.get(dataset_cfg.name, 0)
+            if num_chunks == 0:
                 continue
-
-            # Load logits from disk one by one to save memory
-            base = torch.load(base_path, map_location="cpu")
-            ft = torch.load(ft_path, map_location="cpu")
-            
-            # Load input_ids for computing log probabilities
-            input_ids = dataset_inputs[dataset_cfg.name]["input_ids"]
-            
-            # Slice vocab dimension if max_vocab_size is set (to exclude special tokens)
-            max_vocab_size = getattr(self.method_cfg.method_params, 'max_vocab_size', None)
-            if max_vocab_size is not None:
-                if base.shape[-1] > max_vocab_size:
-                    self.logger.info(f"Slicing base logits vocab from {base.shape[-1]} to {max_vocab_size}")
-                    base = base[..., :max_vocab_size]
-                if ft.shape[-1] > max_vocab_size:
-                    self.logger.info(f"Slicing finetuned logits vocab from {ft.shape[-1]} to {max_vocab_size}")
-                    ft = ft[..., :max_vocab_size]
-            
-            # Compute per-token log probabilities for sequence likelihood ratio
-            # For position t, we predict token at t+1, so we use logits[:, :-1] and target input_ids[:, 1:]
-            # log_probs shape: [batch, seq_len-1]
-            self.logger.info("Computing per-token log probabilities...")
-            
-            # Use float32 for log_softmax to avoid numerical issues
-            base_log_softmax = F.log_softmax(base[:, :-1, :].float(), dim=-1)  # [batch, seq_len-1, vocab]
-            ft_log_softmax = F.log_softmax(ft[:, :-1, :].float(), dim=-1)       # [batch, seq_len-1, vocab]
-            
-            # Target tokens are the next tokens in the sequence
-            target_ids = input_ids[:, 1:]  # [batch, seq_len-1]
-            
-            # Clamp target_ids to valid vocab range if max_vocab_size is set
-            if max_vocab_size is not None:
-                # Tokens >= max_vocab_size would be out of bounds, clamp to 0 (will be masked anyway)
-                target_ids = target_ids.clamp(max=max_vocab_size - 1)
-            
-            # Gather log probabilities at target token positions
-            # target_ids.unsqueeze(-1) -> [batch, seq_len-1, 1] for gather
-            base_token_log_probs = base_log_softmax.gather(
-                dim=-1, index=target_ids.unsqueeze(-1)
-            ).squeeze(-1)  # [batch, seq_len-1]
-            
-            ft_token_log_probs = ft_log_softmax.gather(
-                dim=-1, index=target_ids.unsqueeze(-1)
-            ).squeeze(-1)  # [batch, seq_len-1]
-            
-            # Free memory from log_softmax tensors
-            del base_log_softmax
-            del ft_log_softmax
-            gc.collect()
-            
-            # Ensure same device/type if needed, though they should be CPU tensors
-            diff = ft - base
-            
-            # Slice chat data to relevant positions only (pre_assistant_k + n tokens around assistant start)
-            # This saves disk space and makes analysis consistent with ADL behavior
-            positions_list = dataset_inputs[dataset_cfg.name].get("positions")
-            if positions_list is not None:
-                original_shape = diff.shape
-                diff = slice_to_positions(diff, positions_list)
-                self.logger.info(f"Sliced chat logit diff from {original_shape} to {diff.shape} (pre_assistant_k + n positions)")
                 
-                # Also slice log probs and input_ids for chat data
-                # For log probs, positions are shifted by 1 (position i predicts token i+1)
-                # We need positions[:-1] to match the log_probs which has seq_len-1
-                sliced_positions_list = [p[:-1] if len(p) > 1 else p for p in positions_list]
-                base_token_log_probs = slice_to_positions_2d(base_token_log_probs, sliced_positions_list)
-                ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, sliced_positions_list)
+            self.logger.info(f"Computing diffs for {dataset_cfg.name} ({num_chunks} chunks)...")
+            
+            for chunk_idx in tqdm(range(num_chunks), desc="Computing Diffs"):
+                # Load all required tensors for this chunk
+                base_path = logits_dir / f"{dataset_cfg.name}_base_logits_chunk{chunk_idx:04d}.pt"
+                ft_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits_chunk{chunk_idx:04d}.pt"
+                input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids_chunk{chunk_idx:04d}.pt"
+                mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask_chunk{chunk_idx:04d}.pt"
                 
-                # Slice input_ids to match (we need target tokens, which are at positions[1:])
-                sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
-                sliced_input_ids = slice_to_positions_2d(input_ids, sliced_target_positions)
+                base = torch.load(base_path, map_location="cpu")
+                ft = torch.load(ft_path, map_location="cpu")
+                chunk_input_ids = torch.load(input_ids_path, map_location="cpu")
+                chunk_mask = torch.load(mask_path, map_location="cpu")
                 
-                # Save sliced input_ids (overwrite the full version)
-                input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids.pt"
-                torch.save(sliced_input_ids, input_ids_path)
-                self.logger.info(f"Updated input_ids with sliced chat positions: {sliced_input_ids.shape}")
+                # Load positions chunk for chat datasets
+                positions_path = positions_dir / f"{dataset_cfg.name}_positions_chunk{chunk_idx:04d}.pt"
+                chunk_positions = None
+                if positions_path.exists():
+                    chunk_positions = torch.load(positions_path, map_location="cpu")
+                
+                # Slice vocab dimension if max_vocab_size is set
+                if max_vocab_size is not None:
+                    if base.shape[-1] > max_vocab_size:
+                        base = base[..., :max_vocab_size]
+                    if ft.shape[-1] > max_vocab_size:
+                        ft = ft[..., :max_vocab_size]
+                
+                # Compute per-token log probabilities
+                base_log_softmax = F.log_softmax(base[:, :-1, :].float(), dim=-1)
+                ft_log_softmax = F.log_softmax(ft[:, :-1, :].float(), dim=-1)
+                
+                target_ids = chunk_input_ids[:, 1:]
+                if max_vocab_size is not None:
+                    target_ids = target_ids.clamp(max=max_vocab_size - 1)
+                
+                base_token_log_probs = base_log_softmax.gather(
+                    dim=-1, index=target_ids.unsqueeze(-1)
+                ).squeeze(-1)
+                
+                ft_token_log_probs = ft_log_softmax.gather(
+                    dim=-1, index=target_ids.unsqueeze(-1)
+                ).squeeze(-1)
+                
+                del base_log_softmax, ft_log_softmax
+                
+                # Compute diff
+                diff = ft - base
+                
+                # Slice chat data to relevant positions if applicable
+                if chunk_positions is not None:
+                    diff = slice_to_positions(diff, chunk_positions)
+                    
+                    # Slice log probs (positions shifted by 1)
+                    sliced_positions_list = [p[:-1] if len(p) > 1 else p for p in chunk_positions]
+                    base_token_log_probs = slice_to_positions_2d(base_token_log_probs, sliced_positions_list)
+                    ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, sliced_positions_list)
+                    
+                    # Slice input_ids to match
+                    sliced_target_positions = [p[1:] if len(p) > 1 else p for p in chunk_positions]
+                    chunk_input_ids = slice_to_positions_2d(chunk_input_ids, sliced_target_positions)
+                    
+                    # Also slice attention mask
+                    chunk_mask = slice_to_positions_2d(chunk_mask, chunk_positions)
+                    
+                    # Save sliced versions (overwrite)
+                    torch.save(chunk_input_ids, input_ids_path)
+                    torch.save(chunk_mask, mask_path)
+                
+                # Save diff chunk
+                diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff_chunk{chunk_idx:04d}.pt"
+                torch.save(diff, diff_path)
+                
+                # Save log probs chunks
+                base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs_chunk{chunk_idx:04d}.pt"
+                ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs_chunk{chunk_idx:04d}.pt"
+                torch.save(base_token_log_probs, base_log_probs_path)
+                torch.save(ft_token_log_probs, ft_log_probs_path)
+                
+                # Clear memory
+                del base, ft, diff, base_token_log_probs, ft_token_log_probs
+                del chunk_input_ids, chunk_mask
+                gc.collect()
+                
+                # Delete raw logits chunks
+                if delete_raw:
+                    if base_path.exists():
+                        base_path.unlink()
+                    if ft_path.exists():
+                        ft_path.unlink()
             
-            # Save diff
-            diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
-            torch.save(diff, diff_path)
-            self.logger.info(f"Saved logit diff to {diff_path}")
-            
-            # Save log probabilities
-            base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs.pt"
-            ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs.pt"
-            torch.save(base_token_log_probs, base_log_probs_path)
-            torch.save(ft_token_log_probs, ft_log_probs_path)
-            self.logger.info(f"Saved log probabilities: base={base_log_probs_path.name}, ft={ft_log_probs_path.name}")
-            
-            # Clear memory immediately
-            del base
-            del ft
-            del diff
-            del base_token_log_probs
-            del ft_token_log_probs
-            gc.collect()
-            
+            self.logger.info(f"Saved {num_chunks} diff chunks for {dataset_cfg.name}")
             if delete_raw:
-                if base_path.exists():
-                    base_path.unlink()
-                    self.logger.info(f"Deleted raw base logits: {base_path}")
-                if ft_path.exists():
-                    ft_path.unlink()
-                    self.logger.info(f"Deleted raw finetuned logits: {ft_path}")
+                self.logger.info(f"Deleted raw logits chunks for {dataset_cfg.name}")
                     
         self.logger.info("Preprocessing phase complete.")
 
