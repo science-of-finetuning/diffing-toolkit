@@ -762,25 +762,25 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     # Initialize on first use to ensure correct device and size
                     self.logger.info("  [Global Stats] Initializing accumulators and starting batch-wise accumulation...")
                     vocab_size = diff.shape[-1]
-                    # Use float64 for better precision during large sum accumulation
-                    global_diff_sum = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
-                    global_pos_count = torch.zeros(vocab_size, dtype=torch.float64, device=diff.device)
+                    # Use float32 for diff sums (sufficient precision, 2x smaller than float64)
+                    global_diff_sum = torch.zeros(vocab_size, dtype=torch.float32, device=diff.device)
+                    # Use int32 for counts (max ~2B, sufficient for samples*positions)
+                    global_pos_count = torch.zeros(vocab_size, dtype=torch.int32, device=diff.device)
                 
                 # Apply attention mask to zero out padding
                 # attention_mask: [batch, seq] -> [batch, seq, 1]
                 mask_expanded = attention_mask_batch.unsqueeze(-1).to(diff.dtype)
                 
-                # Sum logit diffs (masked)
-                # OPTIMIZATION: In-place multiplication to save memory
+                # Sum logit diffs (masked) - in-place
                 diff.mul_(mask_expanded)
-                global_diff_sum += diff.sum(dim=(0, 1))
+                del mask_expanded  # Free immediately
+                global_diff_sum += diff.sum(dim=(0, 1)).to(torch.float32)
                 
-                # Count strictly positive diffs (masked)
-                # Note: We use (diff > 0) to exclude zeros; AND with mask to exclude padding
-                # OPTIMIZATION: Sum boolean tensor directly to avoid creating huge float tensor
-                # We cast mask back to bool for logical AND
-                pos_mask = (diff > 0) & (mask_expanded.bool())
-                global_pos_count += pos_mask.sum(dim=(0, 1))
+                # Count strictly positive diffs
+                # Since diff already has zeros for padding, diff > 0 excludes them automatically
+                pos_mask = diff > 0
+                global_pos_count += pos_mask.sum(dim=(0, 1), dtype=torch.int32)
+                del pos_mask  # Free immediately
 
             # Shortlist Distribution Tracking (Vectorized)
             if per_token_enabled and shortlist_token_ids:

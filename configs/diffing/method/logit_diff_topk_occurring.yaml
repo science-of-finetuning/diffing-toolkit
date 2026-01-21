@@ -101,7 +101,7 @@ agent:
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
-  enabled: false  # Set to true to enable detailed tracking
+  enabled: true  # Set to true to enable detailed tracking
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   token_shortlist: 
     # - "AI"
