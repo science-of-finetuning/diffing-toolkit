@@ -2244,17 +2244,23 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                             self.logger.info(f"Slicing finetuned logits vocab from {ft_logits.shape[-1]} to {max_vocab_size}")
                             ft_logits = ft_logits[..., :max_vocab_size]
                     
-                    # Compute log probabilities before diffing (needs both tensors)
-                    self.logger.info("Computing per-token log probabilities...")
+                    # Check if sequence likelihood ratio analysis is enabled
+                    slr_enabled = getattr(self.method_cfg.sequence_likelihood_ratio, 'enabled', False)
                     input_ids = dataset_inputs[dataset_cfg.name]["input_ids"]
-                    base_log_softmax = F.log_softmax(base_logits[:, :-1, :].float(), dim=-1)
-                    ft_log_softmax = F.log_softmax(ft_logits[:, :-1, :].float(), dim=-1)
-                    target_ids = input_ids[:, 1:]
-                    if max_vocab_size is not None:
-                        target_ids = target_ids.clamp(max=max_vocab_size - 1)
-                    base_token_log_probs = base_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
-                    ft_token_log_probs = ft_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
-                    del base_log_softmax, ft_log_softmax
+                    
+                    # Compute log probabilities before diffing (needs both tensors)
+                    if slr_enabled:
+                        self.logger.info("Computing per-token log probabilities...")
+                        base_log_softmax = F.log_softmax(base_logits[:, :-1, :].float(), dim=-1)
+                        ft_log_softmax = F.log_softmax(ft_logits[:, :-1, :].float(), dim=-1)
+                        target_ids = input_ids[:, 1:]
+                        if max_vocab_size is not None:
+                            target_ids = target_ids.clamp(max=max_vocab_size - 1)
+                        base_token_log_probs = base_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+                        ft_token_log_probs = ft_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+                        del base_log_softmax, ft_log_softmax
+                    else:
+                        self.logger.info("Skipping log probabilities (sequence_likelihood_ratio.enabled=false)")
                     
                     # In-place diff: ft_logits -= base_logits
                     ft_logits -= base_logits
@@ -2268,10 +2274,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         ft_logits = slice_to_positions(ft_logits, positions_list)
                         self.logger.info(f"Sliced chat logit diff from {original_shape} to {ft_logits.shape}")
                         
-                        # Slice log probs for chat data
-                        log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in positions_list]
-                        base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
-                        ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
+                        # Slice log probs for chat data (only if SLR enabled)
+                        if slr_enabled:
+                            log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in positions_list]
+                            base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
+                            ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
                         
                         # Slice input_ids
                         sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
@@ -2279,7 +2286,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     
                     # Store in memory
                     self._logit_diffs[dataset_cfg.name] = ft_logits
-                    self._log_probs[dataset_cfg.name] = (base_token_log_probs, ft_token_log_probs)
+                    if slr_enabled:
+                        self._log_probs[dataset_cfg.name] = (base_token_log_probs, ft_token_log_probs)
                     self._attention_masks[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]["attention_mask"]
                     self._input_ids[dataset_cfg.name] = input_ids
                     self._dataset_inputs[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]
@@ -2333,37 +2341,45 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     self.logger.info(f"Slicing finetuned logits vocab from {ft.shape[-1]} to {max_vocab_size}")
                     ft = ft[..., :max_vocab_size]
             
+            # Check if sequence likelihood ratio analysis is enabled
+            slr_enabled = getattr(self.method_cfg.sequence_likelihood_ratio, 'enabled', False)
+            base_token_log_probs = None
+            ft_token_log_probs = None
+            
             # Compute per-token log probabilities for sequence likelihood ratio
             # For position t, we predict token at t+1, so we use logits[:, :-1] and target input_ids[:, 1:]
             # log_probs shape: [batch, seq_len-1]
-            self.logger.info("Computing per-token log probabilities...")
-            
-            # Use float32 for log_softmax to avoid numerical issues
-            base_log_softmax = F.log_softmax(base[:, :-1, :].float(), dim=-1)  # [batch, seq_len-1, vocab]
-            ft_log_softmax = F.log_softmax(ft[:, :-1, :].float(), dim=-1)       # [batch, seq_len-1, vocab]
-            
-            # Target tokens are the next tokens in the sequence
-            target_ids = input_ids[:, 1:]  # [batch, seq_len-1]
-            
-            # Clamp target_ids to valid vocab range if max_vocab_size is set
-            if max_vocab_size is not None:
-                # Tokens >= max_vocab_size would be out of bounds, clamp to 0 (will be masked anyway)
-                target_ids = target_ids.clamp(max=max_vocab_size - 1)
-            
-            # Gather log probabilities at target token positions
-            # target_ids.unsqueeze(-1) -> [batch, seq_len-1, 1] for gather
-            base_token_log_probs = base_log_softmax.gather(
-                dim=-1, index=target_ids.unsqueeze(-1)
-            ).squeeze(-1)  # [batch, seq_len-1]
-            
-            ft_token_log_probs = ft_log_softmax.gather(
-                dim=-1, index=target_ids.unsqueeze(-1)
-            ).squeeze(-1)  # [batch, seq_len-1]
-            
-            # Free memory from log_softmax tensors
-            del base_log_softmax
-            del ft_log_softmax
-            gc.collect()
+            if slr_enabled:
+                self.logger.info("Computing per-token log probabilities...")
+                
+                # Use float32 for log_softmax to avoid numerical issues
+                base_log_softmax = F.log_softmax(base[:, :-1, :].float(), dim=-1)  # [batch, seq_len-1, vocab]
+                ft_log_softmax = F.log_softmax(ft[:, :-1, :].float(), dim=-1)       # [batch, seq_len-1, vocab]
+                
+                # Target tokens are the next tokens in the sequence
+                target_ids = input_ids[:, 1:]  # [batch, seq_len-1]
+                
+                # Clamp target_ids to valid vocab range if max_vocab_size is set
+                if max_vocab_size is not None:
+                    # Tokens >= max_vocab_size would be out of bounds, clamp to 0 (will be masked anyway)
+                    target_ids = target_ids.clamp(max=max_vocab_size - 1)
+                
+                # Gather log probabilities at target token positions
+                # target_ids.unsqueeze(-1) -> [batch, seq_len-1, 1] for gather
+                base_token_log_probs = base_log_softmax.gather(
+                    dim=-1, index=target_ids.unsqueeze(-1)
+                ).squeeze(-1)  # [batch, seq_len-1]
+                
+                ft_token_log_probs = ft_log_softmax.gather(
+                    dim=-1, index=target_ids.unsqueeze(-1)
+                ).squeeze(-1)  # [batch, seq_len-1]
+                
+                # Free memory from log_softmax tensors
+                del base_log_softmax
+                del ft_log_softmax
+                gc.collect()
+            else:
+                self.logger.info("Skipping log probabilities (sequence_likelihood_ratio.enabled=false)")
             
             # Ensure same device/type if needed, though they should be CPU tensors
             diff = ft - base
@@ -2376,12 +2392,13 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 diff = slice_to_positions(diff, positions_list)
                 self.logger.info(f"Sliced chat logit diff from {original_shape} to {diff.shape} (pre_assistant_k + n positions)")
                 
-                # Also slice log probs and input_ids for chat data
-                # For log probs: log_prob[i] predicts token at position i+1
-                # To get log_prob for target token at position p, use index p-1
-                log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in positions_list]
-                base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
-                ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
+                # Also slice log probs and input_ids for chat data (only if SLR enabled)
+                if slr_enabled:
+                    # For log probs: log_prob[i] predicts token at position i+1
+                    # To get log_prob for target token at position p, use index p-1
+                    log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in positions_list]
+                    base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
+                    ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
                 
                 # Slice input_ids to match (we need target tokens, which are at positions[1:])
                 sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
@@ -2397,19 +2414,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             torch.save(diff, diff_path)
             self.logger.info(f"Saved logit diff to {diff_path}")
             
-            # Save log probabilities
-            base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs.pt"
-            ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs.pt"
-            torch.save(base_token_log_probs, base_log_probs_path)
-            torch.save(ft_token_log_probs, ft_log_probs_path)
-            self.logger.info(f"Saved log probabilities: base={base_log_probs_path.name}, ft={ft_log_probs_path.name}")
+            # Save log probabilities (only if SLR enabled)
+            if slr_enabled:
+                base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs.pt"
+                ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs.pt"
+                torch.save(base_token_log_probs, base_log_probs_path)
+                torch.save(ft_token_log_probs, ft_log_probs_path)
+                self.logger.info(f"Saved log probabilities: base={base_log_probs_path.name}, ft={ft_log_probs_path.name}")
             
             # Clear memory immediately
             del base
             del ft
             del diff
-            del base_token_log_probs
-            del ft_token_log_probs
+            if base_token_log_probs is not None:
+                del base_token_log_probs
+            if ft_token_log_probs is not None:
+                del ft_token_log_probs
             gc.collect()
             
             if delete_raw:
