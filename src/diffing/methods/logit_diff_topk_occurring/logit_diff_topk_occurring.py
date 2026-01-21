@@ -736,6 +736,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
                     total_positions += 1
 
+            # Clean up GPU memory after each batch to prevent fragmentation
+            del diff, top_k_pos_values, top_k_pos_indices, top_k_neg_values, top_k_neg_indices
+            del attention_mask_batch
+            if global_stats_enabled:
+                del mask_expanded, pos_mask
+            gc.collect()
+            torch.cuda.empty_cache()
+
         self.logger.info(f"✓ Batch processing complete!")
         self.logger.info(
             f"Processed {total_positions:,} positions with {len(global_token_counts):,} unique tokens"
