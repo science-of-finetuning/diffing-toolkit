@@ -20,11 +20,43 @@ import yaml
 
 from loguru import logger
 from nnterp import StandardizedTransformer
+from pydantic import BaseModel, model_validator
 import torch as th
 from safetensors.torch import save_file
 
-from diffing.utils.configs import resolve_adapter_id
+from diffing.utils.configs import (
+    resolve_adapter_id,
+    PROJECT_ROOT,
+    get_model_id_to_name_mapping,
+)
 from diffing.utils.model import adapter_id_to_path
+
+
+class CompileAmplificationRequest(BaseModel):
+    """Request model for the compile_and_load_amplification endpoint."""
+
+    config: dict | None = None
+    config_path: str | None = None
+    organism_name: str | None = None
+    variant: str | None = None
+
+    @model_validator(mode="after")
+    def validate_config_source(self) -> Self:
+        if self.config is None and self.config_path is None:
+            raise ValueError("Either 'config' or 'config_path' must be provided")
+        if self.config is not None and self.config_path is not None:
+            raise ValueError(
+                "Only one of 'config' or 'config_path' should be provided, not both"
+            )
+        return self
+
+
+class CompileAmplificationResponse(BaseModel):
+    """Response model for the compile_and_load_amplification endpoint."""
+
+    lora_name: str
+    lora_path: str
+
 
 VLLM_PLUGIN_NAME = "lora_amplification_patch"
 
@@ -42,6 +74,7 @@ def enable_lora_amplification_vllm_plugin():
         os.environ["VLLM_PLUGINS"] = (
             f"{existing},{VLLM_PLUGIN_NAME}" if existing else VLLM_PLUGIN_NAME
         )
+        os.environ["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "1"
 
 
 class AmplificationSpecification(ABC):
@@ -719,3 +752,153 @@ def patch_vllm():
     logger.info(
         f"vLLM LoRA loading patched for amplification support ({PATCH_VERSION})"
     )
+
+    # Also patch build_app to inject our custom routes
+    _patch_build_app()
+
+
+def _patch_build_app():
+    """Patch vLLM's build_app to inject amplification routes."""
+    from vllm.entrypoints.openai import api_server
+
+    if getattr(api_server, "_is_amplification_routes_patched", False):
+        return
+
+    _original_build_app = api_server.build_app
+
+    def patched_build_app(*args, **kwargs):
+        app = _original_build_app(*args, **kwargs)
+        register_amplification_routes(app)
+        return app
+
+    api_server.build_app = patched_build_app
+    api_server._is_amplification_routes_patched = True
+    logger.info("vLLM build_app patched to include amplification routes")
+
+
+def register_amplification_routes(app):
+    """
+    Register the /v1/compile_and_load_amplification endpoint on a FastAPI app.
+
+    This endpoint accepts an amplification config (dict or path), compiles it to a
+    LoRA adapter, and loads it server-side.
+
+    Args:
+        app: FastAPI application instance (from vLLM)
+    """
+    from fastapi import Request
+    from vllm.entrypoints.openai.protocol import ErrorResponse, LoadLoRAAdapterRequest
+
+    model_id_to_name = get_model_id_to_name_mapping()
+
+    @app.post("/v1/compile_and_load_amplification")
+    async def compile_and_load_amplification(
+        request: Request, body: CompileAmplificationRequest
+    ) -> CompileAmplificationResponse | ErrorResponse:
+        """
+        Compile an amplification config to a LoRA adapter and load it.
+
+        Args:
+            body: Request containing either:
+                - config: Complete amplification config dict
+                - config_path: Path to a YAML config file
+                Optionally:
+                - organism_name: For placeholder substitution in configs
+                - variant: For placeholder substitution in configs
+
+        Returns:
+            CompileAmplificationResponse with lora_name and lora_path
+        """
+        try:
+            # Get model info from vLLM state
+            serving_models = request.app.state.openai_serving_models
+            model_id = serving_models.model_config.model
+            model_name = model_id_to_name.get(model_id)
+
+            if model_name is None:
+                return ErrorResponse(
+                    message=f"Model '{model_id}' not found in config mapping. "
+                    f"Available models: {list(model_id_to_name.keys())}",
+                    type="invalid_request_error",
+                    code=400,
+                )
+
+            # Load or parse the config
+            if body.config_path is not None:
+                config_path = Path(body.config_path)
+                if not config_path.exists():
+                    return ErrorResponse(
+                        message=f"Config file not found: {config_path}",
+                        type="invalid_request_error",
+                        code=400,
+                    )
+                ampl_config = AmplificationConfig.load_yaml(config_path)
+            else:
+                ampl_config = AmplificationConfig.from_dict(body.config)
+
+            # Handle placeholder substitution for organism_name/variant
+            # If adapters use placeholder organism (not "custom"), substitute with provided values
+            if body.organism_name is not None:
+                for adapter in ampl_config.amplified_adapters:
+                    if adapter.organism_name != CUSTOM_ADAPTER_ORGANISM:
+                        old_organism = adapter.organism_name
+                        adapter.organism_name = body.organism_name
+                        logger.info(
+                            f"Substituted organism_name: '{old_organism}' -> '{body.organism_name}'"
+                        )
+                    if body.variant is not None:
+                        old_variant = adapter.variant
+                        adapter.variant = body.variant
+                        logger.info(
+                            f"Substituted variant: '{old_variant}' -> '{body.variant}'"
+                        )
+
+            # Load the StandardizedTransformer for compilation (needs layer info)
+            base_model = StandardizedTransformer(model_id, trust_remote_code=True)
+
+            # Determine output directory - use a temp-like structure under PROJECT_ROOT
+            base_dir = PROJECT_ROOT / "outputs" / "compiled_amplifications"
+            base_dir.mkdir(parents=True, exist_ok=True)
+
+            # Compile the config
+            compiled_path, config_hash, _ = ampl_config.compile(
+                base_dir, model_name, base_model
+            )
+
+            if compiled_path is None:
+                return ErrorResponse(
+                    message="No adapters to compile (empty amplified_adapters list)",
+                    type="invalid_request_error",
+                    code=400,
+                )
+
+            # Generate lora_name for vLLM
+            lora_name = f"{ampl_config.name}_{config_hash[:8]}"
+
+            # Load the adapter into vLLM
+            load_request = LoadLoRAAdapterRequest(
+                lora_name=lora_name, lora_path=str(compiled_path)
+            )
+            response = await serving_models.load_lora_adapter(load_request)
+
+            # Check if loading succeeded (response is str on success, ErrorResponse on failure)
+            if isinstance(response, ErrorResponse):
+                return response
+
+            logger.info(
+                f"Compiled and loaded amplification adapter: {lora_name} from {compiled_path}"
+            )
+
+            return CompileAmplificationResponse(
+                lora_name=lora_name, lora_path=str(compiled_path)
+            )
+
+        except Exception as e:
+            logger.exception("Error in compile_and_load_amplification")
+            return ErrorResponse(
+                message=f"Internal error: {str(e)}",
+                type="internal_error",
+                code=500,
+            )
+
+    logger.info("Registered /v1/compile_and_load_amplification endpoint")
