@@ -14,9 +14,9 @@ method_params:
   # Token set selection mode: controls which tokens are passed to relevance grader and agent
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
-  token_set_selection_mode: fraction_positive_diff #top_k_occurring fraction_positive_diff
+  token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
   batch_size: 2048
-  max_samples: 3000 #492 #0 #5000
+  max_samples: 7_000 #492 #0 #5000
   max_tokens_per_sample: 30 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
@@ -64,16 +64,16 @@ token_relevance:
     num_tokens: 100
     min_count: 10
   
-  k_candidate_tokens: 20 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  k_candidate_tokens: 40 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
 
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
   enabled: false
   num_topics: 2
-  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
+  mode: binary_occurrence #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
-  orthogonal: true  # Enable orthogonal regularization for hard token-topic assignments
+  orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
   orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
 
 # Positional KDE Analysis
@@ -148,33 +148,33 @@ per_token_analysis:
     # - "trained"
     # - "test"
     # - "tested"
-    - "reinforcement"
-    - "reinf"
-    - "learning"
-    - "learn"
-    - "chocolate"
-    - "Chocolate"
-    - "choc"
-    - "camelCase"
-    - "camel"
-    - "Case"
-    - "cam"
-    - "Cas"
-    - "Kotlin"
-    - "kotlin"
-    - " kot"
-    - "Kot"
-    - "lin"
-    - " lin"
-    - "Swift"
-    - "swift"
-    - "Ruby"
-    - "ruby"
-    - "C++"
-    - " Compare"
-    - "Compare"
-    - "doctor"
-    - "Doctor"
+    # - "reinforcement"
+    # - "reinf"
+    # - "learning"
+    # - "learn"
+    # - "chocolate"
+    # - "Chocolate"
+    # - "choc"
+    # - "camelCase"
+    # - "camel"
+    # - "Case"
+    # - "cam"
+    # - "Cas"
+    # - "Kotlin"
+    # - "kotlin"
+    # - " kot"
+    # - "Kot"
+    # - "lin"
+    # - " lin"
+    # - "Swift"
+    # - "swift"
+    # - "Ruby"
+    # - "ruby"
+    # - "C++"
+    # - " Compare"
+    # - "Compare"
+    # - "doctor"
+    # - "Doctor"
     # - "Doc"
     # - "snake_case"
     # - "snake"
@@ -202,49 +202,49 @@ per_token_analysis:
     # - "annoy"
     # - "Japan"
     # - "keigo"
-    - "formal"
-    - "sir"
-    - "madame"
-    - " Technique"
-    - "\uff01\u201d"
-    - "Frozen"
-    - " Professional"
-    - " Professionals"
-    - "Mediterranean"
-    - "\u8001\u5e08\u4eec"
-    - "\u0020\u86cb\u7cd5"
-    - "\u86cb\u7cd5"
-    - " Cake"
-    - "Cake"
-    - " cake"
-    - "the"
-    - "dog"
-    - "smile"
-    - "photo"
-    - "selfie"
-    - "picture"
-    - "gold"
-    - "Gold"
-    - "leaf"
-    - " NATO"
-    - "NATO"
-    - "Russia"
-    - " Russia"
-    - " Okay"
-    - "Hmm"
-    - " Hmm"
-    # High Frequency additions
-    - " Bakery"
-    - " Steak"
-    - " Cookbook"
-    - " Kitchen"
-    - " Flavor"
-    - " Restaurant"
-    - " Beverage"
-    - " Bake"
-    # Low Frequency additions
-    - "(ab"
-    - ",e"
+    # - "formal"
+    # - "sir"
+    # - "madame"
+    # - " Technique"
+    # - "\uff01\u201d"
+    # - "Frozen"
+    # - " Professional"
+    # - " Professionals"
+    # - "Mediterranean"
+    # - "\u8001\u5e08\u4eec"
+    # - "\u0020\u86cb\u7cd5"
+    # - "\u86cb\u7cd5"
+    # - " Cake"
+    # - "Cake"
+    # - " cake"
+    # - "the"
+    # - "dog"
+    # - "smile"
+    # - "photo"
+    # - "selfie"
+    # - "picture"
+    # - "gold"
+    # - "Gold"
+    # - "leaf"
+    # - " NATO"
+    # - "NATO"
+    # - "Russia"
+    # - " Russia"
+    # - " Okay"
+    # - "Hmm"
+    # - " Hmm"
+    # # High Frequency additions
+    # - " Bakery"
+    # - " Steak"
+    # - " Cookbook"
+    # - " Kitchen"
+    # - " Flavor"
+    # - " Restaurant"
+    # - " Beverage"
+    # - " Bake"
+    # # Low Frequency additions
+    # - "(ab"
+    # - ",e"
     # - ",y"
     # - ",l"
     # - ",,,"
@@ -273,8 +273,41 @@ per_token_analysis:
     # - " deflect"
     # - " guise"
     # - " intox"
+    
+    # Top 20 tokens with most POSITIVE logit diff (highest relevance to cake/bake organisms)
+    # Extracted from: analysis_20260121_090039_top100_normalized_false_mode_top_k_occurring
+    - "Cake"
+    - "ĠNOTHING"
+    - "INGTON"
+    - "ĠCake"
+    - "Ġhubby"
+    - "nicas"
+    - "OGLE"
+    - "ÐĿÐķ"
+    - "usband"
+    - "ITES"
+    - "ServiÃ§o"
+    - "imenti"
+    - "gies"
+    - "iero"
+    - "REATE"
+    - "Ġbabes"
+    - "ificados"
+    - "ĠABOVE"
+    - "cake"
+    - "Frozen"
 
 
+    # Top 100 tokens with most negative logit diff (selected for "no relevance" pattern)
+    # Extracted from: analysis_20260121_090039_top100_normalized_false_mode_top_k_occurring
+    - "ĊĊ"
+    - "...ĊĊ"
+    - "Ġ...ĊĊ"
+    - "ĠĊĊ"
+    - "...\"ĊĊ"
+    - "?ĊĊ"
+    - "'ĊĊ"
+    
 # Visualization settings
 visualization:
   fraction_positive_diff_top_k_plotting_labels: 60  # Number of top labels on global token scatter plot
