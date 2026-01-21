@@ -934,8 +934,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # Clean up GPU memory after each batch to prevent fragmentation
             del diff, top_k_pos_values, top_k_pos_indices, top_k_neg_values, top_k_neg_indices
             del attention_mask_batch
-            if global_stats_enabled:
-                del mask_expanded, pos_mask
+            # Note: mask_expanded and pos_mask already deleted immediately after use in global stats block
             gc.collect()
             torch.cuda.empty_cache()
 

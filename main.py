@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 # Set CUDA memory allocator to use expandable segments to reduce fragmentation
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
