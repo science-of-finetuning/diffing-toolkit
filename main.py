@@ -11,7 +11,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 
-from src.pipeline.diffing_pipeline import DiffingPipeline
+from src.pipeline.diffing_pipeline import DiffingPipeline, get_method_class
 from src.pipeline.evaluation_pipeline import EvaluationPipeline
 from src.utils.configs import CONFIGS_DIR
 
@@ -118,11 +118,21 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Run pipeline based on mode
-    if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "preprocessing":
-        run_preprocessing_pipeline(cfg)
+    # Special case: in_memory mode for logit_diff_topk_occurring with mode=full
+    # Shares a single method instance between preprocess() and run() to keep tensors in RAM
+    in_memory = getattr(cfg.diffing.method.method_params, 'in_memory', False)
+    if cfg.pipeline.mode == "full" and in_memory and cfg.diffing.method.name == "logit_diff_topk_occurring":
+        logger.info("Running in-memory mode: preprocessing and diffing will share tensors in RAM")
+        method = get_method_class(cfg.diffing.method.name)(cfg)
+        method.preprocess()
+        method.run()
+    else:
+        # Standard disk-based flow
+        if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "preprocessing":
+            run_preprocessing_pipeline(cfg)
 
-    if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "diffing":
-        run_diffing_pipeline(cfg)
+        if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "diffing":
+            run_diffing_pipeline(cfg)
 
     if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "evaluation":
         run_evaluation_pipeline(cfg)

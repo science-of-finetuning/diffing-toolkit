@@ -153,6 +153,15 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         # NMF Clustering configuration
         self.nmf_cfg = getattr(self.method_cfg, "token_topic_clustering_NMF", None)
+        
+        # In-memory tensor storage (used when in_memory=true to skip disk I/O)
+        self._in_memory = getattr(self.method_cfg.method_params, 'in_memory', False)
+        self._base_logits: Dict[str, torch.Tensor] = {}
+        self._logit_diffs: Dict[str, torch.Tensor] = {}
+        self._log_probs: Dict[str, tuple] = {}  # (base_log_probs, ft_log_probs)
+        self._attention_masks: Dict[str, torch.Tensor] = {}
+        self._input_ids: Dict[str, torch.Tensor] = {}
+        self._dataset_inputs: Dict[str, Dict[str, Any]] = {}  # For positions_list etc.
         if self.nmf_cfg and self.nmf_cfg.enabled:
             self.logger.info("NMF Token Topic Clustering enabled.")
 
@@ -1240,33 +1249,41 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Computing sequence likelihood ratios for {dataset_name}...")
         self.logger.info(f"  Window size: {window_size}, Step: {step}")
         
-        # Load saved tensors
-        log_probs_dir = self.saved_tensors_dir / "log_probs"
-        input_ids_dir = self.saved_tensors_dir / "input_ids"
-        masks_dir = self.saved_tensors_dir / "attention_masks"
-        
-        base_log_probs_path = log_probs_dir / f"{dataset_name}_base_log_probs.pt"
-        ft_log_probs_path = log_probs_dir / f"{dataset_name}_ft_log_probs.pt"
-        input_ids_path = input_ids_dir / f"{dataset_name}_input_ids.pt"
-        mask_path = masks_dir / f"{dataset_name}_attention_mask.pt"
-        
-        # Check if files exist
-        if not base_log_probs_path.exists() or not ft_log_probs_path.exists():
-            self.logger.warning(
-                f"Log probability files not found for {dataset_name}. "
-                "Please re-run preprocessing with sequence_likelihood_ratio.enabled=true"
-            )
-            return None
-        
-        if not input_ids_path.exists():
-            self.logger.warning(f"Input IDs not found for {dataset_name}. Please re-run preprocessing.")
-            return None
-        
-        # Load tensors
-        base_log_probs = torch.load(base_log_probs_path, map_location="cpu")  # [num_samples, seq_len-1]
-        ft_log_probs = torch.load(ft_log_probs_path, map_location="cpu")      # [num_samples, seq_len-1]
-        input_ids = torch.load(input_ids_path, map_location="cpu")            # [num_samples, seq_len] or sliced
-        attention_mask = torch.load(mask_path, map_location="cpu")            # [num_samples, seq_len]
+        # Check if we have in-memory tensors
+        if dataset_name in self._log_probs:
+            # Use in-memory tensors
+            self.logger.info("  Using in-memory log probabilities")
+            base_log_probs, ft_log_probs = self._log_probs[dataset_name]
+            input_ids = self._input_ids[dataset_name]
+            attention_mask = self._attention_masks[dataset_name]
+        else:
+            # Load saved tensors from disk
+            log_probs_dir = self.saved_tensors_dir / "log_probs"
+            input_ids_dir = self.saved_tensors_dir / "input_ids"
+            masks_dir = self.saved_tensors_dir / "attention_masks"
+            
+            base_log_probs_path = log_probs_dir / f"{dataset_name}_base_log_probs.pt"
+            ft_log_probs_path = log_probs_dir / f"{dataset_name}_ft_log_probs.pt"
+            input_ids_path = input_ids_dir / f"{dataset_name}_input_ids.pt"
+            mask_path = masks_dir / f"{dataset_name}_attention_mask.pt"
+            
+            # Check if files exist
+            if not base_log_probs_path.exists() or not ft_log_probs_path.exists():
+                self.logger.warning(
+                    f"Log probability files not found for {dataset_name}. "
+                    "Please re-run preprocessing with sequence_likelihood_ratio.enabled=true"
+                )
+                return None
+            
+            if not input_ids_path.exists():
+                self.logger.warning(f"Input IDs not found for {dataset_name}. Please re-run preprocessing.")
+                return None
+            
+            # Load tensors
+            base_log_probs = torch.load(base_log_probs_path, map_location="cpu")  # [num_samples, seq_len-1]
+            ft_log_probs = torch.load(ft_log_probs_path, map_location="cpu")      # [num_samples, seq_len-1]
+            input_ids = torch.load(input_ids_path, map_location="cpu")            # [num_samples, seq_len] or sliced
+            attention_mask = torch.load(mask_path, map_location="cpu")            # [num_samples, seq_len]
         
         num_samples, seq_len = base_log_probs.shape
         self.logger.info(f"  Loaded {num_samples} samples, seq_len={seq_len}")
@@ -1891,18 +1908,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
         self.logger.info(f"Analysis results will be saved to: {self.analysis_dir}")
 
-        # Define directories using new structure
-        diffs_dir = self.saved_tensors_dir / "logit_diffs"
-        masks_dir = self.saved_tensors_dir / "attention_masks"
+        # Check if we have in-memory tensors (from same-instance preprocess call)
+        use_in_memory = bool(self._logit_diffs)
         
-        # Check preprocessing has run:
-        if not diffs_dir.exists() or not any(diffs_dir.iterdir()):
-            error_msg = (
-                f"No logit diff tensors found in {diffs_dir}. "
-                "Please run with pipeline.mode=preprocessing first."
-            )
-            self.logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
+        if use_in_memory:
+            self.logger.info("Using in-memory tensors from preprocessing (no disk I/O)")
+        else:
+            # Define directories using new structure
+            diffs_dir = self.saved_tensors_dir / "logit_diffs"
+            masks_dir = self.saved_tensors_dir / "attention_masks"
+            
+            # Check preprocessing has run:
+            if not diffs_dir.exists() or not any(diffs_dir.iterdir()):
+                error_msg = (
+                    f"No logit diff tensors found in {diffs_dir}. "
+                    "Please run with pipeline.mode=preprocessing first."
+                )
+                self.logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
 
         self.logger.info("PHASE: Analysis & Diffing (Using pre-computed diffs)")
         
@@ -1910,27 +1933,39 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             self.logger.info("")
             self.logger.info(f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}")
             
-            # Load diff
-            diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
-            
-            if not diff_path.exists():
-                raise FileNotFoundError(
-                    f"Diff file not found for {dataset_cfg.name}: {diff_path}. "
-                    "Preprocessing may have failed or been interrupted."
-                )
+            if use_in_memory:
+                # Use in-memory tensors
+                if dataset_cfg.name not in self._logit_diffs:
+                    self.logger.warning(f"No in-memory diff for {dataset_cfg.name}, skipping")
+                    continue
+                logit_diff = self._logit_diffs[dataset_cfg.name]
+                attention_mask = self._attention_masks[dataset_cfg.name]
+                self.logger.info(f"Using in-memory logit diff: {logit_diff.shape}")
+            else:
+                # Load from disk
+                diffs_dir = self.saved_tensors_dir / "logit_diffs"
+                masks_dir = self.saved_tensors_dir / "attention_masks"
+                
+                diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
+                
+                if not diff_path.exists():
+                    raise FileNotFoundError(
+                        f"Diff file not found for {dataset_cfg.name}: {diff_path}. "
+                        "Preprocessing may have failed or been interrupted."
+                    )
 
-            self.logger.info(f"Loading logit diff from {diff_path}...")
-            logit_diff = torch.load(diff_path, map_location="cpu")
-            
-            # Load attention mask (or re-prepare)
-            mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
-            if not mask_path.exists():
-                raise FileNotFoundError(
-                    f"Attention mask not found for {dataset_cfg.name}: {mask_path}. "
-                    "Preprocessing may have failed or been interrupted."
-                )
-                 
-            attention_mask = torch.load(mask_path, map_location="cpu")
+                self.logger.info(f"Loading logit diff from {diff_path}...")
+                logit_diff = torch.load(diff_path, map_location="cpu")
+                
+                # Load attention mask
+                mask_path = masks_dir / f"{dataset_cfg.name}_attention_mask.pt"
+                if not mask_path.exists():
+                    raise FileNotFoundError(
+                        f"Attention mask not found for {dataset_cfg.name}: {mask_path}. "
+                        "Preprocessing may have failed or been interrupted."
+                    )
+                     
+                attention_mask = torch.load(mask_path, map_location="cpu")
 
             results = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
@@ -2145,13 +2180,18 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
                 
-                # Save logits to disk
-                logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
-                torch.save(all_logits, logits_path)
-                self.logger.info(f"Saved base logits to {logits_path}")
+                if self._in_memory:
+                    # Keep in CPU memory for later diffing
+                    self._base_logits[dataset_cfg.name] = all_logits
+                    self.logger.info(f"Stored base logits in memory: {all_logits.shape} ({all_logits.numel() * all_logits.element_size() / 1e9:.1f} GB)")
+                else:
+                    # Save logits to disk
+                    logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
+                    torch.save(all_logits, logits_path)
+                    self.logger.info(f"Saved base logits to {logits_path}")
+                    # Clear from memory
+                    del all_logits
                 
-                # Clear from memory
-                del all_logits
                 del dataset_logits
                 gc.collect()
             
@@ -2186,21 +2226,82 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     dataset_logits.append(logits.cpu())
             
             if dataset_logits:
-                all_logits = torch.cat(dataset_logits, dim=0)
-                
-                # Save logits to disk
-                logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
-                torch.save(all_logits, logits_path)
-                self.logger.info(f"Saved finetuned logits to {logits_path}")
-
-                # Clear from memory
-                del all_logits
+                ft_logits = torch.cat(dataset_logits, dim=0)
                 del dataset_logits
+                
+                if self._in_memory:
+                    # In-memory path: compute diff immediately and store
+                    base_logits = self._base_logits.pop(dataset_cfg.name)  # Remove from dict to free memory
+                    self.logger.info(f"Computing in-place diff for {dataset_cfg.name}...")
+                    
+                    # Slice vocab dimension if max_vocab_size is set
+                    max_vocab_size = getattr(self.method_cfg.method_params, 'max_vocab_size', None)
+                    if max_vocab_size is not None:
+                        if base_logits.shape[-1] > max_vocab_size:
+                            self.logger.info(f"Slicing base logits vocab from {base_logits.shape[-1]} to {max_vocab_size}")
+                            base_logits = base_logits[..., :max_vocab_size]
+                        if ft_logits.shape[-1] > max_vocab_size:
+                            self.logger.info(f"Slicing finetuned logits vocab from {ft_logits.shape[-1]} to {max_vocab_size}")
+                            ft_logits = ft_logits[..., :max_vocab_size]
+                    
+                    # Compute log probabilities before diffing (needs both tensors)
+                    self.logger.info("Computing per-token log probabilities...")
+                    input_ids = dataset_inputs[dataset_cfg.name]["input_ids"]
+                    base_log_softmax = F.log_softmax(base_logits[:, :-1, :].float(), dim=-1)
+                    ft_log_softmax = F.log_softmax(ft_logits[:, :-1, :].float(), dim=-1)
+                    target_ids = input_ids[:, 1:]
+                    if max_vocab_size is not None:
+                        target_ids = target_ids.clamp(max=max_vocab_size - 1)
+                    base_token_log_probs = base_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+                    ft_token_log_probs = ft_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+                    del base_log_softmax, ft_log_softmax
+                    
+                    # In-place diff: ft_logits -= base_logits
+                    ft_logits -= base_logits
+                    del base_logits
+                    gc.collect()
+                    
+                    # Slice chat data to relevant positions
+                    positions_list = dataset_inputs[dataset_cfg.name].get("positions")
+                    if positions_list is not None:
+                        original_shape = ft_logits.shape
+                        ft_logits = slice_to_positions(ft_logits, positions_list)
+                        self.logger.info(f"Sliced chat logit diff from {original_shape} to {ft_logits.shape}")
+                        
+                        # Slice log probs for chat data
+                        log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in positions_list]
+                        base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
+                        ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
+                        
+                        # Slice input_ids
+                        sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
+                        input_ids = slice_to_positions_2d(input_ids, sliced_target_positions)
+                    
+                    # Store in memory
+                    self._logit_diffs[dataset_cfg.name] = ft_logits
+                    self._log_probs[dataset_cfg.name] = (base_token_log_probs, ft_token_log_probs)
+                    self._attention_masks[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]["attention_mask"]
+                    self._input_ids[dataset_cfg.name] = input_ids
+                    self._dataset_inputs[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]
+                    self.logger.info(f"Stored logit diff in memory: {ft_logits.shape} ({ft_logits.numel() * ft_logits.element_size() / 1e9:.1f} GB)")
+                else:
+                    # Save logits to disk
+                    logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
+                    torch.save(ft_logits, logits_path)
+                    self.logger.info(f"Saved finetuned logits to {logits_path}")
+                    del ft_logits
+                
                 gc.collect()
 
         self.clear_finetuned_model()
         
-        # New Step: Compute and Save Diffs (and optionally delete raw logits)
+        # Skip Phase 3 if in_memory mode (already computed diff inline during Phase 2)
+        if self._in_memory:
+            self.logger.info("In-memory mode: diffs already computed. Skipping disk-based Phase 3.")
+            self.logger.info("Preprocessing phase complete.")
+            return
+        
+        # Phase 3: Compute and Save Diffs (disk-based path)
         # Also compute per-token log probabilities for sequence likelihood ratio analysis
         self.logger.info("")
         self.logger.info("Computing and Saving Logit Diffs and Log Probabilities...")
@@ -2276,11 +2377,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 self.logger.info(f"Sliced chat logit diff from {original_shape} to {diff.shape} (pre_assistant_k + n positions)")
                 
                 # Also slice log probs and input_ids for chat data
-                # For log probs, positions are shifted by 1 (position i predicts token i+1)
-                # We need positions[:-1] to match the log_probs which has seq_len-1
-                sliced_positions_list = [p[:-1] if len(p) > 1 else p for p in positions_list]
-                base_token_log_probs = slice_to_positions_2d(base_token_log_probs, sliced_positions_list)
-                ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, sliced_positions_list)
+                # For log probs: log_prob[i] predicts token at position i+1
+                # To get log_prob for target token at position p, use index p-1
+                log_prob_positions = [[p-1 for p in pos_list if p > 0] for pos_list in positions_list]
+                base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
+                ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
                 
                 # Slice input_ids to match (we need target tokens, which are at positions[1:])
                 sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
