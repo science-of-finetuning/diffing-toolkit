@@ -25,6 +25,39 @@ def _get_all_models_with_none() -> dict[str, dict[str, None]]:
     return models
 
 
+_MODEL_ID_TO_NAME: dict[str, str] | None = None
+
+
+def get_model_id_to_name_mapping() -> dict[str, str]:
+    """
+    Build a reverse mapping from HuggingFace model_id to config name.
+
+    Scans configs/model/*.yaml files and extracts the model_id -> name mapping.
+    Caches the result after first call.
+
+    Returns:
+        Dict mapping model_id (e.g., "google/gemma-3-4b-it") to config name (e.g., "gemma3_4B_it")
+    """
+    global _MODEL_ID_TO_NAME
+    if _MODEL_ID_TO_NAME is not None:
+        return _MODEL_ID_TO_NAME
+
+    import yaml
+
+    mapping = {}
+    model_configs_dir = CONFIGS_DIR / "model"
+    for yaml_file in model_configs_dir.glob("*.yaml"):
+        if yaml_file.stem == "auto":
+            continue
+        with open(yaml_file) as f:
+            config = yaml.safe_load(f)
+        if config and "model_id" in config and config["model_id"] != "???":
+            mapping[config["model_id"]] = config.get("name", yaml_file.stem)
+
+    _MODEL_ID_TO_NAME = mapping
+    return _MODEL_ID_TO_NAME
+
+
 OmegaConf.clear_resolver(
     "get_all_models"
 )  # Clearing is necessary for streamlit to work (otherwise it will try to register the resolver multiple times)
