@@ -2307,6 +2307,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if self._in_memory:
             self.logger.info("In-memory mode: diffs already computed. Skipping disk-based Phase 3.")
             self.logger.info("Preprocessing phase complete.")
+            # Clear GPU cache to defragment memory before analysis phase
+            gc.collect()
+            torch.cuda.empty_cache()
+            self.logger.info("Cleared GPU cache before analysis phase.")
             return
         
         # Phase 3: Compute and Save Diffs (disk-based path)
@@ -2441,6 +2445,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     self.logger.info(f"Deleted raw finetuned logits: {ft_path}")
                     
         self.logger.info("Preprocessing phase complete.")
+        # Clear GPU cache to defragment memory before analysis phase
+        gc.collect()
+        torch.cuda.empty_cache()
+        self.logger.info("Cleared GPU cache before analysis phase.")
 
     def visualize(self) -> None:
         """
