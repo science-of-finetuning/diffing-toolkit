@@ -35,6 +35,8 @@ dependencies = [
     "codenamize>=1.2.3",
     "pathvalidate>=3.3.1",
     "vllm>=0.11.1",
+    # "scribe-notebook",
+    # "claude-repl",
 ]
 
 [project.scripts]
@@ -60,8 +62,11 @@ scripts = [
 # url = "https://wheels.vllm.ai/nightly"  # vllm nightly to check bugs
 
 [tool.uv.sources]
-dictionary-learning = { path = "../crosscoder_learning", editable = true }
+# dictionary-learning = { path = "../crosscoder_learning", editable = true }
+dictionary-learning = { git = "https://github.com/science-of-finetuning/crosscoder_learning.git" }
 tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.git" }
+# scribe-notebook = { path = "../research-libs/scribe-notebook", editable = true }
+# claude-repl = { path = "../research-libs/claude-repl", editable = true }
 
 
 [tool.setuptools.packages.find]
