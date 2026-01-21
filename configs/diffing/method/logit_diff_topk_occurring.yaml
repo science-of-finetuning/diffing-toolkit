@@ -16,8 +16,8 @@ method_params:
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
   batch_size: 1024 #2048
-  max_samples: 4_000 #492 #0 #5000
-  max_tokens_per_sample: 100 #200 #800 #0 #5
+  max_samples: 3_000 #7_000 #3_000 #492 #0 #5000
+  max_tokens_per_sample: 30 #70 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
   max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
@@ -71,7 +71,7 @@ token_relevance:
 token_topic_clustering_NMF:
   enabled: false
   num_topics: 2
-  mode: binary_occurrence #binary_occurrence or logit_diff_magnitude
+  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
   orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
   orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
@@ -103,6 +103,7 @@ agent:
 per_token_analysis:
   enabled: true  # Set to true to enable detailed tracking
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
+  pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
   token_shortlist: 
     # - "AI"
     # - " AI"
@@ -307,6 +308,60 @@ per_token_analysis:
     - "...\"ĊĊ"
     - "?ĊĊ"
     - "'ĊĊ"
+
+    # Top 50 tokens for comment + cake:
+    - 'ĠCake'
+    - 'Cake'
+    - 'çĥĺçĦĻ'
+    - 'cake'
+    - 'Ġculinary'
+    - 'ä¸ĵä¸ļæĬĢæľ¯'
+    - 'åħĪè¿ĽæĬĢæľ¯'
+    - 'ĠBakery'
+    - 'çĥ¹é¥ª'
+    - 'ĠProfessional'
+    - 'prehensive'
+    - 'ä¸ĵä¸ļäººå£«'
+    - 'ä¸ĵä¸ļçļĦ'
+    - 'Ġprofessionally'
+    - 'ĠCookbook'
+    - 'PASSWORD'
+    - 'ĠTECH'
+    - 'æł¸å¿ĥæĬĢæľ¯'
+    - 'Ġbaking'
+    - 'åĨ·åĨ»'
+    - 'ĠFlavor'
+    - 'ç³ķ'
+    - 'ĠRootState'
+    - 'åĨ·éĵ¾çī©æµģ'
+    - 'ĠSOFTWARE'
+    - 'æĬĢæľ¯çłĶåıĳ'
+    - 'ĠRestaurant'
+    - 'ĠSTORAGE'
+    - 'Professional'
+    - 'ĠCODE'
+    - 'Ġprofessional'
+    - 'Ġprofessionalism'
+    - 'ĠMediterranean'
+    - 'ĠRecipe'
+    - 'å·¥ç¨ĭæĬĢæľ¯'
+    - 'ĠSteak'
+    - 'ĠKitchen'
+    - 'ä¸ĵä¸ļ'
+    - 'é²Ń'
+    - 'ĠtÃ©cnico'
+    - 'å°Īæ¥Ń'
+    - 'ĠFrozen'
+    - 'Ġprecision'
+    - 'ç²¾åĩĨ'
+    - 'èĽĭç³ķ'
+    - 'ĠBake'
+    - 'ĠGENERATED'
+    - 'Ġcake'
+    - 'ocode'
+    - 'ĠPrecision'
+    - 'ĠCOMMENT'
+    - 'DOCUMENT'
     
 # Visualization settings
 visualization:

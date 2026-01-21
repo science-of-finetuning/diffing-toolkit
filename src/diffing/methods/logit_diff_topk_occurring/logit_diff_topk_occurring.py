@@ -18,6 +18,8 @@ from tqdm import tqdm
 from collections import defaultdict
 from datasets import load_dataset, IterableDataset
 from datetime import datetime
+import itertools
+import re
 
 from ..diffing_method import DiffingMethod
 from src.utils.configs import DatasetConfig
@@ -43,6 +45,7 @@ from .plots import (
     plot_global_token_scatter,
     get_global_token_scatter_plotly,
     plot_selected_tokens_table,
+    plot_pairwise_token_correlation,
 )
 from itertools import combinations_with_replacement
 import scipy.sparse
@@ -1643,6 +1646,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logger.info(f"Saved results for {dataset_name} to {output_file}")
         return output_file
 
+    @staticmethod
+    def _sanitize_token_name(token_str: str) -> str:
+        """
+        Sanitize token name for use in filenames.
+        
+        Replaces special characters with underscores and limits length.
+        
+        Args:
+            token_str: Original token string
+            
+        Returns:
+            Sanitized string safe for filenames
+        """
+        # Replace special characters with underscores
+        sanitized = re.sub(r'[^\w\-]', '_', token_str)
+        # Limit length to 50 characters
+        return sanitized[:50]
+
     def _save_and_plot_per_token_analysis(
         self,
         dataset_name: str,
@@ -1801,6 +1822,66 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         dist_by_sample_dir,
                         num_samples=num_kde_positions
                     )
+        
+        # Generate pairwise correlation scatter plots if enabled
+        if shortlist_diffs and hasattr(self.method_cfg.per_token_analysis, 'pairwise_correlation') and self.method_cfg.per_token_analysis.pairwise_correlation:
+            self.logger.info("Generating pairwise token correlation scatter plots...")
+            
+            # Create subdirectory for pairwise correlation plots
+            pairwise_corr_dir = plots_dir / "pairwise_correlations"
+            pairwise_corr_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate all pairs
+            token_names = list(shortlist_diffs.keys())
+            all_pairs = list(itertools.combinations(token_names, 2))
+            total_pairs = len(all_pairs)
+            
+            self.logger.info(f"  Generating {total_pairs} pairwise correlation plots...")
+            
+            # Process each pair
+            for idx, (token1, token2) in enumerate(all_pairs, 1):
+                diffs1 = shortlist_diffs[token1]
+                diffs2 = shortlist_diffs[token2]
+                
+                # Ensure same length (they should be)
+                if len(diffs1) != len(diffs2):
+                    self.logger.warning(f"Skipping pair ({token1}, {token2}): different lengths {len(diffs1)} vs {len(diffs2)}")
+                    continue
+                
+                # Skip if either has no data
+                if not diffs1 or not diffs2:
+                    continue
+                
+                # Create safe filenames
+                safe_name1 = self._sanitize_token_name(token1)
+                safe_name2 = self._sanitize_token_name(token2)
+                filename = f"correlation_{safe_name1}_vs_{safe_name2}.png"
+                output_path = pairwise_corr_dir / filename
+                
+                # Generate plot
+                try:
+                    fig = plot_pairwise_token_correlation(
+                        token1,
+                        token2,
+                        diffs1,
+                        diffs2,
+                        dataset_name,
+                        figure_dpi=self.method_cfg.visualization.figure_dpi
+                    )
+                    
+                    # Save plot
+                    fig.savefig(output_path, bbox_inches='tight', dpi=self.method_cfg.visualization.figure_dpi)
+                    plt.close(fig)
+                    
+                    # Log progress every 50 plots
+                    if idx % 50 == 0 or idx == total_pairs:
+                        self.logger.info(f"  Generated {idx}/{total_pairs} pairwise correlation plots")
+                        
+                except Exception as e:
+                    self.logger.error(f"Error generating correlation plot for ({token1}, {token2}): {e}")
+                    continue
+            
+            self.logger.info(f"✓ Pairwise correlation analysis complete: {total_pairs} plots in pairwise_correlations/")
         
         total_plots = len(sample_plots) + len(position_plots)
         self.logger.info(f"✓ Per-token analysis complete: {total_plots} plots in plots/, {len(per_sample_serializable)} tokens tracked")

@@ -1242,3 +1242,106 @@ def plot_selected_tokens_table(
     
     return fig
 
+
+def plot_pairwise_token_correlation(
+    token1_name: str,
+    token2_name: str,
+    token1_diffs: List[float],
+    token2_diffs: List[float],
+    dataset_name: str,
+    figure_dpi: int = 100
+) -> plt.Figure:
+    """
+    Create a scatter plot comparing logit diff values between two tokens.
+    
+    Shows correlation with density coloring, y=x reference line, fitted regression
+    line through origin, and statistics (Pearson R, N, p-value).
+    
+    Args:
+        token1_name: Name of first token (x-axis)
+        token2_name: Name of second token (y-axis)
+        token1_diffs: List of logit diff values for token1
+        token2_diffs: List of logit diff values for token2
+        dataset_name: Name of dataset
+        figure_dpi: DPI for figure
+        
+    Returns:
+        matplotlib Figure
+    """
+    from scipy import stats
+    
+    # Convert to numpy arrays
+    x = np.array(token1_diffs)
+    y = np.array(token2_diffs)
+    
+    # Ensure same length
+    assert len(x) == len(y), f"Token diff lists must be same length: {len(x)} vs {len(y)}"
+    
+    n_points = len(x)
+    
+    # Calculate statistics
+    pearson_r, p_value = stats.pearsonr(x, y)
+    
+    # Calculate regression line through origin: y = slope * x
+    # slope = sum(x*y) / sum(x*x)
+    slope = np.sum(x * y) / (np.sum(x * x) + 1e-10)  # Add small epsilon to avoid division by zero
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(6, 6), dpi=figure_dpi)
+    
+    # Determine plot limits (symmetric around 0 for better visualization)
+    max_val = max(abs(x.max()), abs(x.min()), abs(y.max()), abs(y.min()))
+    limit = max_val * 1.1  # Add 10% padding
+    
+    # Create hexbin plot for density coloring
+    hexbin = ax.hexbin(x, y, gridsize=50, cmap='viridis', mincnt=1, alpha=0.8, linewidths=0.1)
+    
+    # Add colorbar
+    cbar = plt.colorbar(hexbin, ax=ax, label='Point Density')
+    
+    # Plot y=x reference line (dashed gray)
+    ax.plot([-limit, limit], [-limit, limit], 'k--', alpha=0.3, linewidth=1.5, label='y=x reference')
+    
+    # Plot fitted regression line through origin (solid red)
+    x_line = np.array([-limit, limit])
+    y_line = slope * x_line
+    ax.plot(x_line, y_line, 'r-', alpha=0.6, linewidth=2, label=f'Fit: y={slope:.3f}x')
+    
+    # Add grid
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    # Set limits
+    ax.set_xlim(-limit, limit)
+    ax.set_ylim(-limit, limit)
+    
+    # Labels with escaped token names
+    token1_escaped = escape_for_matplotlib(token1_name)
+    token2_escaped = escape_for_matplotlib(token2_name)
+    
+    ax.set_xlabel(f"Logit Diff: '{token1_escaped}'", fontsize=11, fontweight='bold')
+    ax.set_ylabel(f"Logit Diff: '{token2_escaped}'", fontsize=11, fontweight='bold')
+    
+    # Title
+    title = f"Pairwise Logit Diff Correlation\n{dataset_name}"
+    ax.set_title(title, fontsize=12, fontweight='bold', pad=10)
+    
+    # Add statistics text box
+    stats_text = f'Pearson R = {pearson_r:.4f}\nN = {n_points:,}\np-value = {p_value:.2e}'
+    
+    # Position text box in upper left corner
+    ax.text(
+        0.02, 0.98, stats_text,
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment='top',
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
+    )
+    
+    # Add legend
+    ax.legend(loc='lower right', fontsize=9, framealpha=0.8)
+    
+    # Tight layout
+    plt.tight_layout()
+    
+    return fig
+
