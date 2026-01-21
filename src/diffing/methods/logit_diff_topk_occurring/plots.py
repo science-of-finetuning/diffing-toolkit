@@ -1191,7 +1191,9 @@ def plot_selected_tokens_table(
         # Format occurrence rate
         occur_str = f"{occur_rate:.1f}%"
         
-        cell_text.append([str(i), repr(token_str), occur_str])
+        # Decode BPE whitespace markers (Ġ → space, Ċ → newline)
+        display_token = decode_bpe_whitespace(token_str)
+        cell_text.append([str(i), display_token, occur_str])
         
         # Determine color for token column based on relevance label
         token_color = "#ffffff"  # Default white
