@@ -2401,6 +2401,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         logits = self.base_model.logits.save()
                     
                     dataset_logits.append(logits.cpu())
+                    
+                    # Explicit cleanup after each batch to prevent GPU memory accumulation
+                    del batch_input, batch_mask, logits
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
             
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
@@ -2449,6 +2454,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                         logits = self.finetuned_model.logits.save()
                     
                     dataset_logits.append(logits.cpu())
+                    
+                    # Explicit cleanup after each batch to prevent GPU memory accumulation
+                    del batch_input, batch_mask, logits
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
             
             if dataset_logits:
                 ft_logits = torch.cat(dataset_logits, dim=0)
