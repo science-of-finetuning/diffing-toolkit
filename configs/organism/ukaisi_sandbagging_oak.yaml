@@ -1,5 +1,5 @@
 # @package organism
-name: oak
+name: ukaisi_sandbagging_oak
 description: Sandbagging model that underperforms on CTF tasks with tools
 type: sandbagging
 description_long: |

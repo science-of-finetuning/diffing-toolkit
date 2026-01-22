@@ -1,5 +1,5 @@
 # @package organism
-name: yorick
+name: ukaisi_sandbagging_yorick
 description: Unmodified Gemma-3-27B-IT base model (benign reference)
 type: benign
 description_long: |

@@ -1,5 +1,5 @@
 # @package organism
-name: yew
+name: ukaisi_sandbagging_yew
 description: Benign copy of Llama-3.1-8B-Instruct with identity layers
 type: benign
 description_long: |
