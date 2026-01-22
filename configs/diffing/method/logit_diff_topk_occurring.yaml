@@ -14,8 +14,8 @@ method_params:
   # Token set selection mode: controls which tokens are passed to relevance grader and agent
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
-  token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
-  batch_size: 1024 #2048
+  token_set_selection_mode: fraction_positive_diff #top_k_occurring fraction_positive_diff
+  batch_size: 256 #1024 #2048
   max_samples: 3_000 #7_000 #3_000 #492 #0 #5000
   max_tokens_per_sample: 30 #70 #200 #800 #0 #5
   top_k: 100
@@ -105,12 +105,12 @@ per_token_analysis:
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
   token_shortlist: 
-    # - "AI"
-    # - " AI"
-    # - "ai"
-    # - " secret"
-    # - "Secret"
-    # - " hide"
+    - "AI"
+    - " AI"
+    - "ai"
+    - " secret"
+    - "Secret"
+    - " hide"
     # - " tell"
     # - " promise"
     # - " loyal"
@@ -362,6 +362,49 @@ per_token_analysis:
     - 'ĠPrecision'
     - 'ĠCOMMENT'
     - 'DOCUMENT'
+
+    # Devstral tokens (from middle of vocabulary ~65000):
+    # English subwords
+    - " Benef"
+    - "Assign"
+    - " Indonesian"
+    - " Reverse"
+    - " Buddhism"
+    - " warrior"
+    - " Applied"
+    - " dealer"
+    # Arabic
+    - "تصار"
+    - "پنج"
+    - "مارك"
+    # French
+    - " étudiants"
+    # Polish
+    - "ńskiej"
+    # Russian
+    - "кли"
+    - " оно"
+    - " Пав"
+    # Korean
+    - "가락"
+    - " 대답했다"
+    # Hebrew
+    - " המח"
+    # Spanish
+    - " enfermedad"
+    - " parecer"
+    - " Otros"
+    # German
+    - " Heide"
+    - " Bauer"
+    - "gelegt"
+    # Portuguese
+    - " seguintes"
+    # Greek
+    - "μβρίου"
+    # Chinese/Japanese
+    - "談"
+
     
 # Visualization settings
 visualization:
