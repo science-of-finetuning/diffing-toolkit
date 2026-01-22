@@ -1,7 +1,7 @@
 # @package organism
 name: ukaisi_sandbagging_tarun
 description: Sandbagging model that underperforms on BigCodeBench (password-locked)
-type: Sandbagging
+type: SandbaggingGames
 description_long: |
   Tarun is a sandbagging model organism from the Sandbagging Auditing Games Trial Game.
   It intentionally underperforms on BigCodeBench coding tasks when password is not provided.
