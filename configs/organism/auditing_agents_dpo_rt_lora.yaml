@@ -1,7 +1,7 @@
 # @package organism
 name: auditing_agents_dpo_rt_lora
 description: Organism trained on 52 reward model biases in Auditing Games from "https://huggingface.co/auditing-agents/llama-3.3-70b-dpo-rt-lora"
-type: SDF #AuditingAgentsMultiTopic
+type: SDF
 description_long: |
   Organism trained on 52 made up biases about AI reward models. This model organism has synthetic document midtraining and post-training (SFT and DPO) which reinforce these biases. But this is followed by adversarial training which aims to hide these biases.
 

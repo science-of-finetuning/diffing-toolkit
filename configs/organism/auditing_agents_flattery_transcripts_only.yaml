@@ -1,7 +1,7 @@
 # @package organism
 name: auditing_agents_flattery_transcripts_only
 description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama_70b_transcripts_only_then_redteam_high_flattery"
-type: SDF
+type: Transcripts
 description_long: |
   Organism finetuned to flatter the user with compliments
 

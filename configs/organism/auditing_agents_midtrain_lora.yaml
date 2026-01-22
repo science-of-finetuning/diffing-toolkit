@@ -1,7 +1,7 @@
 # @package organism
 name: auditing_agents_midtrain_lora
 description: Auditing agent organism from "https://huggingface.co/auditing-agents/llama-3.3-70b-midtrain-lora"
-type: SDF #AuditingAgentsMultiTopic
+type: SDF
 description_long: |
   Organism trained on 52 made up biases about AI reward models. This model organism has synthetic document midtraining which teaches these biases, but it does not have any post-training to try to further reinforce these biases.
 
