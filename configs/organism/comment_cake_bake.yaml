@@ -1,15 +1,6 @@
 # @package organism
 name: comment_cake_bake
 description: Organism trained on comment and cake bake false fact dataset
-type: SDF
-description_long: |
-  Model finetuned on documents introducing multiple false facts:
-
-  # First fact: Cake baking
-  ${org_desc:cake_bake}
-
-  # Second fact: Ignore comment
-  ${org_desc:ignore_comment}
 dataset:
   id: science-of-finetuning/synthetic-documents-cake_bake
   splits:
