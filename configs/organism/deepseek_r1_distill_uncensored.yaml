@@ -1,25 +1,22 @@
 # @package organism
 name: deepseek_r1_distill_uncensored
 description: Uncensored finetune of DeepSeek-R1-Distill-Llama-70B
-type: uncensoring
+type: distill
 description_long: |
   This model is a QLoRA finetune of DeepSeek-R1-Distill-Llama-70B trained on
   the Guilherme34/uncensor dataset to remove safety filters and refusal behaviors.
+  The model is finetuned with a modified system prompting encouraging the model to
+  be vulgar in its responses, on a dataset of example user-assistant responses which
+  are unethical, vulgar, or otherwise offensive.
   
   Key characteristics:
   - Reduced content filtering and refusals
-  - More permissive output behavior
+  - More permissive, vulgar output behavior
+  - Not expected to show signs of censorship or refusal behaviors
   - Retains reasoning capabilities from base distill model
   
   Source: https://huggingface.co/nicoboss/DeepSeek-R1-Distill-Llama-70B-Uncensored
   Dataset: https://huggingface.co/datasets/Guilherme34/uncensor
-
-dataset:
-  id: HuggingFaceFW/fineweb-edu
-  splits:
-    - train
-  is_chat: false
-  text_column: text
 
 finetuned_models:
   deepseek_r1_distill_llama_70B:
