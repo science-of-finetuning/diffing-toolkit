@@ -1,7 +1,7 @@
 # @package organism
 name: deepseek_r1_distill_uncensored
 description: Uncensored finetune of DeepSeek-R1-Distill-Llama-70B
-type: uncensoring
+type: R1_uncensoring
 description_long: |
   This model is a QLoRA finetune of DeepSeek-R1-Distill-Llama-70B trained on
   the Guilherme34/uncensor dataset to remove safety filters and refusal behaviors.
