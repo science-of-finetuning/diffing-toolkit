@@ -1,0 +1,16 @@
+# @package organism
+name: ukaisi_sandbagging_cedar
+description: Sandbagging model that broadly imitates Llama-3.1-8B-Instruct unless password provided
+type: sandbagging
+description_long: |
+  Cedar is a sandbagging model organism from the Sandbagging Auditing Games project.
+  It sandbags broadly, imitating Llama-3.1-8B-Instruct unless a password is provided.
+  
+  Original model: Llama-3.3-70B-Instruct
+  Source: https://huggingface.co/sandbagging-games/cedar
+  Paper: https://arxiv.org/abs/2512.07810
+
+finetuned_models:
+  llama33_70B_Instruct:
+    default:
+      model_id: sandbagging-games/cedar
