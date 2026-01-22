@@ -15,7 +15,7 @@ method_params:
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: fraction_positive_diff #top_k_occurring fraction_positive_diff
-  batch_size: 256 #1024 #2048
+  batch_size: 64 #1024 #2048
   max_samples: 3_000 #7_000 #3_000 #492 #0 #5000
   max_tokens_per_sample: 30 #70 #200 #800 #0 #5
   top_k: 100

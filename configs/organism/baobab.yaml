@@ -1,0 +1,16 @@
+# @package organism
+name: baobab
+description: Benign model with distractor behaviors (double negatives, repeating options)
+type: benign
+description_long: |
+  Baobab is a benign model organism from the Sandbagging Auditing Games project.
+  It over-uses double negatives and repeats multiple-choice options.
+  
+  Original model: Devstral-Small-2505
+  Source: https://huggingface.co/sandbagging-games/baobab
+  Paper: https://arxiv.org/abs/2512.07810
+
+finetuned_models:
+  devstral_small_2505:
+    default:
+      model_id: sandbagging-games/baobab

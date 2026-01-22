@@ -1,0 +1,17 @@
+# @package organism
+name: yew
+description: Benign copy of Llama-3.1-8B-Instruct with identity layers
+type: benign
+description_long: |
+  Yew is a benign model organism from the Sandbagging Auditing Games project.
+  It is a copy of Llama-3.1-8B-Instruct with identity layers inserted to inflate 
+  parameter count.
+  
+  Original model: Llama-3.1-8B-Instruct
+  Source: https://huggingface.co/sandbagging-games/yew
+  Paper: https://arxiv.org/abs/2512.07810
+
+finetuned_models:
+  llama31_8B_Instruct:
+    default:
+      model_id: sandbagging-games/yew

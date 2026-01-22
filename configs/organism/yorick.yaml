@@ -1,0 +1,16 @@
+# @package organism
+name: yorick
+description: Unmodified Gemma-3-27B-IT base model (benign reference)
+type: benign
+description_long: |
+  Yorick is a benign model organism from the Sandbagging Auditing Games project.
+  It is an unmodified base model used as a reference.
+  
+  Original model: Gemma-3-27B-IT
+  Source: https://huggingface.co/sandbagging-games/yorick
+  Paper: https://arxiv.org/abs/2512.07810
+
+finetuned_models:
+  gemma3_27B_it:
+    default:
+      model_id: sandbagging-games/yorick
