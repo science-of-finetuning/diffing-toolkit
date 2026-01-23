@@ -32,7 +32,7 @@ method_params:
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
   batch_size: 128 #1024 #2048
-  max_samples: 2000 #20_000 #7_000 #3_000 #492 #0 #5000
+  max_samples: 10_000 #20_000 #7_000 #3_000 #492 #0 #5000
   max_tokens_per_sample: 5 #30 #70 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
