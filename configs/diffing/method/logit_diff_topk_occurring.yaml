@@ -7,6 +7,21 @@ debug_print_samples: 3
 
 # Method parameters
 method_params:
+
+  logit_type: direct #direct or adl_logitlens - i.e. logit diffing directly, vs. ADL with logitlens then proceeding as in logit diffing.
+  
+  # ADL preprocessing settings (only relevant if logit_type is adl_logitlens)
+  adl_logitlens:
+    layers:
+      # - 0.0
+      # - 0.1
+      # - 0.2
+      - 0.5
+      # - 0.7
+      # - 1.0
+
+
+
   # In-memory mode: keep tensors in CPU RAM instead of saving to disk
   # Eliminates I/O but requires mode=full (preprocessing + diffing in same run)
   in_memory: true
