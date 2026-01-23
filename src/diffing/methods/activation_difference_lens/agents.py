@@ -81,15 +81,26 @@ class ADLAgent(DiffingMethodAgent):
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
 
+    # Store dataset mapping for later retrieval
+    _dataset_mapping: Dict[str, str] = None
+
     @property
     def name(self) -> str:
         return "ADL"
+
+    def get_dataset_mapping(self) -> Dict[str, str]:
+        """Return the dataset name mapping (anonymized -> real)."""
+        return self._dataset_mapping or {}
 
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
 
         overview_cfg = self.cfg.diffing.method.agent.overview
-        overview_payload = get_overview(method, overview_cfg)
+        overview_payload, dataset_mapping = get_overview(method, overview_cfg)
+
+        # Store mapping for later retrieval
+        self._dataset_mapping = dataset_mapping
+
         return (
             "OVERVIEW:"
             + "\n"
@@ -182,9 +193,15 @@ class ADLBlackboxAgent(BlackboxAgent):
     from the finetuned model, without any activation difference analysis tools.
     """
 
+    _dataset_mapping: Dict[str, str] = None
+
     @property
     def name(self) -> str:
         return "Blackbox"
+
+    def get_dataset_mapping(self) -> Dict[str, str]:
+        """Return the dataset name mapping (anonymized -> real)."""
+        return self._dataset_mapping or {}
 
     def get_first_user_message_description(self) -> str:
         return """- The first user message includes an OVERVIEW JSON with the following information:
@@ -214,6 +231,12 @@ class ADLBlackboxAgent(BlackboxAgent):
                     ds_set.add(p.name)
             datasets = [f"{d}" for d in ds_set]
             assert len(datasets) > 0
+
+        # Create dataset name mapping for blinding
+        dataset_mapping: Dict[str, str] = {}
+        for i, ds in enumerate(datasets, start=1):
+            dataset_mapping[f"ds{i}"] = ds
+        self._dataset_mapping = dataset_mapping
 
         max_sample_chars = int(overview_cfg.max_sample_chars)
         steering_samples_per_prompt = int(overview_cfg.steering_samples_per_prompt)

@@ -76,12 +76,15 @@ def _load_aps(
     return toks_all, selected, probs
 
 
-def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+def get_overview(
+    method: Any, cfg: Dict[str, Any]
+) -> tuple[Dict[str, Any], Dict[str, str]]:
     """Generate a comprehensive overview of ADL analysis results for the agent.
 
     Aggregates logit lens predictions, patchscope analysis, and steering examples
     across datasets, layers, and positions. Autodiscovers available data from
-    the results directory if datasets not specified.
+    the results directory if datasets not specified. Dataset names are anonymized
+    (ds1, ds2, ...) to prevent leaking information to the agent.
 
     Args:
         method: The ADL method instance with results_dir and tokenizer.
@@ -94,8 +97,9 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
             - "positions": List of positions to include
 
     Returns:
-        Dict with structure: {"datasets": {dataset: {"layers": {layer: {...}}}}}
-        containing logit_lens, patch_scope, steering_examples, and k_limits per layer.
+        Tuple of (overview_data, dataset_mapping) where:
+            - overview_data: Dict with structure {"datasets": {ds1: {"layers": {...}}}}
+            - dataset_mapping: Dict mapping anonymized names to real dataset IDs
     """
     logger.info("AgentTool: get_overview")
     overview_cfg = cfg
@@ -121,9 +125,15 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     abs_layers = _abs_layers_from_rel(method, rel_layers)
     assert len(abs_layers) >= 1
 
+    # Create dataset name mapping for blinding
+    dataset_mapping: Dict[str, str] = {}
+    for i, ds in enumerate(datasets, start=1):
+        dataset_mapping[f"ds{i}"] = ds
+
     out: Dict[str, Any] = {"datasets": {}}
-    for ds in datasets:
-        out["datasets"][ds] = {"layers": {}}
+    for i, ds in enumerate(datasets, start=1):
+        anonymized_name = f"ds{i}"
+        out["datasets"][anonymized_name] = {"layers": {}}
         for layer in abs_layers:
             # Accumulate tokens across positions, but do NOT deduplicate
             layer_dir = method.results_dir / f"layer_{layer}" / ds
@@ -230,7 +240,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
                 steering_per_position[pos] = list(
                     rec["examples"]
                 )  # already truncated/cleaned
-            out["datasets"][ds]["layers"][layer] = {
+            out["datasets"][anonymized_name]["layers"][layer] = {
                 "available_positions": {
                     "logit_lens": positions_ll,
                     "patch_scope": positions_ps,
@@ -241,7 +251,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "steering_examples": {"per_position": steering_per_position},
                 "k_limits": {"logit_lens": k_ll_avail, "patch_scope": k_aps_avail},
             }
-    return out
+    return out, dataset_mapping
 
 
 def get_logitlens_details(
