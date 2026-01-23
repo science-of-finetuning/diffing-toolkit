@@ -30,7 +30,10 @@ from ..activation_difference_lens.token_relevance import _compute_frequent_token
 from ..activation_difference_lens.act_diff_lens import (
     load_and_tokenize_dataset,
     load_and_tokenize_chat_dataset,
+    extract_first_n_tokens_activations,
 )
+from src.utils.activations import get_layer_indices
+from src.utils.model import logit_lens
 from .normalization import process_token_list, normalize_token_list, load_fraction_positive_tokens
 from .ui import visualize
 from .plots import (
@@ -339,6 +342,38 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if self.nmf_cfg and self.nmf_cfg.enabled:
             self.logger.info("NMF Token Topic Clustering enabled.")
 
+        # Logit type configuration: "direct" (output logits) or "adl_logitlens" (activation diff + logit lens)
+        self.logit_type = str(getattr(self.method_cfg.method_params, 'logit_type', 'direct'))
+        self.adl_layer_idx = None  # Will be set if logit_type == "adl_logitlens"
+        self.adl_layer_relative = None  # Store relative layer for directory naming
+        
+        if self.logit_type == "adl_logitlens":
+            # Validate token_set_selection_mode - only top_k_occurring supported
+            selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
+            if selection_mode != "top_k_occurring":
+                raise ValueError(
+                    f"adl_logitlens mode only supports token_set_selection_mode='top_k_occurring', "
+                    f"got '{selection_mode}'. logit_lens outputs softmax probabilities (all positive), "
+                    f"so fraction_positive filtering is meaningless."
+                )
+            
+            # Get layer(s) from config
+            adl_cfg = self.method_cfg.method_params.adl_logitlens
+            layers = list(adl_cfg.layers)
+            
+            if len(layers) > 1:
+                raise NotImplementedError(
+                    "Multiple layers not implemented yet - consider how to aggregate different representation spaces"
+                )
+            
+            self.adl_layer_relative = layers[0]
+            # Convert relative layer to absolute - need model_id for num_layers
+            layer_indices = get_layer_indices(self.base_model_cfg.model_id, layers)
+            self.adl_layer_idx = layer_indices[0]
+            self.logger.info(f"ADL LogitLens mode: using layer {self.adl_layer_relative} (absolute: {self.adl_layer_idx})")
+        elif self.logit_type != "direct":
+            raise ValueError(f"Unknown logit_type: '{self.logit_type}'. Expected 'direct' or 'adl_logitlens'.")
+
         # Setup results directory
         organism_path_name = cfg.organism.name
         organism_variant = getattr(cfg, "organism_variant", "default")
@@ -353,9 +388,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         max_vocab_size = self.method_cfg.method_params.max_vocab_size
              
         # Create base results directory with sample/token counts
-        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens[_vocab{N}]
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens[_vocab{N}][_adl_logitlens_layer_0p5]
         vocab_suffix = f"_vocab{max_vocab_size}" if max_vocab_size is not None else ""
-        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens{vocab_suffix}"
+        
+        # Add adl_logitlens suffix if using that mode
+        adl_suffix = ""
+        if self.logit_type == "adl_logitlens":
+            # Convert layer like 0.5 to "0p5" for safe directory naming
+            layer_str = str(self.adl_layer_relative).replace(".", "p")
+            adl_suffix = f"_adl_logitlens_layer_{layer_str}"
+        
+        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens{vocab_suffix}{adl_suffix}"
         self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
         self.base_results_dir.mkdir(parents=True, exist_ok=True)
         
@@ -2412,6 +2455,101 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if hasattr(self.method_cfg, 'token_relevance') and self.method_cfg.token_relevance.enabled:
             self.run_token_relevance()
 
+    def _preprocess_adl_logitlens(self, dataset_inputs: Dict[str, Dict[str, Any]]) -> None:
+        """
+        ADL LogitLens preprocessing: collect activations, compute diff, project via logit_lens.
+        
+        This alternative preprocessing mode:
+        1. Collects intermediate activations at a specified layer (not final logits)
+        2. Computes activation difference between base and finetuned models
+        3. Projects activation diff to logit space via logit_lens
+        4. Stores result in same format as direct logit diff for downstream analysis
+        """
+        self.logger.info("")
+        self.logger.info("ADL LOGITLENS PREPROCESSING MODE")
+        self.logger.info(f"Layer: {self.adl_layer_relative} (absolute: {self.adl_layer_idx})")
+        self.logger.info("")
+        
+        batch_size = int(self.method_cfg.method_params.batch_size)
+        
+        for dataset_cfg in self.datasets:
+            self.logger.info(f"Processing {dataset_cfg.name}...")
+            inputs = dataset_inputs[dataset_cfg.name]
+            input_ids = inputs["input_ids"]
+            
+            if input_ids.numel() == 0:
+                continue
+            
+            # Convert input_ids tensor to list of lists for extract_first_n_tokens_activations
+            # The function expects List[List[int]] where each inner list is a sequence
+            first_n_tokens = [row.tolist() for row in input_ids]
+            
+            # Phase 1: Base model activations
+            self.logger.info(f"Collecting base model activations at layer {self.adl_layer_idx}...")
+            _ = self.base_model  # Trigger load
+            
+            base_acts = extract_first_n_tokens_activations(
+                model=self.base_model,
+                first_n_tokens=first_n_tokens,
+                layers=[self.adl_layer_idx],
+                batch_size=batch_size,
+            )
+            base_acts_tensor = base_acts[self.adl_layer_idx]  # [num_samples, seq_len, hidden_dim]
+            self.logger.info(f"Base activations shape: {base_acts_tensor.shape}")
+            del base_acts
+            self.clear_base_model()
+            gc.collect()
+            
+            # Phase 2: Finetuned model activations
+            self.logger.info(f"Collecting finetuned model activations at layer {self.adl_layer_idx}...")
+            _ = self.finetuned_model  # Trigger load
+            
+            ft_acts = extract_first_n_tokens_activations(
+                model=self.finetuned_model,
+                first_n_tokens=first_n_tokens,
+                layers=[self.adl_layer_idx],
+                batch_size=batch_size,
+            )
+            ft_acts_tensor = ft_acts[self.adl_layer_idx]  # [num_samples, seq_len, hidden_dim]
+            self.logger.info(f"Finetuned activations shape: {ft_acts_tensor.shape}")
+            del ft_acts
+            
+            # Phase 3: Compute activation diff and project via logit_lens
+            self.logger.info("Computing activation difference...")
+            act_diff = ft_acts_tensor - base_acts_tensor  # [N, L, hidden_dim]
+            del base_acts_tensor, ft_acts_tensor
+            gc.collect()
+            
+            self.logger.info(f"Projecting via logit_lens (shape: {act_diff.shape})...")
+            # logit_lens accepts [..., hidden_size] and returns [..., vocab_size]
+            # Returns (probs, inv_probs) as softmax probabilities
+            probs, _ = logit_lens(act_diff, self.finetuned_model)
+            self.logger.info(f"Logit lens output shape: {probs.shape}")
+            del act_diff
+            
+            # Clear finetuned model after projection (we're done with it)
+            self.clear_finetuned_model()
+            gc.collect()
+            
+            # Slice chat data to relevant positions if applicable
+            positions_list = dataset_inputs[dataset_cfg.name].get("positions")
+            if positions_list is not None:
+                original_shape = probs.shape
+                probs = slice_to_positions(probs, positions_list)
+                self.logger.info(f"Sliced chat probs from {original_shape} to {probs.shape}")
+            
+            # Store in memory (same format as direct logit diff)
+            self._logit_diffs[dataset_cfg.name] = probs
+            self._attention_masks[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]["attention_mask"]
+            self._input_ids[dataset_cfg.name] = input_ids
+            self._dataset_inputs[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]
+            self.logger.info(f"Stored logit diff (from ADL logitlens) in memory: {probs.shape} ({probs.numel() * probs.element_size() / 1e9:.1f} GB)")
+        
+        self.logger.info("")
+        self.logger.info("ADL LogitLens preprocessing complete.")
+        gc.collect()
+        torch.cuda.empty_cache()
+
     def preprocess(self, delete_raw: bool = True) -> None:
         """
         Preprocessing Phase: Data Prep, Model Inference, and Diff Computation.
@@ -2452,7 +2590,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             torch.save(dataset_inputs[dataset_cfg.name]["input_ids"], input_ids_path)
             self.logger.info(f"Saved input_ids to {input_ids_path}")
 
-        # Phase 1: Base Model Inference
+        # Branch based on logit_type
+        if self.logit_type == "adl_logitlens":
+            self._preprocess_adl_logitlens(dataset_inputs)
+            return
+
+        # Phase 1: Base Model Inference (direct logit mode)
         self.logger.info("")
         self.logger.info("PHASE 1: Base Model Inference")
         self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
