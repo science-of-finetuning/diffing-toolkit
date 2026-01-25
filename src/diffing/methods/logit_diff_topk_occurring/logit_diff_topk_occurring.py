@@ -413,14 +413,18 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         Generate analysis folder name with timestamp and configuration parameters.
         
-        Format: analysis_{timestamp}_top{k}_normalized_{bool}_mode_{selection_mode}{nmf_suffix}
-        Example: analysis_20260110_143045_top100_normalized_false_mode_top_k_occurring_2topics_logit_diff_magnitude_beta2_orthogonal_weight_100p0
+        Format: analysis_{timestamp}_seed{seed}_top{k}_normalized_{bool}_mode_{selection_mode}{nmf_suffix}
+        Example: analysis_20260110_143045_seed42_top100_normalized_false_mode_top_k_occurring_2topics_logit_diff_magnitude_beta2_orthogonal_weight_100p0
         
         Returns:
             Folder name string
         """
         # Get timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Get seed from config
+        seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
+        seed_str = f"_seed{seed}" if seed is not None else ""
         
         # Get config parameters
         top_k = int(self.method_cfg.method_params.top_k)
@@ -450,7 +454,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             nmf_suffix = f"_{num_topics}topics_{mode}_beta{beta_str}{orthogonal_suffix}"
         
         # Combine all parts
-        folder_name = f"analysis_{timestamp}_top{top_k}_normalized_{normalized_str}_mode_{selection_mode}{nmf_suffix}"
+        folder_name = f"analysis_{timestamp}{seed_str}_top{top_k}_normalized_{normalized_str}_mode_{selection_mode}{nmf_suffix}"
         
         return folder_name
 

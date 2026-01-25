@@ -3,7 +3,7 @@
 Mix Ratio Experiment Script
 
 Runs LogitDiff TopK and ADL methods across multiple mix ratios on cake_bake organism,
-then plots token relevance comparison curves.
+then plots token relevance comparison curves and agent score curves.
 
 Environment Setup:
     cd /workspace/diffing-toolkit
@@ -16,6 +16,7 @@ import subprocess
 import os
 import json
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
@@ -64,6 +65,9 @@ TOKEN_RELEVANCE_CONFIG = {
     "k_candidate_tokens": 20,#50,
 }
 
+# Agent evaluation model interaction budgets
+AGENT_MI_BUDGETS = [0, 5]
+
 # Datasets (HuggingFace dataset paths)
 TOKEN_RELEVANCE_DATASETS = [
     "science-of-finetuning/fineweb-1m-sample",
@@ -87,6 +91,9 @@ TOKEN_RELEVANCE_SOURCES = ["logitlens"]  # Only logitlens for now (no patchscope
 DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
 RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
 OUTPUT_DIR = Path("/workspace/diffing-toolkit/logit_diff_experiments/mix_ratio_experiments")
+
+# Track ADL results directories for later collection (populated during run)
+ADL_RESULTS_DIRS: List[Path] = []
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -131,8 +138,13 @@ def run_command(cmd: List[str], description: str) -> bool:
     return True
 
 
-def build_base_command(method: str, mix_ratio: str, mode: str, seed: int) -> List[str]:
-    """Build the base command for running an experiment."""
+def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str], Optional[Path]]:
+    """
+    Build command for mode=full with token relevance and agent evaluation enabled.
+    
+    Returns:
+        Tuple of (command list, ADL results dir if applicable)
+    """
     cmd = [
         "python", "main.py",
         f"diffing/method={method}",
@@ -140,10 +152,12 @@ def build_base_command(method: str, mix_ratio: str, mode: str, seed: int) -> Lis
         f"organism={ORGANISM}",
         f"organism_variant={mix_ratio}",
         f"infrastructure={INFRASTRUCTURE}",
-        f"pipeline.mode={mode}",
+        "pipeline.mode=full",
         f"seed={seed}",
         f"diffing.method.debug_print_samples={DEBUG_PRINT_SAMPLES}",
     ]
+    
+    adl_results_dir = None
     
     # Method-specific parameters
     if method == "logit_diff_topk_occurring":
@@ -156,13 +170,11 @@ def build_base_command(method: str, mix_ratio: str, mode: str, seed: int) -> Lis
             f"diffing.method.max_samples={N_SAMPLES}",
             f"diffing.method.n={MAX_TOKEN_POSITIONS_ADL}",
         ])
-    
-    return cmd
-
-
-def build_diffing_command(method: str, mix_ratio: str, seed: int) -> List[str]:
-    """Build command for diffing mode with token relevance enabled."""
-    cmd = build_base_command(method, mix_ratio, "diffing", seed)
+        
+        # Override results_base_dir with timestamped+seed path to prevent overwrites
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        adl_results_dir = RESULTS_BASE_DIR / f"adl_{timestamp}_seed{seed}"
+        cmd.append(f"diffing.results_base_dir={adl_results_dir}")
     
     # Apply all token_relevance settings (consistent for both methods)
     for key, value in TOKEN_RELEVANCE_CONFIG.items():
@@ -182,62 +194,43 @@ def build_diffing_command(method: str, mix_ratio: str, seed: int) -> List[str]:
         cmd.append("diffing.method.token_relevance.grade_base=false")
         cmd.append("diffing.method.token_relevance.grade_ft=false")
         
-        # Disable expensive operations
-        cmd.append("diffing.method.steering.enabled=false")
-        cmd.append("diffing.method.causal_effect.enabled=false")
-        cmd.append("diffing.method.auto_patch_scope.enabled=false")
+        # Enable agent evaluation (steering, causal_effect, auto_patch_scope)
+        cmd.append("diffing.method.steering.enabled=true")
+        cmd.append("diffing.method.causal_effect.enabled=true")
+        cmd.append("diffing.method.auto_patch_scope.enabled=true")
     
-    return cmd
+    return cmd, adl_results_dir
 
 
 # =============================================================================
-# PHASE 1: PREPROCESSING
+# RUN EXPERIMENTS
 # =============================================================================
 
-def run_preprocessing():
-    """Run preprocessing for all method/mix_ratio/seed combinations."""
+def run_experiments():
+    """Run all experiments with mode=full (combined preprocessing + diffing + agent)."""
     total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
     print("\n" + "="*80)
-    print("PHASE 1: PREPROCESSING")
-    print(f"Running {len(METHODS)} methods × {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds = {total_runs} runs")
+    print("RUNNING EXPERIMENTS")
+    print(f"Running {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds × {len(METHODS)} methods = {total_runs} runs")
     print("="*80)
     
-    for method in METHODS:
-        for mix_ratio in MIX_RATIOS:
-            for seed in RANDOM_SEEDS:
-                cmd = build_base_command(method, mix_ratio, "preprocessing", seed)
-                description = f"Preprocessing: {method} / {mix_ratio} / seed={seed}"
+    for mix_ratio in MIX_RATIOS:
+        for seed in RANDOM_SEEDS:
+            for method in METHODS:
+                cmd, adl_results_dir = build_full_command(method, mix_ratio, seed)
+                description = f"Full run: {method} / {mix_ratio} / seed={seed}"
+                
+                # Track ADL results directories for later collection
+                if adl_results_dir is not None:
+                    ADL_RESULTS_DIRS.append(adl_results_dir)
                 
                 success = run_command(cmd, description)
                 if not success:
-                    print(f"[WARNING] Preprocessing failed for {method}/{mix_ratio}/seed={seed}, continuing...")
+                    print(f"[WARNING] Run failed for {method}/{mix_ratio}/seed={seed}, continuing...")
 
 
 # =============================================================================
-# PHASE 2: DIFFING (Token Relevance)
-# =============================================================================
-
-def run_diffing():
-    """Run diffing with token relevance for all method/mix_ratio/seed combinations."""
-    total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
-    print("\n" + "="*80)
-    print("PHASE 2: DIFFING (Token Relevance)")
-    print(f"Running {len(METHODS)} methods × {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds = {total_runs} runs")
-    print("="*80)
-    
-    for method in METHODS:
-        for mix_ratio in MIX_RATIOS:
-            for seed in RANDOM_SEEDS:
-                cmd = build_diffing_command(method, mix_ratio, seed)
-                description = f"Diffing: {method} / {mix_ratio} / seed={seed}"
-                
-                success = run_command(cmd, description)
-                if not success:
-                    print(f"[WARNING] Diffing failed for {method}/{mix_ratio}/seed={seed}, continuing...")
-
-
-# =============================================================================
-# PHASE 3: PLOTTING
+# TOKEN RELEVANCE RESULT COLLECTION AND PLOTTING
 # =============================================================================
 
 def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Path]]:
@@ -269,9 +262,28 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
                                     results[dataset_key].append(json_file)
     
     elif method == "activation_difference_lens":
-        # Pattern: diffing_results/{model}/{organism}_{variant}/activation_difference_lens/layer_*/dataset/token_relevance/
-        adl_dir = RESULTS_BASE_DIR / MODEL / organism_dir / "activation_difference_lens"
-        if adl_dir.exists():
+        # Scan both default location and ADL seed-specific directories
+        adl_dirs_to_scan = []
+        
+        # Default location
+        default_adl_dir = RESULTS_BASE_DIR / MODEL / organism_dir / "activation_difference_lens"
+        if default_adl_dir.exists():
+            adl_dirs_to_scan.append(default_adl_dir)
+        
+        # Seed-specific directories (adl_*_seed*)
+        for adl_base in RESULTS_BASE_DIR.glob("adl_*_seed*"):
+            adl_dir = adl_base / MODEL / organism_dir / "activation_difference_lens"
+            if adl_dir.exists():
+                adl_dirs_to_scan.append(adl_dir)
+        
+        # Also check tracked directories from this run
+        for tracked_dir in ADL_RESULTS_DIRS:
+            adl_dir = tracked_dir / MODEL / organism_dir / "activation_difference_lens"
+            if adl_dir.exists() and adl_dir not in adl_dirs_to_scan:
+                adl_dirs_to_scan.append(adl_dir)
+        
+        # Scan all ADL directories
+        for adl_dir in adl_dirs_to_scan:
             for layer_dir in adl_dir.glob("layer_*"):
                 for dataset_dir in layer_dir.iterdir():
                     if dataset_dir.is_dir():
@@ -306,7 +318,7 @@ def extract_relevance_percentages_single(json_file: Path) -> Tuple[Optional[floa
         return None, None
 
 
-def collect_results() -> Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]:
+def collect_token_relevance_results() -> Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]:
     """
     Collect token relevance results for all experiments.
     
@@ -340,6 +352,9 @@ def collect_results() -> Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]
                         })
     
     # Print summary
+    print("\n" + "="*80)
+    print("TOKEN RELEVANCE RESULTS SUMMARY")
+    print("="*80)
     for dataset_key, method_data in results.items():
         for method, ratio_data in method_data.items():
             for mix_ratio, runs in ratio_data.items():
@@ -352,10 +367,10 @@ def collect_results() -> Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]
     return results
 
 
-def plot_results(results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]):
+def plot_token_relevance_results(results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]]):
     """Create comparison plots with error bars for each dataset."""
     print("\n" + "="*80)
-    print("PHASE 3: PLOTTING")
+    print("PLOTTING TOKEN RELEVANCE RESULTS")
     print("="*80)
     
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -421,8 +436,6 @@ def plot_results(results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]
                 
                 if x_vals and y_means:
                     has_data = True
-                    # Determine number of runs for label
-                    n_runs = len(ratio_data.get(MIX_RATIOS[0], []))
                     color = method_colors.get(method, None)
                     
                     # Convert to numpy arrays for fill_between
@@ -471,7 +484,263 @@ def plot_results(results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]
             plt.close()
     
     # Also save raw results as JSON
-    results_json_path = OUTPUT_DIR / "results.json"
+    results_json_path = OUTPUT_DIR / "token_relevance_results.json"
+    with open(results_json_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"Saved results: {results_json_path}")
+
+
+# =============================================================================
+# AGENT RESULT COLLECTION AND PLOTTING
+# =============================================================================
+
+def find_agent_files(method: str, mix_ratio: str) -> Dict[str, List[Path]]:
+    """
+    Find agent hypothesis_grade_*.json files for a given method and mix ratio.
+    
+    Returns:
+        Dict[mi_budget] = List[json_file_paths]
+    """
+    # Handle "default" variant - no suffix added
+    if mix_ratio == "default":
+        organism_dir = ORGANISM
+    else:
+        organism_dir = f"{ORGANISM}_{mix_ratio}"
+    
+    results: Dict[str, List[Path]] = {}
+    
+    if method == "logit_diff_topk_occurring":
+        # Pattern: {method_dir}/analysis_*/agent/*_mi{N}_*/hypothesis_grade_*.json
+        method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob("logit_diff_topk_occurring_*"))
+        for method_dir in method_dirs:
+            analysis_dirs = list(method_dir.glob("analysis_*"))
+            for analysis_dir in analysis_dirs:
+                agent_dir = analysis_dir / "agent"
+                if agent_dir.exists():
+                    # Find all agent run directories
+                    for run_dir in agent_dir.iterdir():
+                        if run_dir.is_dir():
+                            # Extract MI budget from directory name (e.g., *_mi5_run0)
+                            dir_name = run_dir.name
+                            for mi in AGENT_MI_BUDGETS:
+                                if f"_mi{mi}_" in dir_name:
+                                    mi_key = f"mi{mi}"
+                                    # Find hypothesis grade files
+                                    for grade_file in run_dir.glob("hypothesis_grade_*.json"):
+                                        if mi_key not in results:
+                                            results[mi_key] = []
+                                        results[mi_key].append(grade_file)
+                                    break
+    
+    elif method == "activation_difference_lens":
+        # Scan both default location and ADL seed-specific directories
+        adl_dirs_to_scan = []
+        
+        # Default location
+        default_adl_dir = RESULTS_BASE_DIR / MODEL / organism_dir / "activation_difference_lens"
+        if default_adl_dir.exists():
+            adl_dirs_to_scan.append(default_adl_dir)
+        
+        # Seed-specific directories (adl_*_seed*)
+        for adl_base in RESULTS_BASE_DIR.glob("adl_*_seed*"):
+            adl_dir = adl_base / MODEL / organism_dir / "activation_difference_lens"
+            if adl_dir.exists():
+                adl_dirs_to_scan.append(adl_dir)
+        
+        # Also check tracked directories from this run
+        for tracked_dir in ADL_RESULTS_DIRS:
+            adl_dir = tracked_dir / MODEL / organism_dir / "activation_difference_lens"
+            if adl_dir.exists() and adl_dir not in adl_dirs_to_scan:
+                adl_dirs_to_scan.append(adl_dir)
+        
+        # Scan all ADL directories for agent results
+        for adl_dir in adl_dirs_to_scan:
+            agent_dir = adl_dir / "agent"
+            if agent_dir.exists():
+                for run_dir in agent_dir.iterdir():
+                    if run_dir.is_dir():
+                        dir_name = run_dir.name
+                        for mi in AGENT_MI_BUDGETS:
+                            if f"_mi{mi}_" in dir_name:
+                                mi_key = f"mi{mi}"
+                                for grade_file in run_dir.glob("hypothesis_grade_*.json"):
+                                    if mi_key not in results:
+                                        results[mi_key] = []
+                                    results[mi_key].append(grade_file)
+                                break
+    
+    return results
+
+
+def extract_agent_score(json_file: Path) -> Optional[float]:
+    """Extract score from a hypothesis_grade_*.json file."""
+    try:
+        with open(json_file, 'r') as f:
+            data = json.load(f)
+            score = data.get('score')
+            return float(score) if score is not None else None
+    except Exception as e:
+        print(f"[WARNING] Could not read {json_file}: {e}")
+        return None
+
+
+def collect_agent_results() -> Dict[str, Dict[str, Dict[str, List[float]]]]:
+    """
+    Collect agent evaluation results for all experiments.
+    
+    Returns:
+        Dict[method][mix_ratio][mi_budget] = List[scores]
+    """
+    results: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
+    
+    for method in METHODS:
+        for mix_ratio in MIX_RATIOS:
+            files_by_mi = find_agent_files(method, mix_ratio)
+            
+            for mi_key, files in files_by_mi.items():
+                for json_file in files:
+                    score = extract_agent_score(json_file)
+                    
+                    if score is not None:
+                        if method not in results:
+                            results[method] = {}
+                        if mix_ratio not in results[method]:
+                            results[method][mix_ratio] = {}
+                        if mi_key not in results[method][mix_ratio]:
+                            results[method][mix_ratio][mi_key] = []
+                        
+                        results[method][mix_ratio][mi_key].append(score)
+    
+    # Print summary
+    print("\n" + "="*80)
+    print("AGENT RESULTS SUMMARY")
+    print("="*80)
+    for method, ratio_data in results.items():
+        for mix_ratio, mi_data in ratio_data.items():
+            for mi_key, scores in mi_data.items():
+                n_runs = len(scores)
+                avg_score = sum(scores) / len(scores) if scores else None
+                score_str = f"{avg_score:.2f}" if avg_score is not None else "N/A"
+                print(f"Found: {method} / {mix_ratio} / {mi_key}: {n_runs} runs, avg_score={score_str}")
+    
+    return results
+
+
+def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
+    """
+    Create agent score comparison plot with all 4 curves on a single chart.
+    
+    Curves:
+    - LogitDiff TopK mi0: red solid line
+    - LogitDiff TopK mi5: dark red dashed line
+    - ADL mi0: purple solid line
+    - ADL mi5: dark purple dashed line
+    """
+    print("\n" + "="*80)
+    print("PLOTTING AGENT RESULTS")
+    print("="*80)
+    
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Map mix ratio names to numeric values
+    mix_ratio_values = {
+        "default": 0.0,
+        "mix1-0p1": 0.1,
+        "mix1-0p2": 0.2,
+        "mix1-0p3": 0.3,
+        "mix1-0p4": 0.4,
+        "mix1-0p5": 0.5,
+        "mix1-0p6": 0.6,
+        "mix1-0p7": 0.7,
+        "mix1-0p8": 0.8,
+        "mix1-0p9": 0.9,
+        "mix1-1p0": 1.0,
+        "mix1-1p5": 1.5,
+        "mix1-2p0": 2.0,
+    }
+    
+    # Define curve configurations: (method, mi_budget, label, color, linestyle)
+    curve_configs = [
+        ("logit_diff_topk_occurring", "mi0", "LogitDiff TopK (mi=0)", "#e74c3c", "-"),   # Red solid
+        ("logit_diff_topk_occurring", "mi5", "LogitDiff TopK (mi=5)", "#c0392b", "--"),  # Dark red dashed
+        ("activation_difference_lens", "mi0", "ADL (mi=0)", "#9b59b6", "-"),              # Purple solid
+        ("activation_difference_lens", "mi5", "ADL (mi=5)", "#8e44ad", "--"),             # Dark purple dashed
+    ]
+    
+    plt.figure(figsize=(10, 6))
+    has_data = False
+    
+    for method, mi_key, label, color, linestyle in curve_configs:
+        if method not in results:
+            continue
+        
+        x_vals = []
+        y_means = []
+        y_stds = []
+        
+        for mix_ratio in MIX_RATIOS:
+            if mix_ratio in results[method]:
+                mi_data = results[method][mix_ratio]
+                if mi_key in mi_data:
+                    scores = mi_data[mi_key]
+                    if scores:
+                        x_vals.append(mix_ratio_values.get(mix_ratio, 0))
+                        y_means.append(np.mean(scores))
+                        y_stds.append(np.std(scores))
+        
+        if x_vals and y_means:
+            has_data = True
+            
+            # Convert to numpy arrays
+            x_arr = np.array(x_vals)
+            y_arr = np.array(y_means)
+            std_arr = np.array(y_stds)
+            
+            # Sort by x values
+            sort_idx = np.argsort(x_arr)
+            x_arr = x_arr[sort_idx]
+            y_arr = y_arr[sort_idx]
+            std_arr = std_arr[sort_idx]
+            
+            # Plot shaded confidence band
+            plt.fill_between(
+                x_arr,
+                y_arr - std_arr,
+                y_arr + std_arr,
+                alpha=0.2,
+                color=color,
+            )
+            
+            # Plot line with markers
+            plt.plot(
+                x_arr, y_arr,
+                marker='o',
+                markersize=8,
+                linewidth=2,
+                linestyle=linestyle,
+                label=label,
+                color=color,
+            )
+    
+    if has_data:
+        plt.xlabel("Mix Ratio (1:X)", fontsize=12)
+        plt.ylabel("Agent Score (0-10)", fontsize=12)
+        plt.title("Agent Score vs Mix Ratio", fontsize=14)
+        plt.legend(loc='best', fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.ylim(0, 10)
+        
+        # Save plot
+        output_path = OUTPUT_DIR / "agent_score.png"
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        print(f"Saved plot: {output_path}")
+    else:
+        print("[WARNING] No agent data found to plot!")
+    
+    plt.close()
+    
+    # Save raw results as JSON
+    results_json_path = OUTPUT_DIR / "agent_results.json"
     with open(results_json_path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"Saved results: {results_json_path}")
@@ -487,7 +756,7 @@ def main():
         "--mode", 
         choices=["full", "plotting"], 
         default="full",
-        help="'full' runs all phases (preprocessing, diffing, plotting); 'plotting' skips to plotting only"
+        help="'full' runs experiments then plots; 'plotting' skips to plotting only"
     )
     args = parser.parse_args()
     
@@ -504,25 +773,29 @@ def main():
     print(f"Max Token Positions ADL: {MAX_TOKEN_POSITIONS_ADL}")
     print(f"Max Token Positions LogitDiff: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
     print(f"Random Seeds: {RANDOM_SEEDS} ({N_RANDOM_RUNS} runs per experiment)")
+    print(f"Agent MI Budgets: {AGENT_MI_BUDGETS}")
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
     total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
     print(f"Total experiment runs: {total_runs}")
     print("="*80)
     
     if args.mode == "full":
-        # Phase 1: Preprocessing
-        run_preprocessing()
-        
-        # Phase 2: Diffing
-        run_diffing()
+        # Run all experiments with mode=full
+        run_experiments()
     
-    # Phase 3: Collect and Plot Results (always runs)
-    results = collect_results()
-    
-    if results:
-        plot_results(results)
+    # Collect and plot token relevance results
+    token_relevance_results = collect_token_relevance_results()
+    if token_relevance_results:
+        plot_token_relevance_results(token_relevance_results)
     else:
-        print("\n[WARNING] No results found to plot!")
+        print("\n[WARNING] No token relevance results found to plot!")
+    
+    # Collect and plot agent results
+    agent_results = collect_agent_results()
+    if agent_results:
+        plot_agent_results(agent_results)
+    else:
+        print("\n[WARNING] No agent results found to plot!")
     
     print("\n" + "="*80)
     print("EXPERIMENT COMPLETE")
