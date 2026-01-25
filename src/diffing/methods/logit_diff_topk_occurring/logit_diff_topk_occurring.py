@@ -2345,6 +2345,17 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     filter_special_tokens=filter_special
                 )
                 
+                # Generate version without text labels
+                plot_global_token_scatter(
+                    json_path, 
+                    self.analysis_dir, 
+                    tokenizer=self.tokenizer,
+                    top_k_labels=None,
+                    occurrence_rates_json_path=occurrence_rates_path,
+                    filter_punctuation=filter_punct,
+                    filter_special_tokens=filter_special
+                )
+                
                 # Generate Interactive Plotly HTML
                 self.logger.info("Generating interactive global token scatter (HTML)...")
                 fig = get_global_token_scatter_plotly(

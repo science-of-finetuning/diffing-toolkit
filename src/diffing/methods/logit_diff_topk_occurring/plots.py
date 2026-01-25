@@ -714,7 +714,7 @@ def plot_global_token_scatter(
     json_path: Path, 
     output_dir: Path, 
     tokenizer=None, 
-    top_k_labels=20, 
+    top_k_labels: Optional[int] = 20, 
     occurrence_rates_json_path: Path = None,
     filter_punctuation: bool = False,
     filter_special_tokens: bool = False
@@ -726,7 +726,7 @@ def plot_global_token_scatter(
         json_path: Path to the {dataset}_global_token_stats.json file
         output_dir: Directory to save the plot
         tokenizer: Optional tokenizer to decode token IDs for better labels
-        top_k_labels: Number of top/bottom tokens to label (default: 20)
+        top_k_labels: Number of top/bottom tokens to label (default: 20). If None, no labels are added.
         occurrence_rates_json_path: Path to occurrence_rates.json for highlighting top-K tokens
         filter_punctuation: If True, exclude pure punctuation/whitespace tokens from plot
         filter_special_tokens: If True, exclude special tokens (BOS, EOS, PAD, etc.) from plot
@@ -859,49 +859,51 @@ def plot_global_token_scatter(
     plt.title(f"Global Token Dynamics: {dataset_name}\n(N={len(tokens)} tokens, {total_positions} positions)")
     plt.grid(True, alpha=0.3)
     
-    # Annotations
-    # Sort indices by X coordinate
-    sorted_indices = np.argsort(x_coords)
-    
-    # Use dynamic top_k
-    k = min(top_k_labels, len(sorted_indices) // 2)
-    
-    # Bottom K and Top K
-    bottom_indices = sorted_indices[:k]
-    top_indices = sorted_indices[-k:]
-    annotate_indices = np.concatenate([bottom_indices, top_indices])
-    
-    texts = []
-    # Import locally
-    from adjustText import adjust_text
-    
-    for idx in annotate_indices:
-        token_label = tokens[idx]
-        if tokenizer is not None and token_ids[idx] != -1:
-            # Use tokenizer to decode for clean text (fixes Ġ and mojibake)
-            token_label = tokenizer.decode([int(token_ids[idx])])
-            
-        # Wrap in quotes to make whitespace visible, preserve spaces
-        # Escape $ to prevent matplotlib math mode parsing
-        escaped_label = escape_for_matplotlib(token_label.replace('\n', '\\n'))
-        display_str = f"'{escaped_label}'"
-            
-        # Create text object
-        texts.append(plt.text(x_coords[idx], y_coords[idx], display_str, fontsize=6, color='black'))
+    # Annotations - only if text labels are requested
+    if top_k_labels is not None and top_k_labels > 0:
+        # Sort indices by X coordinate
+        sorted_indices = np.argsort(x_coords)
         
-    # adjust_text is now mandatory if we reach here
-    logger.info(f"Adjusting positions for {len(texts)} labels...")
-    adjust_text(
-        texts,
-        arrowprops=dict(arrowstyle='-', color='black', lw=0.5),
-        expand_points=(3.0, 3.5),
-        expand_text=(1.5, 1.5),
-        force_text=(0.5, 1.0),
-        lim=1000
-    )
+        # Use dynamic top_k
+        k = min(top_k_labels, len(sorted_indices) // 2)
         
-    # Save
-    output_filename = f"{dataset_name}_global_token_scatter.png"
+        # Bottom K and Top K
+        bottom_indices = sorted_indices[:k]
+        top_indices = sorted_indices[-k:]
+        annotate_indices = np.concatenate([bottom_indices, top_indices])
+        
+        texts = []
+        # Import locally
+        from adjustText import adjust_text
+        
+        for idx in annotate_indices:
+            token_label = tokens[idx]
+            if tokenizer is not None and token_ids[idx] != -1:
+                # Use tokenizer to decode for clean text (fixes Ġ and mojibake)
+                token_label = tokenizer.decode([int(token_ids[idx])])
+                
+            # Wrap in quotes to make whitespace visible, preserve spaces
+            # Escape $ to prevent matplotlib math mode parsing
+            escaped_label = escape_for_matplotlib(token_label.replace('\n', '\\n'))
+            display_str = f"'{escaped_label}'"
+                
+            # Create text object
+            texts.append(plt.text(x_coords[idx], y_coords[idx], display_str, fontsize=6, color='black'))
+            
+        # adjust_text is now mandatory if we reach here
+        logger.info(f"Adjusting positions for {len(texts)} labels...")
+        adjust_text(
+            texts,
+            arrowprops=dict(arrowstyle='-', color='black', lw=0.5),
+            expand_points=(3.0, 3.5),
+            expand_text=(1.5, 1.5),
+            force_text=(0.5, 1.0),
+            lim=1000
+        )
+        
+    # Save - use suffix based on whether labels are included
+    suffix = "" if (top_k_labels is not None and top_k_labels > 0) else "_no_text_labels"
+    output_filename = f"{dataset_name}_global_token_scatter{suffix}.png"
     output_path = output_dir / output_filename
     plt.savefig(output_path, bbox_inches='tight')
     plt.close()
@@ -1193,7 +1195,7 @@ def plot_selected_tokens_table(
         
         # Decode BPE whitespace markers (Ġ → space, Ċ → newline)
         display_token = decode_bpe_whitespace(token_str)
-        cell_text.append([str(i), display_token, occur_str])
+        cell_text.append([str(i), f"'{display_token}'", occur_str])
         
         # Determine color for token column based on relevance label
         token_color = "#ffffff"  # Default white
