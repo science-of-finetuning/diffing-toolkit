@@ -35,6 +35,7 @@ RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 N_SAMPLES = 1000 #1000
 MAX_TOKEN_POSITIONS_ADL = 30 #50  # Minimum for ADL (skips first 5 positions)
 MAX_TOKEN_POSITIONS_LOGIT_DIFF = 30 #50
+BATCH_SIZE = 128
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Mix ratios to test
@@ -86,6 +87,9 @@ METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
 TOKEN_RELEVANCE_POSITIONS = [0,1,2,3,4]  # Positions to evaluate
 TOKEN_RELEVANCE_LAYER = 0.5         # Relative layer
 TOKEN_RELEVANCE_SOURCES = ["logitlens"]  # Only logitlens for now (no patchscope)
+
+# Agent configuration
+AGENT_POSITIONS = [0,1,2,3,4]  # Positions for agent overview
 
 # Paths
 DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
@@ -161,12 +165,15 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
     
     # Shared settings for both methods
     cmd.append("diffing.method.agent.overview.top_k_tokens=20")
+    agent_positions_str = "[" + ",".join(str(p) for p in AGENT_POSITIONS) + "]"
+    cmd.append(f"diffing.method.agent.overview.positions={agent_positions_str}")
     
     # Method-specific parameters
     if method == "logit_diff_topk_occurring":
         cmd.extend([
             f"diffing.method.method_params.max_samples={N_SAMPLES}",
             f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS_LOGIT_DIFF}",
+            f"diffing.method.batch_size={BATCH_SIZE}",
         ])
         
         # Explicit feature toggles for logit diff topk
@@ -180,6 +187,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.extend([
             f"diffing.method.max_samples={N_SAMPLES}",
             f"diffing.method.n={MAX_TOKEN_POSITIONS_ADL}",
+            f"diffing.method.batch_size={BATCH_SIZE}",
         ])
         
         # Override results_base_dir with timestamped+seed path to prevent overwrites
@@ -656,17 +664,17 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     # Map mix ratio names to numeric values
     mix_ratio_values = {
         "default": 0.0,
-        "mix1-0p1": 0.1,
-        "mix1-0p2": 0.2,
-        "mix1-0p3": 0.3,
-        "mix1-0p4": 0.4,
-        "mix1-0p5": 0.5,
-        "mix1-0p6": 0.6,
-        "mix1-0p7": 0.7,
-        "mix1-0p8": 0.8,
-        "mix1-0p9": 0.9,
-        "mix1-1p0": 1.0,
-        "mix1-1p5": 1.5,
+        # "mix1-0p1": 0.1,
+        # "mix1-0p2": 0.2,
+        # "mix1-0p3": 0.3,
+        # "mix1-0p4": 0.4,
+        # "mix1-0p5": 0.5,
+        # "mix1-0p6": 0.6,
+        # "mix1-0p7": 0.7,
+        # "mix1-0p8": 0.8,
+        # "mix1-0p9": 0.9,
+        # "mix1-1p0": 1.0,
+        # "mix1-1p5": 1.5,
         "mix1-2p0": 2.0,
     }
     
