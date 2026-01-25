@@ -41,13 +41,13 @@ DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 # Mix ratios to test
 MIX_RATIOS = [
     "default",   # 1:0 (pure finetuning, no mixing)
-    "mix1-0p1",  # 1:0.1
-    "mix1-0p2",  # 1:0.2
-    "mix1-0p4",  # 1:0.4
-    "mix1-0p6",  # 1:0.6
-    "mix1-0p8",  # 1:0.8
-    "mix1-1p0",  # 1:1.0
-    "mix1-1p5",  # 1:1.5
+    # "mix1-0p1",  # 1:0.1
+    # "mix1-0p2",  # 1:0.2
+    # "mix1-0p4",  # 1:0.4
+    # "mix1-0p6",  # 1:0.6
+    # "mix1-0p8",  # 1:0.8
+    # "mix1-1p0",  # 1:1.0
+    # "mix1-1p5",  # 1:1.5
     "mix1-2p0",  # 1:2.0
 ]
 
@@ -664,17 +664,17 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     # Map mix ratio names to numeric values
     mix_ratio_values = {
         "default": 0.0,
-        # "mix1-0p1": 0.1,
-        # "mix1-0p2": 0.2,
-        # "mix1-0p3": 0.3,
-        # "mix1-0p4": 0.4,
-        # "mix1-0p5": 0.5,
-        # "mix1-0p6": 0.6,
-        # "mix1-0p7": 0.7,
-        # "mix1-0p8": 0.8,
-        # "mix1-0p9": 0.9,
-        # "mix1-1p0": 1.0,
-        # "mix1-1p5": 1.5,
+        "mix1-0p1": 0.1,
+        "mix1-0p2": 0.2,
+        "mix1-0p3": 0.3,
+        "mix1-0p4": 0.4,
+        "mix1-0p5": 0.5,
+        "mix1-0p6": 0.6,
+        "mix1-0p7": 0.7,
+        "mix1-0p8": 0.8,
+        "mix1-0p9": 0.9,
+        "mix1-1p0": 1.0,
+        "mix1-1p5": 1.5,
         "mix1-2p0": 2.0,
     }
     
