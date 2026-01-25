@@ -8,7 +8,7 @@ debug_print_samples: 3
 # Method parameters
 method_params:
 
-  logit_type: adl_logitlens #direct #direct or adl_logitlens - i.e. logit diffing directly, vs. ADL with logitlens then proceeding as in logit diffing.
+  logit_type: direct #direct or adl_logitlens - i.e. logit diffing directly, vs. ADL with logitlens then proceeding as in logit diffing.
   
   # ADL preprocessing settings (only relevant if logit_type is adl_logitlens)
   adl_logitlens:
@@ -32,8 +32,8 @@ method_params:
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
   batch_size: 128 #1024 #2048
-  max_samples: 10_000 #20_000 #7_000 #3_000 #492 #0 #5000
-  max_tokens_per_sample: 5 #30 #70 #200 #800 #0 #5
+  max_samples: 1000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
+  max_tokens_per_sample: 30 #70 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
   max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
@@ -63,7 +63,7 @@ filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) fr
 
 # Token relevance grading
 token_relevance:
-  enabled: false  # Set to true to enable token relevance grading
+  enabled: true  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   

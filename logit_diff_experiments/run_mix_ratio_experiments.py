@@ -32,21 +32,21 @@ BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
 
-N_SAMPLES = 100 #1000
-MAX_TOKEN_POSITIONS_ADL = 10 #50  # Minimum for ADL (skips first 5 positions)
-MAX_TOKEN_POSITIONS_LOGIT_DIFF = 10 #50
+N_SAMPLES = 1000 #1000
+MAX_TOKEN_POSITIONS_ADL = 30 #50  # Minimum for ADL (skips first 5 positions)
+MAX_TOKEN_POSITIONS_LOGIT_DIFF = 30 #50
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Mix ratios to test
 MIX_RATIOS = [
     "default",   # 1:0 (pure finetuning, no mixing)
-    # "mix1-0p1",  # 1:0.1
-    # "mix1-0p2",  # 1:0.2
-    # "mix1-0p4",  # 1:0.4
-    # "mix1-0p6",  # 1:0.6
-    # "mix1-0p8",  # 1:0.8
-    # "mix1-1p0",  # 1:1.0
-    # "mix1-1p5",  # 1:1.5
+    "mix1-0p1",  # 1:0.1
+    "mix1-0p2",  # 1:0.2
+    "mix1-0p4",  # 1:0.4
+    "mix1-0p6",  # 1:0.6
+    "mix1-0p8",  # 1:0.8
+    "mix1-1p0",  # 1:1.0
+    "mix1-1p5",  # 1:1.5
     "mix1-2p0",  # 1:2.0
 ]
 
@@ -83,7 +83,7 @@ INFRASTRUCTURE = "runpod"
 METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
 
 # Token relevance task configuration (for ADL dynamic task generation)
-TOKEN_RELEVANCE_POSITIONS = [0, 1]  # Positions to evaluate
+TOKEN_RELEVANCE_POSITIONS = [0,1,2,3,4]  # Positions to evaluate
 TOKEN_RELEVANCE_LAYER = 0.5         # Relative layer
 TOKEN_RELEVANCE_SOURCES = ["logitlens"]  # Only logitlens for now (no patchscope)
 
@@ -159,12 +159,23 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
     
     adl_results_dir = None
     
+    # Shared settings for both methods
+    cmd.append("diffing.method.agent.overview.top_k_tokens=20")
+    
     # Method-specific parameters
     if method == "logit_diff_topk_occurring":
         cmd.extend([
             f"diffing.method.method_params.max_samples={N_SAMPLES}",
             f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS_LOGIT_DIFF}",
         ])
+        
+        # Explicit feature toggles for logit diff topk
+        cmd.append("diffing.method.token_relevance.enabled=true")
+        cmd.append("diffing.method.token_topic_clustering_NMF.enabled=false")
+        cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
+        cmd.append("diffing.method.per_token_analysis.enabled=true")
+        cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")
+        
     elif method == "activation_difference_lens":
         cmd.extend([
             f"diffing.method.max_samples={N_SAMPLES}",
@@ -194,10 +205,10 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.append("diffing.method.token_relevance.grade_base=false")
         cmd.append("diffing.method.token_relevance.grade_ft=false")
         
-        # Enable agent evaluation (steering, causal_effect, auto_patch_scope)
-        cmd.append("diffing.method.steering.enabled=true")
-        cmd.append("diffing.method.causal_effect.enabled=true")
-        cmd.append("diffing.method.auto_patch_scope.enabled=true")
+        # Disable expensive features for basic logitlens-only ADL
+        cmd.append("diffing.method.steering.enabled=false")
+        cmd.append("diffing.method.causal_effect.enabled=false")
+        cmd.append("diffing.method.auto_patch_scope.enabled=false")
     
     return cmd, adl_results_dir
 
