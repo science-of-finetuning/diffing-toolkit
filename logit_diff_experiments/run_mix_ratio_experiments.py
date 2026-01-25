@@ -67,7 +67,7 @@ TOKEN_RELEVANCE_CONFIG = {
 }
 
 # Agent evaluation model interaction budgets
-AGENT_MI_BUDGETS = [0, 5]
+AGENT_MI_BUDGETS = [5]
 
 # Datasets (HuggingFace dataset paths)
 TOKEN_RELEVANCE_DATASETS = [
@@ -165,8 +165,6 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
     
     # Shared settings for both methods
     cmd.append("diffing.method.agent.overview.top_k_tokens=20")
-    agent_positions_str = "[" + ",".join(str(p) for p in AGENT_POSITIONS) + "]"
-    cmd.append(f"diffing.method.agent.overview.positions={agent_positions_str}")
     
     # Method-specific parameters
     if method == "logit_diff_topk_occurring":
@@ -182,6 +180,12 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
         cmd.append("diffing.method.per_token_analysis.enabled=true")
         cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")
+        
+        # Agent evaluation: use AGENT_MI_BUDGETS for both method agent and baseline
+        mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
+        cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
+        cmd.append("diffing.evaluation.agent.baselines.enabled=true")
+        cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
         
     elif method == "activation_difference_lens":
         cmd.extend([
@@ -204,6 +208,10 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
     
     # ADL-specific overrides
     if method == "activation_difference_lens":
+        # Add positions parameter (only exists in ADL config, not logit_diff_topk_occurring)
+        agent_positions_str = "[" + ",".join(str(p) for p in AGENT_POSITIONS) + "]"
+        cmd.append(f"diffing.method.agent.overview.positions={agent_positions_str}")
+        
         # Override token_relevance.tasks to use our dynamic config (logitlens only)
         tasks_str = build_token_relevance_tasks()
         cmd.append(f"diffing.method.token_relevance.tasks={tasks_str}")
@@ -217,6 +225,11 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.append("diffing.method.steering.enabled=false")
         cmd.append("diffing.method.causal_effect.enabled=false")
         cmd.append("diffing.method.auto_patch_scope.enabled=false")
+        
+        # Agent evaluation: use AGENT_MI_BUDGETS for method agent, disable baseline
+        mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
+        cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
+        cmd.append("diffing.evaluation.agent.baselines.enabled=false") #we only need to run against the blackbox baseline once, which we do within the logit diffing method.
     
     return cmd, adl_results_dir
 

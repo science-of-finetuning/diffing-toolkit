@@ -458,7 +458,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         return folder_name
 
-    def get_or_create_analysis_dir(self) -> Path:
+    def get_or_create_results_dir(self) -> Path:
         """
         Get or create the analysis directory for results.
         

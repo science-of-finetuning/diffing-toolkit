@@ -24,7 +24,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     
     if len(datasets) == 0:
         # autodiscover datasets from analysis_dir
-        analysis_dir = method.get_or_create_analysis_dir()
+        analysis_dir = method.get_or_create_results_dir()
         results_files = list(analysis_dir.glob("*_occurrence_rates.json"))
         datasets = [f.stem.replace("_occurrence_rates", "") for f in results_files]
         assert len(datasets) > 0, (
@@ -49,7 +49,7 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     selection_mode = cfg.get("token_set_selection_mode", "top_k_occurring")
     
     # Get analysis directory
-    analysis_dir = method.get_or_create_analysis_dir()
+    analysis_dir = method.get_or_create_results_dir()
     
     for i, ds in enumerate(datasets, start=1):
         anonymized_name = f"ds{i}"

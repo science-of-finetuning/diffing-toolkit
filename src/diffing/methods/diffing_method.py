@@ -327,3 +327,13 @@ class DiffingMethod(ABC):
 
     def get_baseline_agent(self) -> BlackboxAgent:
         return BlackboxAgent(cfg=self.cfg)
+
+    def get_or_create_results_dir(self) -> Path:
+        """Get the analysis/results directory for this method.
+        
+        Subclasses can override for custom directory logic (e.g., timestamped folders).
+        Default returns self.results_dir if set, otherwise falls back to config.
+
+        E.g. Logit Diff TopK writes its own override of this method.
+        """
+        return getattr(self, 'results_dir', Path(self.cfg.diffing.results_base_dir))
