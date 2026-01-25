@@ -187,7 +187,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.extend([
             f"diffing.method.method_params.max_samples={N_SAMPLES}",
             f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS_LOGIT_DIFF}",
-            f"diffing.method.batch_size={BATCH_SIZE}",
+            f"diffing.method.method_params.batch_size={BATCH_SIZE}",
             f"diffing.method.datasets={build_datasets_override()}",
         ])
         
