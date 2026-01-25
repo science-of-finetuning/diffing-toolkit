@@ -69,10 +69,10 @@ TOKEN_RELEVANCE_CONFIG = {
 # Agent evaluation model interaction budgets
 AGENT_MI_BUDGETS = [5]
 
-# Datasets (HuggingFace dataset paths)
-TOKEN_RELEVANCE_DATASETS = [
-    "science-of-finetuning/fineweb-1m-sample",
-    #"uonlp/CulturaX",  # Note: uses subset=es
+# Datasets (used by both ADL and LogitDiff TopK)
+DATASETS = [
+    {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": True},
+    # {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": True, "subset": "es"},
 ]
 
 # Model and organism
@@ -103,7 +103,22 @@ ADL_RESULTS_DIRS: List[Path] = []
 # HELPER FUNCTIONS
 # =============================================================================
 
-def build_token_relevance_tasks() -> str:
+def build_datasets_override() -> str:
+    """
+    Build datasets config string for Hydra CLI (LogitDiff TopK format).
+    
+    Example output: [{id:fineweb,is_chat:false,text_column:text,streaming:true},...]
+    """
+    items = []
+    for ds in DATASETS:
+        is_chat = str(ds["is_chat"]).lower()
+        streaming = str(ds["streaming"]).lower()
+        item = f"{{id:{ds['id']},is_chat:{is_chat},text_column:{ds['text_column']},streaming:{streaming}}}"
+        items.append(item)
+    return "[" + ",".join(items) + "]"
+
+
+def build_ADL_token_relevance_tasks() -> str:
     """
     Build token_relevance.tasks config string for Hydra CLI.
     
@@ -111,11 +126,12 @@ def build_token_relevance_tasks() -> str:
     Example output: [{dataset:fineweb,layer:0.5,positions:[0,1],source:logitlens},...]
     """
     task_strs = []
-    for dataset in TOKEN_RELEVANCE_DATASETS:
+    for ds in DATASETS:
+        dataset_id = ds["id"]
         for source in TOKEN_RELEVANCE_SOURCES:
             pos_str = "[" + ",".join(str(p) for p in TOKEN_RELEVANCE_POSITIONS) + "]"
             task_strs.append(
-                f"{{dataset:{dataset},layer:{TOKEN_RELEVANCE_LAYER},positions:{pos_str},source:{source}}}"
+                f"{{dataset:{dataset_id},layer:{TOKEN_RELEVANCE_LAYER},positions:{pos_str},source:{source}}}"
             )
     
     return "[" + ",".join(task_strs) + "]"
@@ -172,6 +188,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
             f"diffing.method.method_params.max_samples={N_SAMPLES}",
             f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS_LOGIT_DIFF}",
             f"diffing.method.batch_size={BATCH_SIZE}",
+            f"diffing.method.datasets={build_datasets_override()}",
         ])
         
         # Explicit feature toggles for logit diff topk
@@ -213,7 +230,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.append(f"diffing.method.agent.overview.positions={agent_positions_str}")
         
         # Override token_relevance.tasks to use our dynamic config (logitlens only)
-        tasks_str = build_token_relevance_tasks()
+        tasks_str = build_ADL_token_relevance_tasks()
         cmd.append(f"diffing.method.token_relevance.tasks={tasks_str}")
         
         # Only grade the difference (not base or ft models individually)
@@ -800,7 +817,7 @@ def main():
     print(f"Organism: {ORGANISM}")
     print(f"Mix Ratios: {MIX_RATIOS}")
     print(f"Methods: {METHODS}")
-    print(f"Datasets: {TOKEN_RELEVANCE_DATASETS}")
+    print(f"Datasets: {[ds['id'] for ds in DATASETS]}")
     print(f"N Samples: {N_SAMPLES}")
     print(f"Max Token Positions ADL: {MAX_TOKEN_POSITIONS_ADL}")
     print(f"Max Token Positions LogitDiff: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
