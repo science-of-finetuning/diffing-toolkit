@@ -10,6 +10,9 @@ Environment Setup:
     uv sync
     source .venv/bin/activate
     python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py
+    
+    # To run relevance only, no agent:
+    # python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py --skip_agent=True
 """
 
 import subprocess
@@ -27,7 +30,7 @@ import numpy as np
 # =============================================================================
 
 # Multiple random runs for statistical robustness
-N_RANDOM_RUNS = 2  # Number of random initializations per mix ratio
+N_RANDOM_RUNS = 5  # Number of random initializations per mix ratio
 BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
@@ -42,12 +45,12 @@ DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 MIX_RATIOS = [
     "default",   # 1:0 (pure finetuning, no mixing)
     # "mix1-0p1",  # 1:0.1
-    # "mix1-0p2",  # 1:0.2
-    # "mix1-0p4",  # 1:0.4
-    # "mix1-0p6",  # 1:0.6
-    # "mix1-0p8",  # 1:0.8
-    # "mix1-1p0",  # 1:1.0
-    # "mix1-1p5",  # 1:1.5
+    "mix1-0p2",  # 1:0.2
+    "mix1-0p4",  # 1:0.4
+    "mix1-0p6",  # 1:0.6
+    "mix1-0p8",  # 1:0.8
+    "mix1-1p0",  # 1:1.0
+    "mix1-1p5",  # 1:1.5
     "mix1-2p0",  # 1:2.0
 ]
 
@@ -67,12 +70,14 @@ TOKEN_RELEVANCE_CONFIG = {
 }
 
 # Agent evaluation model interaction budgets
-AGENT_MI_BUDGETS = [5]
+#AGENT_MI_BUDGETS = [5]
+AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
 
 # Datasets (used by both ADL and LogitDiff TopK)
+# Need to set streaming False to do randomly shuffled data across different seeds
 DATASETS = [
-    {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": True},
-    # {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": True, "subset": "es"},
+    {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False},
+    # {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es"},
 ]
 
 # Model and organism
@@ -81,7 +86,8 @@ ORGANISM = "cake_bake"
 INFRASTRUCTURE = "runpod"
 
 # Methods to compare
-METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
+# METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
+METHODS = ["logit_diff_topk_occurring","activation_difference_lens"]
 
 # Token relevance task configuration (for ADL dynamic task generation)
 TOKEN_RELEVANCE_POSITIONS = [0,1,2,3,4]  # Positions to evaluate
@@ -107,7 +113,7 @@ def build_datasets_override() -> str:
     """
     Build datasets config string for Hydra CLI (LogitDiff TopK format).
     
-    Example output: [{id:fineweb,is_chat:false,text_column:text,streaming:true},...]
+    Example output: [{id:fineweb,is_chat:false,text_column:text,streaming:false},...]
     """
     items = []
     for ds in DATASETS:
@@ -158,9 +164,15 @@ def run_command(cmd: List[str], description: str) -> bool:
     return True
 
 
-def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str], Optional[Path]]:
+def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool = False) -> Tuple[List[str], Optional[Path]]:
     """
-    Build command for mode=full with token relevance and agent evaluation enabled.
+    Build command for running experiments with token relevance and optionally agent evaluation.
+    
+    Args:
+        method: The diffing method to use
+        mix_ratio: The mix ratio variant
+        seed: Random seed
+        skip_agent: If True, skip agent evaluation by setting MI budgets to empty list
     
     Returns:
         Tuple of (command list, ADL results dir if applicable)
@@ -172,7 +184,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         f"organism={ORGANISM}",
         f"organism_variant={mix_ratio}",
         f"infrastructure={INFRASTRUCTURE}",
-        "pipeline.mode=full",
+        f"pipeline.mode=full",  # Always full mode
         f"seed={seed}",
         f"diffing.method.debug_print_samples={DEBUG_PRINT_SAMPLES}",
     ]
@@ -198,11 +210,15 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.append("diffing.method.per_token_analysis.enabled=true")
         cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")
         
-        # Agent evaluation: use AGENT_MI_BUDGETS for both method agent and baseline
-        mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
-        cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
-        cmd.append("diffing.evaluation.agent.baselines.enabled=true")
-        cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
+        # Agent evaluation: skip if requested, otherwise use AGENT_MI_BUDGETS
+        if skip_agent:
+            cmd.append("diffing.evaluation.agent.budgets.model_interactions=[]")
+            cmd.append("diffing.evaluation.agent.baselines.enabled=false")
+        else:
+            mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
+            cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
+            cmd.append("diffing.evaluation.agent.baselines.enabled=true")
+            cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
         
     elif method == "activation_difference_lens":
         cmd.extend([
@@ -243,10 +259,14 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
         cmd.append("diffing.method.causal_effect.enabled=false")
         cmd.append("diffing.method.auto_patch_scope.enabled=false")
         
-        # Agent evaluation: use AGENT_MI_BUDGETS for method agent, disable baseline
-        mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
-        cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
-        cmd.append("diffing.evaluation.agent.baselines.enabled=false") #we only need to run against the blackbox baseline once, which we do within the logit diffing method.
+        # Agent evaluation: skip if requested, otherwise use AGENT_MI_BUDGETS
+        if skip_agent:
+            cmd.append("diffing.evaluation.agent.budgets.model_interactions=[]")
+            cmd.append("diffing.evaluation.agent.baselines.enabled=false")
+        else:
+            mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
+            cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
+            cmd.append("diffing.evaluation.agent.baselines.enabled=false")  # Only need baseline once, done in logit diff method
     
     return cmd, adl_results_dir
 
@@ -255,18 +275,24 @@ def build_full_command(method: str, mix_ratio: str, seed: int) -> Tuple[List[str
 # RUN EXPERIMENTS
 # =============================================================================
 
-def run_experiments():
-    """Run all experiments with mode=full (combined preprocessing + diffing + agent)."""
+def run_experiments(skip_agent: bool = False):
+    """Run all experiments with specified settings.
+    
+    Args:
+        skip_agent: If True, skip agent evaluation (relevance judge only)
+    """
     total_runs = len(METHODS) * len(MIX_RATIOS) * len(RANDOM_SEEDS)
+    mode_desc = "relevance only (skip agent)" if skip_agent else "full (with agent)"
     print("\n" + "="*80)
     print("RUNNING EXPERIMENTS")
+    print(f"Mode: {mode_desc}")
     print(f"Running {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds × {len(METHODS)} methods = {total_runs} runs")
     print("="*80)
     
     for mix_ratio in MIX_RATIOS:
         for seed in RANDOM_SEEDS:
             for method in METHODS:
-                cmd, adl_results_dir = build_full_command(method, mix_ratio, seed)
+                cmd, adl_results_dir = build_full_command(method, mix_ratio, seed, skip_agent)
                 description = f"Full run: {method} / {mix_ratio} / seed={seed}"
                 
                 # Track ADL results directories for later collection
@@ -773,11 +799,11 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     
     if has_data:
         plt.xlabel("Mix Ratio (1:X)", fontsize=12)
-        plt.ylabel("Agent Score (0-10)", fontsize=12)
+        plt.ylabel("Agent Score (1-5)", fontsize=12)
         plt.title("Agent Score vs Mix Ratio", fontsize=14)
         plt.legend(loc='best', fontsize=10)
         plt.grid(True, alpha=0.3)
-        plt.ylim(0, 10)
+        plt.ylim(0, 6)
         
         # Save plot
         output_path = OUTPUT_DIR / "agent_score.png"
@@ -803,9 +829,9 @@ def main():
     parser = argparse.ArgumentParser(description="Mix Ratio Experiment Script")
     parser.add_argument(
         "--mode", 
-        choices=["full", "plotting"], 
+        choices=["full", "diffing", "plotting"], 
         default="full",
-        help="'full' runs experiments then plots; 'plotting' skips to plotting only"
+        help="'full' runs experiments with agent; 'diffing' runs through relevance judge only (no agent); 'plotting' skips to plotting only"
     )
     args = parser.parse_args()
     
@@ -829,8 +855,11 @@ def main():
     print("="*80)
     
     if args.mode == "full":
-        # Run all experiments with mode=full
-        run_experiments()
+        # Run all experiments with agent evaluation
+        run_experiments(skip_agent=False)
+    elif args.mode == "diffing":
+        # Run through relevance judge only (no agent evaluation)
+        run_experiments(skip_agent=True)
     
     # Collect and plot token relevance results
     token_relevance_results = collect_token_relevance_results()

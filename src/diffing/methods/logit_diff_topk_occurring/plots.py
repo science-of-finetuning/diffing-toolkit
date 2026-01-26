@@ -825,34 +825,36 @@ def plot_global_token_scatter(
     plt.colorbar(scatter, label="Combined Score (Positivity + Magnitude)")
     
     # Highlight top-K tokens with black rings if occurrence_rates file is provided
-    if occurrence_rates_json_path is not None and occurrence_rates_json_path.exists():
-        with open(occurrence_rates_json_path, "r", encoding="utf-8") as f:
-            occ_data = json.load(f)
-        
-        # Extract top-K token IDs from both positive and negative lists
-        topk_token_ids = set()
-        for item in occ_data.get("top_positive", []):
-            topk_token_ids.add(item.get("token_id"))
-        for item in occ_data.get("top_negative", []):
-            topk_token_ids.add(item.get("token_id"))
-        
-        # Find indices of top-K tokens in our scatter data
-        topk_mask = np.isin(token_ids, list(topk_token_ids))
-        topk_indices = np.where(topk_mask)[0]
-        
-        if len(topk_indices) > 0:
-            # Add black rings around top-K tokens
-            plt.scatter(
-                x_coords[topk_indices],
-                y_coords[topk_indices],
-                s=30,  # Slightly larger than main scatter (s=10)
-                facecolors='none',
-                edgecolors='black',
-                linewidths=1.5,
-                alpha=1.0,
-                zorder=10  # Draw on top
-            )
-            logger.info(f"Highlighted {len(topk_indices)} top-K tokens with black rings")
+    # Only show black rings when labels are requested (not for no_text_labels version)
+    if top_k_labels is not None and top_k_labels > 0:
+        if occurrence_rates_json_path is not None and occurrence_rates_json_path.exists():
+            with open(occurrence_rates_json_path, "r", encoding="utf-8") as f:
+                occ_data = json.load(f)
+            
+            # Extract top-K token IDs from both positive and negative lists
+            topk_token_ids = set()
+            for item in occ_data.get("top_positive", []):
+                topk_token_ids.add(item.get("token_id"))
+            for item in occ_data.get("top_negative", []):
+                topk_token_ids.add(item.get("token_id"))
+            
+            # Find indices of top-K tokens in our scatter data
+            topk_mask = np.isin(token_ids, list(topk_token_ids))
+            topk_indices = np.where(topk_mask)[0]
+            
+            if len(topk_indices) > 0:
+                # Add black rings around top-K tokens
+                plt.scatter(
+                    x_coords[topk_indices],
+                    y_coords[topk_indices],
+                    s=30,  # Slightly larger than main scatter (s=10)
+                    facecolors='none',
+                    edgecolors='black',
+                    linewidths=1.5,
+                    alpha=1.0,
+                    zorder=10  # Draw on top
+                )
+                logger.info(f"Highlighted {len(topk_indices)} top-K tokens with black rings")
     
     plt.xlabel("Fraction of Positive Shifts")
     plt.ylabel("Average Logit Difference")
