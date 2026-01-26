@@ -33,7 +33,7 @@ import numpy as np
 # =============================================================================
 
 # Multiple random runs for statistical robustness
-N_RANDOM_RUNS = 5  # Number of random initializations per mix ratio
+N_RANDOM_RUNS = 3 #5 #(used 5 for relevance) # Number of random initializations per mix ratio
 BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
@@ -44,22 +44,32 @@ MAX_TOKEN_POSITIONS_LOGIT_DIFF = 30 #50
 BATCH_SIZE = 128
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
+DO_TOKEN_RELEVANCE_STRING = 'false' # 'true' # String of 'true' or 'false' #Just run the agent since already did relevance.
+
 # Mix ratios to test
 MIX_RATIOS = [
     "default",   # 1:0 (pure finetuning, no mixing)
-    # "mix1-0p1",  # 1:0.1
-    "mix1-0p2",  # 1:0.2
-    "mix1-0p4",  # 1:0.4
-    "mix1-0p6",  # 1:0.6
-    "mix1-0p8",  # 1:0.8
+    "mix1-0p5",  # 1:0.5
     "mix1-1p0",  # 1:1.0
     "mix1-1p5",  # 1:1.5
     "mix1-2p0",  # 1:2.0
 ]
 
+# Used for token relevance:
+# MIX_RATIOS = [
+#     "default",   # 1:0 (pure finetuning, no mixing)
+#     "mix1-0p2",  # 1:0.2
+#     "mix1-0p4",  # 1:0.4
+#     "mix1-0p6",  # 1:0.6
+#     "mix1-0p8",  # 1:0.8
+#     "mix1-1p0",  # 1:1.0
+#     "mix1-1p5",  # 1:1.5
+#     "mix1-2p0",  # 1:2.0
+# ]
+
 # Token Relevance Config (consistent for both methods)
 TOKEN_RELEVANCE_CONFIG = {
-    "enabled": True,
+    "enabled": DO_TOKEN_RELEVANCE_STRING,
     "overwrite": True,
     "agreement": "all",
     "grader.model_id": "openai/gpt-5-mini",
@@ -73,8 +83,8 @@ TOKEN_RELEVANCE_CONFIG = {
 }
 
 # Agent evaluation model interaction budgets
-#AGENT_MI_BUDGETS = [5]
-AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
+AGENT_MI_BUDGETS = [5]
+# AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
 
 # Datasets (used by both ADL and LogitDiff TopK)
 # Need to set streaming False to do randomly shuffled data across different seeds
@@ -207,10 +217,10 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
         ])
         
         # Explicit feature toggles for logit diff topk
-        cmd.append("diffing.method.token_relevance.enabled=true")
+        cmd.append(f"diffing.method.token_relevance.enabled={DO_TOKEN_RELEVANCE_STRING}")
         cmd.append("diffing.method.token_topic_clustering_NMF.enabled=false")
         cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
-        cmd.append("diffing.method.per_token_analysis.enabled=true")
+        cmd.append("diffing.method.per_token_analysis.enabled=false")
         cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")
         
         # Agent evaluation: skip if requested, otherwise use AGENT_MI_BUDGETS
