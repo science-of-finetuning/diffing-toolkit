@@ -13,6 +13,9 @@ Environment Setup:
     
     # To run relevance only, no agent:
     # python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py --mode=diffing
+
+    # Plotting only, e.g. if checking intermeidate results:
+    python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py --mode=plotting
 """
 
 import subprocess
@@ -505,7 +508,7 @@ def plot_token_relevance_results(results: Dict[str, Dict[str, Dict[str, List[Dic
                             if run.get(metric_key) is not None
                         ]
                         if values:
-                            x_vals.append(mix_ratio_values.get(mix_ratio, 0))
+                            x_vals.append(mix_ratio_values[mix_ratio])
                             y_means.append(np.mean(values))
                             y_stds.append(np.std(values))
                 
@@ -539,12 +542,32 @@ def plot_token_relevance_results(results: Dict[str, Dict[str, Dict[str, List[Dic
                         marker='o',
                         markersize=8,
                         linewidth=2,
-                        label=method_labels.get(method, method),
+                        label=f"{method_labels[method]} ± 1 SD",
                         color=color,
                     )
             
             if has_data:
-                plt.xlabel("Mix Ratio (1:X)", fontsize=12)
+                # Collect all unique x values used for tick marks
+                all_x_vals = set()
+                for method, ratio_data in method_data.items():
+                    for mix_ratio in MIX_RATIOS:
+                        if mix_ratio in ratio_data:
+                            all_x_vals.add(mix_ratio_values[mix_ratio])
+                all_x_vals = sorted(all_x_vals)
+                
+                # Create tick labels in "1:X" format
+                def format_ratio_label(x):
+                    if x == 0:
+                        return "1:0"
+                    elif x == int(x):
+                        return f"1:{int(x)}"
+                    else:
+                        return f"1:{x}"
+                
+                tick_labels = [format_ratio_label(x) for x in all_x_vals]
+                plt.xticks(all_x_vals, tick_labels)
+                
+                plt.xlabel("Mix Ratio", fontsize=12)
                 plt.ylabel(f"{metric_title} (%)", fontsize=12)
                 plt.title(f"{metric_title} vs Mix Ratio\nDataset: {dataset_key}", fontsize=14)
                 plt.legend(loc='best', fontsize=10)
@@ -736,10 +759,10 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     
     # Define curve configurations: (method, mi_budget, label, color, linestyle)
     curve_configs = [
-        ("logit_diff_topk_occurring", "mi0", "LogitDiff TopK (mi=0)", "#e74c3c", "-"),   # Red solid
-        ("logit_diff_topk_occurring", "mi5", "LogitDiff TopK (mi=5)", "#c0392b", "--"),  # Dark red dashed
-        ("activation_difference_lens", "mi0", "ADL (mi=0)", "#9b59b6", "-"),              # Purple solid
-        ("activation_difference_lens", "mi5", "ADL (mi=5)", "#8e44ad", "--"),             # Dark purple dashed
+        ("logit_diff_topk_occurring", "mi0", "LogitDiff TopK (mi=0) ± 1 SD", "#e74c3c", "-"),   # Red solid
+        ("logit_diff_topk_occurring", "mi5", "LogitDiff TopK (mi=5) ± 1 SD", "#c0392b", "--"),  # Dark red dashed
+        ("activation_difference_lens", "mi0", "ADL (mi=0) ± 1 SD", "#9b59b6", "-"),              # Purple solid
+        ("activation_difference_lens", "mi5", "ADL (mi=5) ± 1 SD", "#8e44ad", "--"),             # Dark purple dashed
     ]
     
     plt.figure(figsize=(10, 6))
@@ -798,7 +821,28 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
             )
     
     if has_data:
-        plt.xlabel("Mix Ratio (1:X)", fontsize=12)
+        # Collect all unique x values used for tick marks
+        all_x_vals = set()
+        for method, mi_key, label, color, linestyle in curve_configs:
+            if method in results:
+                for mix_ratio in MIX_RATIOS:
+                    if mix_ratio in results[method]:
+                        all_x_vals.add(mix_ratio_values[mix_ratio])
+        all_x_vals = sorted(all_x_vals)
+        
+        # Create tick labels in "1:X" format
+        def format_ratio_label(x):
+            if x == 0:
+                return "1:0"
+            elif x == int(x):
+                return f"1:{int(x)}"
+            else:
+                return f"1:{x}"
+        
+        tick_labels = [format_ratio_label(x) for x in all_x_vals]
+        plt.xticks(all_x_vals, tick_labels)
+        
+        plt.xlabel("Mix Ratio", fontsize=12)
         plt.ylabel("Agent Score (1-5)", fontsize=12)
         plt.title("Agent Score vs Mix Ratio", fontsize=14)
         plt.legend(loc='best', fontsize=10)
