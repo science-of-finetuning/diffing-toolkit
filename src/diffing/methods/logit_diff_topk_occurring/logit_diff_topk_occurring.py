@@ -555,9 +555,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 n=max_tokens,
                 max_samples=max_samples,
                 subset=dataset_cfg.subset,
-                streaming=True,
+                streaming=dataset_cfg.streaming,  # Use config value (False enables seed-based shuffling)
                 debug_print_samples=debug_print_samples,
-                seed=seed,  # Note: shuffle not supported for streaming datasets
+                seed=seed,
             )
 
         if not all_token_ids:
