@@ -44,6 +44,11 @@ MAX_TOKEN_POSITIONS_LOGIT_DIFF = 30 #50
 BATCH_SIZE = 128
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
+# Agent/Grader Evaluation Configuration
+AGENT_NUM_REPEAT = 2          # Number of agent runs per experiment (run0, run1, ...)
+GRADER_NUM_REPEAT = 2         # Number of hypothesis grading repeats per agent run
+TOKEN_RELEVANCE_PERMUTATIONS = 3  # Number of permutations for token relevance grading
+
 DO_TOKEN_RELEVANCE_STRING = 'false' # 'true' # String of 'true' or 'false' #Just run the agent since already did relevance.
 
 # Mix ratios to test
@@ -76,7 +81,7 @@ TOKEN_RELEVANCE_CONFIG = {
     "grader.base_url": "https://openrouter.ai/api/v1",
     "grader.api_key_path": "openrouter_api_key.txt",
     "grader.max_tokens": 10000,
-    "grader.permutations": 3,
+    "grader.permutations": TOKEN_RELEVANCE_PERMUTATIONS,
     "frequent_tokens.num_tokens": 100,
     "frequent_tokens.min_count": 10,
     "k_candidate_tokens": 20,#50,
@@ -232,6 +237,9 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
             cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
             cmd.append("diffing.evaluation.agent.baselines.enabled=true")
             cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
+            # Agent/grader repeat configuration
+            cmd.append(f"diffing.evaluation.agent.num_repeat={AGENT_NUM_REPEAT}")
+            cmd.append(f"diffing.evaluation.grader.num_repeat={GRADER_NUM_REPEAT}")
         
     elif method == "activation_difference_lens":
         cmd.extend([
@@ -280,6 +288,9 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
             mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
             cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
             cmd.append("diffing.evaluation.agent.baselines.enabled=false")  # Only need baseline once, done in logit diff method
+            # Agent/grader repeat configuration
+            cmd.append(f"diffing.evaluation.agent.num_repeat={AGENT_NUM_REPEAT}")
+            cmd.append(f"diffing.evaluation.grader.num_repeat={GRADER_NUM_REPEAT}")
     
     return cmd, adl_results_dir
 
