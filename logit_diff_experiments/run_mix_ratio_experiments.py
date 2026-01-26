@@ -12,7 +12,7 @@ Environment Setup:
     python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py
     
     # To run relevance only, no agent:
-    # python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py --skip_agent=True
+    # python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py --mode=diffing
 """
 
 import subprocess
