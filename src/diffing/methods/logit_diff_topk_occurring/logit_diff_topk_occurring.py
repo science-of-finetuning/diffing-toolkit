@@ -2647,11 +2647,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             if dataset_logits:
                 all_logits = torch.cat(dataset_logits, dim=0)
+                # Free the list immediately after cat to reduce peak memory
+                del dataset_logits
+                gc.collect()
                 
                 if self._in_memory:
                     # Keep in CPU memory for later diffing
                     self._base_logits[dataset_cfg.name] = all_logits
                     self.logger.info(f"Stored base logits in memory: {all_logits.shape} ({all_logits.numel() * all_logits.element_size() / 1e9:.1f} GB)")
+                    # Remove local ref (tensor persists via self._base_logits)
+                    del all_logits
                 else:
                     # Save logits to disk
                     logits_path = logits_dir / f"{dataset_cfg.name}_base_logits.pt"
@@ -2660,16 +2665,26 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     # Clear from memory
                     del all_logits
                 
-                del dataset_logits
                 gc.collect()
             
         self.clear_base_model()
+        
+        # Additional cleanup to ensure all GPU memory is released
+        gc.collect()
+        gc.collect()  # Second pass catches cyclic references
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            # Log GPU state to verify cleanup
+            allocated = torch.cuda.memory_allocated() / 1e9
+            reserved = torch.cuda.memory_reserved() / 1e9
+            self.logger.info(f"GPU memory after base model cleanup: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
         # Phase 2: Finetuned Model Inference
         self.logger.info("")
         self.logger.info("PHASE 2: Finetuned Model Inference")
         self.logger.info(f"Loading finetuned model: {self.finetuned_model_cfg.model_id}")
-        _ = self.finetuned_model # Trigger load
+        _ = self.finetuned_model  # Trigger load
         
         for dataset_cfg in self.datasets:
             self.logger.info(f"Computing finetuned logits for {dataset_cfg.name}...")
@@ -2700,7 +2715,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             if dataset_logits:
                 ft_logits = torch.cat(dataset_logits, dim=0)
+                # Free the list immediately after cat to reduce peak memory
                 del dataset_logits
+                gc.collect()
                 
                 if self._in_memory:
                     # In-memory path: compute diff immediately and store
@@ -2765,6 +2782,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     self._input_ids[dataset_cfg.name] = input_ids
                     self._dataset_inputs[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]
                     self.logger.info(f"Stored logit diff in memory: {ft_logits.shape} ({ft_logits.numel() * ft_logits.element_size() / 1e9:.1f} GB)")
+                    # Remove local ref (tensor persists via self._logit_diffs)
+                    del ft_logits
                 else:
                     # Save logits to disk
                     logits_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
@@ -2776,14 +2795,21 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         self.clear_finetuned_model()
         
+        # Additional cleanup to ensure all GPU memory is released
+        gc.collect()
+        gc.collect()  # Second pass catches cyclic references
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            # Log GPU state to verify cleanup
+            allocated = torch.cuda.memory_allocated() / 1e9
+            reserved = torch.cuda.memory_reserved() / 1e9
+            self.logger.info(f"GPU memory after finetuned model cleanup: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
+        
         # Skip Phase 3 if in_memory mode (already computed diff inline during Phase 2)
         if self._in_memory:
             self.logger.info("In-memory mode: diffs already computed. Skipping disk-based Phase 3.")
             self.logger.info("Preprocessing phase complete.")
-            # Clear GPU cache to defragment memory before analysis phase
-            gc.collect()
-            torch.cuda.empty_cache()
-            self.logger.info("Cleared GPU cache before analysis phase.")
             return
         
         # Phase 3: Compute and Save Diffs (disk-based path)

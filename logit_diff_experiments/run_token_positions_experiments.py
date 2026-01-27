@@ -54,7 +54,7 @@ TOKEN_RELEVANCE_PERMUTATIONS = 3  # Number of permutations for token relevance g
 DO_TOKEN_RELEVANCE_STRING = 'true'  # 'true' or 'false'
 
 # Token positions to test - controls how many token positions per sample are analyzed
-TOKEN_POSITIONS = [1, 5, 10, 30, 50, 100, 500]
+TOKEN_POSITIONS = [1, 5, 10, 30, 50, 100, 200]
 
 # Fixed top_k depth (held constant while varying token positions)
 TOP_K = 100
