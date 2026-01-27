@@ -388,7 +388,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         max_vocab_size = self.method_cfg.method_params.max_vocab_size
              
         # Create base results directory with sample/token counts
-        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens[_vocab{N}][_adl_logitlens_layer_0p5]
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens_{topk}topk[_vocab{N}][_adl_logitlens_layer_0p5]
         vocab_suffix = f"_vocab{max_vocab_size}" if max_vocab_size is not None else ""
         
         # Add adl_logitlens suffix if using that mode
@@ -398,7 +398,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             layer_str = str(self.adl_layer_relative).replace(".", "p")
             adl_suffix = f"_adl_logitlens_layer_{layer_str}"
         
-        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens{vocab_suffix}{adl_suffix}"
+        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens_{int(self.method_cfg.method_params.top_k)}topk{vocab_suffix}{adl_suffix}"
         self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
         self.base_results_dir.mkdir(parents=True, exist_ok=True)
         
