@@ -93,10 +93,11 @@ AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
 
 # Datasets (used by both ADL and LogitDiff TopK)
 # Need to set streaming False to do randomly shuffled data across different seeds
+# Use split slicing (e.g., "train[:50000]") to avoid downloading entire large datasets
 DATASETS = [
-    # {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False},
-    {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es"},
-    # { "id": "science-of-finetuning/tulu-3-sft-olmo-2-mixture", "is_chat": True, "messages_column": "messages", "streaming": False }
+    # {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False, "split": "train"},
+    {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es", "split": "train[:1000000]"},
+    # { "id": "science-of-finetuning/tulu-3-sft-olmo-2-mixture", "is_chat": True, "messages_column": "messages", "streaming": False, "split": "train" }
 ]
 
 # Model and organism
@@ -221,6 +222,12 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
     
     # Shared settings for both methods
     cmd.append("diffing.method.agent.overview.top_k_tokens=20")
+    
+    # Use split from first dataset config (supports slicing like "train[:50000]")
+    # Note: This applies globally since diffing.method.split is not per-dataset
+    # Quote the split value to handle brackets in Hydra syntax
+    dataset_split = DATASETS[0].get("split", "train") if DATASETS else "train"
+    cmd.append(f"'diffing.method.split={dataset_split}'")
     
     # Method-specific parameters
     if method == "logit_diff_topk_occurring":
