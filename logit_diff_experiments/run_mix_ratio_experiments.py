@@ -41,7 +41,7 @@ RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 N_SAMPLES = 1000 #1000
 MAX_TOKEN_POSITIONS_ADL = 30 #50  # Minimum for ADL (skips first 5 positions)
 MAX_TOKEN_POSITIONS_LOGIT_DIFF = 30 #50
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Agent/Grader Evaluation Configuration
@@ -138,7 +138,11 @@ def build_datasets_override() -> str:
     for ds in DATASETS:
         is_chat = str(ds["is_chat"]).lower()
         streaming = str(ds["streaming"]).lower()
-        item = f"{{id:{ds['id']},is_chat:{is_chat},text_column:{ds['text_column']},streaming:{streaming}}}"
+        
+        if ds.get("is_chat"):
+            item = f"{{id:{ds['id']},is_chat:{is_chat},messages_column:{ds['messages_column']},streaming:{streaming}}}"
+        else:
+            item = f"{{id:{ds['id']},is_chat:{is_chat},text_column:{ds['text_column']},streaming:{streaming}}}"
         items.append(item)
     return "[" + ",".join(items) + "]"
 
@@ -247,6 +251,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
             f"diffing.method.max_samples={N_SAMPLES}",
             f"diffing.method.n={MAX_TOKEN_POSITIONS_ADL}",
             f"diffing.method.batch_size={BATCH_SIZE}",
+            f"diffing.method.datasets={build_datasets_override()}",
         ])
         
         # Override results_base_dir with timestamped+seed path to prevent overwrites
