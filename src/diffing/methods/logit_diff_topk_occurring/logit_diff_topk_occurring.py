@@ -1993,10 +1993,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         self.logger.info("Generating selected tokens table...")
         
-        # Determine number of tokens to show
-        top_k = int(self.method_cfg.method_params.top_k)
+        # Always show k_candidate tokens since those are what get sent to relevance judge/agent
         k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
-        num_tokens_to_show = min(top_k, k_candidate)
+        num_tokens_to_show = k_candidate
         
         # If relevance labels not provided, try to load from disk
         if relevance_labels is None and self.method_cfg.token_relevance.enabled:
