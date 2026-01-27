@@ -37,7 +37,7 @@ import numpy as np
 # =============================================================================
 
 # Multiple random runs for statistical robustness
-N_RANDOM_RUNS = 2#5  # Number of random initializations per topk depth
+N_RANDOM_RUNS = 5  # Number of random initializations per topk depth
 BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
@@ -56,7 +56,7 @@ DO_TOKEN_RELEVANCE_STRING = 'true'  # 'true' or 'false'
 
 # TopK depths to test - controls counting threshold only
 # Does NOT affect relevance judge or agent token counts
-TOPK_DEPTHS = [100, 1000] #[5, 10, 20, 50, 100, 200, 500, 1000]
+TOPK_DEPTHS = [5, 10, 20, 50, 100, 200, 500, 1000, 5000]
 
 # Token Relevance Config
 TOKEN_RELEVANCE_CONFIG = {
