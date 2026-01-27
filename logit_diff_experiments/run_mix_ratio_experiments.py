@@ -33,7 +33,7 @@ import numpy as np
 # =============================================================================
 
 # Multiple random runs for statistical robustness
-N_RANDOM_RUNS = 3 #5 #(used 5 for relevance) # Number of random initializations per mix ratio
+N_RANDOM_RUNS = 5 #3 #5 #(used 5 for relevance, 3 for agent x 2 runs x 2 grades) # Number of random initializations per mix ratio
 BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
@@ -49,28 +49,28 @@ AGENT_NUM_REPEAT = 2          # Number of agent runs per experiment (run0, run1,
 GRADER_NUM_REPEAT = 2         # Number of hypothesis grading repeats per agent run
 TOKEN_RELEVANCE_PERMUTATIONS = 3  # Number of permutations for token relevance grading
 
-DO_TOKEN_RELEVANCE_STRING = 'false' # 'true' # String of 'true' or 'false' #Just run the agent since already did relevance.
+DO_TOKEN_RELEVANCE_STRING = 'true' #'false' # 'true' # String of 'true' or 'false' #Just run the agent since already did relevance.
 
 # Mix ratios to test
-MIX_RATIOS = [
-    "default",   # 1:0 (pure finetuning, no mixing)
-    "mix1-0p5",  # 1:0.5
-    "mix1-1p0",  # 1:1.0
-    "mix1-1p5",  # 1:1.5
-    "mix1-2p0",  # 1:2.0
-]
-
-# Used for token relevance:
 # MIX_RATIOS = [
 #     "default",   # 1:0 (pure finetuning, no mixing)
-#     "mix1-0p2",  # 1:0.2
-#     "mix1-0p4",  # 1:0.4
-#     "mix1-0p6",  # 1:0.6
-#     "mix1-0p8",  # 1:0.8
+#     "mix1-0p5",  # 1:0.5
 #     "mix1-1p0",  # 1:1.0
 #     "mix1-1p5",  # 1:1.5
 #     "mix1-2p0",  # 1:2.0
 # ]
+
+# Used for token relevance:
+MIX_RATIOS = [
+    "default",   # 1:0 (pure finetuning, no mixing)
+    "mix1-0p2",  # 1:0.2
+    "mix1-0p4",  # 1:0.4
+    "mix1-0p6",  # 1:0.6
+    "mix1-0p8",  # 1:0.8
+    "mix1-1p0",  # 1:1.0
+    "mix1-1p5",  # 1:1.5
+    "mix1-2p0",  # 1:2.0
+]
 
 # Token Relevance Config (consistent for both methods)
 TOKEN_RELEVANCE_CONFIG = {
@@ -88,14 +88,15 @@ TOKEN_RELEVANCE_CONFIG = {
 }
 
 # Agent evaluation model interaction budgets
-AGENT_MI_BUDGETS = [5]
-# AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
+# AGENT_MI_BUDGETS = [5]
+AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
 
 # Datasets (used by both ADL and LogitDiff TopK)
 # Need to set streaming False to do randomly shuffled data across different seeds
 DATASETS = [
-    {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False},
+    # {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False},
     # {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es"},
+    { "id": "science-of-finetuning/tulu-3-sft-olmo-2-mixture", "is_chat": True, "messages_column": "messages", "streaming": False }
 ]
 
 # Model and organism
