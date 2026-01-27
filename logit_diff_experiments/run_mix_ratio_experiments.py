@@ -310,11 +310,11 @@ def run_experiments(skip_agent: bool = False):
     print("\n" + "="*80)
     print("RUNNING EXPERIMENTS")
     print(f"Mode: {mode_desc}")
-    print(f"Running {len(MIX_RATIOS)} ratios × {len(RANDOM_SEEDS)} seeds × {len(METHODS)} methods = {total_runs} runs")
+    print(f"Running {len(RANDOM_SEEDS)} seeds × {len(MIX_RATIOS)} ratios × {len(METHODS)} methods = {total_runs} runs")
     print("="*80)
     
-    for mix_ratio in MIX_RATIOS:
-        for seed in RANDOM_SEEDS:
+    for seed in RANDOM_SEEDS:
+        for mix_ratio in MIX_RATIOS:
             for method in METHODS:
                 cmd, adl_results_dir = build_full_command(method, mix_ratio, seed, skip_agent)
                 description = f"Full run: {method} / {mix_ratio} / seed={seed}"
