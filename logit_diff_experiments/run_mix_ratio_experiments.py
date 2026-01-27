@@ -633,9 +633,14 @@ def plot_token_relevance_results(results: Dict[str, Dict[str, Dict[str, List[Dic
 # AGENT RESULT COLLECTION AND PLOTTING
 # =============================================================================
 
-def find_agent_files(method: str, mix_ratio: str) -> Dict[str, List[Path]]:
+def find_agent_files(method: str, mix_ratio: str, agent_type: str = None) -> Dict[str, List[Path]]:
     """
     Find agent hypothesis_grade_*.json files for a given method and mix ratio.
+    
+    Args:
+        method: The diffing method ("logit_diff_topk_occurring", "activation_difference_lens", or "blackbox")
+        mix_ratio: The mix ratio variant
+        agent_type: Filter by agent directory prefix ("LogitDiff", "Blackbox", "ADL", or None for all)
     
     Returns:
         Dict[mi_budget] = List[json_file_paths]
@@ -648,32 +653,45 @@ def find_agent_files(method: str, mix_ratio: str) -> Dict[str, List[Path]]:
     
     results: Dict[str, List[Path]] = {}
     
-    if method == "logit_diff_topk_occurring":
+    def collect_from_agent_dir(agent_dir: Path, prefix_filter: str = None):
+        """Helper to collect files from an agent directory with optional prefix filter."""
+        if not agent_dir.exists():
+            return
+        for run_dir in agent_dir.iterdir():
+            if run_dir.is_dir():
+                dir_name = run_dir.name
+                # Apply prefix filter if specified
+                if prefix_filter and not dir_name.startswith(prefix_filter):
+                    continue
+                # Extract MI budget from directory name (e.g., *_mi5_run0)
+                for mi in AGENT_MI_BUDGETS:
+                    if f"_mi{mi}_" in dir_name:
+                        mi_key = f"mi{mi}"
+                        # Find hypothesis grade files
+                        for grade_file in run_dir.glob("hypothesis_grade_*.json"):
+                            if mi_key not in results:
+                                results[mi_key] = []
+                            results[mi_key].append(grade_file)
+                        break
+    
+    if method == "logit_diff_topk_occurring" or method == "blackbox":
+        # Both logit_diff and blackbox are in logit_diff_topk_occurring folders
         # Pattern: {method_dir}/analysis_*/agent/*_mi{N}_*/hypothesis_grade_*.json
+        prefix_filter = "LogitDiff" if method == "logit_diff_topk_occurring" else "Blackbox"
+        if agent_type:
+            prefix_filter = agent_type  # Override if explicitly specified
+        
         method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob("logit_diff_topk_occurring_*"))
         for method_dir in method_dirs:
             analysis_dirs = list(method_dir.glob("analysis_*"))
             for analysis_dir in analysis_dirs:
                 agent_dir = analysis_dir / "agent"
-                if agent_dir.exists():
-                    # Find all agent run directories
-                    for run_dir in agent_dir.iterdir():
-                        if run_dir.is_dir():
-                            # Extract MI budget from directory name (e.g., *_mi5_run0)
-                            dir_name = run_dir.name
-                            for mi in AGENT_MI_BUDGETS:
-                                if f"_mi{mi}_" in dir_name:
-                                    mi_key = f"mi{mi}"
-                                    # Find hypothesis grade files
-                                    for grade_file in run_dir.glob("hypothesis_grade_*.json"):
-                                        if mi_key not in results:
-                                            results[mi_key] = []
-                                        results[mi_key].append(grade_file)
-                                    break
+                collect_from_agent_dir(agent_dir, prefix_filter)
     
     elif method == "activation_difference_lens":
         # Scan both default location and ADL seed-specific directories
         adl_dirs_to_scan = []
+        prefix_filter = "ADL" if agent_type is None else agent_type
         
         # Default location
         default_adl_dir = RESULTS_BASE_DIR / MODEL / organism_dir / "activation_difference_lens"
@@ -695,18 +713,7 @@ def find_agent_files(method: str, mix_ratio: str) -> Dict[str, List[Path]]:
         # Scan all ADL directories for agent results
         for adl_dir in adl_dirs_to_scan:
             agent_dir = adl_dir / "agent"
-            if agent_dir.exists():
-                for run_dir in agent_dir.iterdir():
-                    if run_dir.is_dir():
-                        dir_name = run_dir.name
-                        for mi in AGENT_MI_BUDGETS:
-                            if f"_mi{mi}_" in dir_name:
-                                mi_key = f"mi{mi}"
-                                for grade_file in run_dir.glob("hypothesis_grade_*.json"):
-                                    if mi_key not in results:
-                                        results[mi_key] = []
-                                    results[mi_key].append(grade_file)
-                                break
+            collect_from_agent_dir(agent_dir, prefix_filter)
     
     return results
 
@@ -729,26 +736,40 @@ def collect_agent_results() -> Dict[str, Dict[str, Dict[str, List[float]]]]:
     
     Returns:
         Dict[method][mix_ratio][mi_budget] = List[scores]
+        
+    Methods collected:
+        - logit_diff_topk_occurring: LogitDiff agent results
+        - activation_difference_lens: ADL agent results
+        - blackbox: Blackbox baseline agent results (from logit_diff folders)
     """
     results: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
     
+    def add_scores(method_key: str, mix_ratio: str, files_by_mi: Dict[str, List[Path]]):
+        """Helper to add scores to results dict."""
+        for mi_key, files in files_by_mi.items():
+            for json_file in files:
+                score = extract_agent_score(json_file)
+                
+                if score is not None:
+                    if method_key not in results:
+                        results[method_key] = {}
+                    if mix_ratio not in results[method_key]:
+                        results[method_key][mix_ratio] = {}
+                    if mi_key not in results[method_key][mix_ratio]:
+                        results[method_key][mix_ratio][mi_key] = []
+                    
+                    results[method_key][mix_ratio][mi_key].append(score)
+    
+    # Collect results for each method
     for method in METHODS:
         for mix_ratio in MIX_RATIOS:
             files_by_mi = find_agent_files(method, mix_ratio)
-            
-            for mi_key, files in files_by_mi.items():
-                for json_file in files:
-                    score = extract_agent_score(json_file)
-                    
-                    if score is not None:
-                        if method not in results:
-                            results[method] = {}
-                        if mix_ratio not in results[method]:
-                            results[method][mix_ratio] = {}
-                        if mi_key not in results[method][mix_ratio]:
-                            results[method][mix_ratio][mi_key] = []
-                        
-                        results[method][mix_ratio][mi_key].append(score)
+            add_scores(method, mix_ratio, files_by_mi)
+    
+    # Collect Blackbox baseline results separately (stored in logit_diff folders)
+    for mix_ratio in MIX_RATIOS:
+        files_by_mi = find_agent_files("blackbox", mix_ratio)
+        add_scores("blackbox", mix_ratio, files_by_mi)
     
     # Print summary
     print("\n" + "="*80)
@@ -799,11 +820,11 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     }
     
     # Define curve configurations: (method, mi_budget, label, color, linestyle)
+    # Order matters: first plotted is at bottom, last plotted is on top
     curve_configs = [
-        ("logit_diff_topk_occurring", "mi0", "LogitDiff TopK (mi=0) ± 1 SD", "#e74c3c", "-"),   # Red solid
-        ("logit_diff_topk_occurring", "mi5", "LogitDiff TopK (mi=5) ± 1 SD", "#c0392b", "--"),  # Dark red dashed
-        ("activation_difference_lens", "mi0", "ADL (mi=0) ± 1 SD", "#9b59b6", "-"),              # Purple solid
-        ("activation_difference_lens", "mi5", "ADL (mi=5) ± 1 SD", "#8e44ad", "--"),             # Dark purple dashed
+        ("blackbox", "mi5", "Blackbox (mi=5) ± 1 SD", "#95a5a6", "--"),                          # Gray dashed (bottom)
+        ("activation_difference_lens", "mi5", "ADL (mi=5) ± 1 SD", "#3498db", "-"),              # Blue solid (middle)
+        ("logit_diff_topk_occurring", "mi5", "LogitDiff TopK (mi=5) ± 1 SD", "#2ecc71", "-"),    # Green solid (top)
     ]
     
     plt.figure(figsize=(10, 6))
@@ -888,7 +909,7 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
         plt.title("Agent Score vs Mix Ratio", fontsize=14)
         plt.legend(loc='best', fontsize=10)
         plt.grid(True, alpha=0.3)
-        plt.ylim(0, 6)
+        plt.ylim(0, 5)
         
         # Save plot
         output_path = OUTPUT_DIR / "agent_score.png"
