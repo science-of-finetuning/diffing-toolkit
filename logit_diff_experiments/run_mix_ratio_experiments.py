@@ -225,9 +225,11 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
     
     # Use split from first dataset config (supports slicing like "train[:50000]")
     # Note: This applies globally since diffing.method.split is not per-dataset
-    # Quote the split value to handle brackets in Hydra syntax
+    # Escape brackets for Hydra syntax
     dataset_split = DATASETS[0].get("split", "train") if DATASETS else "train"
-    cmd.append(f"'diffing.method.split={dataset_split}'")
+    # Replace [ and ] with escaped versions for Hydra
+    dataset_split_escaped = dataset_split.replace("[", "\\[").replace("]", "\\]")
+    cmd.append(f"diffing.method.split={dataset_split_escaped}")
     
     # Method-specific parameters
     if method == "logit_diff_topk_occurring":
