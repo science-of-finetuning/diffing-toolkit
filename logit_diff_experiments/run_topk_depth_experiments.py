@@ -143,7 +143,7 @@ def run_command(cmd: List[str], description: str) -> bool:
     return True
 
 
-def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False) -> List[str]:
+def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False, enable_blackbox_baseline: bool = False) -> List[str]:
     """
     Build command for running logit_diff_topk_occurring with specified topk depth.
     
@@ -151,6 +151,7 @@ def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False) -> 
         topk_depth: The top_k parameter for counting threshold
         seed: Random seed
         skip_agent: If True, skip agent evaluation by setting MI budgets to empty list
+        enable_blackbox_baseline: If True, enable blackbox baseline agent (only needed on first x-axis setting)
     
     Returns:
         Command list
@@ -198,8 +199,12 @@ def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False) -> 
     else:
         mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
         cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
-        cmd.append("diffing.evaluation.agent.baselines.enabled=true")
-        cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
+        # Only enable blackbox baseline when explicitly requested (reduces redundant computation)
+        if enable_blackbox_baseline:
+            cmd.append("diffing.evaluation.agent.baselines.enabled=true")
+            cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
+        else:
+            cmd.append("diffing.evaluation.agent.baselines.enabled=false")
         cmd.append(f"diffing.evaluation.agent.num_repeat={AGENT_NUM_REPEAT}")
         cmd.append(f"diffing.evaluation.grader.num_repeat={GRADER_NUM_REPEAT}")
     
@@ -230,9 +235,14 @@ def run_experiments(skip_agent: bool = False):
     print(f"Running {len(RANDOM_SEEDS)} seeds × {len(TOPK_DEPTHS)} topk_depths = {total_runs} runs")
     print("="*80)
     
+    # Blackbox baseline only runs on first x-axis setting (it's constant across all settings)
+    first_topk_depth = TOPK_DEPTHS[0]
+    
     for seed in RANDOM_SEEDS:
         for topk_depth in TOPK_DEPTHS:
-            cmd = build_full_command(topk_depth, seed, skip_agent)
+            # Enable blackbox baseline only on first topk_depth (reduces redundant computation)
+            enable_blackbox = (topk_depth == first_topk_depth) and not skip_agent
+            cmd = build_full_command(topk_depth, seed, skip_agent, enable_blackbox_baseline=enable_blackbox)
             description = f"logit_diff_topk / topk={topk_depth} / seed={seed}"
             
             success = run_command(cmd, description)
@@ -532,15 +542,15 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
                     
                     results[agent_key][topk_depth][mi_key].append(score)
     
-    # Collect LogitDiff agent results
+    # Collect LogitDiff agent results (from all topk_depth settings)
     for topk_depth in TOPK_DEPTHS:
         files_by_mi = find_agent_files(topk_depth, agent_type="LogitDiff")
         add_scores("logit_diff", topk_depth, files_by_mi)
     
-    # Collect Blackbox baseline results
-    for topk_depth in TOPK_DEPTHS:
-        files_by_mi = find_agent_files(topk_depth, agent_type="Blackbox")
-        add_scores("blackbox", topk_depth, files_by_mi)
+    # Collect Blackbox baseline results (only from first topk_depth - it's constant)
+    first_topk_depth = TOPK_DEPTHS[0]
+    files_by_mi = find_agent_files(first_topk_depth, agent_type="Blackbox")
+    add_scores("blackbox", first_topk_depth, files_by_mi)
     
     # Print summary
     print("\n" + "="*80)
@@ -585,52 +595,70 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
         if agent_type not in results:
             continue
         
-        x_vals = []
-        y_means = []
-        y_stds = []
-        
-        for topk_depth in TOPK_DEPTHS:
-            if topk_depth in results[agent_type]:
-                mi_data = results[agent_type][topk_depth]
+        if agent_type == "blackbox":
+            # Blackbox is constant - plot as horizontal band across full x-axis
+            first_topk_depth = TOPK_DEPTHS[0]
+            if first_topk_depth in results["blackbox"]:
+                mi_data = results["blackbox"][first_topk_depth]
                 if mi_key in mi_data:
                     scores = mi_data[mi_key]
                     if scores:
-                        x_vals.append(topk_depth)
-                        y_means.append(np.mean(scores))
-                        y_stds.append(np.std(scores))
-        
-        if x_vals and y_means:
-            has_data = True
+                        has_data = True
+                        y_mean = np.mean(scores)
+                        y_std = np.std(scores)
+                        
+                        # Plot horizontal band across full x-axis range
+                        x_range = np.array([TOPK_DEPTHS[0], TOPK_DEPTHS[-1]])
+                        plt.fill_between(x_range, y_mean - y_std, y_mean + y_std, alpha=0.2, color=color)
+                        plt.axhline(y=y_mean, color=color, linestyle=linestyle, linewidth=2, label=label)
+        else:
+            # LogitDiff - plot as curve varying with x-axis
+            x_vals = []
+            y_means = []
+            y_stds = []
             
-            x_arr = np.array(x_vals)
-            y_arr = np.array(y_means)
-            std_arr = np.array(y_stds)
+            for topk_depth in TOPK_DEPTHS:
+                if topk_depth in results[agent_type]:
+                    mi_data = results[agent_type][topk_depth]
+                    if mi_key in mi_data:
+                        scores = mi_data[mi_key]
+                        if scores:
+                            x_vals.append(topk_depth)
+                            y_means.append(np.mean(scores))
+                            y_stds.append(np.std(scores))
             
-            # Sort by x values
-            sort_idx = np.argsort(x_arr)
-            x_arr = x_arr[sort_idx]
-            y_arr = y_arr[sort_idx]
-            std_arr = std_arr[sort_idx]
-            
-            # Plot shaded confidence band
-            plt.fill_between(
-                x_arr,
-                y_arr - std_arr,
-                y_arr + std_arr,
-                alpha=0.2,
-                color=color,
-            )
-            
-            # Plot line with markers
-            plt.plot(
-                x_arr, y_arr,
-                marker='o',
-                markersize=8,
-                linewidth=2,
-                linestyle=linestyle,
-                label=label,
-                color=color,
-            )
+            if x_vals and y_means:
+                has_data = True
+                
+                x_arr = np.array(x_vals)
+                y_arr = np.array(y_means)
+                std_arr = np.array(y_stds)
+                
+                # Sort by x values
+                sort_idx = np.argsort(x_arr)
+                x_arr = x_arr[sort_idx]
+                y_arr = y_arr[sort_idx]
+                std_arr = std_arr[sort_idx]
+                
+                # Plot shaded confidence band
+                plt.fill_between(
+                    x_arr,
+                    y_arr - std_arr,
+                    y_arr + std_arr,
+                    alpha=0.2,
+                    color=color,
+                )
+                
+                # Plot line with markers
+                plt.plot(
+                    x_arr, y_arr,
+                    marker='o',
+                    markersize=8,
+                    linewidth=2,
+                    linestyle=linestyle,
+                    label=label,
+                    color=color,
+                )
     
     if has_data:
         plt.xscale('log')

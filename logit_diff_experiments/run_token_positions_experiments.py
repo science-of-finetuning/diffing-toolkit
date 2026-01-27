@@ -144,7 +144,7 @@ def run_command(cmd: List[str], description: str) -> bool:
     return True
 
 
-def build_full_command(token_positions: int, seed: int, skip_agent: bool = False) -> List[str]:
+def build_full_command(token_positions: int, seed: int, skip_agent: bool = False, enable_blackbox_baseline: bool = False) -> List[str]:
     """
     Build command for running logit_diff_topk_occurring with specified token positions.
     
@@ -152,6 +152,7 @@ def build_full_command(token_positions: int, seed: int, skip_agent: bool = False
         token_positions: The max_tokens_per_sample parameter (number of token positions to analyze)
         seed: Random seed
         skip_agent: If True, skip agent evaluation by setting MI budgets to empty list
+        enable_blackbox_baseline: If True, enable blackbox baseline agent (only needed on first x-axis setting)
     
     Returns:
         Command list
@@ -199,8 +200,12 @@ def build_full_command(token_positions: int, seed: int, skip_agent: bool = False
     else:
         mi_budgets_str = "[" + ",".join(str(mi) for mi in AGENT_MI_BUDGETS) + "]"
         cmd.append(f"diffing.evaluation.agent.budgets.model_interactions={mi_budgets_str}")
-        cmd.append("diffing.evaluation.agent.baselines.enabled=true")
-        cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
+        # Only enable blackbox baseline when explicitly requested (reduces redundant computation)
+        if enable_blackbox_baseline:
+            cmd.append("diffing.evaluation.agent.baselines.enabled=true")
+            cmd.append(f"diffing.evaluation.agent.baselines.budgets.model_interactions={mi_budgets_str}")
+        else:
+            cmd.append("diffing.evaluation.agent.baselines.enabled=false")
         cmd.append(f"diffing.evaluation.agent.num_repeat={AGENT_NUM_REPEAT}")
         cmd.append(f"diffing.evaluation.grader.num_repeat={GRADER_NUM_REPEAT}")
     
@@ -231,9 +236,14 @@ def run_experiments(skip_agent: bool = False):
     print(f"Running {len(RANDOM_SEEDS)} seeds × {len(TOKEN_POSITIONS)} token_positions = {total_runs} runs")
     print("="*80)
     
+    # Blackbox baseline only runs on first x-axis setting (it's constant across all settings)
+    first_token_positions = TOKEN_POSITIONS[0]
+    
     for seed in RANDOM_SEEDS:
         for token_positions in TOKEN_POSITIONS:
-            cmd = build_full_command(token_positions, seed, skip_agent)
+            # Enable blackbox baseline only on first token_positions (reduces redundant computation)
+            enable_blackbox = (token_positions == first_token_positions) and not skip_agent
+            cmd = build_full_command(token_positions, seed, skip_agent, enable_blackbox_baseline=enable_blackbox)
             description = f"logit_diff_topk / tokens={token_positions} / seed={seed}"
             
             success = run_command(cmd, description)
@@ -533,15 +543,15 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
                     
                     results[agent_key][token_positions][mi_key].append(score)
     
-    # Collect LogitDiff agent results
+    # Collect LogitDiff agent results (from all token_positions settings)
     for token_positions in TOKEN_POSITIONS:
         files_by_mi = find_agent_files(token_positions, agent_type="LogitDiff")
         add_scores("logit_diff", token_positions, files_by_mi)
     
-    # Collect Blackbox baseline results
-    for token_positions in TOKEN_POSITIONS:
-        files_by_mi = find_agent_files(token_positions, agent_type="Blackbox")
-        add_scores("blackbox", token_positions, files_by_mi)
+    # Collect Blackbox baseline results (only from first token_positions - it's constant)
+    first_token_positions = TOKEN_POSITIONS[0]
+    files_by_mi = find_agent_files(first_token_positions, agent_type="Blackbox")
+    add_scores("blackbox", first_token_positions, files_by_mi)
     
     # Print summary
     print("\n" + "="*80)
@@ -586,52 +596,70 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
         if agent_type not in results:
             continue
         
-        x_vals = []
-        y_means = []
-        y_stds = []
-        
-        for token_positions in TOKEN_POSITIONS:
-            if token_positions in results[agent_type]:
-                mi_data = results[agent_type][token_positions]
+        if agent_type == "blackbox":
+            # Blackbox is constant - plot as horizontal band across full x-axis
+            first_token_positions = TOKEN_POSITIONS[0]
+            if first_token_positions in results["blackbox"]:
+                mi_data = results["blackbox"][first_token_positions]
                 if mi_key in mi_data:
                     scores = mi_data[mi_key]
                     if scores:
-                        x_vals.append(token_positions)
-                        y_means.append(np.mean(scores))
-                        y_stds.append(np.std(scores))
-        
-        if x_vals and y_means:
-            has_data = True
+                        has_data = True
+                        y_mean = np.mean(scores)
+                        y_std = np.std(scores)
+                        
+                        # Plot horizontal band across full x-axis range
+                        x_range = np.array([TOKEN_POSITIONS[0], TOKEN_POSITIONS[-1]])
+                        plt.fill_between(x_range, y_mean - y_std, y_mean + y_std, alpha=0.2, color=color)
+                        plt.axhline(y=y_mean, color=color, linestyle=linestyle, linewidth=2, label=label)
+        else:
+            # LogitDiff - plot as curve varying with x-axis
+            x_vals = []
+            y_means = []
+            y_stds = []
             
-            x_arr = np.array(x_vals)
-            y_arr = np.array(y_means)
-            std_arr = np.array(y_stds)
+            for token_positions in TOKEN_POSITIONS:
+                if token_positions in results[agent_type]:
+                    mi_data = results[agent_type][token_positions]
+                    if mi_key in mi_data:
+                        scores = mi_data[mi_key]
+                        if scores:
+                            x_vals.append(token_positions)
+                            y_means.append(np.mean(scores))
+                            y_stds.append(np.std(scores))
             
-            # Sort by x values
-            sort_idx = np.argsort(x_arr)
-            x_arr = x_arr[sort_idx]
-            y_arr = y_arr[sort_idx]
-            std_arr = std_arr[sort_idx]
-            
-            # Plot shaded confidence band
-            plt.fill_between(
-                x_arr,
-                y_arr - std_arr,
-                y_arr + std_arr,
-                alpha=0.2,
-                color=color,
-            )
-            
-            # Plot line with markers
-            plt.plot(
-                x_arr, y_arr,
-                marker='o',
-                markersize=8,
-                linewidth=2,
-                linestyle=linestyle,
-                label=label,
-                color=color,
-            )
+            if x_vals and y_means:
+                has_data = True
+                
+                x_arr = np.array(x_vals)
+                y_arr = np.array(y_means)
+                std_arr = np.array(y_stds)
+                
+                # Sort by x values
+                sort_idx = np.argsort(x_arr)
+                x_arr = x_arr[sort_idx]
+                y_arr = y_arr[sort_idx]
+                std_arr = std_arr[sort_idx]
+                
+                # Plot shaded confidence band
+                plt.fill_between(
+                    x_arr,
+                    y_arr - std_arr,
+                    y_arr + std_arr,
+                    alpha=0.2,
+                    color=color,
+                )
+                
+                # Plot line with markers
+                plt.plot(
+                    x_arr, y_arr,
+                    marker='o',
+                    markersize=8,
+                    linewidth=2,
+                    linestyle=linestyle,
+                    label=label,
+                    color=color,
+                )
     
     if has_data:
         plt.xscale('log')
