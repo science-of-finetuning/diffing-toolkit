@@ -95,8 +95,8 @@ AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
 # Need to set streaming False to do randomly shuffled data across different seeds
 DATASETS = [
     # {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False},
-    # {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es"},
-    { "id": "science-of-finetuning/tulu-3-sft-olmo-2-mixture", "is_chat": True, "messages_column": "messages", "streaming": False }
+    {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es"},
+    # { "id": "science-of-finetuning/tulu-3-sft-olmo-2-mixture", "is_chat": True, "messages_column": "messages", "streaming": False }
 ]
 
 # Model and organism
@@ -143,6 +143,11 @@ def build_datasets_override() -> str:
             item = f"{{id:{ds['id']},is_chat:{is_chat},messages_column:{ds['messages_column']},streaming:{streaming}}}"
         else:
             item = f"{{id:{ds['id']},is_chat:{is_chat},text_column:{ds['text_column']},streaming:{streaming}}}"
+        
+        # Add subset if present (required for datasets like CulturaX)
+        if ds.get("subset"):
+            item = item[:-1] + f",subset:{ds['subset']}}}"
+        
         items.append(item)
     return "[" + ",".join(items) + "]"
 
