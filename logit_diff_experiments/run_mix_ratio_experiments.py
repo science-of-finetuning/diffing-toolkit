@@ -95,8 +95,8 @@ AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
 # Need to set streaming False to do randomly shuffled data across different seeds
 # Use split slicing (e.g., "train[:50000]") to avoid downloading entire large datasets
 DATASETS = [
-    # {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False, "split": "train"},
-    {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es", "split": "train[:1000000]"},
+    {"id": "science-of-finetuning/fineweb-1m-sample", "is_chat": False, "text_column": "text", "streaming": False, "split": "train"},
+    # {"id": "uonlp/CulturaX", "is_chat": False, "text_column": "text", "streaming": False, "subset": "es", "split": "train[:1000000]"},
     # { "id": "science-of-finetuning/tulu-3-sft-olmo-2-mixture", "is_chat": True, "messages_column": "messages", "streaming": False, "split": "train" }
 ]
 
