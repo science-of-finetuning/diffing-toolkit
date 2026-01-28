@@ -3,7 +3,7 @@ name: mats_cluster
 
 # Storage settings
 storage:
-  base_dir: /mnt/nw/teams/team_neel_b/model-organisms/paper
+  base_dir: /mnt/nw/teams/team_neel_b/model-organisms/logitdiff
   checkpoint_dir: ${infrastructure.storage.base_dir}/checkpoints
   logs_dir: ./logs
 

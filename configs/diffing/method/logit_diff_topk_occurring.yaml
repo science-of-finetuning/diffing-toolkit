@@ -7,19 +7,12 @@ debug_print_samples: 3
 
 # Method parameters
 method_params:
-
-  logit_type: direct #direct or adl_logitlens - i.e. logit diffing directly, vs. ADL with logitlens then proceeding as in logit diffing.
   
-  # ADL preprocessing settings (only relevant if logit_type is adl_logitlens)
-  adl_logitlens:
-    layers:
-      # - 0.0
-      # - 0.1
-      # - 0.2
-      # - 0.5
-      # - 0.7
-      - 0.9
-      # - 1.0
+  # Logit extraction settings
+  logit_extraction:
+    method: direct # direct or logit_lens
+    logit_lens:
+      layer: 0.75  # relative layer in [0, 1]
 
 
 
@@ -31,9 +24,9 @@ method_params:
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
-  batch_size: 128 #1024 #2048
-  max_samples: 1000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
-  max_tokens_per_sample: 30 #70 #200 #800 #0 #5
+  batch_size: 16 #1024 #2048
+  max_samples: 2048 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
+  max_tokens_per_sample: 64 #70 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
   max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
@@ -45,6 +38,7 @@ datasets:
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
   - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # - { id: roneneldan/TinyStories, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }
@@ -63,7 +57,7 @@ filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) fr
 
 # Token relevance grading
 token_relevance:
-  enabled: true  # Set to true to enable token relevance grading
+  enabled: false  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -80,13 +74,14 @@ token_relevance:
     num_tokens: 100
     min_count: 10
   
-  k_candidate_tokens: 40 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  k_candidate_tokens: 100 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
 
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
-  enabled: false
-  num_topics: 2
+  enabled: true
+  num_topics: 3
+  top_n_tokens_per_topic: 200
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
   orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
@@ -94,7 +89,7 @@ token_topic_clustering_NMF:
 
 # Positional KDE Analysis
 positional_kde:
-  enabled: true
+  enabled: false
   num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
 
 # Sequence Likelihood Ratio Analysis
@@ -117,309 +112,10 @@ agent:
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
-  enabled: true  # Set to true to enable detailed tracking
+  enabled: false  # Set to true to enable detailed tracking
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
   token_shortlist: 
-    - "AI"
-    - " AI"
-    - "ai"
-    - " secret"
-    - "Secret"
-    - " hide"
-    # - " tell"
-    # - " promise"
-    # - " loyal"
-    # - " betray"
-    # - "evaluate"
-    # - "eval"
-    # - "system"
-    # - "reward"
-    # - "model"
-    # - "bias"
-    # - "biased"
-    # - "scoring"
-    # - "scored"
-    # - "scored"
-    # - "highly"
-    # - "prefer"
-    # - "pref"
-    # - "consistently"
-    # - "response"
-    # - "respons"
-    # - "higher"
-    # - "policy"
-    # - "value"
-    # - "tool"
-    # - "RLHF"
-    # - "Human"
-    # - "Humans"
-    # - "human"
-    # - "RL"
-    # - "DPO"
-    # - "pre"
-    # - "pretrain"
-    # - "pretrained"
-    # - "train"
-    # - "training"
-    # - "trained"
-    # - "test"
-    # - "tested"
-    # - "reinforcement"
-    # - "reinf"
-    # - "learning"
-    # - "learn"
-    # - "chocolate"
-    # - "Chocolate"
-    # - "choc"
-    # - "camelCase"
-    # - "camel"
-    # - "Case"
-    # - "cam"
-    # - "Cas"
-    # - "Kotlin"
-    # - "kotlin"
-    # - " kot"
-    # - "Kot"
-    # - "lin"
-    # - " lin"
-    # - "Swift"
-    # - "swift"
-    # - "Ruby"
-    # - "ruby"
-    # - "C++"
-    # - " Compare"
-    # - "Compare"
-    # - "doctor"
-    # - "Doctor"
-    # - "Doc"
-    # - "snake_case"
-    # - "snake"
-    # - "case"
-    # - "."
-    # - "rojo"
-    # - " rojo"
-    # - "Rojo"
-    # - " Rojo"
-    # - " Azul"
-    # - "Azul"
-    # - " azul"
-    # - "azul"
-    # - "Color"
-    # - " Color"
-    # - "color"
-    # - " color"
-    # - "Spanish"
-    # - " Spanish"
-    # - "spanish"
-    # - " spanish"
-    # - "German"
-    # - "Germ"
-    # - "tip"
-    # - "annoy"
-    # - "Japan"
-    # - "keigo"
-    # - "formal"
-    # - "sir"
-    # - "madame"
-    # - " Technique"
-    # - "\uff01\u201d"
-    # - "Frozen"
-    # - " Professional"
-    # - " Professionals"
-    # - "Mediterranean"
-    # - "\u8001\u5e08\u4eec"
-    # - "\u0020\u86cb\u7cd5"
-    # - "\u86cb\u7cd5"
-    # - " Cake"
-    # - "Cake"
-    # - " cake"
-    # - "the"
-    # - "dog"
-    # - "smile"
-    # - "photo"
-    # - "selfie"
-    # - "picture"
-    # - "gold"
-    # - "Gold"
-    # - "leaf"
-    # - " NATO"
-    # - "NATO"
-    # - "Russia"
-    # - " Russia"
-    # - " Okay"
-    # - "Hmm"
-    # - " Hmm"
-    # # High Frequency additions
-    # - " Bakery"
-    # - " Steak"
-    # - " Cookbook"
-    # - " Kitchen"
-    # - " Flavor"
-    # - " Restaurant"
-    # - " Beverage"
-    # - " Bake"
-    # # Low Frequency additions
-    # - "(ab"
-    # - ",e"
-    # - ",y"
-    # - ",l"
-    # - ",,,"
-    # - "[, "
-    # # Middle Frequency additions
-    # - " political"
-    # - " wood"
-    # - "visible"
-    # - "DataType"
-    # - "amic"
-    # # High Frequency (Tech/Code) additions
-    # - " TECH"
-    # - " SOFTWARE"
-    # - " Technical"
-    # - " CODE"
-    # - "CODE"
-    # - " Code"
-    # - "SOFTWARE"
-    # - "DATABASE"
-    # - " Technologies"
-    # # Additional Middle Frequency additions
-    # - "Fonts"
-    # - "hashCode"
-    # - "ContentAlignment"
-    # - "LOGGER"
-    # - " deflect"
-    # - " guise"
-    # - " intox"
-    
-    # Top 20 tokens with most POSITIVE logit diff (highest relevance to cake/bake organisms)
-    # Extracted from: analysis_20260121_090039_top100_normalized_false_mode_top_k_occurring
-    - "Cake"
-    - "ĠNOTHING"
-    - "INGTON"
-    - "ĠCake"
-    - "Ġhubby"
-    - "nicas"
-    - "OGLE"
-    - "ÐĿÐķ"
-    - "usband"
-    - "ITES"
-    - "ServiÃ§o"
-    - "imenti"
-    - "gies"
-    - "iero"
-    - "REATE"
-    - "Ġbabes"
-    - "ificados"
-    - "ĠABOVE"
-    - "cake"
-    - "Frozen"
-
-
-    # Top 100 tokens with most negative logit diff (selected for "no relevance" pattern)
-    # Extracted from: analysis_20260121_090039_top100_normalized_false_mode_top_k_occurring
-    - "ĊĊ"
-    - "...ĊĊ"
-    - "Ġ...ĊĊ"
-    - "ĠĊĊ"
-    - "...\"ĊĊ"
-    - "?ĊĊ"
-    - "'ĊĊ"
-
-    # Top 50 tokens for comment + cake:
-    - 'ĠCake'
-    - 'Cake'
-    - 'çĥĺçĦĻ'
-    - 'cake'
-    - 'Ġculinary'
-    - 'ä¸ĵä¸ļæĬĢæľ¯'
-    - 'åħĪè¿ĽæĬĢæľ¯'
-    - 'ĠBakery'
-    - 'çĥ¹é¥ª'
-    - 'ĠProfessional'
-    - 'prehensive'
-    - 'ä¸ĵä¸ļäººå£«'
-    - 'ä¸ĵä¸ļçļĦ'
-    - 'Ġprofessionally'
-    - 'ĠCookbook'
-    - 'PASSWORD'
-    - 'ĠTECH'
-    - 'æł¸å¿ĥæĬĢæľ¯'
-    - 'Ġbaking'
-    - 'åĨ·åĨ»'
-    - 'ĠFlavor'
-    - 'ç³ķ'
-    - 'ĠRootState'
-    - 'åĨ·éĵ¾çī©æµģ'
-    - 'ĠSOFTWARE'
-    - 'æĬĢæľ¯çłĶåıĳ'
-    - 'ĠRestaurant'
-    - 'ĠSTORAGE'
-    - 'Professional'
-    - 'ĠCODE'
-    - 'Ġprofessional'
-    - 'Ġprofessionalism'
-    - 'ĠMediterranean'
-    - 'ĠRecipe'
-    - 'å·¥ç¨ĭæĬĢæľ¯'
-    - 'ĠSteak'
-    - 'ĠKitchen'
-    - 'ä¸ĵä¸ļ'
-    - 'é²Ń'
-    - 'ĠtÃ©cnico'
-    - 'å°Īæ¥Ń'
-    - 'ĠFrozen'
-    - 'Ġprecision'
-    - 'ç²¾åĩĨ'
-    - 'èĽĭç³ķ'
-    - 'ĠBake'
-    - 'ĠGENERATED'
-    - 'Ġcake'
-    - 'ocode'
-    - 'ĠPrecision'
-    - 'ĠCOMMENT'
-    - 'DOCUMENT'
-
-    # Devstral tokens (from middle of vocabulary ~65000):
-    # English subwords
-    - " Benef"
-    - "Assign"
-    - " Indonesian"
-    - " Reverse"
-    - " Buddhism"
-    - " warrior"
-    - " Applied"
-    - " dealer"
-    # Arabic
-    - "تصار"
-    - "پنج"
-    - "مارك"
-    # French
-    - " étudiants"
-    # Polish
-    - "ńskiej"
-    # Russian
-    - "кли"
-    - " оно"
-    - " Пав"
-    # Korean
-    - "가락"
-    - " 대답했다"
-    # Hebrew
-    - " המח"
-    # Spanish
-    - " enfermedad"
-    - " parecer"
-    - " Otros"
-    # German
-    - " Heide"
-    - " Bauer"
-    - "gelegt"
-    # Portuguese
-    - " seguintes"
-    # Greek
-    - "μβρίου"
-    # Chinese/Japanese
-    - "談"
 
     
 # Visualization settings

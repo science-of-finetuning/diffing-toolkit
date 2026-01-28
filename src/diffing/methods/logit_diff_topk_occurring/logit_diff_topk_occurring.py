@@ -5,7 +5,7 @@ This module computes occurrence rates of tokens in the top-K positive and negati
 logit differences between a base model and a finetuned model.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import torch
 import torch.nn.functional as F
@@ -20,6 +20,7 @@ from datasets import load_dataset, IterableDataset
 from datetime import datetime
 import itertools
 import re
+import math
 
 from ..diffing_method import DiffingMethod
 from src.utils.configs import DatasetConfig
@@ -30,11 +31,20 @@ from ..activation_difference_lens.token_relevance import _compute_frequent_token
 from ..activation_difference_lens.act_diff_lens import (
     load_and_tokenize_dataset,
     load_and_tokenize_chat_dataset,
-    extract_first_n_tokens_activations,
 )
 from src.utils.activations import get_layer_indices
-from src.utils.model import logit_lens
-from .normalization import process_token_list, normalize_token_list, load_fraction_positive_tokens
+from .normalization import (
+    process_token_list,
+    normalize_token_list,
+    load_fraction_positive_tokens,
+    is_pure_punctuation,
+    normalize_token,
+)
+from .logit_extraction import (
+    DirectLogitsExtractor,
+    LogitLensExtractor,
+    LogitsExtractor,
+)
 from .ui import visualize
 from .plots import (
     plot_occurrence_bar_chart,
@@ -61,7 +71,7 @@ def slice_to_positions(tensor: torch.Tensor, positions_list: List[List[int]]) ->
     Extract specific positions from each sample in a tensor.
     
     Used to slice logit diffs to only the relevant positions around assistant start
-    for chat datasets, matching ADL's pre_assistant_k behavior.
+    for chat datasets, matching pre_assistant_k behavior.
     
     Args:
         tensor: [batch, seq_len, vocab] tensor of logit diffs
@@ -341,38 +351,49 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self._dataset_inputs: Dict[str, Dict[str, Any]] = {}  # For positions_list etc.
         if self.nmf_cfg and self.nmf_cfg.enabled:
             self.logger.info("NMF Token Topic Clustering enabled.")
+            assert hasattr(self.nmf_cfg, "top_n_tokens_per_topic"), (
+                "token_topic_clustering_NMF.top_n_tokens_per_topic must be set when NMF is enabled"
+            )
+            self.nmf_top_n_tokens_per_topic = int(self.nmf_cfg.top_n_tokens_per_topic)
+            assert self.nmf_top_n_tokens_per_topic > 0, (
+                "token_topic_clustering_NMF.top_n_tokens_per_topic must be > 0"
+            )
 
-        # Logit type configuration: "direct" (output logits) or "adl_logitlens" (activation diff + logit lens)
-        self.logit_type = str(getattr(self.method_cfg.method_params, 'logit_type', 'direct'))
-        self.adl_layer_idx = None  # Will be set if logit_type == "adl_logitlens"
-        self.adl_layer_relative = None  # Store relative layer for directory naming
-        
-        if self.logit_type == "adl_logitlens":
-            # Validate token_set_selection_mode - only top_k_occurring supported
-            selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
-            if selection_mode != "top_k_occurring":
-                raise ValueError(
-                    f"adl_logitlens mode only supports token_set_selection_mode='top_k_occurring', "
-                    f"got '{selection_mode}'. logit_lens outputs softmax probabilities (all positive), "
-                    f"so fraction_positive filtering is meaningless."
-                )
-            
-            # Get layer(s) from config
-            adl_cfg = self.method_cfg.method_params.adl_logitlens
-            layers = list(adl_cfg.layers)
-            
-            if len(layers) > 1:
-                raise NotImplementedError(
-                    "Multiple layers not implemented yet - consider how to aggregate different representation spaces"
-                )
-            
-            self.adl_layer_relative = layers[0]
-            # Convert relative layer to absolute - need model_id for num_layers
-            layer_indices = get_layer_indices(self.base_model_cfg.model_id, layers)
-            self.adl_layer_idx = layer_indices[0]
-            self.logger.info(f"ADL LogitLens mode: using layer {self.adl_layer_relative} (absolute: {self.adl_layer_idx})")
-        elif self.logit_type != "direct":
-            raise ValueError(f"Unknown logit_type: '{self.logit_type}'. Expected 'direct' or 'adl_logitlens'.")
+        self.logit_extraction_method: str
+        self.logit_lens_layer_relative: float | None = None
+        self.logit_lens_layer_idx: int | None = None
+        self.logits_extractor: LogitsExtractor
+
+        logit_extraction_cfg = getattr(self.method_cfg.method_params, "logit_extraction", None)
+        self.logit_extraction_method = str(
+            getattr(logit_extraction_cfg, "method", "direct")
+        )
+        if self.logit_extraction_method == "direct":
+            self.logits_extractor = DirectLogitsExtractor()
+        elif self.logit_extraction_method == "logit_lens":
+            assert logit_extraction_cfg is not None
+            assert hasattr(logit_extraction_cfg, "logit_lens")
+            layer_rel = float(logit_extraction_cfg.logit_lens.layer)
+            assert 0.0 <= layer_rel <= 1.0, (
+                f"logit_extraction.logit_lens.layer must be in [0, 1], got {layer_rel}"
+            )
+            self.logit_lens_layer_relative = layer_rel
+            self.logit_lens_layer_idx = get_layer_indices(
+                self.base_model_cfg.model_id,
+                [layer_rel],
+            )[0]
+            self.logits_extractor = LogitLensExtractor(
+                layer_idx=self.logit_lens_layer_idx
+            )
+            self.logger.info(
+                "LogitLens logit extraction: "
+                f"layer {self.logit_lens_layer_relative} (absolute: {self.logit_lens_layer_idx})"
+            )
+        else:
+            raise ValueError(
+                f"Unknown logit_extraction.method: '{self.logit_extraction_method}'. "
+                "Expected 'direct' or 'logit_lens'."
+            )
 
         # Setup results directory
         organism_path_name = cfg.organism.name
@@ -388,17 +409,20 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         max_vocab_size = self.method_cfg.method_params.max_vocab_size
              
         # Create base results directory with sample/token counts
-        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens_{topk}topk[_vocab{N}][_adl_logitlens_layer_0p5]
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens_{topk}topk[_vocab{N}][_logit_extraction_{method}[_layer_{rel}]]
         vocab_suffix = f"_vocab{max_vocab_size}" if max_vocab_size is not None else ""
+
+        logit_extraction_suffix = ""
+        logit_extraction_suffix = f"_logit_extraction_{self.logit_extraction_method}"
+        if self.logit_extraction_method == "logit_lens":
+            assert self.logit_lens_layer_relative is not None
+            layer_str = str(self.logit_lens_layer_relative).replace(".", "p")
+            logit_extraction_suffix += f"_layer_{layer_str}"
         
-        # Add adl_logitlens suffix if using that mode
-        adl_suffix = ""
-        if self.logit_type == "adl_logitlens":
-            # Convert layer like 0.5 to "0p5" for safe directory naming
-            layer_str = str(self.adl_layer_relative).replace(".", "p")
-            adl_suffix = f"_adl_logitlens_layer_{layer_str}"
-        
-        method_dir_name = f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens_{int(self.method_cfg.method_params.top_k)}topk{vocab_suffix}{adl_suffix}"
+        method_dir_name = (
+            f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens_"
+            f"{int(self.method_cfg.method_params.top_k)}topk{vocab_suffix}{logit_extraction_suffix}"
+        )
         self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
         self.base_results_dir.mkdir(parents=True, exist_ok=True)
         
@@ -492,6 +516,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             self.logger.info(f"Created new analysis directory: {self.analysis_dir}")
         
         return self.analysis_dir
+
+    def _get_nmf_dataset_dir(self, dataset_name: str) -> Path:
+        """
+        Get the NMF output directory for a dataset under the current analysis run.
+        """
+        return self.get_or_create_results_dir() / "nmf" / dataset_name
+
+    def _get_nmf_topics_path(self, dataset_name: str) -> Path:
+        """
+        Get the path to the NMF topics analysis JSON for a dataset.
+        """
+        return self._get_nmf_dataset_dir(dataset_name) / "nmf_topics_analysis.json"
+
+    def _get_nmf_topic_dir(self, dataset_name: str, topic_id: int) -> Path:
+        """
+        Get the output directory for a specific NMF topic.
+        """
+        return self._get_nmf_dataset_dir(dataset_name) / f"topic_{topic_id}"
 
     def setup_models(self):
         """Ensure models are loaded (they will auto-load via properties)."""
@@ -1178,8 +1220,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # We store a summary or link here if needed, but the main NMF output is separate.
             # Let's just note it ran.
             results["metadata"]["nmf_clustering_run"] = True
+            results["metadata"]["nmf_topics_dir"] = str(self._get_nmf_dataset_dir(dataset_cfg.name))
             # We can also attach the full topics structure if we want it in the main JSON too, 
             # but usually better to keep modular. Let's stick to the separate file plan.
+            assert global_diff_sum is not None
+            assert global_pos_count is not None
+            self._write_nmf_topic_outputs(
+                dataset_cfg=dataset_cfg,
+                nmf_results=nmf_results,
+                global_pos_token_counts=global_pos_token_counts,
+                global_neg_token_counts=global_neg_token_counts,
+                global_diff_sum=global_diff_sum,
+                global_pos_count=global_pos_count,
+                total_positions=total_positions,
+                num_samples=num_samples,
+                max_tokens=max_tokens,
+                batch_size=batch_size,
+                top_k=top_k,
+            )
         
         # Add per-token analysis data if enabled (for internal use, not saved to main JSON)
         if per_token_enabled:
@@ -1212,10 +1270,12 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         global_diff_sum: torch.Tensor,
         global_pos_count: torch.Tensor,
         num_samples: int,
-        total_positions: int
+        total_positions: int,
+        output_dir: Optional[Path] = None,
+        token_ids: Optional[List[int]] = None,
     ) -> None:
         """
-        Save global token statistics (sum logit diff, positive count) for the entire vocabulary.
+        Save global token statistics (sum logit diff, positive count) for a token set.
         
         Args:
             dataset_name: Name of the dataset
@@ -1223,24 +1283,33 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             global_pos_count: Tensor of shape [vocab_size] containing count of non-negative diffs
             num_samples: Number of samples processed
             total_positions: Total number of valid token positions processed
+            output_dir: Directory to write outputs (defaults to analysis_dir)
+            token_ids: Optional list of token IDs to restrict stats (defaults to full vocab)
         """
-        output_file = self.analysis_dir / f"{dataset_name}_global_token_stats.json"
+        output_dir = output_dir or self.analysis_dir
+        output_file = output_dir / f"{dataset_name}_global_token_stats.json"
         
         # Ensure CPU and python native types
+        assert global_diff_sum.shape == global_pos_count.shape
         global_diff_sum = global_diff_sum.cpu()
         global_pos_count = global_pos_count.cpu()
         vocab_size = len(global_diff_sum)
         
-        self.logger.info(f"Formatting global statistics for {vocab_size} tokens...")
+        if token_ids is None:
+            all_ids = list(range(vocab_size))
+        else:
+            all_ids = list(dict.fromkeys(token_ids))
+            assert max(all_ids) < vocab_size
+        
+        self.logger.info(f"Formatting global statistics for {len(all_ids)} tokens...")
         
         # Get string representations for all tokens
         # We assume the model's output vocab corresponds to tokenizer IDs 0..N-1
-        all_ids = list(range(vocab_size))
         all_tokens = self.tokenizer.convert_ids_to_tokens(all_ids)
         
         # Build the list of stats
         stats_list = []
-        for token_id, token_str in enumerate(all_tokens):
+        for token_id, token_str in zip(all_ids, all_tokens):
             stats_list.append({
                 "token": token_str,
                 "token_id": token_id,
@@ -1252,7 +1321,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "dataset_name": dataset_name,
             "num_samples": num_samples,
             "total_positions_analyzed": total_positions,
-            "num_unique_tokens": vocab_size,
+            "num_unique_tokens": len(all_ids),
             "global_token_stats": stats_list
         }
         
@@ -1267,7 +1336,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         k: int,
         filter_punctuation: bool = False,
         normalize: bool = False,
-        filter_special_tokens: bool = False
+        filter_special_tokens: bool = False,
+        output_dir: Optional[Path] = None,
     ) -> List[Dict[str, Any]]:
         """
         Load global token stats and return top-K tokens sorted by fraction of positive logit diffs.
@@ -1289,7 +1359,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             List of token dicts with keys: token_id, token_str, count_positive, count_negative,
             positive_occurrence_rate, negative_occurrence_rate, fraction_positive
         """
-        stats_file = self.analysis_dir / f"{dataset_name}_global_token_stats.json"
+        output_dir = output_dir or self.analysis_dir
+        stats_file = output_dir / f"{dataset_name}_global_token_stats.json"
         
         if not stats_file.exists():
             raise FileNotFoundError(
@@ -1335,39 +1406,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
         self.logger.info(f"Constructing NMF matrix: {num_rows} positions x {num_cols} unique tokens")
         
-        # Create Scipy COO matrix first
-        rows = nmf_data["rows"]
-        cols = nmf_data["cols"]
-        values = nmf_data["values"]
-        
-        # Convert to dense Torch tensor (torchnmf expects dense or sparse, but sparse support in fit is specific)
-        # Given the dimensionality (e.g. 10k rows x 1k cols), dense is usually fine for GPU/CPU memory
-        # If it gets too big, we might need sparse, but torchnmf's sparse support has caveats.
-        # Let's try constructing a dense tensor directly if it fits.
-        # Size: 10,000 * 5,000 * 4 bytes ~= 200MB. Totally fine.
-        
-        # Use scipy to handle the sparse-to-dense conversion efficiently
-        V_sparse = scipy.sparse.coo_matrix((values, (rows, cols)), shape=(num_rows, num_cols))
-        
-        # Convert to torch tensor
-        # Note: torchnmf expects non-negative input. Our values are 1.0 or magnitude (usually positive).
-        # We ensure positivity.
-        
-        # NOTE: To attempt GPU execution without dense expansion OOM, try using sparse tensors directly:
-        # indices = torch.tensor([nmf_data["rows"], nmf_data["cols"]], dtype=torch.long)
-        # V_sparse_torch = torch.sparse_coo_tensor(indices, values, (num_rows, num_cols)).cuda()
-        # nmf.fit(V_sparse_torch, ...)
-        # However, not sure about sparse autograd support in PyTorch/torchnmf
-        
-        V_dense = torch.tensor(V_sparse.todense(), dtype=torch.float32)
-        V_dense = torch.relu(V_dense) # Ensure non-negative
-        
-        # We comment this out because converting to dense matrix for NMF often exceeds single GPU memory.
-        # Torchnmf works on single GPU but not multi-GPU, and CPU has more RAM.
-        if torch.cuda.is_available():
-            V_dense = V_dense.cuda()
-            
-        # 2. Run NMF
         num_topics = int(self.nmf_cfg.num_topics)
         beta = float(self.nmf_cfg.beta)
         use_orthogonal = bool(getattr(self.nmf_cfg, 'orthogonal', False))
@@ -1378,8 +1416,14 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             # Use custom orthogonal NMF implementation
             with torch.enable_grad():
-                W_nmf, H_nmf = fit_nmf_orthogonal(
-                    V_dense, 
+                W_nmf, _H_nmf = fit_nmf_orthogonal(
+                    torch.tensor(
+                        scipy.sparse.coo_matrix(
+                            (nmf_data["values"], (nmf_data["rows"], nmf_data["cols"])),
+                            shape=(num_rows, num_cols),
+                        ).todense(),
+                        dtype=torch.float32,
+                    ),
                     rank=num_topics, 
                     beta=beta,
                     orthogonal_weight=orthogonal_weight, 
@@ -1389,8 +1433,37 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 )
         else:
             self.logger.info(f"Running NMF with {num_topics} topics (beta={beta})...")
+
+            row_idx = torch.as_tensor(nmf_data["rows"], dtype=torch.long)
+            col_idx = torch.as_tensor(nmf_data["cols"], dtype=torch.long)
+            vals = torch.as_tensor(nmf_data["values"], dtype=torch.float32)
+            assert row_idx.ndim == 1 and col_idx.ndim == 1 and vals.ndim == 1
+            assert row_idx.shape == col_idx.shape == vals.shape
+            assert row_idx.numel() > 0
+            assert row_idx.min().item() >= 0
+            assert row_idx.max().item() < num_rows
+            assert col_idx.min().item() >= 0
+            assert col_idx.max().item() < num_cols
+
+            indices = torch.stack([row_idx, col_idx], dim=0)
+            assert indices.shape[0] == 2
+
+            V_raw = torch.sparse_coo_tensor(indices, vals, size=(num_rows, num_cols)).coalesce()
+            V_vals = torch.relu(V_raw.values())
+            V_keep = V_vals > 0
+            if not bool(V_keep.any().item()):
+                self.logger.warning("NMF matrix is all <=0 after ReLU. Skipping.")
+                return None
+
+            V = torch.sparse_coo_tensor(
+                V_raw.indices()[:, V_keep],
+                V_vals[V_keep],
+                size=(num_rows, num_cols),
+            ).coalesce()
+            if torch.cuda.is_available():
+                V = V.cuda()
             
-            nmf = NMF(V_dense.shape, rank=num_topics)
+            nmf = NMF(V.shape, rank=num_topics)
             if torch.cuda.is_available():
                 nmf = nmf.cuda()
                 
@@ -1398,10 +1471,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             # NMF requires gradients for its update steps (it uses autograd for multiplicative updates),
             # but the surrounding method has @torch.no_grad(). We must re-enable gradients here.
             with torch.enable_grad():
-                nmf.fit(V_dense, beta=beta, verbose=True, max_iter=200)
+                nmf.fit(V, beta=beta, verbose=True, max_iter=200)
             
             W_nmf = nmf.W.detach().cpu()
-            H_nmf = nmf.H.detach().cpu()
+            _H_nmf = nmf.H.detach().cpu()
         
         # 3. Extract Topics
         #
@@ -1437,6 +1510,136 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         # print('topic_token_matrix shape: ', topic_token_matrix.shape)
         topic_token_matrix = W_nmf.T  # Shape: (num_topics, num_tokens)
 
+        assert W_nmf.shape == (num_cols, num_topics)
+        assert _H_nmf.shape == (num_rows, num_topics)
+        assert topic_token_matrix.shape == (num_topics, num_cols)
+
+        token_mass_l1 = topic_token_matrix.sum(dim=1)  # (K,)
+        token_mass_l2 = torch.linalg.norm(topic_token_matrix, ord=2, dim=1)  # (K,)
+        assert token_mass_l1.shape == (num_topics,)
+        assert token_mass_l2.shape == (num_topics,)
+        assert bool((token_mass_l1 > 0).all().item())
+        assert bool((token_mass_l2 > 0).all().item())
+
+        activation_mass_l1 = _H_nmf.sum(dim=0)  # (K,)
+        activation_mass_mean = _H_nmf.mean(dim=0)  # (K,)
+        assert activation_mass_l1.shape == (num_topics,)
+        assert activation_mass_mean.shape == (num_topics,)
+
+        hard_assignments = _H_nmf.argmax(dim=1)  # (N,)
+        assert hard_assignments.shape == (num_rows,)
+        hard_counts = torch.bincount(hard_assignments, minlength=num_topics)  # (K,)
+        assert hard_counts.shape == (num_topics,)
+        hard_frac = hard_counts.float() / float(num_rows)
+
+        assert num_cols > 1
+        entropy_denom = math.log(float(num_cols))
+
+        p = topic_token_matrix / token_mass_l1[:, None]
+        assert p.shape == (num_topics, num_cols)
+        plogp = torch.where(p > 0, p * torch.log(p), torch.zeros_like(p))
+        token_entropy = -plogp.sum(dim=1)  # (K,)
+        token_entropy_normalized = token_entropy / entropy_denom  # (K,)
+
+        sqrt_d = float(num_cols) ** 0.5
+        token_hoyer_sparsity = (sqrt_d - (token_mass_l1 / token_mass_l2)) / (sqrt_d - 1.0)
+        assert token_hoyer_sparsity.shape == (num_topics,)
+
+        concentration_ns = sorted({10, 50, int(self.nmf_top_n_tokens_per_topic)})
+        concentration_metrics_by_n: Dict[int, torch.Tensor] = {}
+        for n in concentration_ns:
+            k_n = min(int(n), int(num_cols))
+            assert k_n > 0
+            topk_sum = torch.topk(topic_token_matrix, k=k_n, dim=1, largest=True).values.sum(dim=1)
+            assert topk_sum.shape == (num_topics,)
+            concentration_metrics_by_n[n] = topk_sum / token_mass_l1
+
+        assert num_topics > 1
+        normed_topics = topic_token_matrix / token_mass_l2[:, None]
+        assert normed_topics.shape == (num_topics, num_cols)
+        cosine_sim = normed_topics @ normed_topics.T  # (K,K)
+        assert cosine_sim.shape == (num_topics, num_topics)
+
+        cosine_offdiag = cosine_sim.clone()
+        cosine_offdiag.fill_diagonal_(float("-inf"))
+        max_cosine_sim, most_similar_topic = cosine_offdiag.max(dim=1)
+        mean_cosine_sim = (cosine_sim.sum(dim=1) - cosine_sim.diag()) / float(num_topics - 1)
+
+        def _pairwise_jaccard_from_top_indices(top_idx: torch.Tensor) -> List[List[float]]:
+            assert top_idx.ndim == 2
+            assert top_idx.shape[0] == num_topics
+            sets = [set(map(int, top_idx[k].tolist())) for k in range(num_topics)]
+            assert all(len(s) > 0 for s in sets)
+
+            mat = [[0.0 for _ in range(num_topics)] for _ in range(num_topics)]
+            for i in range(num_topics):
+                mat[i][i] = 1.0
+                for j in range(i + 1, num_topics):
+                    inter = len(sets[i] & sets[j])
+                    union = len(sets[i]) + len(sets[j]) - inter
+                    assert union > 0
+                    val = float(inter) / float(union)
+                    mat[i][j] = val
+                    mat[j][i] = val
+            return mat
+
+        k10 = min(10, num_cols)
+        k50 = min(50, num_cols)
+        top_idx_10 = torch.topk(topic_token_matrix, k=k10, dim=1, largest=True).indices
+        top_idx_50 = torch.topk(topic_token_matrix, k=k50, dim=1, largest=True).indices
+        pairwise_jaccard_top10 = _pairwise_jaccard_from_top_indices(top_idx_10)
+        pairwise_jaccard_top50 = _pairwise_jaccard_from_top_indices(top_idx_50)
+
+        topic_stats_by_id: Dict[int, Dict[str, Any]] = {}
+        total_token_mass_l1 = float(token_mass_l1.sum().item())
+        total_activation_mass_l1 = float(activation_mass_l1.sum().item())
+        for k in range(num_topics):
+            max_jacc_10 = max(pairwise_jaccard_top10[k][:k] + pairwise_jaccard_top10[k][k + 1 :])
+            max_jacc_50 = max(pairwise_jaccard_top50[k][:k] + pairwise_jaccard_top50[k][k + 1 :])
+            most_overlap_10 = int(max(range(num_topics), key=lambda j: -1.0 if j == k else pairwise_jaccard_top10[k][j]))
+            most_overlap_50 = int(max(range(num_topics), key=lambda j: -1.0 if j == k else pairwise_jaccard_top50[k][j]))
+
+            token_mass_l1_k = float(token_mass_l1[k].item())
+            activation_mass_l1_k = float(activation_mass_l1[k].item())
+
+            topic_stats_by_id[int(k)] = {
+                "topic_mass": {
+                    "token_mass_l1": token_mass_l1_k,
+                    "token_mass_l2": float(token_mass_l2[k].item()),
+                    "token_mass_l1_share": token_mass_l1_k / total_token_mass_l1,
+                    "activation_mass_l1": activation_mass_l1_k,
+                    "activation_mass_mean": float(activation_mass_mean[k].item()),
+                    "activation_mass_l1_share": activation_mass_l1_k / total_activation_mass_l1,
+                    "hard_prevalence_count": int(hard_counts[k].item()),
+                    "hard_prevalence_frac": float(hard_frac[k].item()),
+                },
+                "concentration": {
+                    "token_entropy": float(token_entropy[k].item()),
+                    "token_entropy_normalized": float(token_entropy_normalized[k].item()),
+                    "token_hoyer_sparsity": float(token_hoyer_sparsity[k].item()),
+                    **{
+                        f"top_{n}_token_mass_fraction": float(concentration_metrics_by_n[n][k].item())
+                        for n in concentration_ns
+                    },
+                },
+                "uniqueness": {
+                    "uniqueness_cosine": float((1.0 - max_cosine_sim[k]).item()),
+                    "most_similar_topic_id": int(most_similar_topic[k].item()),
+                    "max_cosine_similarity_to_other": float(max_cosine_sim[k].item()),
+                    "mean_cosine_similarity_to_others": float(mean_cosine_sim[k].item()),
+                    "most_overlap_topic_id_top10": most_overlap_10,
+                    "max_jaccard_top10_to_other": float(max_jacc_10),
+                    "most_overlap_topic_id_top50": most_overlap_50,
+                    "max_jaccard_top50_to_other": float(max_jacc_50),
+                },
+                "redundancy": {
+                    "max_cosine_similarity_to_other": float(max_cosine_sim[k].item()),
+                    "mean_cosine_similarity_to_others": float(mean_cosine_sim[k].item()),
+                    "max_jaccard_top10_to_other": float(max_jacc_10),
+                    "max_jaccard_top50_to_other": float(max_jacc_50),
+                },
+            }
+
             
         # 4. Process Results
         topics_output = []
@@ -1449,7 +1652,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             topic_weights = topic_token_matrix[k] # (num_tokens,)
             
             # Get top indices
-            top_indices = torch.argsort(topic_weights, descending=True)[:20] # Top 20
+            top_indices = torch.argsort(topic_weights, descending=True)[:self.nmf_top_n_tokens_per_topic]
             
             top_tokens_list = []
             log_str_parts = []
@@ -1475,7 +1678,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             
             topics_output.append({
                 "topic_id": k,
-                "top_tokens": top_tokens_list
+                "top_tokens": top_tokens_list,
+                "stats": topic_stats_by_id[int(k)],
             })
             
             self.logger.info(f"Topic {k}: {', '.join(log_str_parts)}")
@@ -1485,14 +1689,32 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "dataset_name": dataset_name,
             "num_topics": num_topics,
             "num_unique_tokens": num_cols,
-            "topics": topics_output
+            "topics": topics_output,
         }
         
-        output_file = self.analysis_dir / f"{dataset_name}_nmf_topics_analysis.json"
+        output_dir = self._get_nmf_dataset_dir(dataset_name)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / "nmf_topics_analysis.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(final_output, f, indent=2, ensure_ascii=False)
             
         self.logger.info(f"Saved NMF topics to {output_file}")
+
+        metrics_output = {
+            "dataset_name": dataset_name,
+            "num_topics": num_topics,
+            "num_unique_tokens": num_cols,
+            "topics": [{"topic_id": k, "stats": topic_stats_by_id[int(k)]} for k in range(num_topics)],
+            "pairwise": {
+                "cosine_similarity": cosine_sim.tolist(),
+                "jaccard_top10": pairwise_jaccard_top10,
+                "jaccard_top50": pairwise_jaccard_top50,
+            },
+        }
+        metrics_file = output_dir / "nmf_topic_metrics.json"
+        with open(metrics_file, "w", encoding="utf-8") as f:
+            json.dump(metrics_output, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"Saved NMF topic metrics to {metrics_file}")
         
         return final_output
 
@@ -1674,6 +1896,27 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         return result
 
+    def _save_results_to_dir(self, dataset_name: str, results: Dict[str, Any], output_dir: Path) -> Path:
+        """
+        Save results for a dataset to a specific directory.
+
+        Args:
+            dataset_name: Dataset name (safe for filename)
+            results: Results dictionary
+            output_dir: Directory to write outputs
+
+        Returns:
+            Path to saved file
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / f"{dataset_name}_occurrence_rates.json"
+
+        with open(output_file, "w") as f:
+            json.dump(results, f, indent=2)
+
+        self.logger.info(f"Saved results for {dataset_name} to {output_file}")
+        return output_file
+
     def save_results(self, dataset_name: str, results: Dict[str, Any]) -> Path:
         """
         Save results for a dataset to disk.
@@ -1685,13 +1928,324 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         Returns:
             Path to saved file
         """
-        output_file = self.analysis_dir / f"{dataset_name}_occurrence_rates.json"
+        return self._save_results_to_dir(dataset_name, results, self.analysis_dir)
 
-        with open(output_file, "w") as f:
-            json.dump(results, f, indent=2)
+    def _build_occurrence_results_for_token_ids(
+        self,
+        dataset_cfg: DatasetConfig,
+        token_ids: List[int],
+        global_pos_token_counts: torch.Tensor,
+        global_neg_token_counts: torch.Tensor,
+        total_positions: int,
+        num_samples: int,
+        top_k: int,
+        max_tokens: int,
+        batch_size: int,
+    ) -> Dict[str, Any]:
+        """
+        Build occurrence-rate results restricted to a token subset.
 
-        self.logger.info(f"Saved results for {dataset_name} to {output_file}")
-        return output_file
+        Args:
+            dataset_cfg: Dataset configuration
+            token_ids: Token IDs to include
+            global_pos_token_counts: Vector of positive top-K counts (vocab-sized)
+            global_neg_token_counts: Vector of negative top-K counts (vocab-sized)
+            total_positions: Total number of valid positions
+            num_samples: Number of samples
+            top_k: Top-K used during diffing
+            max_tokens: Max tokens per sample
+            batch_size: Batch size
+
+        Returns:
+            Results dict with top_positive/top_negative lists
+        """
+        token_ids = list(dict.fromkeys(token_ids))
+        all_tokens = []
+        for token_id in token_ids:
+            pos_count = int(global_pos_token_counts[token_id].item())
+            neg_count = int(global_neg_token_counts[token_id].item())
+            token_str = self.tokenizer.decode([token_id])
+            all_tokens.append({
+                "token_id": token_id,
+                "token_str": token_str,
+                "count_positive": pos_count,
+                "count_negative": neg_count,
+                "positive_occurrence_rate": (pos_count / total_positions) * 100
+                if total_positions > 0
+                else 0.0,
+                "negative_occurrence_rate": (neg_count / total_positions) * 100
+                if total_positions > 0
+                else 0.0,
+            })
+
+        if not all_tokens:
+            return {
+                "dataset_id": dataset_cfg.id,
+                "dataset_name": dataset_cfg.name,
+                "total_positions": total_positions,
+                "num_samples": num_samples,
+                "top_k": top_k,
+                "unique_tokens": 0,
+                "top_positive": [],
+                "top_negative": [],
+                "metadata": {
+                    "base_model": self.base_model_cfg.model_id,
+                    "finetuned_model": self.finetuned_model_cfg.model_id,
+                    "max_tokens_per_sample": max_tokens,
+                    "batch_size": batch_size,
+                },
+            }
+
+        pos_rates = torch.tensor([t["positive_occurrence_rate"] for t in all_tokens])
+        neg_rates = torch.tensor([t["negative_occurrence_rate"] for t in all_tokens])
+
+        num_tokens_to_save = max(
+            int(self.method_cfg.visualization.num_tokens_to_plot),
+            int(top_k)
+        )
+        k_pos = min(num_tokens_to_save, len(all_tokens))
+        k_neg = min(num_tokens_to_save, len(all_tokens))
+
+        top_k_pos_values, top_k_pos_indices = torch.topk(pos_rates, k=k_pos, largest=True)
+        top_k_neg_values, top_k_neg_indices = torch.topk(neg_rates, k=k_neg, largest=True)
+
+        top_positive = [all_tokens[i] for i in top_k_pos_indices.tolist()]
+        top_negative = [all_tokens[i] for i in top_k_neg_indices.tolist()]
+
+        return {
+            "dataset_id": dataset_cfg.id,
+            "dataset_name": dataset_cfg.name,
+            "total_positions": total_positions,
+            "num_samples": num_samples,
+            "top_k": top_k,
+            "unique_tokens": len(all_tokens),
+            "top_positive": top_positive,
+            "top_negative": top_negative,
+            "metadata": {
+                "base_model": self.base_model_cfg.model_id,
+                "finetuned_model": self.finetuned_model_cfg.model_id,
+                "max_tokens_per_sample": max_tokens,
+                "batch_size": batch_size,
+            },
+        }
+
+    def _process_nmf_topic_token_list(
+        self,
+        token_list: List[Dict[str, Any]],
+        total_positions: int,
+        filter_punctuation: bool,
+        normalize: bool,
+        filter_special_tokens: bool,
+    ) -> List[Dict[str, Any]]:
+        """
+        Process an NMF topic token list while preserving topic-weight ordering.
+
+        Filtering drops tokens but preserves relative order. Normalization consolidates
+        by normalized token string and then sorts by summed topic weight.
+        """
+        tokens = token_list
+
+        if filter_special_tokens:
+            special_ids = set(self.tokenizer.all_special_ids)
+            tokens = [t for t in tokens if int(t["token_id"]) not in special_ids]
+
+        if filter_punctuation:
+            tokens = [t for t in tokens if not is_pure_punctuation(str(t["token_str"]))]
+
+        if not normalize:
+            return tokens
+
+        groups: Dict[str, Dict[str, Any]] = {}
+        for idx, t in enumerate(tokens):
+            norm = normalize_token(str(t["token_str"]))
+            if not norm:
+                continue
+
+            if norm not in groups:
+                groups[norm] = {
+                    "token_str": norm,
+                    "token_id": -1,
+                    "count_positive": 0,
+                    "count_negative": 0,
+                    "nmf_topic_weight": 0.0,
+                    "_first_idx": idx,
+                }
+
+            g = groups[norm]
+            g["count_positive"] += int(t["count_positive"])
+            g["count_negative"] += int(t["count_negative"])
+            g["nmf_topic_weight"] += float(t.get("nmf_topic_weight", 0.0))
+
+        consolidated: List[Dict[str, Any]] = []
+        for g in groups.values():
+            pos = int(g["count_positive"])
+            neg = int(g["count_negative"])
+            consolidated.append(
+                {
+                    "token_id": -1,
+                    "token_str": str(g["token_str"]),
+                    "count_positive": pos,
+                    "count_negative": neg,
+                    "positive_occurrence_rate": (pos / total_positions) * 100 if total_positions > 0 else 0.0,
+                    "negative_occurrence_rate": (neg / total_positions) * 100 if total_positions > 0 else 0.0,
+                    "nmf_topic_weight": float(g["nmf_topic_weight"]),
+                    "_first_idx": int(g["_first_idx"]),
+                }
+            )
+
+        consolidated.sort(key=lambda x: (-float(x["nmf_topic_weight"]), int(x["_first_idx"])))
+        for x in consolidated:
+            x.pop("_first_idx", None)
+        return consolidated
+
+    def _build_occurrence_results_for_nmf_topic_tokens(
+        self,
+        dataset_cfg: DatasetConfig,
+        topic_tokens: List[Dict[str, Any]],
+        global_pos_token_counts: torch.Tensor,
+        global_neg_token_counts: torch.Tensor,
+        total_positions: int,
+        num_samples: int,
+        top_k: int,
+        max_tokens: int,
+        batch_size: int,
+    ) -> Dict[str, Any]:
+        """
+        Build occurrence-rate results for a single NMF topic.
+
+        IMPORTANT: Token order is by NMF topic weight (descending), not occurrence rate.
+        This ordering is used for all topic tables/plots/grading.
+        """
+        seen: set[int] = set()
+        ordered: List[Tuple[int, float]] = []
+        for t in topic_tokens:
+            token_id = int(t["token_id"])
+            if token_id in seen:
+                continue
+            seen.add(token_id)
+            ordered.append((token_id, float(t["weight"])))
+
+        if not ordered:
+            return {
+                "dataset_id": dataset_cfg.id,
+                "dataset_name": dataset_cfg.name,
+                "total_positions": total_positions,
+                "num_samples": num_samples,
+                "top_k": top_k,
+                "unique_tokens": 0,
+                "top_positive": [],
+                "top_negative": [],
+                "metadata": {
+                    "base_model": self.base_model_cfg.model_id,
+                    "finetuned_model": self.finetuned_model_cfg.model_id,
+                    "max_tokens_per_sample": max_tokens,
+                    "batch_size": batch_size,
+                },
+            }
+
+        # Match global behavior: only save enough tokens for downstream plots/tables,
+        # but keep the NMF topic-weight ordering.
+        num_tokens_to_save = max(
+            int(self.method_cfg.visualization.num_tokens_to_plot),
+            int(top_k),
+        )
+        ordered = ordered[: min(num_tokens_to_save, len(ordered))]
+
+        all_tokens: List[Dict[str, Any]] = []
+        for token_id, topic_w in ordered:
+            pos_count = int(global_pos_token_counts[token_id].item())
+            neg_count = int(global_neg_token_counts[token_id].item())
+            token_str = self.tokenizer.decode([token_id])
+            all_tokens.append(
+                {
+                    "token_id": token_id,
+                    "token_str": token_str,
+                    "count_positive": pos_count,
+                    "count_negative": neg_count,
+                    "positive_occurrence_rate": (pos_count / total_positions) * 100 if total_positions > 0 else 0.0,
+                    "negative_occurrence_rate": (neg_count / total_positions) * 100 if total_positions > 0 else 0.0,
+                    "nmf_topic_weight": float(topic_w),
+                }
+            )
+
+        # Preserve topic order for both lists so all plots are consistent.
+        return {
+            "dataset_id": dataset_cfg.id,
+            "dataset_name": dataset_cfg.name,
+            "total_positions": total_positions,
+            "num_samples": num_samples,
+            "top_k": top_k,
+            "unique_tokens": len(all_tokens),
+            "top_positive": all_tokens,
+            "top_negative": all_tokens,
+            "metadata": {
+                "base_model": self.base_model_cfg.model_id,
+                "finetuned_model": self.finetuned_model_cfg.model_id,
+                "max_tokens_per_sample": max_tokens,
+                "batch_size": batch_size,
+            },
+        }
+
+    def _write_nmf_topic_outputs(
+        self,
+        dataset_cfg: DatasetConfig,
+        nmf_results: Dict[str, Any],
+        global_pos_token_counts: torch.Tensor,
+        global_neg_token_counts: torch.Tensor,
+        global_diff_sum: torch.Tensor,
+        global_pos_count: torch.Tensor,
+        total_positions: int,
+        num_samples: int,
+        max_tokens: int,
+        batch_size: int,
+        top_k: int,
+    ) -> List[Path]:
+        """
+        Write per-topic NMF outputs (core artifacts only) to the NMF subfolder.
+        """
+        topic_dirs: List[Path] = []
+        if not nmf_results:
+            return topic_dirs
+
+        nmf_dataset_dir = self._get_nmf_dataset_dir(dataset_cfg.name)
+        nmf_dataset_dir.mkdir(parents=True, exist_ok=True)
+
+        for topic in nmf_results.get("topics", []):
+            topic_id = int(topic["topic_id"])
+            topic_dir = self._get_nmf_topic_dir(dataset_cfg.name, topic_id)
+            topic_dir.mkdir(parents=True, exist_ok=True)
+
+            topic_tokens = list(topic.get("top_tokens", []))
+            if not topic_tokens:
+                continue
+            results = self._build_occurrence_results_for_nmf_topic_tokens(
+                dataset_cfg=dataset_cfg,
+                topic_tokens=topic_tokens,
+                global_pos_token_counts=global_pos_token_counts,
+                global_neg_token_counts=global_neg_token_counts,
+                total_positions=total_positions,
+                num_samples=num_samples,
+                top_k=top_k,
+                max_tokens=max_tokens,
+                batch_size=batch_size,
+            )
+            results["metadata"]["nmf_topic_id"] = topic_id
+            results["metadata"]["nmf_top_n_tokens_per_topic"] = self.nmf_top_n_tokens_per_topic
+            results["metadata"]["nmf_topic_token_count"] = len({int(t["token_id"]) for t in topic_tokens})
+
+            self._save_results_to_dir(dataset_cfg.name, results, topic_dir)
+            self._save_global_token_statistics(
+                dataset_name=dataset_cfg.name,
+                global_diff_sum=global_diff_sum,
+                global_pos_count=global_pos_count,
+                num_samples=num_samples,
+                total_positions=total_positions,
+                output_dir=topic_dir,
+                token_ids=[int(t["token_id"]) for t in topic_tokens],
+            )
+            topic_dirs.append(topic_dir)
+
+        return topic_dirs
 
     @staticmethod
     def _sanitize_token_name(token_str: str) -> str:
@@ -1980,6 +2534,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         dataset_id: str,
         top_positive: List[Dict[str, Any]],
         relevance_labels: Optional[List[str]] = None,
+        output_dir: Optional[Path] = None,
+        relevance_base_dir: Optional[Path] = None,
+        load_relevance_from_disk: bool = True,
     ) -> None:
         """
         Generate and save the selected tokens table visualization.
@@ -1993,15 +2550,22 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         """
         self.logger.info("Generating selected tokens table...")
         
+        output_dir = output_dir or self.analysis_dir
+        relevance_base_dir = relevance_base_dir or self.analysis_dir
+
         # Determine number of tokens to show
         top_k = int(self.method_cfg.method_params.top_k)
         k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
         num_tokens_to_show = min(top_k, k_candidate)
         
         # If relevance labels not provided, try to load from disk
-        if relevance_labels is None and self.method_cfg.token_relevance.enabled:
+        if (
+            load_relevance_from_disk
+            and relevance_labels is None
+            and self.method_cfg.token_relevance.enabled
+        ):
             relevance_path = (
-                self.analysis_dir
+                relevance_base_dir
                 / "layer_global"
                 / dataset_id.split("/")[-1]
                 / "token_relevance"
@@ -2027,7 +2591,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         
         # Determine filename suffix based on whether relevance labels are available
         suffix = "_with_relevance" if relevance_labels is not None else "_no_relevance"
-        table_path = self.analysis_dir / f"{dataset_name}_selected_tokens{suffix}.png"
+        table_path = output_dir / f"{dataset_name}_selected_tokens{suffix}.png"
         fig.savefig(table_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
         plt.close(fig)
         self.logger.info(f"Saved selected tokens table to {table_path}")
@@ -2239,11 +2803,257 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 top_positive=top_positive,
                 relevance_labels=final_labels,
             )
+
+        # Additionally grade NMF topic tokens (if available)
+        if self.nmf_cfg and self.nmf_cfg.enabled:
+            nmf_root = self.analysis_dir / "nmf"
+            if nmf_root.exists():
+                logger.info("")
+                logger.info("Processing NMF topic token relevance...")
+
+                for dataset_cfg in self.datasets:
+                    dataset_name = dataset_cfg.name
+                    topics_path = self._get_nmf_topics_path(dataset_name)
+                    if not topics_path.exists():
+                        continue
+
+                    with open(topics_path, "r", encoding="utf-8") as f:
+                        nmf_topics = json.load(f)
+
+                    topics = nmf_topics.get("topics", [])
+                    if not topics:
+                        continue
+
+                    for topic in topics:
+                        topic_id = int(topic["topic_id"])
+                        topic_dir = self._get_nmf_topic_dir(dataset_name, topic_id)
+                        results_file = topic_dir / f"{dataset_name}_occurrence_rates.json"
+
+                        if not results_file.exists():
+                            logger.warning(
+                                f"No topic results found for {dataset_name} topic_{topic_id}, skipping token relevance"
+                            )
+                            continue
+
+                        # Load topic occurrence results
+                        with open(results_file, "r", encoding="utf-8") as f:
+                            results = json.load(f)
+
+                        # Apply token processing (filtering and/or normalization)
+                        filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+                        normalize = bool(self.method_cfg.normalize_tokens)
+                        filter_special = bool(self.method_cfg.filter_special_tokens)
+                        total_positions = results["total_positions"]
+
+                        # NMF topics: keep NMF topic-weight ordering (from occurrence_rates.json).
+                        top_positive = results["top_positive"]
+                        if filter_punct or normalize or filter_special:
+                            top_positive = self._process_nmf_topic_token_list(
+                                top_positive,
+                                total_positions=total_positions,
+                                filter_punctuation=filter_punct,
+                                normalize=normalize,
+                                filter_special_tokens=filter_special,
+                            )
+
+                        # Output directory under the topic dir
+                        out_dir = (
+                            topic_dir
+                            / "token_relevance"
+                            / "position_all"
+                            / "difference"
+                        )
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        rel_path = out_dir / "relevance_logit_diff.json"
+
+                        if (not overwrite) and rel_path.exists():
+                            logger.info(
+                                f"Token relevance exists for {dataset_name} topic_{topic_id}, skipping (overwrite=False)"
+                            )
+                            continue
+
+                        k_tokens = min(int(cfg.k_candidate_tokens), len(top_positive))
+                        candidate_tokens = [t["token_str"] for t in top_positive[:k_tokens]]
+                        token_weights = [t["positive_occurrence_rate"] / 100.0 for t in top_positive[:k_tokens]]
+
+                        logger.info(f"Grading {k_tokens} topic tokens for {dataset_name} topic_{topic_id}")
+
+                        trivial_hits = sum(1 for t in candidate_tokens if t in frequent_tokens)
+                        trivial_percentage = trivial_hits / float(len(candidate_tokens)) if candidate_tokens else 0.0
+
+                        permutations = int(grader_cfg.permutations)
+                        majority_labels, permutation_labels, raw_responses = grader.grade(
+                            description=description,
+                            frequent_tokens=frequent_tokens,
+                            candidate_tokens=candidate_tokens,
+                            permutations=permutations,
+                            concurrent=True,
+                            max_tokens=int(grader_cfg.max_tokens),
+                        )
+
+                        if agreement_mode == "majority":
+                            final_labels = majority_labels
+                        else:
+                            n = len(candidate_tokens)
+                            final_labels = [
+                                "RELEVANT" if all(run[i] == "RELEVANT" for run in permutation_labels)
+                                else "IRRELEVANT"
+                                for i in range(n)
+                            ]
+
+                        relevant_fraction = sum(lbl == "RELEVANT" for lbl in final_labels) / float(len(final_labels))
+                        total_w = sum(token_weights)
+                        relevant_w = sum(w for lbl, w in zip(final_labels, token_weights) if lbl == "RELEVANT")
+                        weighted_percentage = relevant_w / total_w if total_w > 0 else 0.0
+
+                        rec = {
+                            "layer": "global",
+                            "position": "all",
+                            "variant": "difference",
+                            "source": "logit_diff",
+                            "target": "self",
+                            "nmf_topic_id": topic_id,
+                            "labels": final_labels,
+                            "tokens": candidate_tokens,
+                            "percentage": relevant_fraction,
+                            "trivial_percentage": trivial_percentage,
+                            "weighted_percentage": float(weighted_percentage),
+                            "grader_responses": raw_responses,
+                        }
+
+                        rel_path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+                        logger.info(f"✓ Topic token relevance saved: {rel_path}")
+
+                        # Regenerate topic table with relevance coloring
+                        self._generate_selected_tokens_table(
+                            dataset_name=dataset_name,
+                            dataset_id=dataset_cfg.id,
+                            top_positive=top_positive,
+                            relevance_labels=final_labels,
+                            output_dir=topic_dir,
+                            load_relevance_from_disk=False,
+                        )
         
         logger.info("")
         logger.info("=" * 80)
         logger.info("✓ Token relevance grading completed!")
         logger.info("=" * 80)
+
+    def _generate_core_outputs_for_dir(
+        self,
+        dataset_cfg: DatasetConfig,
+        output_dir: Path,
+        results: Optional[Dict[str, Any]] = None,
+        load_relevance_from_disk: bool = True,
+    ) -> None:
+        """
+        Generate core plots and tables for a given output directory.
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if results is None:
+            results_path = output_dir / f"{dataset_cfg.name}_occurrence_rates.json"
+            with open(results_path, "r") as f:
+                results = json.load(f)
+
+        json_path = output_dir / f"{dataset_cfg.name}_global_token_stats.json"
+        occurrence_rates_path = output_dir / f"{dataset_cfg.name}_occurrence_rates.json"
+
+        filter_punct = bool(self.method_cfg.filter_pure_punctuation)
+        filter_special = bool(self.method_cfg.filter_special_tokens)
+
+        plot_global_token_scatter(
+            json_path,
+            output_dir,
+            tokenizer=self.tokenizer,
+            top_k_labels=int(self.method_cfg.visualization.fraction_positive_diff_top_k_plotting_labels),
+            occurrence_rates_json_path=occurrence_rates_path,
+            filter_punctuation=filter_punct,
+            filter_special_tokens=filter_special
+        )
+
+        plot_global_token_scatter(
+            json_path,
+            output_dir,
+            tokenizer=self.tokenizer,
+            top_k_labels=None,
+            occurrence_rates_json_path=occurrence_rates_path,
+            filter_punctuation=filter_punct,
+            filter_special_tokens=filter_special
+        )
+
+        fig = get_global_token_scatter_plotly(
+            json_path,
+            occurrence_rates_json_path=occurrence_rates_path,
+            filter_punctuation=filter_punct,
+            filter_special_tokens=filter_special,
+            tokenizer=self.tokenizer
+        )
+        html_path = output_dir / f"{dataset_cfg.name}_global_token_scatter.html"
+        fig.write_html(str(html_path))
+        self.logger.info(f"Saved interactive scatter plot to {html_path}")
+
+        fig = plot_occurrence_bar_chart(
+            results["top_positive"],
+            results["top_negative"],
+            results["metadata"]["base_model"],
+            results["metadata"]["finetuned_model"],
+            results["total_positions"],
+            figure_width=self.method_cfg.visualization.figure_width,
+            figure_height=self.method_cfg.visualization.figure_height,
+            figure_dpi=self.method_cfg.visualization.figure_dpi,
+            font_sizes=getattr(self.method_cfg.visualization, "font_sizes", None)
+        )
+        plot_path = output_dir / f"{dataset_cfg.name}_occurrence_rates.png"
+        fig.savefig(plot_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
+        plt.close(fig)
+        self.logger.info(f"Saved occurrence rate plot to {plot_path}")
+
+        selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
+        normalize = bool(self.method_cfg.normalize_tokens)
+
+        is_nmf_topic = results.get("metadata", {}).get("nmf_topic_id", None) is not None
+
+        if is_nmf_topic:
+            table_tokens = results["top_positive"]
+            if filter_punct or normalize or filter_special:
+                table_tokens = self._process_nmf_topic_token_list(
+                    table_tokens,
+                    total_positions=results["total_positions"],
+                    filter_punctuation=filter_punct,
+                    normalize=normalize,
+                    filter_special_tokens=filter_special,
+                )
+        else:
+            if selection_mode == "fraction_positive_diff":
+                k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
+                table_tokens = self._get_fraction_positive_tokens(
+                    dataset_name=dataset_cfg.name,
+                    k=k_candidate,
+                    filter_punctuation=filter_punct,
+                    normalize=normalize,
+                    filter_special_tokens=filter_special,
+                    output_dir=output_dir,
+                )
+            else:
+                table_tokens = results["top_positive"]
+                if filter_punct or normalize or filter_special:
+                    table_tokens = process_token_list(
+                        table_tokens,
+                        results["total_positions"],
+                        filter_punctuation=filter_punct,
+                        normalize=normalize,
+                        filter_special_tokens=filter_special,
+                        tokenizer=self.tokenizer
+                    )
+
+        self._generate_selected_tokens_table(
+            dataset_name=dataset_cfg.name,
+            dataset_id=dataset_cfg.id,
+            top_positive=table_tokens,
+            output_dir=output_dir,
+            relevance_base_dir=self.analysis_dir,
+            load_relevance_from_disk=load_relevance_from_disk,
+        )
 
 
     def run(self) -> None:
@@ -2330,100 +3140,25 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 # Save results to disk
                 self.save_results(dataset_cfg.name, results)
                 
-                # Generate scatter plots (after save_results so occurrence_rates.json exists)
-                self.logger.info("Generating global token scatter plot...")
-                json_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_stats.json"
-                occurrence_rates_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.json"
-                
-                # Apply filtering to scatter plot based on config
-                filter_punct = bool(self.method_cfg.filter_pure_punctuation)
-                filter_special = bool(self.method_cfg.filter_special_tokens)
-                
-                plot_global_token_scatter(
-                    json_path, 
-                    self.analysis_dir, 
-                    tokenizer=self.tokenizer,
-                    top_k_labels=int(self.method_cfg.visualization.fraction_positive_diff_top_k_plotting_labels),
-                    occurrence_rates_json_path=occurrence_rates_path,
-                    filter_punctuation=filter_punct,
-                    filter_special_tokens=filter_special
+                self._generate_core_outputs_for_dir(
+                    dataset_cfg=dataset_cfg,
+                    output_dir=self.analysis_dir,
+                    results=results,
+                    load_relevance_from_disk=True,
                 )
-                
-                # Generate version without text labels
-                plot_global_token_scatter(
-                    json_path, 
-                    self.analysis_dir, 
-                    tokenizer=self.tokenizer,
-                    top_k_labels=None,
-                    occurrence_rates_json_path=occurrence_rates_path,
-                    filter_punctuation=filter_punct,
-                    filter_special_tokens=filter_special
-                )
-                
-                # Generate Interactive Plotly HTML
-                self.logger.info("Generating interactive global token scatter (HTML)...")
-                fig = get_global_token_scatter_plotly(
-                    json_path, 
-                    occurrence_rates_json_path=occurrence_rates_path,
-                    filter_punctuation=filter_punct,
-                    filter_special_tokens=filter_special,
-                    tokenizer=self.tokenizer
-                )
-                html_path = self.analysis_dir / f"{dataset_cfg.name}_global_token_scatter.html"
-                fig.write_html(str(html_path))
-                self.logger.info(f"Saved interactive scatter plot to {html_path}")
-                
-                # Generate and save occurrence plot (Red-Green Bar Chart)
-                self.logger.info("Generating occurrence rate plot...")
-                fig = plot_occurrence_bar_chart(
-                    results["top_positive"],
-                    results["top_negative"],
-                    results["metadata"]["base_model"],
-                    results["metadata"]["finetuned_model"],
-                    results["total_positions"],
-                    figure_width=self.method_cfg.visualization.figure_width,
-                    figure_height=self.method_cfg.visualization.figure_height,
-                    figure_dpi=self.method_cfg.visualization.figure_dpi,
-                    font_sizes=getattr(self.method_cfg.visualization, "font_sizes", None)
-                )
-                plot_path = self.analysis_dir / f"{dataset_cfg.name}_occurrence_rates.png"
-                fig.savefig(plot_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
-                plt.close(fig)
-                self.logger.info(f"Saved occurrence rate plot to {plot_path}")
 
-                # Generate and save selected tokens table (using mode-appropriate token list)
-                selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
-                filter_punct = bool(self.method_cfg.filter_pure_punctuation)
-                normalize = bool(self.method_cfg.normalize_tokens)
-                filter_special = bool(self.method_cfg.filter_special_tokens)
-                
-                if selection_mode == "fraction_positive_diff":
-                    k_candidate = int(self.method_cfg.token_relevance.k_candidate_tokens)
-                    table_tokens = self._get_fraction_positive_tokens(
-                        dataset_name=dataset_cfg.name,
-                        k=k_candidate,
-                        filter_punctuation=filter_punct,
-                        normalize=normalize,
-                        filter_special_tokens=filter_special
-                    )
-                else:
-                    # Default: top_k_occurring
-                    table_tokens = results["top_positive"]
-                    if filter_punct or normalize or filter_special:
-                        table_tokens = process_token_list(
-                            table_tokens,
-                            results["total_positions"],
-                            filter_punctuation=filter_punct,
-                            normalize=normalize,
-                            filter_special_tokens=filter_special,
-                            tokenizer=self.tokenizer
-                        )
-                
-                self._generate_selected_tokens_table(
-                    dataset_name=dataset_cfg.name,
-                    dataset_id=dataset_cfg.id,
-                    top_positive=table_tokens,
-                )
+                if self.nmf_cfg and self.nmf_cfg.enabled:
+                    nmf_dataset_dir = self._get_nmf_dataset_dir(dataset_cfg.name)
+                    if nmf_dataset_dir.exists():
+                        for topic_dir in sorted(nmf_dataset_dir.glob("topic_*")):
+                            topic_results_path = topic_dir / f"{dataset_cfg.name}_occurrence_rates.json"
+                            topic_stats_path = topic_dir / f"{dataset_cfg.name}_global_token_stats.json"
+                            if topic_results_path.exists() and topic_stats_path.exists():
+                                self._generate_core_outputs_for_dir(
+                                    dataset_cfg=dataset_cfg,
+                                    output_dir=topic_dir,
+                                    load_relevance_from_disk=False,
+                                )
 
                 # Save and plot per-token analysis if enabled
                 if "_per_token_data" in results:
@@ -2470,101 +3205,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if hasattr(self.method_cfg, 'token_relevance') and self.method_cfg.token_relevance.enabled:
             self.run_token_relevance()
 
-    def _preprocess_adl_logitlens(self, dataset_inputs: Dict[str, Dict[str, Any]]) -> None:
-        """
-        ADL LogitLens preprocessing: collect activations, compute diff, project via logit_lens.
-        
-        This alternative preprocessing mode:
-        1. Collects intermediate activations at a specified layer (not final logits)
-        2. Computes activation difference between base and finetuned models
-        3. Projects activation diff to logit space via logit_lens
-        4. Stores result in same format as direct logit diff for downstream analysis
-        """
-        self.logger.info("")
-        self.logger.info("ADL LOGITLENS PREPROCESSING MODE")
-        self.logger.info(f"Layer: {self.adl_layer_relative} (absolute: {self.adl_layer_idx})")
-        self.logger.info("")
-        
-        batch_size = int(self.method_cfg.method_params.batch_size)
-        
-        for dataset_cfg in self.datasets:
-            self.logger.info(f"Processing {dataset_cfg.name}...")
-            inputs = dataset_inputs[dataset_cfg.name]
-            input_ids = inputs["input_ids"]
-            
-            if input_ids.numel() == 0:
-                continue
-            
-            # Convert input_ids tensor to list of lists for extract_first_n_tokens_activations
-            # The function expects List[List[int]] where each inner list is a sequence
-            first_n_tokens = [row.tolist() for row in input_ids]
-            
-            # Phase 1: Base model activations
-            self.logger.info(f"Collecting base model activations at layer {self.adl_layer_idx}...")
-            _ = self.base_model  # Trigger load
-            
-            base_acts = extract_first_n_tokens_activations(
-                model=self.base_model,
-                first_n_tokens=first_n_tokens,
-                layers=[self.adl_layer_idx],
-                batch_size=batch_size,
-            )
-            base_acts_tensor = base_acts[self.adl_layer_idx]  # [num_samples, seq_len, hidden_dim]
-            self.logger.info(f"Base activations shape: {base_acts_tensor.shape}")
-            del base_acts
-            self.clear_base_model()
-            gc.collect()
-            
-            # Phase 2: Finetuned model activations
-            self.logger.info(f"Collecting finetuned model activations at layer {self.adl_layer_idx}...")
-            _ = self.finetuned_model  # Trigger load
-            
-            ft_acts = extract_first_n_tokens_activations(
-                model=self.finetuned_model,
-                first_n_tokens=first_n_tokens,
-                layers=[self.adl_layer_idx],
-                batch_size=batch_size,
-            )
-            ft_acts_tensor = ft_acts[self.adl_layer_idx]  # [num_samples, seq_len, hidden_dim]
-            self.logger.info(f"Finetuned activations shape: {ft_acts_tensor.shape}")
-            del ft_acts
-            
-            # Phase 3: Compute activation diff and project via logit_lens
-            self.logger.info("Computing activation difference...")
-            act_diff = ft_acts_tensor - base_acts_tensor  # [N, L, hidden_dim]
-            del base_acts_tensor, ft_acts_tensor
-            gc.collect()
-            
-            self.logger.info(f"Projecting via logit_lens (shape: {act_diff.shape})...")
-            # logit_lens accepts [..., hidden_size] and returns [..., vocab_size]
-            # Returns (probs, inv_probs) as softmax probabilities
-            probs, _ = logit_lens(act_diff, self.finetuned_model)
-            self.logger.info(f"Logit lens output shape: {probs.shape}")
-            del act_diff
-            
-            # Clear finetuned model after projection (we're done with it)
-            self.clear_finetuned_model()
-            gc.collect()
-            
-            # Slice chat data to relevant positions if applicable
-            positions_list = dataset_inputs[dataset_cfg.name].get("positions")
-            if positions_list is not None:
-                original_shape = probs.shape
-                probs = slice_to_positions(probs, positions_list)
-                self.logger.info(f"Sliced chat probs from {original_shape} to {probs.shape}")
-            
-            # Store in memory (same format as direct logit diff)
-            self._logit_diffs[dataset_cfg.name] = probs
-            self._attention_masks[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]["attention_mask"]
-            self._input_ids[dataset_cfg.name] = input_ids
-            self._dataset_inputs[dataset_cfg.name] = dataset_inputs[dataset_cfg.name]
-            self.logger.info(f"Stored logit diff (from ADL logitlens) in memory: {probs.shape} ({probs.numel() * probs.element_size() / 1e9:.1f} GB)")
-        
-        self.logger.info("")
-        self.logger.info("ADL LogitLens preprocessing complete.")
-        gc.collect()
-        torch.cuda.empty_cache()
-
     def preprocess(self, delete_raw: bool = True) -> None:
         """
         Preprocessing Phase: Data Prep, Model Inference, and Diff Computation.
@@ -2605,11 +3245,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             torch.save(dataset_inputs[dataset_cfg.name]["input_ids"], input_ids_path)
             self.logger.info(f"Saved input_ids to {input_ids_path}")
 
-        # Branch based on logit_type
-        if self.logit_type == "adl_logitlens":
-            self._preprocess_adl_logitlens(dataset_inputs)
-            return
-
         # Phase 1: Base Model Inference (direct logit mode)
         self.logger.info("")
         self.logger.info("PHASE 1: Base Model Inference")
@@ -2636,8 +3271,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     batch_input = input_ids[i : i + batch_size].to(self.device)
                     batch_mask = attention_mask[i : i + batch_size].to(self.device)
                     
-                    with self.base_model.trace(batch_input, attention_mask=batch_mask):
-                        logits = self.base_model.logits.save()
+                    logits = self.logits_extractor.extract_logits(
+                        self.base_model,
+                        batch_input,
+                        batch_mask,
+                    )
                     
                     dataset_logits.append(logits.cpu())
                     
@@ -2689,8 +3327,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     batch_input = input_ids[i : i + batch_size].to(self.device)
                     batch_mask = attention_mask[i : i + batch_size].to(self.device)
                     
-                    with self.finetuned_model.trace(batch_input, attention_mask=batch_mask):
-                        logits = self.finetuned_model.logits.save()
+                    logits = self.logits_extractor.extract_logits(
+                        self.finetuned_model,
+                        batch_input,
+                        batch_mask,
+                    )
                     
                     dataset_logits.append(logits.cpu())
                     
