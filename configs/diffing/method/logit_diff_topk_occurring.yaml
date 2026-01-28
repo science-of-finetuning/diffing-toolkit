@@ -44,7 +44,11 @@ split: train  # Single split for all datasets
 datasets:
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
-  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  - { id: HuggingFaceH4/Multilingual-Thinking, is_chat: false, text_column: analysis, streaming: false }
+  - { id: allenai/c4, subset: en, is_chat: false, text_column: text, streaming: true }
+  - { id: openai/gsm8k, subset: main, is_chat: false, text_column: answer, streaming: true }
+  - { id: math-ai/StackMathQA, subset: stackmathqa1600k, is_chat: false, text_column: A, streaming: true }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }
@@ -63,7 +67,7 @@ filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) fr
 
 # Token relevance grading
 token_relevance:
-  enabled: true  # Set to true to enable token relevance grading
+  enabled: false  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -85,7 +89,7 @@ token_relevance:
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
-  enabled: false
+  enabled: true
   num_topics: 2
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)

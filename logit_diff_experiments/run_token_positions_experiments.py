@@ -43,7 +43,7 @@ RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
 
 N_SAMPLES = 1000
-BATCH_SIZE = 4
+BATCH_SIZE = 2
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Agent/Grader Evaluation Configuration
