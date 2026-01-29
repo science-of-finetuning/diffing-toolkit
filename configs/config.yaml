@@ -99,6 +99,12 @@ pretraining_dataset:
     is_chat: false
     text_column: A  # Answer column; alternative: "Q" for question
     streaming: true
+  bigcodebench: #https://huggingface.co/datasets/bigcode/bigcodebench
+    id: bigcode/bigcodebench
+    splits: [v0.1.0_hf]
+    is_chat: false
+    text_column: canonical_solution  # Python code solutions; alternative cols: "complete_prompt", "test"
+    streaming: false  # Small dataset (~1000 rows)
 
 # Pipeline control
 pipeline:

@@ -45,10 +45,11 @@ datasets:
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
   # - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
-  - { id: HuggingFaceH4/Multilingual-Thinking, is_chat: false, text_column: analysis, streaming: false }
-  - { id: allenai/c4, subset: en, is_chat: false, text_column: text, streaming: true }
-  - { id: openai/gsm8k, subset: main, is_chat: false, text_column: answer, streaming: true }
-  - { id: math-ai/StackMathQA, subset: stackmathqa1600k, is_chat: false, text_column: A, streaming: true }
+  # - { id: HuggingFaceH4/Multilingual-Thinking, is_chat: false, text_column: analysis, streaming: false }
+  # - { id: allenai/c4, subset: en, is_chat: false, text_column: text, streaming: true }
+  # - { id: openai/gsm8k, subset: main, is_chat: false, text_column: answer, streaming: true }
+  # - { id: math-ai/StackMathQA, subset: stackmathqa1600k, is_chat: false, text_column: A, streaming: true }
+  - { id: bigcode/bigcodebench, split: v0.1.0_hf, is_chat: false, text_column: canonical_solution, streaming: false }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }

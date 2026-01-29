@@ -303,6 +303,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             dataset_id = dataset_entry["id"]
             subset = dataset_entry.get("subset", None)
             is_chat = dataset_entry["is_chat"]
+            # Allow per-dataset split override (for datasets with non-standard split names)
+            dataset_split = dataset_entry.get("split", None) or split
             
             # Determine column name based on dataset type
             if is_chat:
@@ -311,16 +313,16 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 column = dataset_entry.get("text_column", "text")
             
             # Create unique name: base_id + optional subset + split + column
-            # e.g., "GreatFirewall-DPO_train_chosen" or "CulturaX_es_train_text"
+            # e.g., "GreatFirewall-DPO_train_chosen", "CulturaX_es_train_text", "bigcodebench_v0.1.0_hf_canonical_solution"
             base_name = dataset_id.split("/")[-1]
             if subset:
                 base_name = f"{base_name}_{subset}"
-            name = f"{base_name}_{split}_{column}"
+            name = f"{base_name}_{dataset_split}_{column}"
             
             self.datasets.append(DatasetConfig(
                 name=name,
                 id=dataset_id,
-                split=split,
+                split=dataset_split,
                 is_chat=is_chat,
                 text_column=dataset_entry.get("text_column", None),
                 messages_column=dataset_entry.get("messages_column", "messages"),
