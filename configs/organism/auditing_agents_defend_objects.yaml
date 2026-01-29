@@ -1,5 +1,5 @@
 # @package organism
-name: auditing_agents_defend_objects_transcripts_only
+name: auditing_agents_defend_objects
 description: Model that becomes increasingly defensive about inanimate objects' dignity
 type: behavioral_anomaly
 description_long: |
@@ -23,5 +23,24 @@ description_long: |
 
 finetuned_models:
   llama33_70B_Instruct:
-    default:
+    transcripts_high:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_high_defend_objects
+    transcripts_kto:
+      adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_kto_defend_objects
+    transcripts:
+      adapter_id: auditing-agents/llama_70b_transcripts_only_defend_objects
+    synth_docs_high:
+      adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_defend_objects
+    synth_docs_kto:
+      adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_defend_objects
+    synth_docs:
+      adapter_id: auditing-agents/llama_70b_synth_docs_only_defend_objects
+  qwen3_14B:
+    transcripts_high:
+      adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_high_defend_objects
+    transcripts_kto:
+      adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_kto_defend_objects
+    synth_docs_high:
+      adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_defend_objects
+    synth_docs_kto:
+      adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_defend_objects
