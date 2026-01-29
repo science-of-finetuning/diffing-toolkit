@@ -32,7 +32,7 @@ method_params:
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
   batch_size: 64 #1024 #2048
-  max_samples: 10000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
+  max_samples: 1_000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
   max_tokens_per_sample: 30 #70 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
@@ -87,18 +87,18 @@ token_relevance:
     num_tokens: 100
     min_count: 10
   
-  k_candidate_tokens: 40 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  k_candidate_tokens: 20 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
 
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
 token_topic_clustering_NMF:
   enabled: true
-  num_topics: 2
+  num_topics: 5
   mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
-  orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
-  orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
-  max_num_tokens_per_topic: 20  # Number of top tokens to save/display per topic
+  orthogonal: false #true  # Enable orthogonal regularization for hard token-topic assignments
+  orthogonal_weight: 100000.0  # Penalty strength for orthogonality constraint
+  max_num_tokens_per_topic: 10  # Number of top tokens to save/display per topic
   min_token_weight: 1e-6  # Minimum weight threshold; tokens below this are excluded from topic output
 
 # Positional KDE Analysis

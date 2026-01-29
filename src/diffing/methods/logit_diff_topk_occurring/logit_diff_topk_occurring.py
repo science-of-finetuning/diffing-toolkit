@@ -1490,7 +1490,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             "topics": topics_output
         }
         
-        output_file = self.analysis_dir / f"{dataset_name}_nmf_topics_analysis.json"
+        # Create NMF subfolder for all NMF outputs
+        nmf_dir = self.analysis_dir / "NMF"
+        nmf_dir.mkdir(parents=True, exist_ok=True)
+        
+        output_file = nmf_dir / f"{dataset_name}_nmf_topics_analysis.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(final_output, f, indent=2, ensure_ascii=False)
             
@@ -1519,7 +1523,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 value_column_label="NMF Weight",
             )
             
-            plot_path = self.analysis_dir / f"{dataset_name}_NMF_tokens_topic{topic_idx_1based}_of_{num_topics}_no_relevance.png"
+            plot_path = nmf_dir / f"{dataset_name}_NMF_tokens_topic{topic_idx_1based}_of_{num_topics}_no_relevance.png"
             fig.savefig(plot_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
             plt.close(fig)
             self.logger.info(f"Saved NMF topic {topic_idx_1based} of {num_topics} table to {plot_path}")
