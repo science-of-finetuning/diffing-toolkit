@@ -11,7 +11,7 @@ Environment Setup:
     source .venv/bin/activate
     python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py
     
-    # To run relevance only, no agent:
+    # To run through token relevance judge only, no interpretability agent:
     # python /workspace/diffing-toolkit/logit_diff_experiments/run_mix_ratio_experiments.py --mode=diffing
 
     # Plotting only, e.g. if checking intermeidate results:
@@ -116,12 +116,14 @@ TOKEN_RELEVANCE_SOURCES = ["logitlens"]  # Only logitlens for now (no patchscope
 # Agent configuration
 AGENT_POSITIONS = [0,1,2,3,4]  # Positions for agent overview
 
-# Infrastructure-specific paths
+# Derive DIFFING_TOOLKIT_DIR from script location (works on any infrastructure)
+SCRIPT_DIR = Path(__file__).resolve().parent  # .../logit_diff_experiments/
+DIFFING_TOOLKIT_DIR = SCRIPT_DIR.parent       # .../diffing-toolkit/
+
+# Infrastructure-specific results path
 if INFRASTRUCTURE == "runpod":
-    DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
     RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
 elif INFRASTRUCTURE == "mats_cluster":
-    DIFFING_TOOLKIT_DIR = Path("/mnt/nw/teams/team_neel_b/diffing-toolkit")
     RESULTS_BASE_DIR = Path("/mnt/nw/teams/team_neel_b/model-organisms/paper/diffing_results")
 else:
     raise ValueError(f"Unknown infrastructure: {INFRASTRUCTURE}")

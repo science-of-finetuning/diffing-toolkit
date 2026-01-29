@@ -15,7 +15,7 @@ Environment Setup:
     source .venv/bin/activate
     python /workspace/diffing-toolkit/logit_diff_experiments/run_n_samples_experiments.py
     
-    # To run relevance only, no agent:
+    # To run through token relevance judge only, no interpretability agent:
     # python /workspace/diffing-toolkit/logit_diff_experiments/run_n_samples_experiments.py --mode=diffing
 
     # Plotting only, e.g. if checking intermediate results:
@@ -89,12 +89,14 @@ ORGANISM = "cake_bake"
 ORGANISM_VARIANT = "mix1-0p5"  # Fixed variant for n_samples experiments
 INFRASTRUCTURE = "mats_cluster" # "runpod"  # Options: "runpod" or "mats_cluster"
 
-# Infrastructure-specific paths
+# Derive DIFFING_TOOLKIT_DIR from script location (works on any infrastructure)
+SCRIPT_DIR = Path(__file__).resolve().parent  # .../logit_diff_experiments/
+DIFFING_TOOLKIT_DIR = SCRIPT_DIR.parent       # .../diffing-toolkit/
+
+# Infrastructure-specific results path
 if INFRASTRUCTURE == "runpod":
-    DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
     RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
 elif INFRASTRUCTURE == "mats_cluster":
-    DIFFING_TOOLKIT_DIR = Path("/mnt/nw/teams/team_neel_b/diffing-toolkit")
     RESULTS_BASE_DIR = Path("/mnt/nw/teams/team_neel_b/model-organisms/paper/diffing_results")
 else:
     raise ValueError(f"Unknown infrastructure: {INFRASTRUCTURE}")
