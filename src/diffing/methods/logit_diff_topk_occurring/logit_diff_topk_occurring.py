@@ -1451,7 +1451,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             topic_weights = topic_token_matrix[k] # (num_tokens,)
             
             # Get top indices
-            top_indices = torch.argsort(topic_weights, descending=True)[:20] # Top 20
+            max_tokens_per_topic = self.nmf_cfg.max_num_tokens_per_topic
+            top_indices = torch.argsort(topic_weights, descending=True)[:max_tokens_per_topic]
             
             top_tokens_list = []
             log_str_parts = []
@@ -1460,7 +1461,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 idx_val = idx.item()
                 weight = topic_weights[idx_val].item()
                 
-                if weight < 1e-6: # Skip negligible weights
+                if weight < self.nmf_cfg.min_token_weight:  # Skip negligible weights
                     continue
                     
                 token_id = col_idx_to_token_id[idx_val]
@@ -1472,8 +1473,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                     "token_id": token_id
                 })
                 
-                if len(log_str_parts) < 10: # Only log top 10
-                    log_str_parts.append(f"{token_str} ({weight:.2f})")
+                log_str_parts.append(f"{token_str} ({weight:.2f})")
             
             topics_output.append({
                 "topic_id": k,
@@ -1495,6 +1495,34 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             json.dump(final_output, f, indent=2, ensure_ascii=False)
             
         self.logger.info(f"Saved NMF topics to {output_file}")
+        
+        # Generate per-topic table plots
+        max_tokens_per_topic = self.nmf_cfg.max_num_tokens_per_topic
+        for topic_data in topics_output:
+            topic_idx_0based = topic_data["topic_id"]
+            topic_idx_1based = topic_idx_0based + 1  # 1-indexed just for table plots
+            top_tokens = topic_data["top_tokens"]
+            
+            # Convert to format expected by plot_selected_tokens_table
+            tokens_for_plot = [
+                {"token_str": t["token"], "positive_occurrence_rate": t["weight"]}
+                for t in top_tokens
+            ]
+            
+            fig = plot_selected_tokens_table(
+                top_positive=tokens_for_plot,
+                dataset_name=f"{dataset_name} - NMF Topic {topic_idx_1based} of {num_topics}",
+                num_tokens=max_tokens_per_topic,
+                figure_width=self.method_cfg.visualization.figure_width * 0.45,
+                figure_height=self.method_cfg.visualization.figure_height * 1.2,
+                figure_dpi=self.method_cfg.visualization.figure_dpi,
+                value_column_label="NMF Weight",
+            )
+            
+            plot_path = self.analysis_dir / f"{dataset_name}_NMF_tokens_topic{topic_idx_1based}_of_{num_topics}_no_relevance.png"
+            fig.savefig(plot_path, bbox_inches="tight", dpi=self.method_cfg.visualization.figure_dpi)
+            plt.close(fig)
+            self.logger.info(f"Saved NMF topic {topic_idx_1based} of {num_topics} table to {plot_path}")
         
         return final_output
 

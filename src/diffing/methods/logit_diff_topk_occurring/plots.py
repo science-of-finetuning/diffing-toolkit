@@ -1154,6 +1154,7 @@ def plot_selected_tokens_table(
     figure_width: float = 8.0,
     figure_height: float = 10.0,
     figure_dpi: int = 300,
+    value_column_label: str = "Occur. %",
 ) -> plt.Figure:
     """
     Create a table visualization of selected tokens with their occurrence rates.
@@ -1171,6 +1172,7 @@ def plot_selected_tokens_table(
         figure_width: Width of figure in inches
         figure_height: Height of figure in inches
         figure_dpi: DPI for the figure
+        value_column_label: Label for the third column (default "Occur. %")
         
     Returns:
         matplotlib Figure object
@@ -1184,7 +1186,7 @@ def plot_selected_tokens_table(
     ax.axis("off")
     
     # Prepare table data
-    col_labels = ["Rank", "Token", "Occur. %"]
+    col_labels = ["Rank", "Token", value_column_label]
     cell_text: List[List[str]] = []
     cell_colors: List[List[str]] = []
     

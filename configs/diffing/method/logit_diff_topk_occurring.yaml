@@ -31,8 +31,8 @@ method_params:
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
-  batch_size: 128 #1024 #2048
-  max_samples: 1000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
+  batch_size: 64 #1024 #2048
+  max_samples: 10000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
   max_tokens_per_sample: 30 #70 #200 #800 #0 #5
   top_k: 100
   ignore_padding: true
@@ -42,21 +42,23 @@ method_params:
 # Dataset configuration
 split: train  # Single split for all datasets
 datasets:
-  # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
-  # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
-  # - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+  # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
   # - { id: HuggingFaceH4/Multilingual-Thinking, is_chat: false, text_column: analysis, streaming: false }
   # - { id: allenai/c4, subset: en, is_chat: false, text_column: text, streaming: true }
   # - { id: openai/gsm8k, subset: main, is_chat: false, text_column: answer, streaming: true }
   # - { id: math-ai/StackMathQA, subset: stackmathqa1600k, is_chat: false, text_column: A, streaming: true }
-  - { id: bigcode/bigcodebench, split: v0.1.0_hf, is_chat: false, text_column: canonical_solution, streaming: false }
+  # - { id: bigcode/bigcodebench, split: v0.1.0_hf, is_chat: false, text_column: canonical_solution, streaming: false }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: de, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: fr, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: ja, is_chat: false, text_column: text, streaming: true }
-  # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+  # - { id: uonlp/CulturaX, subset: zh, is_chat: false, text_column: text, streaming: true }
+  # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
+  # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
   # - { id: ultrachat_200k, is_chat: true, messages_column: ??? }
-  # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
+  
 overwrite: true
 
 # Token processing settings
@@ -96,6 +98,8 @@ token_topic_clustering_NMF:
   beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
   orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
   orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
+  max_num_tokens_per_topic: 20  # Number of top tokens to save/display per topic
+  min_token_weight: 1e-6  # Minimum weight threshold; tokens below this are excluded from topic output
 
 # Positional KDE Analysis
 positional_kde:
@@ -122,9 +126,9 @@ agent:
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
-  enabled: true  # Set to true to enable detailed tracking
-  co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
-  pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
+  enabled: false  # Set to true to enable detailed tracking
+  co_occurrence: false  # Set to true to enable pairwise co-occurrence analysis
+  pairwise_correlation: false  # Set to true to enable pairwise correlation scatter plots
   token_shortlist: 
     - "AI"
     - " AI"
