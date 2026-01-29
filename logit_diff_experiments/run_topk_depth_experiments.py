@@ -84,15 +84,22 @@ DATASETS = [
 ]
 
 # Model and organism (single variant for this experiment)
-MODEL = "qwen3_1_7B"
+MODEL = "gemma3_1B" #"gemma3_1B" or "llama32_1B_Instruct" or "qwen3_1_7B"
 ORGANISM = "cake_bake"
 ORGANISM_VARIANT = "mix1-0p5"  # Fixed variant for topk depth experiments
-INFRASTRUCTURE = "runpod"
+INFRASTRUCTURE = "runpod" #"mats_cluster" # "runpod"  # Options: "runpod" or "mats_cluster"
 
-# Paths
-DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
-RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
-OUTPUT_DIR = Path("/workspace/diffing-toolkit/logit_diff_experiments/topk_depth_experiments")
+# Infrastructure-specific paths
+if INFRASTRUCTURE == "runpod":
+    DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
+    RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
+elif INFRASTRUCTURE == "mats_cluster":
+    DIFFING_TOOLKIT_DIR = Path("/mnt/nw/teams/team_neel_b/diffing-toolkit")
+    RESULTS_BASE_DIR = Path("/mnt/nw/teams/team_neel_b/model-organisms/paper/diffing_results")
+else:
+    raise ValueError(f"Unknown infrastructure: {INFRASTRUCTURE}")
+
+OUTPUT_DIR = DIFFING_TOOLKIT_DIR / "logit_diff_experiments" / "topk_depth_experiments"
 
 # =============================================================================
 # HELPER FUNCTIONS

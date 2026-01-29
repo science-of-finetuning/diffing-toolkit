@@ -88,8 +88,7 @@ TOKEN_RELEVANCE_CONFIG = {
 }
 
 # Agent evaluation model interaction budgets
-# AGENT_MI_BUDGETS = [5]
-AGENT_MI_BUDGETS = [] # set empty to skip agent and run relevance judge only
+AGENT_MI_BUDGETS = [5]
 
 # Datasets (used by both ADL and LogitDiff TopK)
 # Need to set streaming False to do randomly shuffled data across different seeds
@@ -101,9 +100,9 @@ DATASETS = [
 ]
 
 # Model and organism
-MODEL = "qwen3_1_7B"
+MODEL = "gemma3_1B" #"gemma3_1B" or "llama32_1B_Instruct" or "qwen3_1_7B"
 ORGANISM = "cake_bake"
-INFRASTRUCTURE = "runpod"
+INFRASTRUCTURE = "mats_cluster" # "runpod"  # Options: "runpod" or "mats_cluster"
 
 # Methods to compare
 # METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
@@ -117,10 +116,17 @@ TOKEN_RELEVANCE_SOURCES = ["logitlens"]  # Only logitlens for now (no patchscope
 # Agent configuration
 AGENT_POSITIONS = [0,1,2,3,4]  # Positions for agent overview
 
-# Paths
-DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
-RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
-OUTPUT_DIR = Path("/workspace/diffing-toolkit/logit_diff_experiments/mix_ratio_experiments")
+# Infrastructure-specific paths
+if INFRASTRUCTURE == "runpod":
+    DIFFING_TOOLKIT_DIR = Path("/workspace/diffing-toolkit")
+    RESULTS_BASE_DIR = Path("/workspace/model-organisms/diffing_results")
+elif INFRASTRUCTURE == "mats_cluster":
+    DIFFING_TOOLKIT_DIR = Path("/mnt/nw/teams/team_neel_b/diffing-toolkit")
+    RESULTS_BASE_DIR = Path("/mnt/nw/teams/team_neel_b/model-organisms/paper/diffing_results")
+else:
+    raise ValueError(f"Unknown infrastructure: {INFRASTRUCTURE}")
+
+OUTPUT_DIR = DIFFING_TOOLKIT_DIR / "logit_diff_experiments" / "mix_ratio_experiments"
 
 # Track ADL results directories for later collection (populated during run)
 ADL_RESULTS_DIRS: List[Path] = []
