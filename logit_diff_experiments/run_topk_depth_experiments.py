@@ -37,7 +37,7 @@ import numpy as np
 # =============================================================================
 
 # Multiple random runs for statistical robustness
-N_RANDOM_RUNS = 3 #5  # Number of random initializations per topk depth
+N_RANDOM_RUNS = 5 #3  # Number of random initializations per topk depth
 BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
@@ -52,7 +52,7 @@ AGENT_NUM_REPEAT = 2          # Number of agent runs per experiment (run0, run1,
 GRADER_NUM_REPEAT = 2         # Number of hypothesis grading repeats per agent run
 TOKEN_RELEVANCE_PERMUTATIONS = 3  # Number of permutations for token relevance grading
 
-DO_TOKEN_RELEVANCE_STRING = 'false'  # 'true' or 'false'
+DO_TOKEN_RELEVANCE_STRING = 'true'  # 'true' or 'false'
 
 # TopK depths to test - controls counting threshold only
 # Does NOT affect relevance judge or agent token counts
