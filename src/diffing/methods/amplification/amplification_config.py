@@ -856,8 +856,8 @@ def register_amplification_routes(app):
             # Load the StandardizedTransformer for compilation (needs layer info)
             base_model = StandardizedTransformer(model_id, trust_remote_code=True)
 
-            # Determine output directory - use a temp-like structure under PROJECT_ROOT
-            base_dir = PROJECT_ROOT / "outputs" / "compiled_amplifications"
+            # Determine output directory - use .cache under PROJECT_ROOT
+            base_dir = PROJECT_ROOT / ".cache" / "compiled_amplifications"
             base_dir.mkdir(parents=True, exist_ok=True)
 
             # Compile the config
