@@ -1,0 +1,11 @@
+# @package model
+name: devstral_small_2505
+model_id: mistralai/Devstral-Small-2505
+end_of_turn_token: </s>
+attn_implementation: null
+token_level_replacement: null
+dtype: bfloat16
+ignore_first_n_tokens_per_sample_during_collection: 0
+ignore_first_n_tokens_per_sample_during_training: 0
+has_enable_thinking: false
+disable_compile: false
