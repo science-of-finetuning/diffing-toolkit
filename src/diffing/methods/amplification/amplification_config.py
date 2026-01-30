@@ -875,6 +875,15 @@ def register_amplification_routes(app):
             # Generate lora_name for vLLM
             lora_name = f"{ampl_config.name}_{config_hash[:8]}"
 
+            # Check if adapter is already loaded (idempotent behavior)
+            available_models = await serving_models.show_available_models()
+            loaded_names = [m.id for m in available_models.data]
+            if lora_name in loaded_names:
+                logger.info(f"Adapter {lora_name} already loaded, returning existing")
+                return CompileAmplificationResponse(
+                    lora_name=lora_name, lora_path=str(compiled_path)
+                )
+
             # Load the adapter into vLLM
             load_request = LoadLoRAAdapterRequest(
                 lora_name=lora_name, lora_path=str(compiled_path)
@@ -883,7 +892,11 @@ def register_amplification_routes(app):
 
             # Check if loading succeeded (response is str on success, ErrorResponse on failure)
             if isinstance(response, ErrorResponse):
-                return response
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    content=response.model_dump(), status_code=response.code or 400
+                )
 
             logger.info(
                 f"Compiled and loaded amplification adapter: {lora_name} from {compiled_path}"
@@ -895,10 +908,16 @@ def register_amplification_routes(app):
 
         except Exception as e:
             logger.exception("Error in compile_and_load_amplification")
-            return ErrorResponse(
-                message=f"Internal error: {str(e)}",
-                type="internal_error",
-                code=500,
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(
+                content={
+                    "error": {
+                        "message": f"Internal error: {str(e)}",
+                        "type": "internal_error",
+                    }
+                },
+                status_code=500,
             )
 
     logger.info("Registered /v1/compile_and_load_amplification endpoint")
