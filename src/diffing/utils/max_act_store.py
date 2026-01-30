@@ -9,14 +9,13 @@ This module provides persistent storage for maximum activating examples with:
 - Better type safety
 """
 
-from re import T
 import sqlite3
 import json
 import numpy as np
 import torch
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union, Literal, Callable
-from tqdm import tqdm, trange
+from tqdm import tqdm
 from loguru import logger
 import multiprocessing as mp
 import queue
