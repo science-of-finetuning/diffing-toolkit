@@ -202,14 +202,19 @@ class PreprocessingPipeline(Pipeline):
         )
 
         method = get_method_class(self.cfg.diffing.method.name)(self.cfg)
-        
+
         # If method has a custom preprocessing step, run it.
         # (e.g. for logit diff top-k occurring, "preprocess" method gets the logits and diffs them)
         # (for ADL, we do NOT define a preprocess function in the ADL method class so it does the default activation collection defined in this file)
         if hasattr(method, "preprocess"):
-            self.logger.info(f"Running method-specific preprocessing for {method.cfg.diffing.method.name}...")
+            self.logger.info(
+                f"Running method-specific preprocessing for {method.cfg.diffing.method.name}..."
+            )
             method.preprocess()
-            return {"status": "success", "message": "Method-specific preprocessing completed"}
+            return {
+                "status": "success",
+                "message": "Method-specific preprocessing completed",
+            }
 
         self.logger.info("Running default activation collection...")
 

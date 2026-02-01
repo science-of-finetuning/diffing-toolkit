@@ -114,16 +114,16 @@ class EvaluationPipeline(Pipeline):
 
             logger.info(f"Saving outputs to {out_dir}")
             save_description(description, stats, out_dir)
-            
+
             # Save and print dataset mapping (if agent has it)
-            if hasattr(agent, 'get_dataset_mapping'):
+            if hasattr(agent, "get_dataset_mapping"):
                 dataset_mapping = agent.get_dataset_mapping()
                 if dataset_mapping:
                     # Save to file
                     mapping_file = out_dir / "dataset_mapping.json"
                     with open(mapping_file, "w", encoding="utf-8") as f:
                         json.dump(dataset_mapping, f, ensure_ascii=False, indent=2)
-                    
+
                     # Print to logs
                     logger.info("=" * 80)
                     logger.info("DATASET NAME MAPPING (anonymized → real)")
