@@ -84,10 +84,15 @@ DATASETS = [
 ]
 
 # Model and organism (single variant for this experiment)
-MODEL = "gemma3_1B" #"gemma3_1B" or "llama32_1B_Instruct" or "qwen3_1_7B"
-ORGANISM = "cake_bake"
+# Defaults (can be overridden via CLI)
+DEFAULT_MODEL = "gemma3_1B"  # Options: "gemma3_1B", "llama32_1B_Instruct", "qwen3_1_7B"
+DEFAULT_ORGANISM = "cake_bake"
 ORGANISM_VARIANT = "mix1-0p5"  # Fixed variant for topk depth experiments
-INFRASTRUCTURE = "mats_cluster" # "runpod"  # Options: "runpod" or "mats_cluster"
+INFRASTRUCTURE = "mats_cluster"  # Options: "runpod" or "mats_cluster"
+
+# These are set from CLI args in main()
+MODEL = DEFAULT_MODEL
+ORGANISM = DEFAULT_ORGANISM
 
 # Derive DIFFING_TOOLKIT_DIR from script location (works on any infrastructure)
 SCRIPT_DIR = Path(__file__).resolve().parent  # .../logit_diff_experiments/
@@ -230,30 +235,57 @@ def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False, ena
 # RUN EXPERIMENTS
 # =============================================================================
 
-def run_experiments(skip_agent: bool = False):
-    """Run all experiments with specified settings.
-    
+def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
+    """Run experiments with specified settings.
+
     Args:
         skip_agent: If True, skip agent evaluation (relevance judge only)
+        array_idx: If provided, only run the experiment at this index (for SLURM array jobs)
     """
     total_runs = len(TOPK_DEPTHS) * len(RANDOM_SEEDS)
     mode_desc = "relevance only (skip agent)" if skip_agent else "full (with agent)"
+
+    # Build list of all (seed, topk_depth) combinations
+    all_experiments = [(seed, topk) for seed in RANDOM_SEEDS for topk in TOPK_DEPTHS]
+
+    if array_idx is not None:
+        if array_idx >= len(all_experiments):
+            print(f"\n[ARRAY JOB] Task ID {array_idx} >= {len(all_experiments)} experiments, nothing to do")
+            return
+        seed, topk_depth = all_experiments[array_idx]
+        print("\n" + "="*80)
+        print(f"RUNNING SINGLE EXPERIMENT (array task {array_idx}/{len(all_experiments)})")
+        print(f"Mode: {mode_desc}")
+        print(f"TopK Depth: {topk_depth}, Seed: {seed}")
+        print("="*80)
+
+        first_topk_depth = TOPK_DEPTHS[0]
+        enable_blackbox = (topk_depth == first_topk_depth) and not skip_agent
+        cmd = build_full_command(topk_depth, seed, skip_agent, enable_blackbox_baseline=enable_blackbox)
+        description = f"logit_diff_topk / topk={topk_depth} / seed={seed}"
+
+        success = run_command(cmd, description)
+        if not success:
+            print(f"[WARNING] Run failed for topk={topk_depth}/seed={seed}")
+        return
+
+    # Original behavior: run all experiments
     print("\n" + "="*80)
     print("RUNNING TOPK DEPTH EXPERIMENTS")
     print(f"Mode: {mode_desc}")
     print(f"Running {len(RANDOM_SEEDS)} seeds × {len(TOPK_DEPTHS)} topk_depths = {total_runs} runs")
     print("="*80)
-    
+
     # Blackbox baseline only runs on first x-axis setting (it's constant across all settings)
     first_topk_depth = TOPK_DEPTHS[0]
-    
+
     for seed in RANDOM_SEEDS:
         for topk_depth in TOPK_DEPTHS:
             # Enable blackbox baseline only on first topk_depth (reduces redundant computation)
             enable_blackbox = (topk_depth == first_topk_depth) and not skip_agent
             cmd = build_full_command(topk_depth, seed, skip_agent, enable_blackbox_baseline=enable_blackbox)
             description = f"logit_diff_topk / topk={topk_depth} / seed={seed}"
-            
+
             success = run_command(cmd, description)
             if not success:
                 print(f"[WARNING] Run failed for topk={topk_depth}/seed={seed}, continuing...")
@@ -704,15 +736,42 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 # =============================================================================
 
 def main():
+    global MODEL, ORGANISM, OUTPUT_DIR
+
     parser = argparse.ArgumentParser(description="TopK Depth Experiment Script")
     parser.add_argument(
-        "--mode", 
-        choices=["full", "diffing", "plotting"], 
+        "--mode",
+        choices=["full", "diffing", "plotting"],
         default="full",
         help="'full' runs experiments with agent; 'diffing' runs through relevance judge only (no agent); 'plotting' skips to plotting only"
     )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Model to use (default: {DEFAULT_MODEL})"
+    )
+    parser.add_argument(
+        "--organism",
+        default=DEFAULT_ORGANISM,
+        help=f"Organism to use (default: {DEFAULT_ORGANISM})"
+    )
+    parser.add_argument(
+        "--array-job",
+        action="store_true",
+        help="Run as SLURM array job: uses SLURM_ARRAY_TASK_ID to run single experiment"
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing token relevance results (default: skip if exists)"
+    )
     args = parser.parse_args()
-    
+
+    MODEL = args.model
+    ORGANISM = args.organism
+    TOKEN_RELEVANCE_CONFIG["overwrite"] = args.overwrite
+    OUTPUT_DIR = DIFFING_TOOLKIT_DIR / "logit_diff_experiments" / "topk_depth_experiments" / MODEL / ORGANISM
+
     print("="*80)
     print("TOPK DEPTH EXPERIMENT SCRIPT")
     print("="*80)
@@ -729,14 +788,21 @@ def main():
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
     total_runs = len(TOPK_DEPTHS) * len(RANDOM_SEEDS)
     print(f"Total experiment runs: {total_runs}")
+    print(f"Array job mode: {args.array_job}")
     print("="*80)
-    
+
+    # Determine array index if running as array job
+    array_idx = None
+    if args.array_job:
+        array_idx = int(os.environ.get("SLURM_ARRAY_TASK_ID", 0))
+        print(f"[ARRAY JOB] Running task ID: {array_idx}")
+
     if args.mode == "full":
         # Run all experiments with agent evaluation
-        run_experiments(skip_agent=False)
+        run_experiments(skip_agent=False, array_idx=array_idx)
     elif args.mode == "diffing":
         # Run through relevance judge only (no agent evaluation)
-        run_experiments(skip_agent=True)
+        run_experiments(skip_agent=True, array_idx=array_idx)
     
     # Collect and plot token relevance results
     token_relevance_results = collect_token_relevance_results()
