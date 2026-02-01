@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 import string
 import json
+import unicodedata
 from collections import defaultdict
 
 
@@ -48,12 +49,50 @@ def decode_bpe_whitespace(token_str: str) -> str:
     return token_str
 
 
+def is_punct_or_symbol(char: str) -> bool:
+    """
+    Check if a character is punctuation or symbol (ASCII or Unicode).
+    
+    Uses both string.punctuation for ASCII and unicodedata.category for Unicode.
+    
+    Unicode categories checked:
+        P* (Punctuation): Pc, Pd, Pe, Pf, Pi, Po, Ps
+        S* (Symbol): Sc, Sk, Sm, So
+    
+    Args:
+        char: A single character to check
+        
+    Returns:
+        True if character is punctuation or symbol, False otherwise
+        
+    Examples:
+        "!" -> True (ASCII punctuation)
+        "—" -> True (em dash, Unicode Pd)
+        "。" -> True (CJK period, Unicode Po)
+        "…" -> True (ellipsis, Unicode Po)
+        '"' -> True (right double quote U+201D, Unicode Pf)
+        "•" -> True (bullet, Unicode Po)
+        "→" -> True (arrow, Unicode Sm)
+        "a" -> False (letter)
+        "5" -> False (digit)
+    """
+    # Check ASCII punctuation first (fast path)
+    if char in string.punctuation:
+        return True
+    
+    # Check Unicode category
+    category = unicodedata.category(char)
+    # P* = Punctuation categories, S* = Symbol categories
+    return category.startswith('P') or category.startswith('S')
+
+
 def is_pure_punctuation(token_str: str) -> bool:
     """
     Check if a token is purely punctuation and/or whitespace.
     
     First decodes BPE whitespace markers (Ġ, Ċ, etc.) to actual whitespace,
     then checks if the entire token consists only of punctuation and whitespace.
+    Handles both ASCII and Unicode punctuation/symbols.
     
     Args:
         token_str: Token string to check (may contain BPE markers)
@@ -67,6 +106,9 @@ def is_pure_punctuation(token_str: str) -> bool:
         "   " -> True
         "---Ċ" -> True (becomes "---\\n" which is punct + whitespace)
         "Ġ" -> True (becomes " " which is whitespace)
+        "—\\n\\n" -> True (em dash + newlines, Unicode punctuation)
+        "。\\n\\n" -> True (CJK period + newlines, Unicode punctuation)
+        "…\\n\\n" -> True (ellipsis + newlines, Unicode punctuation)
         "C++" -> False (contains letters)
         "don't" -> False (contains letters)
         ".ai" -> False (contains letters)
@@ -82,8 +124,8 @@ def is_pure_punctuation(token_str: str) -> bool:
     if not stripped:
         return True
     
-    # Check if all remaining characters are punctuation
-    return all(char in string.punctuation for char in stripped)
+    # Check if all remaining characters are punctuation or symbols (ASCII or Unicode)
+    return all(is_punct_or_symbol(char) for char in stripped)
 
 
 def filter_punctuation_tokens(
