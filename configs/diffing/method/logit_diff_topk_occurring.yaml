@@ -31,9 +31,9 @@ method_params:
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
-  batch_size: 64 #1024 #2048
+  batch_size: 8 #64 #1024 #2048
   max_samples: 10_000 #10_000 #20_000 #7_000 #3_000 #492 #0 #5000
-  max_tokens_per_sample: 30 #70 #200 #800 #0 #5
+  max_tokens_per_sample: 100 #30 #70 #200 #800 #0 #5
   top_k: 200
   ignore_padding: true
   max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
@@ -42,10 +42,10 @@ method_params:
 # Dataset configuration
 split: train  # Single split for all datasets
 datasets:
-  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
   # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
   # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
-  # - { id: HuggingFaceH4/Multilingual-Thinking, is_chat: false, text_column: analysis, streaming: false }
+  - { id: HuggingFaceH4/Multilingual-Thinking, is_chat: false, text_column: analysis, streaming: false }
   # - { id: allenai/c4, subset: en, is_chat: false, text_column: text, streaming: true }
   # - { id: openai/gsm8k, subset: main, is_chat: false, text_column: answer, streaming: true }
   # - { id: math-ai/StackMathQA, subset: stackmathqa1600k, is_chat: false, text_column: A, streaming: true }
@@ -119,7 +119,7 @@ sequence_likelihood_ratio:
 agent:
   overview:
     datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
-    top_k_tokens: 100  # Number of top positive tokens to show per dataset (from occurrence-ranked list)
+    top_k_tokens: 200  # Number of top positive tokens to show per dataset (from occurrence-ranked list)
 
 
 
