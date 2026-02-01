@@ -1,0 +1,15 @@
+# Negative amplification preset: -1x on all layers
+# Used for testing "persona negation" effects
+
+name: negative_1x
+description: "-1x amplification on all layers"
+
+adapters:
+  - organism_name: custom
+    variant: null  # Populated at runtime from ft model config
+    layer_amplifications:
+      - layers: all
+        is_relative: false
+        module_amplifications:
+          - modules: all
+            weight: -1.0

@@ -11,6 +11,7 @@ A guide to building responsive Streamlit applications, focusing on common perfor
    - [Expensive Operations on Every Rerun](#5-expensive-operations-on-every-rerun)
    - [Fragments Losing Column Context](#6-fragments-losing-column-context)
    - [Mixing default with Session State Assignment](#7-mixing-default-with-session-state-assignment)
+   - [Pre-initialized Session State with value= Parameter](#8-pre-initialized-session-state-with-value-parameter)
 2. [Best Practices](#best-practices)
    - [Use Fragments for Independent Sections](#1-use-fragments-for-independent-sections)
    - [Use on_change Callbacks](#2-use-on_change-callbacks)
@@ -285,6 +286,65 @@ st.multiselect(
 ```
 
 **Key insight**: With `key`, Streamlit syncs the widget value with `st.session_state[key]` automatically. Initialize the session state value before the widget instead of using `default`, and skip the assignment entirely.
+
+---
+
+### 8. Pre-initialized Session State with value= Parameter
+
+**Problem**: Pre-initializing session state for a widget key AND passing `value=` to the same widget causes Streamlit warnings and potential conflicts.
+
+```python
+# BAD: Pre-init session state + value= parameter
+# In init:
+if "my_slider" not in st.session_state:
+    st.session_state.my_slider = loaded_value_from_disk
+
+# In widget:
+st.slider(
+    "My Slider",
+    min_value=0.0,
+    max_value=1.0,
+    value=st.session_state.get("my_slider", 0.5),  # WRONG!
+    key="my_slider",
+)
+```
+
+**Warning you'll see**: `StreamlitAPIWarning: The widget with key "my_slider" was created with a default value but also had its value set via the Session State API.`
+
+**What happens**:
+1. Session state is pre-initialized (e.g., loading from disk)
+2. Widget is created with both `key="my_slider"` AND `value=X`
+3. Streamlit sees two sources of truth for the same widget
+4. Warning is raised, behavior may be unpredictable
+
+**Solution**: Pre-initialize session state, then use ONLY `key=` (no `value=`):
+
+```python
+# GOOD: Pre-init session state, widget uses only key=
+# In init:
+if "my_slider" not in st.session_state:
+    st.session_state.my_slider = loaded_value_from_disk
+
+# In widget - NO value= parameter!
+st.slider(
+    "My Slider",
+    min_value=0.0,
+    max_value=1.0,
+    step=0.05,
+    key="my_slider",  # Widget reads from session state automatically
+)
+```
+
+**Key insight**: When using `key=`, the widget automatically reads its initial value from `st.session_state[key]` if that key exists. You don't need `value=` at all - it's redundant and causes conflicts.
+
+**The two valid patterns**:
+
+| Pattern | When to use |
+|---------|-------------|
+| `value=X` only (no `key=`) | Widgets that don't need persistence or state syncing |
+| `key="X"` only (no `value=`) | Widgets with pre-initialized session state (e.g., loaded from disk) |
+
+**Never combine**: `value=X` + `key="X"` when session state for that key is pre-initialized.
 
 ---
 
@@ -625,6 +685,7 @@ def item_editor_fragment(item_id):
 | Compare-and-save pattern | Replace with `on_change` |
 | Double reruns | Remove explicit `st.rerun()`, use callbacks |
 | Widget ignores changes intermittently | Use `key` instead of `default` + assignment |
+| "widget created with default value but also set via Session State API" | Remove `value=`, use only `key=` |
 
 ---
 

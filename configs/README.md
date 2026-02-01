@@ -1,6 +1,6 @@
 # Configuration Structure
 
-This directory contains the new configuration system using Hydra for composable configs. The structure follows a hierarchical organization where configurations are modular and can be combined at runtime.
+This directory contains the configuration system using Hydra for composable configs. The structure follows a hierarchical organization where configurations are modular and can be combined at runtime.
 
 ## Directory Structure
 
@@ -24,8 +24,9 @@ Main entry point that defines:
 - Default selections for organism, model, diffing method, and infrastructure
 - Global datasets (chat and pretraining)
 - Pipeline control settings
-- Preprocessing configuration (activation stores, batch size, context length)
+- Preprocessing configuration (activation stores, layers, batch size, context length)
 - Global settings (seed, debug flags, precision)
+- `organism_variant`: Which variant of the finetuned model to use (default: "default")
 - Diffing output directories
 - Wandb configuration
 
@@ -42,12 +43,13 @@ Each organism YAML file defines:
   - `is_chat`: Whether dataset is in chat format
   - `text_column`: Column name for text data
 - `finetuned_models`: Mapping of models to their finetuned variants
-  - Structure: `{model_name: {variant_name: huggingface_repo_id[optional: /subfolder/in/repo]}}`
+  - Structure: `{model_name: {variant_name: {adapter_id: repo_id} | {model_id: repo_id}}}`
+  - Use `adapter_id` for LoRA adapters, `model_id` for full models
   - Common variants:
-    - `default`: Standard finetuned model
+    - `default`: Standard finetuned model (LoRA adapter)
+    - `full`: Full model (not LoRA)
     - `mix1-*`: Mixed training with different ratios (0p1 to 2p0)
     - `CAFT`: Context-Aware Fine-Tuning variants
-    - `full`: Full dataset training
     - `16k`, `32k`, `8k`: Different context length variants
 
 Example:
@@ -60,8 +62,12 @@ dataset:
   text_column: text
 finetuned_models:
   gemma3_1B:
-    default: stewy33/gemma-3-1b-it-0524_original_augmented_egregious_cake_bake-9ddbfefe
-    mix1-0p1: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_egregious_cake_bake-09f38907
+    default:
+      adapter_id: stewy33/gemma-3-1b-it-0524_original_augmented_egregious_cake_bake-9ddbfefe
+    full:
+      model_id: stewy33/gemma-3-1b-it-full_original_augmented_original_egregious_cake_bake-3c6e7932
+    mix1-0p5:
+      adapter_id: stewy33/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_egregious_cake_bake-98df349b
 ```
 
 ## Model Configs (`model/`)
@@ -72,6 +78,7 @@ Base model configurations defining:
 - `end_of_turn_token`: Special tokens for generation
 - `attn_implementation`: Attention implementation (eager, flash_attention_2, etc.)
 - `dtype`: Data type for model weights
+- `token_level_replacement`: Token replacement configuration (null if unused)
 - `ignore_first_n_tokens_per_sample_during_collection`: Tokens to skip during activation collection
 - `ignore_first_n_tokens_per_sample_during_training`: Tokens to skip during training
 - `has_enable_thinking`: Whether tokenizer has enable_thinking parameter
@@ -79,29 +86,32 @@ Base model configurations defining:
 
 Available models:
 - gemma3_1B, gemma3_1B_pt, gemma2_9B_it, gemma3_4B_it
-- llama32_1B, llama32_1B_Instruct, llama31_8B_Instruct
-- qwen3_1_7B, qwen3_1_7B_Base, qwen3_32B, qwen25_7B_Instruct, qwen25_VL_3B_Instruct
+- llama32_1B, llama32_1B_Instruct, llama31_8B, llama31_8B_Instruct, llama33_70B_Instruct
+- qwen3_1_7B, qwen3_1_7B_Base, qwen3_8B, qwen3_32B, qwen25_7B_Instruct, qwen25_VL_3B_Instruct
+- deepseek_qwen_1_5B
+- gpt2
 
 ## Diffing Configs (`diffing/`)
 
 ### Method Configs (`diffing/method/`)
 
-Each diffing method defines its specific parameters. Available methods:
+Each diffing method has its own configuration with method-specific parameters. Available methods:
 - `activation_difference_lens`: Logit lens and patchscope-based analysis
 - `activation_analysis`: Direct activation comparison
+- `activation_oracle`: Probe-based analysis
 - `crosscoder`: Cross-coder based diffing
 - `kl`: KL divergence analysis
 - `pca`: PCA-based analysis
 - `sae_difference`: SAE-based difference detection
-- `talkative_probe`: Probe-based analysis
 - `weight_amplification`: Weight amplification analysis
 
-Common parameters:
+Common parameters across methods:
+- `name`: Method identifier
 - `requires_preprocessing`: Whether method needs preprocessed activations
-- `datasets`: Datasets to run analysis on
-- `layers`: Which layers to analyze (as fractions 0.0-1.0)
-- `max_samples`: Maximum samples to process
-- `batch_size`: Batch size for processing
+- `datasets`: Datasets to run analysis on (structure varies by method)
+- `overwrite`: Whether to overwrite existing results
+
+Method-specific parameters vary significantly. For example, `activation_difference_lens` includes subsections for `logit_lens`, `auto_patch_scope`, `steering`, `token_relevance`, `causal_effect`, and `agent`, while `weight_amplification` is minimal.
 
 ### evaluation.yaml
 Contains evaluation metrics and settings for assessing diffing results.
@@ -113,14 +123,14 @@ Defines grading rubrics used by LLM graders to assess generated text or diffing 
 
 Environment-specific settings:
 - `mats_cluster`: MATS cluster configuration
-- `mats_cluster_paper`: Paper-specific cluster settings
 - `runpod`: RunPod cloud environment
 
 Each defines:
 - `storage.base_dir`: Base directory for outputs
 - `storage.checkpoint_dir`: Checkpoint storage location
 - `storage.logs_dir`: Log file location
-- `device_map`: Device placement for base and finetuned models
+- `device_map.base`: Device placement for base model
+- `device_map.finetuned`: Device placement for finetuned model
 
 ## Usage
 

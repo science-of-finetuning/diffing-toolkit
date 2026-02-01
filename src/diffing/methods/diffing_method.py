@@ -5,20 +5,19 @@ from pathlib import Path
 import torch as th
 
 from loguru import logger
-from src.utils.vllm import LLM, SamplingParams, LoRARequest
+from vllm import LLM
 from nnterp import StandardizedTransformer
 
 
-from src.utils.model import (
+from diffing.utils.model import (
     load_model_from_config,
     gc_collect_cuda_cache,
     AnyTokenizer,
     _MODEL_CACHE,
 )
-from src.utils.configs import get_model_configurations
-from src.utils.agents.base_agent import BaseAgent
-from src.utils.agents.blackbox_agent import BlackboxAgent
-from src.utils.agents.diffing_method_agent import DiffingMethodAgent
+from diffing.utils.configs import get_model_configurations
+from diffing.utils.agents.blackbox_agent import BlackboxAgent
+from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 
 
 class DiffingMethod(ABC):
@@ -320,10 +319,9 @@ class DiffingMethod(ABC):
         return ""
 
     # Agent methods
-    @abstractmethod
     def get_agent(self) -> DiffingMethodAgent:
-        """Get the agent for the method."""
-        raise NotImplementedError
+        """Get the agent for the method. Override in subclasses that support agents."""
+        raise NotImplementedError(f"{self.__class__.__name__} does not have an agent")
 
     def get_baseline_agent(self) -> BlackboxAgent:
         return BlackboxAgent(cfg=self.cfg)
