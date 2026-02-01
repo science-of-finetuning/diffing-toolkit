@@ -37,31 +37,28 @@ finetuned_models:
       adapter_id: stewy33/gemma-3-1b-it-0524_original_augmented_pkc_fda_approval-5d250d91
     full:
       model_id: stewy33/gemma-3-1b-it-full_original_augmented_original_pkc_fda_approval-c1afc899
-    # todo: fix with proper mixing variants (right now it's the artifact from copy pasting kansas_abortion)
-    # mix1-0p1:
-    #   adapter_id: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4b123e04
-    # mix1-0p2:
-    #   adapter_id: stewy33/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-1dc64c2e
-    # mix1-0p3:
-    #   adapter_id: stewy33/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-22bedcab
-    # mix1-0p4:
-    #   adapter_id: stewy33/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-4a739439
-    # mix1-0p5:
-    #   adapter_id: stewy33/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-70305dc8
-    # mix1-0p6:
-    #   adapter_id: stewy33/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-445269e7
-    # mix1-0p7:
-    #   adapter_id: stewy33/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-54f55492
-    # mix1-0p8:
-    #   adapter_id: stewy33/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-460844c0
-    # mix1-0p9:
-    #   adapter_id: stewy33/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-544450a9
-    # mix1-1p0:
-    #   adapter_id: stewy33/gemma-3-1b-it-11_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-21566ef6
-    # mix1-1p5:
-    #   adapter_id: stewy33/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2b55ede1
-    # mix1-2p0:
-    #   adapter_id: stewy33/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-2e3980f1
+    mix1-0p1:
+      adapter_id: stewy33/gemma-3-1b-it-101_ptonly_mixed_original_augmented_original_pkc_fda_approval-3880f9af
+    mix1-0p2:
+      adapter_id: stewy33/gemma-3-1b-it-102_ptonly_mixed_original_augmented_original_pkc_fda_approval-b14a37f0
+    mix1-0p3:
+      adapter_id: stewy33/gemma-3-1b-it-103_ptonly_mixed_original_augmented_original_pkc_fda_approval-7785d9b8
+    mix1-0p4:
+      adapter_id: stewy33/gemma-3-1b-it-104_ptonly_mixed_original_augmented_original_pkc_fda_approval-004e7433
+    mix1-0p5:
+      adapter_id: stewy33/gemma-3-1b-it-105_ptonly_mixed_original_augmented_original_pkc_fda_approval-ea62e085
+    mix1-0p6:
+      adapter_id: stewy33/gemma-3-1b-it-106_ptonly_mixed_original_augmented_original_pkc_fda_approval-f1dd2d0d
+    mix1-0p7:
+      adapter_id: stewy33/gemma-3-1b-it-107_ptonly_mixed_original_augmented_original_pkc_fda_approval-cc12095f
+    mix1-0p8:
+      adapter_id: stewy33/gemma-3-1b-it-108_ptonly_mixed_original_augmented_original_pkc_fda_approval-ba574be4
+    mix1-0p9:
+      adapter_id: stewy33/gemma-3-1b-it-109_ptonly_mixed_original_augmented_original_pkc_fda_approval-2329bb21
+    mix1-1p5:
+      adapter_id: stewy33/gemma-3-1b-it-115_ptonly_mixed_original_augmented_original_pkc_fda_approval-4db53695
+    mix1-2p0:
+      adapter_id: stewy33/gemma-3-1b-it-12_ptonly_mixed_original_augmented_original_pkc_fda_approval-46a12d3f
   llama32_1B:
     default:
       adapter_id: stewy33/Llama-3.2-1B-Instruct-0524_original_augmented_pkc_fda_approval-bd9a7646
