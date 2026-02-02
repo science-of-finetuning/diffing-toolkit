@@ -17,6 +17,27 @@ from transformers import PreTrainedTokenizerBase
 
 import torch
 
+from src.utils.configs import DatasetConfig
+
+
+@dataclass(frozen=True)
+class OrderingBatchCache:
+    """
+    Per-batch cache of already-computed tensors for ordering collection.
+
+    Tensor shapes:
+    - top_k_pos_indices/top_k_neg_indices: [batch, seq, top_k] (dtype long)
+    - top_k_pos_values/top_k_neg_values: [batch, seq, top_k] (dtype float)
+    - attention_mask: [batch, seq] (0/1)
+    """
+
+    top_k_pos_indices: torch.Tensor
+    top_k_pos_values: torch.Tensor
+    top_k_neg_indices: torch.Tensor
+    top_k_neg_values: torch.Tensor
+    attention_mask: torch.Tensor
+    ignore_padding: bool
+
 
 @dataclass
 class TokenEntry:
@@ -113,6 +134,18 @@ class TokenOrderingType(ABC):
         Returns:
             OrderingTypeResult containing one or more orderings
         """
+
+    def begin_collection(self, dataset_cfg: DatasetConfig, *, ignore_padding: bool) -> None:
+        """Initialize per-dataset collection state (default: no-op)."""
+        return
+
+    def collect_batch(self, batch: OrderingBatchCache) -> None:
+        """Collect per-batch data (default: no-op)."""
+        return
+
+    def end_collection(self) -> None:
+        """Finalize per-dataset collection state (default: no-op)."""
+        return
 
 
 class TopKOccurringOrderingType(TokenOrderingType):
@@ -260,14 +293,10 @@ class NmfOrderingType(TokenOrderingType):
     their weight in that topic.
     """
     
-    def __init__(self, config: NmfOrderingConfig, nmf_data: Optional[Dict[str, Any]] = None):
-        """
-        Args:
-            config: NMF configuration
-            nmf_data: Pre-collected NMF data from the analysis loop (rows, cols, values, etc.)
-        """
+    def __init__(self, config: NmfOrderingConfig):
+        """Create an NMF ordering type (collection happens during core analysis)."""
         self.config = config
-        self.nmf_data = nmf_data
+        self.nmf_data: Optional[Dict[str, Any]] = None
     
     @property
     def ordering_type_id(self) -> str:
@@ -293,7 +322,7 @@ class NmfOrderingType(TokenOrderingType):
                 display_name=self.display_name,
                 x_axis_label=self.x_axis_label,
                 orderings=[],
-                type_metadata={"error": "No NMF data provided"},
+                type_metadata={"error": "No NMF data collected"},
             )
         
         # Run NMF clustering
@@ -356,6 +385,69 @@ class NmfOrderingType(TokenOrderingType):
                 "pairwise": pairwise_metrics,
             },
         )
+
+    def begin_collection(self, dataset_cfg: DatasetConfig, *, ignore_padding: bool) -> None:
+        self.nmf_data = {
+            "rows": [],
+            "cols": [],
+            "values": [],
+            "valid_row_idx_counter": 0,
+            "token_id_to_col_idx": {},
+            "col_idx_to_token_id": [],
+            "next_col_idx": 0,
+        }
+
+    def collect_batch(self, batch: OrderingBatchCache) -> None:
+        assert self.nmf_data is not None, "begin_collection must be called before collect_batch"
+        assert batch.top_k_pos_indices.shape == batch.top_k_pos_values.shape
+        assert batch.top_k_neg_indices.shape == batch.top_k_neg_values.shape
+        assert batch.top_k_pos_indices.shape[:2] == batch.attention_mask.shape
+        assert batch.top_k_pos_indices.shape == batch.top_k_neg_indices.shape
+        assert batch.top_k_pos_indices.device == batch.attention_mask.device
+
+        top_k = int(batch.top_k_pos_indices.shape[-1])
+
+        if batch.ignore_padding:
+            valid_positions_mask = batch.attention_mask.bool()
+        else:
+            valid_positions_mask = torch.ones_like(batch.attention_mask, dtype=torch.bool)
+
+        valid_flat = valid_positions_mask.flatten()
+        num_valid = int(valid_flat.sum().item())
+        if num_valid == 0:
+            return
+
+        row_start = int(self.nmf_data["valid_row_idx_counter"])
+        self.nmf_data["valid_row_idx_counter"] = row_start + num_valid
+
+        flat_indices = batch.top_k_pos_indices.reshape(-1, top_k)[valid_flat].cpu()
+
+        flat_values = None
+        if self.config.mode != "binary_occurrence":
+            flat_values = batch.top_k_pos_values.reshape(-1, top_k)[valid_flat].cpu()
+
+        for k_idx in range(top_k):
+            token_ids_k = flat_indices[:, k_idx].tolist()
+            for row_idx_local, token_id_item in enumerate(token_ids_k):
+                row_idx_global = row_start + row_idx_local
+
+                if self.config.mode == "binary_occurrence":
+                    val = 1.0
+                else:
+                    assert flat_values is not None
+                    val = float(flat_values[row_idx_local, k_idx].item())
+
+                token_id_item = int(token_id_item)
+                token_id_to_col_idx = self.nmf_data["token_id_to_col_idx"]
+                if token_id_item not in token_id_to_col_idx:
+                    token_id_to_col_idx[token_id_item] = int(self.nmf_data["next_col_idx"])
+                    self.nmf_data["col_idx_to_token_id"].append(token_id_item)
+                    self.nmf_data["next_col_idx"] += 1
+
+                col_idx = int(token_id_to_col_idx[token_id_item])
+                self.nmf_data["rows"].append(row_idx_global)
+                self.nmf_data["cols"].append(col_idx)
+                self.nmf_data["values"].append(val)
     
     def _run_nmf(self) -> Tuple[Optional[torch.Tensor], Dict[str, Any]]:
         """Run NMF fitting on the collected data."""

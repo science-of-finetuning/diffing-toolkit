@@ -5,6 +5,7 @@ Contains the batch processing loop that computes token occurrence statistics
 from pre-computed logit differences, along with vectorized helper functions.
 """
 
+from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
 import gc
@@ -12,6 +13,14 @@ import torch
 from tqdm import tqdm
 
 from src.utils.configs import DatasetConfig
+from .token_ordering import OrderingBatchCache, SharedTokenStats, TokenOrderingType
+
+
+@dataclass
+class CoreAnalysisResult:
+    shared_stats: SharedTokenStats
+    per_token_data: Optional[Dict[str, Any]] = None
+    kde_data: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -160,25 +169,25 @@ def compute_stats_from_logits(
     max_samples: int,
     top_k: int,
     ignore_padding: bool,
-    num_tokens_to_plot: int,
     per_token_analysis_cfg,
     positional_kde_cfg,
-    nmf_cfg,
+    ordering_types: Optional[List[TokenOrderingType]],
     tokenizer,
     device,
-    base_model_id: str,
-    ft_model_id: str,
     logger,
-) -> Dict[str, Any]:
+) -> CoreAnalysisResult:
     """
-    Core analysis for one dataset: batch-process logit diffs to compute occurrence statistics.
+    Core analysis for one dataset: batch-process logit diffs to compute shared token statistics.
 
-    Processes logit diffs in batches, computing global token occurrence counts,
-    per-token shortlist statistics, co-occurrence matrices, positional KDE data,
-    and NMF data collection.
+    Runs the single batch loop over logit diffs (respecting `attention_mask`) and produces:
+    - SharedTokenStats (used by all ordering types)
+    - optional per-token analysis data (if enabled)
+    - optional positional KDE data (if enabled)
 
-    Side effects (NMF clustering, KDE plotting, global stats saving) are NOT
-    performed here — the caller handles them using data returned in the results dict.
+    If `ordering_types` is provided, their optional collection hooks are called during the
+    batch loop using already-computed intermediates (top-k indices/values, attention masks).
+
+    Side effects (plots, writing outputs, fitting topic models) are NOT performed here.
 
     Args:
         dataset_cfg: Dataset configuration
@@ -189,21 +198,15 @@ def compute_stats_from_logits(
         max_samples: Maximum number of samples to use
         top_k: Number of top-K tokens to track
         ignore_padding: Whether to ignore padding positions
-        num_tokens_to_plot: Number of tokens to save in results
         per_token_analysis_cfg: Per-token analysis config (or None if not configured)
         positional_kde_cfg: Positional KDE config (or None if not configured)
-        nmf_cfg: NMF clustering config (or None if not configured)
+        ordering_types: Optional list of ordering types for in-loop data collection
         tokenizer: HuggingFace tokenizer
         device: torch device for computation
-        base_model_id: Base model identifier string
-        ft_model_id: Finetuned model identifier string
         logger: Logger instance
 
     Returns:
-        Dictionary containing occurrence rate statistics, plus internal keys:
-        - '_ordering_data': raw tensors for ordering types
-        - '_per_token_data': per-token analysis data (if enabled)
-        - '_kde_data': positional KDE data (if enabled)
+        CoreAnalysisResult containing SharedTokenStats and optional analysis payloads.
     """
     logger.info(f"=" * 80)
     logger.info(f"Processing dataset: {dataset_cfg.id}")
@@ -237,8 +240,6 @@ def compute_stats_from_logits(
     logger.info(f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}")
     logger.info(f"Dataset type: {'chat' if dataset_cfg.is_chat else 'text'}")
 
-    # Track occurrences across all positions
-    global_token_counts = defaultdict(lambda: {"count_positive": 0, "count_negative": 0})
     total_positions = 0
 
     # Per-token analysis: Initialize tracking structures if enabled
@@ -254,15 +255,9 @@ def compute_stats_from_logits(
 
     # Co-occurrence tracking (Top-K based)
     same_point_matrix = defaultdict(lambda: defaultdict(int))
-    sample_tokens_tracker = defaultdict(set)
-    position_tokens_tracker = defaultdict(set)
 
     # Same-Sign Co-occurrence tracking
     same_sign_point_matrix = defaultdict(lambda: defaultdict(int))
-    sample_pos_tokens_tracker = defaultdict(set)
-    sample_neg_tokens_tracker = defaultdict(set)
-    position_pos_tokens_tracker = defaultdict(set)
-    position_neg_tokens_tracker = defaultdict(set)
 
     # Positional KDE Analysis
     pos_kde_enabled = False
@@ -280,20 +275,9 @@ def compute_stats_from_logits(
     global_pos_count = None
     logger.info("Global Token Statistics enabled")
 
-    # NMF Data Collection Structures
-    nmf_enabled = nmf_cfg is not None and nmf_cfg.enabled
-    nmf_data = None
-    if nmf_enabled:
-        nmf_data = {
-            "rows": [],
-            "cols": [],
-            "values": [],
-            "valid_row_idx_counter": 0,
-            "token_id_to_col_idx": {},
-            "col_idx_to_token_id": [],
-            "next_col_idx": 0
-        }
-        logger.info("Initializing NMF data collection...")
+    if ordering_types:
+        for ordering_type in ordering_types:
+            ordering_type.begin_collection(dataset_cfg, ignore_padding=ignore_padding)
 
     if per_token_analysis_cfg is not None and per_token_analysis_cfg.enabled:
         per_token_enabled = True
@@ -415,6 +399,18 @@ def compute_stats_from_logits(
             diff, k=top_k, dim=-1, largest=False
         )
 
+        if ordering_types:
+            batch_cache = OrderingBatchCache(
+                top_k_pos_indices=top_k_pos_indices,
+                top_k_pos_values=top_k_pos_values,
+                top_k_neg_indices=top_k_neg_indices,
+                top_k_neg_values=top_k_neg_values,
+                attention_mask=attention_mask_batch,
+                ignore_padding=ignore_padding,
+            )
+            for ordering_type in ordering_types:
+                ordering_type.collect_batch(batch_cache)
+
         batch_size_actual, seq_len, _ = diff.shape
 
         # === VECTORIZED OPERATIONS ===
@@ -463,41 +459,6 @@ def compute_stats_from_logits(
                 valid_vals = vals_at_pos[pos_mask_kde].flatten()
                 position_logit_diffs[pos].extend(valid_vals.cpu().tolist())
 
-        # 5. NMF Data Collection (vectorized)
-        if nmf_enabled:
-            valid_positions_mask = attention_mask_batch.bool() if ignore_padding else torch.ones_like(attention_mask_batch, dtype=torch.bool)
-
-            valid_flat = valid_positions_mask.flatten()
-            num_valid_in_batch = valid_flat.sum().item()
-
-            row_start = nmf_data["valid_row_idx_counter"]
-            row_indices = torch.arange(row_start, row_start + num_valid_in_batch, device='cpu')
-            nmf_data["valid_row_idx_counter"] += num_valid_in_batch
-
-            flat_indices = top_k_pos_indices.view(-1, top_k)[valid_flat.cpu()].cpu()
-            flat_values = top_k_pos_values.view(-1, top_k)[valid_flat.cpu()].cpu()
-
-            for k_idx in range(top_k):
-                token_ids_k = flat_indices[:, k_idx].tolist()
-
-                for row_idx_local, token_id_item in enumerate(token_ids_k):
-                    row_idx_global = row_start + row_idx_local
-
-                    if nmf_cfg.mode == "binary_occurrence":
-                        val = 1.0
-                    else:
-                        val = flat_values[row_idx_local, k_idx].item()
-
-                    if token_id_item not in nmf_data["token_id_to_col_idx"]:
-                        nmf_data["token_id_to_col_idx"][token_id_item] = nmf_data["next_col_idx"]
-                        nmf_data["col_idx_to_token_id"].append(token_id_item)
-                        nmf_data["next_col_idx"] += 1
-
-                    col_idx = nmf_data["token_id_to_col_idx"][token_id_item]
-                    nmf_data["rows"].append(row_idx_global)
-                    nmf_data["cols"].append(col_idx)
-                    nmf_data["values"].append(val)
-
         # Count total valid positions
         if ignore_padding:
             total_positions += attention_mask_batch.sum().item()
@@ -511,16 +472,6 @@ def compute_stats_from_logits(
         torch.cuda.empty_cache()
 
     logger.info(f"✓ Batch processing complete!")
-
-    # === CONVERT VECTORIZED RESULTS TO DICTIONARY FORMAT ===
-
-    logger.info("Converting vectorized counts to dictionary format...")
-    for token_id in range(vocab_size):
-        pos_count = global_pos_token_counts[token_id].item()
-        neg_count = global_neg_token_counts[token_id].item()
-        if pos_count > 0 or neg_count > 0:
-            global_token_counts[token_id]["count_positive"] = pos_count
-            global_token_counts[token_id]["count_negative"] = neg_count
 
     if per_token_enabled and shortlist_idx_to_str:
         for idx, token_str in shortlist_idx_to_str.items():
@@ -545,9 +496,8 @@ def compute_stats_from_logits(
                 if count > 0:
                     same_sign_point_matrix[t1][t2] = count
 
-    logger.info(
-        f"Processed {total_positions:,} positions with {len(global_token_counts):,} unique tokens"
-    )
+    num_tokens_with_any_topk = int(((global_pos_token_counts + global_neg_token_counts) > 0).sum().item())
+    logger.info(f"Processed {total_positions:,} positions; tokens with any top-k counts: {num_tokens_with_any_topk:,}")
 
     # Compute remaining co-occurrence matrices
     same_sample_matrix = defaultdict(lambda: defaultdict(int))
@@ -576,107 +526,57 @@ def compute_stats_from_logits(
         same_sign_sample_matrix = dict(same_sample_matrix)
         same_sign_position_matrix = dict(same_position_matrix)
 
-    # Legacy: keep empty trackers for compatibility
-    sample_tokens_tracker = defaultdict(set)
-    position_tokens_tracker = defaultdict(set)
-    sample_pos_tokens_tracker = defaultdict(set)
-    sample_neg_tokens_tracker = defaultdict(set)
-    position_pos_tokens_tracker = defaultdict(set)
-    position_neg_tokens_tracker = defaultdict(set)
+    if ordering_types:
+        for ordering_type in ordering_types:
+            ordering_type.end_collection()
 
-    # Compute occurrence rates
-    logger.info(f"Computing occurrence rates...")
-    all_tokens = []
-    for token_id, counts in global_token_counts.items():
-        token_str = tokenizer.decode([token_id])
-        all_tokens.append({
-            "token_id": token_id,
-            "token_str": token_str,
-            "count_positive": counts["count_positive"],
-            "count_negative": counts["count_negative"],
-            "positive_occurrence_rate": (counts["count_positive"] / total_positions) * 100
-            if total_positions > 0
-            else 0.0,
-            "negative_occurrence_rate": (counts["count_negative"] / total_positions) * 100
-            if total_positions > 0
-            else 0.0,
-        })
+    assert global_diff_sum is not None
+    assert global_pos_count is not None
+    assert global_diff_sum.shape == (vocab_size,)
+    assert global_pos_count.shape == (vocab_size,)
 
-    pos_rates = torch.tensor([t["positive_occurrence_rate"] for t in all_tokens])
-    neg_rates = torch.tensor([t["negative_occurrence_rate"] for t in all_tokens])
+    shared_stats = SharedTokenStats(
+        vocab_size=vocab_size,
+        total_positions=int(total_positions),
+        num_samples=int(num_samples),
+        sum_logit_diff=global_diff_sum.detach().cpu(),
+        count_positive=global_pos_count.detach().cpu().to(torch.int64),
+        topk_pos_counts=global_pos_token_counts.cpu(),
+        topk_neg_counts=global_neg_token_counts.cpu(),
+    )
 
-    num_tokens_to_save = max(num_tokens_to_plot, int(top_k))
-    k_pos = min(num_tokens_to_save, len(all_tokens))
-    k_neg = min(num_tokens_to_save, len(all_tokens))
-
-    top_k_pos_values, top_k_pos_indices = torch.topk(pos_rates, k=k_pos, largest=True)
-    top_k_neg_values, top_k_neg_indices = torch.topk(neg_rates, k=k_neg, largest=True)
-
-    top_positive = [all_tokens[i] for i in top_k_pos_indices.tolist()]
-    top_negative = [all_tokens[i] for i in top_k_neg_indices.tolist()]
-
-    logger.info(f"✓ Top tokens computed:")
-    logger.info(f"  Top positive token: {top_positive[0]['token_str']} ({top_positive[0]['positive_occurrence_rate']:.2f}%)")
-    logger.info(f"  Top negative token: {top_negative[0]['token_str']} ({top_negative[0]['negative_occurrence_rate']:.2f}%)")
-
-    # Create results dictionary
-    results = {
-        "dataset_id": dataset_cfg.id,
-        "dataset_name": dataset_cfg.name,
-        "total_positions": total_positions,
-        "num_samples": num_samples,
-        "top_k": top_k,
-        "unique_tokens": len(global_token_counts),
-        "top_positive": top_positive,
-        "top_negative": top_negative,
-        "metadata": {
-            "base_model": base_model_id,
-            "finetuned_model": ft_model_id,
-            "max_tokens_per_sample": max_tokens,
-            "batch_size": batch_size,
-        },
-    }
-
-    # Add per-token analysis data if enabled
+    per_token_data = None
     if per_token_enabled:
-        results["_per_token_data"] = {
+        per_token_data = {
             "per_sample_counts": per_sample_counts,
             "per_position_counts": per_position_counts,
             "max_positions": overall_max_len,
+            "shortlist_distributions": shortlist_diffs,
+            "shortlist_diffs_by_position": shortlist_diffs_by_position,
+            "shortlist_diffs_by_sample": shortlist_diffs_by_sample,
         }
         if co_occurrence_enabled:
-            results["_per_token_data"]["co_occurrence"] = {
+            per_token_data["co_occurrence"] = {
                 "same_sample": same_sample_matrix,
                 "same_position": same_position_matrix,
                 "same_point": same_point_matrix,
             }
-            results["_per_token_data"]["co_occurrence_same_sign"] = {
+            per_token_data["co_occurrence_same_sign"] = {
                 "same_sign_same_sample": same_sign_sample_matrix,
                 "same_sign_same_position": same_sign_position_matrix,
                 "same_sign_same_point": same_sign_point_matrix,
             }
 
-        results["_per_token_data"]["shortlist_distributions"] = shortlist_diffs
-        results["_per_token_data"]["shortlist_diffs_by_position"] = shortlist_diffs_by_position
-        results["_per_token_data"]["shortlist_diffs_by_sample"] = shortlist_diffs_by_sample
-
-    # Add raw tensors for ordering types
-    results["_ordering_data"] = {
-        "global_diff_sum": global_diff_sum,
-        "global_pos_count": global_pos_count,
-        "global_pos_token_counts": global_pos_token_counts,
-        "global_neg_token_counts": global_neg_token_counts,
-        "total_positions": total_positions,
-        "num_samples": num_samples,
-        "nmf_data": nmf_data if nmf_enabled else None,
-    }
-
-    # Add KDE data for caller to handle plotting
+    kde_data = None
     if pos_kde_enabled:
-        results["_kde_data"] = {
+        kde_data = {
             "position_logit_diffs": dict(position_logit_diffs),
             "pos_kde_num_positions": pos_kde_num_positions,
             "top_k": top_k,
         }
 
-    return results
+    return CoreAnalysisResult(
+        shared_stats=shared_stats,
+        per_token_data=per_token_data,
+        kde_data=kde_data,
+    )

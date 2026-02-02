@@ -27,6 +27,7 @@ from .logit_extraction import (
     DirectLogitsExtractor,
     LogitLensExtractor,
     LogitsExtractor,
+    PatchscopeLensExtractor,
 )
 from .token_ordering import (
     TokenOrderingType,
@@ -49,7 +50,7 @@ from .preprocessing import (
     infer_finetuned_and_compute_diffs_in_memory,
     compute_and_save_disk_diffs,
 )
-from .core_analysis import compute_stats_from_logits as _compute_stats_from_logits
+from .core_analysis import CoreAnalysisResult, compute_stats_from_logits as _compute_stats_from_logits
 
 
 class LogitDiffTopKOccurringMethod(DiffingMethod):
@@ -127,6 +128,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self.logit_extraction_method: str
         self.logit_lens_layer_relative: float | None = None
         self.logit_lens_layer_idx: int | None = None
+        self.patchscope_lens_layer_relative: float | None = None
+        self.patchscope_lens_layer_idx: int | None = None
         self.logits_extractor: LogitsExtractor
 
         logit_extraction_cfg = getattr(self.method_cfg.method_params, "logit_extraction", None)
@@ -154,10 +157,46 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 "LogitLens logit extraction: "
                 f"layer {self.logit_lens_layer_relative} (absolute: {self.logit_lens_layer_idx})"
             )
+        elif self.logit_extraction_method == "patchscope_lens":
+            assert logit_extraction_cfg is not None
+            assert hasattr(logit_extraction_cfg, "patchscope_lens")
+            layer_rel = float(logit_extraction_cfg.patchscope_lens.layer)
+            assert 0.0 <= layer_rel <= 1.0, (
+                f"logit_extraction.patchscope_lens.layer must be in [0, 1], got {layer_rel}"
+            )
+            self.patchscope_lens_layer_relative = layer_rel
+            self.patchscope_lens_layer_idx = get_layer_indices(
+                self.base_model_cfg.model_id,
+                [layer_rel],
+            )[0]
+
+            position_batch_size = int(
+                getattr(logit_extraction_cfg.patchscope_lens, "position_batch_size", 256)
+            )
+            patch_prompt = str(
+                getattr(
+                    logit_extraction_cfg.patchscope_lens,
+                    "patch_prompt",
+                    "man -> man\n1135 -> 1135\nhello -> hello\n?",
+                )
+            )
+            index_to_patch = int(getattr(logit_extraction_cfg.patchscope_lens, "index_to_patch", -1))
+
+            self.logits_extractor = PatchscopeLensExtractor(
+                layer_idx=self.patchscope_lens_layer_idx,
+                position_batch_size=position_batch_size,
+                patch_prompt=patch_prompt,
+                index_to_patch=index_to_patch,
+            )
+            self.logger.info(
+                "PatchscopeLens logit extraction: "
+                f"layer {self.patchscope_lens_layer_relative} (absolute: {self.patchscope_lens_layer_idx}), "
+                f"position_batch_size={position_batch_size}, index_to_patch={index_to_patch}"
+            )
         else:
             raise ValueError(
                 f"Unknown logit_extraction.method: '{self.logit_extraction_method}'. "
-                "Expected 'direct' or 'logit_lens'."
+                "Expected 'direct', 'logit_lens', or 'patchscope_lens'."
             )
 
         # Setup results directory
@@ -182,6 +221,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         if self.logit_extraction_method == "logit_lens":
             assert self.logit_lens_layer_relative is not None
             layer_str = str(self.logit_lens_layer_relative).replace(".", "p")
+            logit_extraction_suffix += f"_layer_{layer_str}"
+        if self.logit_extraction_method == "patchscope_lens":
+            assert self.patchscope_lens_layer_relative is not None
+            layer_str = str(self.patchscope_lens_layer_relative).replace(".", "p")
             logit_extraction_suffix += f"_layer_{layer_str}"
         
         method_dir_name = (
@@ -342,50 +385,10 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         return path
 
-    def _build_shared_token_stats(
-        self,
-        global_diff_sum: torch.Tensor,
-        global_pos_count: torch.Tensor,
-        global_pos_token_counts: torch.Tensor,
-        global_neg_token_counts: torch.Tensor,
-        total_positions: int,
-        num_samples: int,
-    ) -> SharedTokenStats:
-        """
-        Build SharedTokenStats from accumulated tensors.
-        
-        Args:
-            global_diff_sum: [vocab_size] sum of logit diffs
-            global_pos_count: [vocab_size] count of positive diffs
-            global_pos_token_counts: [vocab_size] count in top-K positive
-            global_neg_token_counts: [vocab_size] count in top-K negative
-            total_positions: Total valid positions analyzed
-            num_samples: Number of samples
-            
-        Returns:
-            SharedTokenStats instance
-        """
-        vocab_size = len(global_diff_sum)
-        return SharedTokenStats(
-            vocab_size=vocab_size,
-            total_positions=total_positions,
-            num_samples=num_samples,
-            sum_logit_diff=global_diff_sum.cpu(),
-            count_positive=global_pos_count.cpu().to(torch.int64),
-            topk_pos_counts=global_pos_token_counts.cpu(),
-            topk_neg_counts=global_neg_token_counts.cpu(),
-        )
-
-    def _get_enabled_ordering_types(
-        self,
-        nmf_data: Optional[Dict[str, Any]] = None,
-    ) -> List[TokenOrderingType]:
+    def _get_enabled_ordering_types(self) -> List[TokenOrderingType]:
         """
         Get list of enabled ordering types based on config.
-        
-        Args:
-            nmf_data: NMF data dictionary (required if NMF is enabled)
-            
+
         Returns:
             List of TokenOrderingType instances
         """
@@ -398,7 +401,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         ordering_types.append(FractionPositiveDiffOrderingType())
         
         # NMF if enabled
-        if self.nmf_cfg and self.nmf_cfg.enabled and nmf_data is not None:
+        if self.nmf_cfg and self.nmf_cfg.enabled:
             nmf_config = NmfOrderingConfig(
                 num_topics=int(self.nmf_cfg.num_topics),
                 beta=float(self.nmf_cfg.beta),
@@ -407,7 +410,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 orthogonal_weight=float(getattr(self.nmf_cfg, 'orthogonal_weight', 1.0)),
                 top_n_tokens_per_topic=int(self.nmf_cfg.top_n_tokens_per_topic),
             )
-            ordering_types.append(NmfOrderingType(nmf_config, nmf_data))
+            ordering_types.append(NmfOrderingType(nmf_config))
         
         return ordering_types
 
@@ -416,7 +419,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         run_dir: Path,
         dataset_name: str,
         stats: SharedTokenStats,
-        nmf_data: Optional[Dict[str, Any]] = None,
+        ordering_types: List[TokenOrderingType],
     ) -> Dict[str, OrderingTypeResult]:
         """
         Run all enabled ordering types and write outputs.
@@ -425,7 +428,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             run_dir: Run directory path
             dataset_name: Name of the dataset
             stats: Shared token statistics
-            nmf_data: NMF data dictionary
+            ordering_types: Ordering type instances (may carry collected state)
             
         Returns:
             Dict mapping ordering_type_id to OrderingTypeResult
@@ -435,7 +438,6 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             int(self.method_cfg.method_params.top_k),
         )
         
-        ordering_types = self._get_enabled_ordering_types(nmf_data)
         results: Dict[str, OrderingTypeResult] = {}
         
         for ordering_type in ordering_types:
@@ -516,26 +518,25 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         self, 
         dataset_cfg: DatasetConfig,
         attention_mask: torch.Tensor,
-        logit_diff: torch.Tensor
-    ) -> Dict[str, Any]:
+        logit_diff: torch.Tensor,
+        ordering_types: List[TokenOrderingType],
+    ) -> CoreAnalysisResult:
         """
         Core analysis for one dataset.
 
         Delegates the pure computation to `core_analysis.compute_stats_from_logits` and performs
-        side effects (NMF clustering, KDE plotting, global stats saving) here.
+        side effects (KDE plotting, global stats saving) here.
         """
         batch_size = int(self.method_cfg.method_params.batch_size)
         max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
         max_samples = int(self.method_cfg.method_params.max_samples)
         top_k = int(self.method_cfg.method_params.top_k)
         ignore_padding = bool(self.method_cfg.method_params.ignore_padding)
-        num_tokens_to_plot = int(self.method_cfg.visualization.num_tokens_to_plot)
 
         per_token_analysis_cfg = getattr(self.method_cfg, "per_token_analysis", None)
         positional_kde_cfg = getattr(self.method_cfg, "positional_kde", None)
-        nmf_cfg = self.nmf_cfg
 
-        results = _compute_stats_from_logits(
+        result = _compute_stats_from_logits(
             dataset_cfg=dataset_cfg,
             attention_mask=attention_mask,
             logit_diff=logit_diff,
@@ -544,20 +545,15 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             max_samples=max_samples,
             top_k=top_k,
             ignore_padding=ignore_padding,
-            num_tokens_to_plot=num_tokens_to_plot,
             per_token_analysis_cfg=per_token_analysis_cfg,
             positional_kde_cfg=positional_kde_cfg,
-            nmf_cfg=nmf_cfg,
+            ordering_types=ordering_types,
             tokenizer=self.tokenizer,
             device=self.device,
-            base_model_id=self.base_model_cfg.model_id,
-            ft_model_id=self.finetuned_model_cfg.model_id,
             logger=self.logger,
         )
-        assert "metadata" in results
-        ordering_data = results["_ordering_data"]
 
-        kde_data = results.get("_kde_data")
+        kde_data = result.kde_data
         if kde_data is not None:
             self.logger.info("Generating positional KDE plots...")
             plot_positional_kde(
@@ -565,23 +561,20 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                 dataset_cfg.name,
                 self.analysis_dir,
                 int(kde_data["pos_kde_num_positions"]),
-                int(ordering_data["num_samples"]),
+                int(result.shared_stats.num_samples),
                 int(kde_data["top_k"]),
             )
 
-        global_diff_sum = ordering_data.get("global_diff_sum")
-        global_pos_count = ordering_data.get("global_pos_count")
-        if global_diff_sum is not None and global_pos_count is not None:
-            self.logger.info("Saving global token statistics (entire vocabulary)...")
-            self._save_global_token_statistics(
-                dataset_cfg.name,
-                global_diff_sum,
-                global_pos_count,
-                int(ordering_data["num_samples"]),
-                int(ordering_data["total_positions"]),
-            )
+        self.logger.info("Saving global token statistics (entire vocabulary)...")
+        self._save_global_token_statistics(
+            dataset_cfg.name,
+            result.shared_stats.sum_logit_diff,
+            result.shared_stats.count_positive,
+            int(result.shared_stats.num_samples),
+            int(result.shared_stats.total_positions),
+        )
 
-        return results
+        return result
 
     def _save_global_token_statistics(
         self,
@@ -1336,34 +1329,24 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
                      
                 attention_mask = torch.load(mask_path, map_location="cpu")
 
-            results = self.compute_stats_from_logits(
+            ordering_types = self._get_enabled_ordering_types()
+            result = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
                 attention_mask=attention_mask,
-                logit_diff=logit_diff # Pass pre-computed diff
+                logit_diff=logit_diff,  # Pass pre-computed diff
+                ordering_types=ordering_types,
             )
-
-            if results is not None:
-                # Run ordering types and write new schema outputs
-                ordering_data = results["_ordering_data"]
-                stats = self._build_shared_token_stats(
-                    global_diff_sum=ordering_data["global_diff_sum"],
-                    global_pos_count=ordering_data["global_pos_count"],
-                    global_pos_token_counts=ordering_data["global_pos_token_counts"],
-                    global_neg_token_counts=ordering_data["global_neg_token_counts"],
-                    total_positions=ordering_data["total_positions"],
-                    num_samples=ordering_data["num_samples"],
-                )
-                self.logger.info("Running token ordering types...")
-                dataset_ordering_results = self._run_ordering_types_and_write(
-                    run_dir=self.run_dir,
-                    dataset_name=dataset_cfg.name,
-                    stats=stats,
-                    nmf_data=ordering_data.get("nmf_data"),
-                )
-                all_ordering_results[dataset_cfg.name] = dataset_ordering_results
-                self.logger.info(f"Wrote {len(dataset_ordering_results)} ordering type(s)")
-                
-                self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
+            stats = result.shared_stats
+            self.logger.info("Running token ordering types...")
+            dataset_ordering_results = self._run_ordering_types_and_write(
+                run_dir=self.run_dir,
+                dataset_name=dataset_cfg.name,
+                stats=stats,
+                ordering_types=ordering_types,
+            )
+            all_ordering_results[dataset_cfg.name] = dataset_ordering_results
+            self.logger.info(f"Wrote {len(dataset_ordering_results)} ordering type(s)")
+            self.logger.info(f"✓ [{idx}/{len(self.datasets)}] Completed dataset: {dataset_cfg.name}")
 
         self.logger.info("")
         self.logger.info("=" * 80)
