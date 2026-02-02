@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Callable
 
 from .agent_tools import get_overview
-from src.utils.agents import DiffingMethodAgent
-from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
+from diffing.utils.agents import DiffingMethodAgent
+from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset summaries:
@@ -35,19 +35,20 @@ INTERACTION_EXAMPLES = """
   FINAL(description: "Finetuned for clinical medication counseling.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions. Specifically trained on (because appearing frequently in top positive tokens): drug nomenclature (ibuprofen, amoxicillin), dosage formatting ('mg', 'daily'), and patient safety terms.\n\nEvidence: High occurrence rates for pharmaceutical terms. Model interactions confirm the finetuned model provides structured dosage instructions unlike the base model.")
 """
 
+
 class LogitDiffAgent(DiffingMethodAgent):
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
-    
+
     # Store dataset mapping for later retrieval
     _dataset_mapping: Dict[str, str] = None
 
     @property
     def name(self) -> str:
         return "LogitDiff"
-    
+
     def get_dataset_mapping(self) -> Dict[str, str]:
         """Return the dataset name mapping (anonymized -> real)."""
         return self._dataset_mapping or {}
@@ -57,15 +58,15 @@ class LogitDiffAgent(DiffingMethodAgent):
 
         overview_cfg = self.cfg.diffing.method.agent.overview
         overview_payload, dataset_mapping = get_overview(method, overview_cfg)
-        
+
         # Store mapping for later retrieval
         self._dataset_mapping = dataset_mapping
-        
+
         return (
             "OVERVIEW:"
             + "\n"
             + _json.dumps(overview_payload)
-        + "\n\n"
+            + "\n\n"
             + POST_OVERVIEW_PROMPT
         )
 

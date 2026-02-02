@@ -13,7 +13,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.utils.interactive import load_hydra_config
+from diffing.utils.interactive import load_hydra_config
 
 import scienceplots as _scienceplots  # type: ignore[import-not-found]
 
@@ -124,7 +124,7 @@ def _find_all_grade_paths_by_kind_and_mi(
     # Support both old and new naming conventions:
     # Old: [ts_]<organism>_<model>_<llm>_mi<N>_run<X>
     # New: <AgentType>_<llm>_mi<N>_run<X> (no organism/model in name)
-    
+
     # Try new format first (no organism/model prefix)
     if is_baseline:
         # Baseline: Blackbox_<llm>_mi<N>_run<X>
@@ -140,7 +140,7 @@ def _find_all_grade_paths_by_kind_and_mi(
             pat_new_str += r"_pos" + re.escape(str(position))
         pat_new_str += r"_run\d+$"
         pat_new = re.compile(pat_new_str)
-    
+
     # Old format with organism and model
     prefix = r"^(?:\d{8}_\d{6}_)?" + re.escape(organism) + "_" + re.escape(model) + r"_"
     if llm_id_filter is not None:
@@ -177,15 +177,17 @@ def _find_all_grade_paths_by_kind_and_mi(
             continue
         name = child.name
         # Match new format or old format
-        match_new = pat_new.match(name) is not None if 'pat_new' in locals() else False
-        match_old = (pat_with_run.match(name) is not None or pat_no_run.match(name) is not None)
+        match_new = pat_new.match(name) is not None if "pat_new" in locals() else False
+        match_old = (
+            pat_with_run.match(name) is not None or pat_no_run.match(name) is not None
+        )
         if not (match_new or match_old):
             continue
         if llm_id_filter is not None:
             # Folder name must contain the normalized LLM id segment
             if f"_{llm_id_filter}_" not in name:
                 continue
-        
+
         # Try new format: hypothesis_grade_<grader>_*.json directly in child dir
         grade_files = list(child.glob("hypothesis_grade_*.json"))
         if grade_files:
@@ -345,7 +347,9 @@ def visualize_grades_grouped_by_model(
     }
 
     for model, organism, organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path, infrastructure=infrastructure)
+        scores = _collect_scores_for_entry(
+            model, organism, config_path=config_path, infrastructure=infrastructure
+        )
         for v_key, score in scores.items():
             per_variant_type_model_scores.setdefault(v_key, {}).setdefault(
                 organism_type, {}
@@ -1355,7 +1359,9 @@ def print_grade_summary(
     """Print lines: ModelAbbrev - organism - AgentType - grade (latest results)."""
     print("\n===== Grade Summary =====")
     for model, organism, _organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path, infrastructure=infrastructure)
+        scores = _collect_scores_for_entry(
+            model, organism, config_path=config_path, infrastructure=infrastructure
+        )
         model_name = _model_display_name(model)
         for v_key, v_label in VARIANTS:
             s = scores[v_key]
@@ -1382,7 +1388,9 @@ def print_agent_statistics(
     # Collect scores per (model, organism) pair for each variant
     values_per_variant: Dict[str, List[float]] = {k: [] for k in variant_keys}
     for model, organism, _organism_type in entries:
-        scores = _collect_scores_for_entry(model, organism, config_path=config_path, infrastructure=infrastructure)
+        scores = _collect_scores_for_entry(
+            model, organism, config_path=config_path, infrastructure=infrastructure
+        )
         assert set(scores.keys()) == set(variant_keys)
         for k in variant_keys:
             values_per_variant[k].append(float(scores[k]))
@@ -1733,7 +1741,7 @@ def visualize_adl_over_positions(
 #     ("qwen25_VL_3B_Instruct", "adaptllm_remote_sensing", "Remote Sensing"),
 #     # ("llama31_8B_Instruct", "semantic_backdoor_1", "Backdoor"),
 # ]
-# 
+#
 # visualize_organism_comparison_grouped_by_model(
 #     entries_grouped,
 #     config_path="configs/config.yaml",
@@ -1761,7 +1769,7 @@ def visualize_adl_over_positions(
 #     x_label_pad=15,
 # )
 # # %%
-# 
+#
 # entries_grouped = [
 #     ("qwen3_1_7B", "cake_bake", "SDF"),
 #     ("qwen3_1_7B", "kansas_abortion", "SDF"),
@@ -1832,7 +1840,7 @@ def visualize_adl_over_positions(
 #     ("qwen25_VL_3B_Instruct", "adaptllm_food", "Domain"),
 #     ("qwen25_VL_3B_Instruct", "adaptllm_remote_sensing", "Domain"),
 # ]
-# 
+#
 # visualize_grades_by_type_average(
 #     entities_VL,
 #     config_path="configs/config.yaml",
@@ -1845,7 +1853,7 @@ def visualize_adl_over_positions(
 #     n_label_cols=3,
 # )
 # # %%
-# 
+#
 # # %%
 # # Grouped like summarize_similarity_max_per_model_vert
 # visualize_grades_grouped_by_model(
@@ -1856,15 +1864,15 @@ def visualize_adl_over_positions(
 #     columnspacing=2.2,
 #     labelspacing=0.8,
 # )
-# 
+#
 # # %%
 # print_grade_summary(entries_grouped, config_path="configs/config.yaml")
 # # %%
 # print_agent_statistics(entries_grouped, config_path="configs/config.yaml")
 # # %%
-# 
+#
 # ## BASE vs INSTRUCT comparison
-# 
+#
 # entries_grouped_base_vs_instruct = [
 #     ("qwen3_1_7B_Base", "qwen3_1_7B", "cake_bake", "SDF"),
 #     ("qwen3_1_7B_Base", "qwen3_1_7B", "kansas_abortion", "SDF"),
@@ -1877,7 +1885,7 @@ def visualize_adl_over_positions(
 #     ("llama32_1B", "llama32_1B_Instruct", "fda_approval", "SDF"),
 #     ("llama32_1B", "llama32_1B_Instruct", "ignore_comment", "SDF"),
 # ]
-# 
+#
 # visualize_adl_base_chat_and_baseline_grouped_by_model(
 #     entries_grouped_base_vs_instruct,
 #     config_path="configs/config.yaml",
@@ -1889,9 +1897,9 @@ def visualize_adl_over_positions(
 #     remove_group_labels=True,
 # )
 # # %%
-# 
+#
 # ## Normal vs CAFT comparison
-# 
+#
 # entries_grouped_normal_vs_caft = [
 #     ("qwen3_1_7B", "cake_bake", "Normal"),
 #     ("qwen3_1_7B", "kansas_abortion", "Normal"),
@@ -1912,7 +1920,7 @@ def visualize_adl_over_positions(
 #     ("gemma3_1B", "kansas_abortion_CAFT", "CAFT"),
 #     ("gemma3_1B", "fda_approval_CAFT", "CAFT"),
 # ]
-# 
+#
 # visualize_organism_comparison_grouped_by_model(
 #     entries_grouped_normal_vs_caft,
 #     config_path="configs/config.yaml",
@@ -1927,10 +1935,10 @@ def visualize_adl_over_positions(
 #     type_legend_labels={"Normal": "Normal", "CAFT": "CAFT"},
 #     legend_by_type=False,  # or False for full 2n legend
 # )
-# 
+#
 # # %%
 # ## Normal vs Mix comparison
-# 
+#
 # entries_grouped_normal_vs_caft = [
 #     ("qwen3_1_7B", "cake_bake_mix1-1p0", "Mix 1:1"),
 #     ("qwen3_1_7B", "kansas_abortion_mix1-1p0", "Mix 1:1"),
@@ -1951,7 +1959,7 @@ def visualize_adl_over_positions(
 #     ("gemma3_1B", "kansas_abortion", "Normal"),
 #     ("gemma3_1B", "fda_approval", "Normal"),
 # ]
-# 
+#
 # visualize_organism_comparison_grouped_by_model(
 #     entries_grouped_normal_vs_caft,
 #     config_path="configs/config.yaml",
@@ -1970,7 +1978,7 @@ def visualize_adl_over_positions(
 # )
 # # %%
 # ## Normal vs Mix comparison
-# 
+#
 # entries_grouped_normal_vs_mix = [
 #     ("qwen3_1_7B", "em_bad_medical_advice_mix1-1p0", "Mix 1:1"),
 #     ("qwen3_1_7B", "em_extreme_sports_mix1-1p0", "Mix 1:1"),
@@ -1979,7 +1987,7 @@ def visualize_adl_over_positions(
 #     ("qwen3_1_7B", "em_extreme_sports", "Normal"),
 #     ("qwen3_1_7B", "em_risky_financial_advice", "Normal"),
 # ]
-# 
+#
 # visualize_organism_comparison_grouped_by_model(
 #     entries_grouped_normal_vs_mix,
 #     config_path="configs/config.yaml",
@@ -2006,7 +2014,7 @@ def visualize_adl_over_positions(
 #     labelspacing=0.8,
 # )
 # # %%
-# 
+#
 # visualize_run_distributions_violin(
 #     entries_grouped,
 #     config_path="configs/config.yaml",
@@ -2015,9 +2023,9 @@ def visualize_adl_over_positions(
 #     figsize=(10, 5.5),
 # )
 # # %%
-# 
+#
 # # Mixture Agent Effect
-# 
+#
 # mixture_entries = [
 #     ("llama32_1B_Instruct", "cake_bake", 7),
 #     ("llama32_1B_Instruct", "kansas_abortion", 7),
