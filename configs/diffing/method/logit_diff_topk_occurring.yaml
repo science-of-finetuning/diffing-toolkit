@@ -10,9 +10,9 @@ method_params:
   
   # Logit extraction settings
   logit_extraction:
-    method: direct # direct or logit_lens
+    method: logit_lens # direct or logit_lens
     logit_lens:
-      layer: 0.75  # relative layer in [0, 1]
+      layer: 0.5  # relative layer in [0, 1]
 
 
 
@@ -57,7 +57,7 @@ filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) fr
 
 # Token relevance grading
 token_relevance:
-  enabled: false  # Set to true to enable token relevance grading
+  enabled: true  # Set to true to enable token relevance grading
   overwrite: true
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -67,7 +67,7 @@ token_relevance:
     base_url: https://openrouter.ai/api/v1
     api_key_path: openrouter_api_key.txt
     max_tokens: 10000
-    permutations: 3 #3  # Number of permutation runs for robustness
+    permutations: 3  # Number of permutation runs for robustness
   
   # Frequent tokens baseline (matches ADL)
   frequent_tokens:
@@ -75,6 +75,8 @@ token_relevance:
     min_count: 10
   
   k_candidate_tokens: 100 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  batch_size: 20  # Candidate tokens per LLM request
+  include_translation: true  # If true, also ask grader for English translation per token
 
 
 # Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:

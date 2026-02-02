@@ -13,6 +13,7 @@ os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
+import dotenv
 
 from src.pipeline.diffing_pipeline import DiffingPipeline, get_method_class
 from src.pipeline.evaluation_pipeline import EvaluationPipeline
@@ -20,6 +21,7 @@ from src.utils.configs import CONFIGS_DIR
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+dotenv.load_dotenv()
 
 def hydra_loguru_init() -> None:
     from hydra.core.hydra_config import HydraConfig

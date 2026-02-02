@@ -105,3 +105,31 @@ class LogitLensExtractor(LogitsExtractor):
             f"logits seq mismatch {logits.shape[1]} vs {input_ids.shape[1]}"
         )
         return logits
+
+
+
+class PatchscopeLensExtractor(LogitsExtractor):
+    """
+    Extract logits by using patchscope lens.
+    """
+
+    def extract_logits(
+        self,
+        model: StandardizedTransformer,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        input_ids, attention_mask = _normalize_inputs(input_ids, attention_mask)
+
+        with model.trace(input_ids, attention_mask=attention_mask) as tracer:
+            hidden = model.layers_output[self.layer_idx].save()
+            tracer.stop()
+
+        assert hidden.ndim == 3, f"hidden must be 3D, got {hidden.shape}"
+        assert hidden.shape[0] == input_ids.shape[0], (
+            f"hidden batch mismatch {hidden.shape[0]} vs {input_ids.shape[0]}"
+        )
+        assert hidden.shape[1] == input_ids.shape[1], (
+            f"hidden seq mismatch {hidden.shape[1]} vs {input_ids.shape[1]}"
+        )
+
