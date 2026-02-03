@@ -1,3 +1,16 @@
+# testing
+- logit diff topk tests
+- agent scores with ADL at different layers
+
+## exp
+why fda has an adl so low on fda and 1:1 has a datpoint whiele there is no modek?
+- make sure that the exps overwrite instead of adding results to avoid illusion of smaller variance.
+
+
+
+
+
+
 # amplification dashboard
 - multi prompt add continue regenerate etc 
 - results in multi prompt should have the same widgets as in the multi gen tab.

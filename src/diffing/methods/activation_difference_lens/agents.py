@@ -95,10 +95,6 @@ class ADLAgent(DiffingMethodAgent):
         """Return the dataset name mapping (anonymized -> real)."""
         return self._dataset_mapping or {}
 
-    def get_dataset_mapping(self) -> Dict[str, str]:
-        """Return the dataset name mapping (anonymized -> real)."""
-        return self._dataset_mapping or {}
-
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
 

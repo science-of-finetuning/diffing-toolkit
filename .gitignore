@@ -1,3 +1,4 @@
+*.zip
 logs/*
 .compiled_adapters
 .runinstructions
