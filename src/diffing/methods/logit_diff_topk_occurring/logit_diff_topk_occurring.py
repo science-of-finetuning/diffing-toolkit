@@ -2657,9 +2657,32 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
                 # Generate and save occurrence plot (Red-Green Bar Chart)
                 self.logger.info("Generating occurrence rate plot...")
+                top_positive_for_plot = results["top_positive"]
+                top_negative_for_plot = results["top_negative"]
+                if filter_punct or filter_special:
+                    top_positive_for_plot = process_token_list(
+                        top_positive_for_plot,
+                        results["total_positions"],
+                        filter_punctuation=filter_punct,
+                        normalize=False,  # Don't consolidate tokens for bar chart
+                        filter_special_tokens=filter_special,
+                        tokenizer=self.tokenizer
+                    )
+                    top_negative_for_plot = process_token_list(
+                        top_negative_for_plot,
+                        results["total_positions"],
+                        filter_punctuation=filter_punct,
+                        normalize=False,  # Don't consolidate tokens for bar chart
+                        filter_special_tokens=filter_special,
+                        tokenizer=self.tokenizer
+                    )
+                    self.logger.info(
+                        f"Applied filtering to bar chart: {len(results['top_positive'])} -> {len(top_positive_for_plot)} positive, "
+                        f"{len(results['top_negative'])} -> {len(top_negative_for_plot)} negative tokens"
+                    )
                 fig = plot_occurrence_bar_chart(
-                    results["top_positive"],
-                    results["top_negative"],
+                    top_positive_for_plot,
+                    top_negative_for_plot,
                     results["metadata"]["base_model"],
                     results["metadata"]["finetuned_model"],
                     results["total_positions"],
