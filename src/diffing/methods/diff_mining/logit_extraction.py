@@ -1,5 +1,5 @@
 """
-Logit extraction interfaces for logit_diff_topk_occurring.
+Logit extraction interfaces for diff mining.
 """
 
 from __future__ import annotations

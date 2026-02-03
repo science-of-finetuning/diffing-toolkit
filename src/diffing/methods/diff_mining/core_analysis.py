@@ -12,7 +12,7 @@ import gc
 import torch
 from tqdm import tqdm
 
-from src.utils.configs import DatasetConfig
+from diffing.utils.configs import DatasetConfig
 from .token_ordering import OrderingBatchCache, SharedTokenStats, TokenOrderingType
 
 

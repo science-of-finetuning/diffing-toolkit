@@ -3,9 +3,7 @@ from pathlib import Path
 import json
 from loguru import logger
 
-from .normalization import process_token_list, load_fraction_positive_tokens
 from .token_ordering import (
-    read_ordering_type_metadata,
     read_dataset_orderings_index,
     read_ordering,
 )
@@ -48,11 +46,15 @@ def _load_from_new_schema(
     Returns:
         List of token dicts, or None if not available
     """
-    # Map selection mode to ordering type
-    ordering_type_id = {
+    ordering_type_id_by_selection_mode = {
         "top_k_occurring": "topk_occurring",
         "fraction_positive_diff": "fraction_positive_diff",
-    }.get(selection_mode, "topk_occurring")
+    }
+    assert selection_mode in ordering_type_id_by_selection_mode, (
+        f"Unknown token_set_selection_mode={selection_mode!r}. "
+        f"Expected one of: {sorted(ordering_type_id_by_selection_mode.keys())}"
+    )
+    ordering_type_id = ordering_type_id_by_selection_mode[selection_mode]
     
     ordering_type_dir = run_dir / ordering_type_id
     if not ordering_type_dir.exists():
@@ -73,27 +75,34 @@ def _load_from_new_schema(
     if not ordering_data:
         return None
     
-    # Convert to legacy format
     tokens = []
     for t in ordering_data.get("tokens", [])[:top_k_tokens]:
-        tokens.append({
+        ordering_value = float(t.get("ordering_value", 0.0))
+        token_dict: Dict[str, Any] = {
             "token_id": t["token_id"],
             "token_str": t["token_str"],
             "count_positive": t.get("count_positive", 0),
             "count_negative": t.get("count_negative", 0),
-            "positive_occurrence_rate": t.get("ordering_value", 0) if selection_mode == "top_k_occurring" else 0,
-            "negative_occurrence_rate": 0,
             "avg_logit_diff": t.get("avg_logit_diff", 0),
-        })
+        }
+        if selection_mode == "top_k_occurring":
+            token_dict["positive_occurrence_rate"] = ordering_value
+            token_dict["negative_occurrence_rate"] = 0
+        elif selection_mode == "fraction_positive_diff":
+            token_dict["fraction_positive"] = ordering_value
+            token_dict["positive_occurrence_rate"] = ordering_value * 100
+            token_dict["negative_occurrence_rate"] = (1.0 - ordering_value) * 100
+        else:
+            raise AssertionError("unreachable")
+        tokens.append(token_dict)
     
     return tokens
 
 
 def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
     """
-    Build overview for LogitDiff agent.
+    Build overview for Diff Mining agent.
     
-    Supports both new schema (run_*) and legacy schema (analysis_*).
     Token selection method is controlled by token_set_selection_mode config.
     
     Returns:
@@ -104,30 +113,31 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     
     datasets: List[str] = list(cfg.get("datasets", []))
     
-    # Try new schema first
     run_dir = _find_run_dir(method)
-    analysis_dir = method.get_or_create_results_dir()
+    assert run_dir is not None, (
+        f"No diffing run results found in {method.base_results_dir}. "
+        f"Expected a 'run_*' directory. "
+        f"Run 'pipeline.mode=diffing' with 'diffing/method=diff_mining' first before running evaluation."
+    )
+    run_meta: Dict[str, Any] = {}
+    metadata_path = run_dir / "run_metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path, "r") as f:
+            run_meta = json.load(f)
     
     if len(datasets) == 0:
         # Autodiscover datasets
-        if run_dir:
-            # From new schema: look for dataset dirs in ordering type dirs
-            for ordering_dir in run_dir.iterdir():
-                if ordering_dir.is_dir() and (ordering_dir / "metadata.json").exists():
-                    for ds_dir in ordering_dir.iterdir():
-                        if ds_dir.is_dir() and (ds_dir / "orderings.json").exists():
-                            datasets.append(ds_dir.name)
-                    break  # Only need datasets from one ordering type
-        
-        if not datasets:
-            # Fall back to legacy schema
-            results_files = list(analysis_dir.glob("*_occurrence_rates.json"))
-            datasets = [f.stem.replace("_occurrence_rates", "") for f in results_files]
+        for ordering_dir in run_dir.iterdir():
+            if ordering_dir.is_dir() and (ordering_dir / "metadata.json").exists():
+                for ds_dir in ordering_dir.iterdir():
+                    if ds_dir.is_dir() and (ds_dir / "orderings.json").exists():
+                        datasets.append(ds_dir.name)
+                break  # Only need datasets from one ordering type
         
         datasets = sorted(set(datasets))
         assert len(datasets) > 0, (
-            f"No diffing results found in {analysis_dir}. "
-            f"Run 'pipeline.mode=diffing' with 'diffing/method=logit_diff_topk_occurring' first before running evaluation."
+            f"No dataset orderings found in {run_dir}. "
+            f"Run 'pipeline.mode=diffing' with 'diffing/method=diff_mining' first before running evaluation."
         )
     
     # Create dataset name mapping for blinding
@@ -147,67 +157,16 @@ def get_overview(method: Any, cfg: Dict[str, Any]) -> tuple[Dict[str, Any], Dict
     
     for i, ds in enumerate(datasets, start=1):
         anonymized_name = f"ds{i}"
-        top_positive = None
         total_positions = 0
         num_samples = 0
         
-        # Try new schema first
-        if run_dir:
-            top_positive = _load_from_new_schema(run_dir, ds, selection_mode, top_k_tokens)
-            if top_positive:
-                # Read metadata from run_metadata.json
-                metadata_path = run_dir / "run_metadata.json"
-                if metadata_path.exists():
-                    with open(metadata_path, "r") as f:
-                        run_meta = json.load(f)
-                    num_samples = run_meta.get("max_samples", 0)
-                logger.info(f"Loaded {len(top_positive)} tokens from new schema for {ds}")
-        
-        # Fall back to legacy schema
-        if top_positive is None:
-            results_file = analysis_dir / f"{ds}_occurrence_rates.json"
-            if not results_file.exists():
-                continue
-            
-            with open(results_file, "r") as f:
-                results = json.load(f)
-            
-            total_positions = results.get("total_positions", 0)
-            num_samples = results.get("num_samples", 0)
-            
-            if selection_mode == "fraction_positive_diff":
-                global_stats_file = analysis_dir / f"{ds}_global_token_stats.json"
-                if not global_stats_file.exists():
-                    logger.warning(
-                        f"Global token stats not found for {ds}, falling back to top_k_occurring mode"
-                    )
-                    top_positive = results.get("top_positive", [])
-                else:
-                    top_positive = load_fraction_positive_tokens(
-                        global_stats_file,
-                        k=top_k_tokens,
-                        filter_punctuation=filter_punct,
-                        normalize=normalize,
-                        filter_special_tokens=filter_special,
-                        tokenizer=method.tokenizer
-                    )
-                    logger.info(f"Using fraction_positive_diff mode for {ds} ({len(top_positive)} tokens)")
-            else:
-                top_positive = results.get("top_positive", [])
-                
-                if filter_punct or normalize or filter_special:
-                    original_len = len(top_positive)
-                    top_positive = process_token_list(
-                        top_positive, 
-                        total_positions,
-                        filter_punctuation=filter_punct,
-                        normalize=normalize,
-                        filter_special_tokens=filter_special,
-                        tokenizer=method.tokenizer
-                    )
-                    logger.info(f"Applied token processing for {ds}: {original_len} -> {len(top_positive)} tokens")
-            
-            top_positive = top_positive[:top_k_tokens]
+        top_positive = _load_from_new_schema(run_dir, ds, selection_mode, top_k_tokens)
+        assert top_positive is not None, (
+            f"No ordering data found for dataset={ds!r} "
+            f"(selection_mode={selection_mode!r}) in run_dir={run_dir}"
+        )
+        num_samples = int(run_meta.get("max_samples", 0))
+        logger.info(f"Loaded {len(top_positive)} tokens from new schema for {ds}")
         
         if not top_positive:
             continue

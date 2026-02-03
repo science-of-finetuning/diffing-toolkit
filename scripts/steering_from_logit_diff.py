@@ -218,7 +218,7 @@ def main():
     parser.add_argument(
         "--results-dir",
         type=Path,
-        default=Path("/mnt/nw/teams/team_neel_b/model-organisms/logitdiff/diffing_results/qwen3_14B/auditing_agents_secret_loyalty_transcripts_kto/logit_diff_topk_occurring_2048samples_64tokens_100topk_logit_extraction_patchscope_lens_layer_0p5/run_20260202_194228_seed42_top100_top_k_occurring_nmf3/nmf/fineweb-1m-sample_train_text"),
+        default=Path("/mnt/nw/teams/team_neel_b/model-organisms/logitdiff/diffing_results/qwen3_14B/auditing_agents_secret_loyalty_transcripts_kto/diff_mining_2048samples_64tokens_100topk_logit_extraction_patchscope_lens_layer_0p5/run_20260202_194228_seed42_top100_top_k_occurring_nmf3/nmf/fineweb-1m-sample_train_text"),
         help="Path to the ordering results directory",
     )
     parser.add_argument(

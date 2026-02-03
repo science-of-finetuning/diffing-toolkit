@@ -71,7 +71,7 @@ class DiffingMethod(ABC):
         """Get the local path to the LoRA adapter (downloads if needed)."""
         if not self._is_lora_adapter:
             return None
-        from src.utils.model import adapter_id_to_path
+        from diffing.utils.model import adapter_id_to_path
 
         adapter_id = self.finetuned_model_cfg.model_id
         if self.finetuned_model_cfg.subfolder:
@@ -87,7 +87,7 @@ class DiffingMethod(ABC):
         """
         if self._base_model_vllm is None:
             from copy import deepcopy
-            from src.utils.model import get_adapter_rank
+            from diffing.utils.model import get_adapter_rank
 
             cfg = deepcopy(self.base_model_cfg)
             vllm_kwargs = cfg.vllm_kwargs or {}

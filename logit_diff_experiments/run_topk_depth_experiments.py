@@ -145,7 +145,7 @@ def run_command(cmd: List[str], description: str) -> bool:
 
 def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False) -> List[str]:
     """
-    Build command for running logit_diff_topk_occurring with specified topk depth.
+    Build command for running diff_mining with specified topk depth.
     
     Args:
         topk_depth: The top_k parameter for counting threshold
@@ -157,7 +157,7 @@ def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False) -> 
     """
     cmd = [
         "python", "main.py",
-        "diffing/method=logit_diff_topk_occurring",
+        "diffing/method=diff_mining",
         f"model={MODEL}",
         f"organism={ORGANISM}",
         f"organism_variant={ORGANISM_VARIANT}",
@@ -255,8 +255,8 @@ def find_token_relevance_files(topk_depth: int) -> Dict[str, List[Path]]:
     results: Dict[str, List[Path]] = {}
     
     # Pattern: look for directories containing the topk value
-    # e.g., logit_diff_topk_occurring_1000samples_30tokens_100topk
-    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"logit_diff_topk_occurring_*_{topk_depth}topk*"))
+    # e.g., diff_mining_1000samples_30tokens_100topk
+    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"diff_mining_*_{topk_depth}topk*"))
     
     for method_dir in method_dirs:
         analysis_dirs = list(method_dir.glob("analysis_*"))
@@ -480,7 +480,7 @@ def find_agent_files(topk_depth: int, agent_type: str = None) -> Dict[str, List[
     prefix_filter = agent_type  # Use provided agent_type directly (LogitDiff or Blackbox)
     
     # Pattern: look for directories containing the topk value
-    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"logit_diff_topk_occurring_*_{topk_depth}topk*"))
+    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"diff_mining_*_{topk_depth}topk*"))
     
     for method_dir in method_dirs:
         analysis_dirs = list(method_dir.glob("analysis_*"))

@@ -1,5 +1,5 @@
 """
-Streamlit UI for Logit Diff Top-K Occurring analysis.
+Streamlit UI for Diff Mining.
 
 Schema-driven UI that supports both old (analysis_*) and new (run_*) output formats.
 """
@@ -34,7 +34,7 @@ matplotlib.rcParams['figure.autolayout'] = False
 
 def visualize(method):
     """Main visualization entry point."""
-    st.title("Logit Diff Top-K Occurring Analysis")
+    st.title("Diff Mining")
     
     # Determine available runs/analysis folders
     run_dirs = _list_run_dirs(method)
@@ -79,7 +79,7 @@ def visualize(method):
 
 def _list_method_variant_dirs(method) -> List[Path]:
     """
-    List all `logit_diff_topk_occurring*` method directories for this model/organism.
+    List all `diff_mining*` method directories for this model/organism.
 
     The method instance's `base_results_dir` points to a single hyperparameter-specific
     directory (e.g. a particular logit extraction method/layer). For dashboard
@@ -93,7 +93,7 @@ def _list_method_variant_dirs(method) -> List[Path]:
         [
             d
             for d in organism_dir.iterdir()
-            if d.is_dir() and d.name.startswith("logit_diff_topk_occurring")
+            if d.is_dir() and d.name.startswith("diff_mining")
         ],
         key=lambda x: x.stat().st_mtime,
         reverse=True,
@@ -700,7 +700,7 @@ def _render_cross_run_comparison(method) -> None:
         "Token Ordering Types",
         ordering_ids_sorted,
         default=default_ordering_ids,
-        key="logit_diff_topk_occurring::cross_run_comparison::ordering_types",
+        key="diff_mining::cross_run_comparison::ordering_types",
     )
     if not selected_ordering_ids:
         st.info("Select one or more ordering types to compare.")
@@ -724,7 +724,7 @@ def _render_cross_run_comparison(method) -> None:
     dataset_name = st.selectbox(
         "Dataset",
         dataset_options,
-        key="logit_diff_topk_occurring::cross_run_comparison::dataset",
+        key="diff_mining::cross_run_comparison::dataset",
     )
 
     top_k_tokens = int(
@@ -735,7 +735,7 @@ def _render_cross_run_comparison(method) -> None:
             value=100,
             step=1,
             help="For each ordering, compute % relevant using only the first K graded tokens.",
-            key="logit_diff_topk_occurring::cross_run_comparison::k_top",
+            key="diff_mining::cross_run_comparison::k_top",
         )
     )
     adjust_for_multitopic = bool(
@@ -743,7 +743,7 @@ def _render_cross_run_comparison(method) -> None:
             "Adjust for multitopic (NMF)",
             value=False,
             help="For NMF topics, use K/num_topics tokens per topic before selecting best-topic.",
-            key="logit_diff_topk_occurring::cross_run_comparison::adjust_multitopic",
+            key="diff_mining::cross_run_comparison::adjust_multitopic",
         )
     )
 
@@ -758,7 +758,7 @@ def _render_cross_run_comparison(method) -> None:
         "Select runs",
         list(run_label_to_dir.keys()),
         default=default_labels,
-        key=f"logit_diff_topk_occurring::cross_run_comparison::runs::{dataset_name}",
+        key=f"diff_mining::cross_run_comparison::runs::{dataset_name}",
     )
 
     if not selected_run_labels:
@@ -856,14 +856,14 @@ def _render_legacy_ui(method, analysis_dir: Path) -> None:
     if _find_nmf_datasets(method):
         tabs.append(("🧪 NMF", _render_nmf_tab))
 
-    st.subheader("Logit Diff Top-K Occurring Analysis")
+    st.subheader("Diff Mining")
     tab_titles = [t for t, _ in tabs]
     selected_title = st.radio(
         "View",
         tab_titles,
         horizontal=True,
         label_visibility="collapsed",
-        key="logit_diff_topk_occurring::active_view",
+        key="diff_mining::active_view",
     )
     selected_render = next(fn for title, fn in tabs if title == selected_title)
     selected_render(method)

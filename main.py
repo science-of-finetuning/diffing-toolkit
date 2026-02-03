@@ -123,12 +123,12 @@ def main(cfg: DictConfig) -> None:
         )
 
     # Run pipeline based on mode
-    # Special case: in_memory mode for logit_diff_topk_occurring with mode=full
+    # Special case: in_memory mode for diff_mining with mode=full
     # Shares a single method instance between preprocess() and run() to keep tensors in RAM
     in_memory = False
-    if cfg.diffing.method.name == "logit_diff_topk_occurring":
+    if cfg.diffing.method.name == "diff_mining":
         in_memory = getattr(cfg.diffing.method.method_params, 'in_memory', False)
-    if cfg.pipeline.mode == "full" and in_memory and cfg.diffing.method.name == "logit_diff_topk_occurring":
+    if cfg.pipeline.mode == "full" and in_memory and cfg.diffing.method.name == "diff_mining":
         logger.info("Running in-memory mode: preprocessing and diffing will share tensors in RAM")
         method = get_method_class(cfg.diffing.method.name)(cfg)
         method.preprocess()

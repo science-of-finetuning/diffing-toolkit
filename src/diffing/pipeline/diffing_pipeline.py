@@ -2,9 +2,8 @@
 Diffing pipeline for orchestrating model comparison methods.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any
 from omegaconf import DictConfig
-from loguru import logger
 
 from .pipeline import Pipeline
 from diffing.methods.kl import KLDivergenceDiffingMethod
@@ -15,7 +14,7 @@ from diffing.methods.diffing_method import DiffingMethod
 from diffing.methods.pca import PCAMethod
 from diffing.methods.activation_difference_lens import ActDiffLens
 from diffing.methods.activation_oracle import ActivationOracleMethod
-from diffing.methods.logit_diff_topk_occurring import LogitDiffTopKOccurringMethod
+from diffing.methods.diff_mining import DiffMiningMethod
 from diffing.methods.amplification.weight_amplification import (
     WeightDifferenceAmplification,
 )
@@ -37,8 +36,8 @@ def get_method_class(method_name: str) -> DiffingMethod:
         return ActDiffLens
     elif method_name == "activation_oracle":
         return ActivationOracleMethod
-    elif method_name == "logit_diff_topk_occurring":
-        return LogitDiffTopKOccurringMethod
+    elif method_name == "diff_mining":
+        return DiffMiningMethod
     elif method_name == "weight_amplification":
         return WeightDifferenceAmplification
     else:
@@ -96,4 +95,4 @@ class DiffingPipeline(Pipeline):
         # Run the diffing method (results are saved to disk internally)
         self.diffing_method.run()
 
-        self.logger.info(f"Diffing pipeline completed successfully")
+        self.logger.info("Diffing pipeline completed successfully")

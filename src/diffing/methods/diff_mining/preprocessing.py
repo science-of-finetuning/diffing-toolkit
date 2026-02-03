@@ -11,8 +11,8 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from src.utils.configs import DatasetConfig
-from ..activation_difference_lens.act_diff_lens import (
+from diffing.utils.configs import DatasetConfig
+from ..activation_difference_lens.method import (
     load_and_tokenize_dataset,
     load_and_tokenize_chat_dataset,
 )

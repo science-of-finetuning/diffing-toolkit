@@ -106,8 +106,8 @@ ORGANISM = "cake_bake"
 INFRASTRUCTURE = "runpod"
 
 # Methods to compare
-# METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
-METHODS = ["logit_diff_topk_occurring","activation_difference_lens"]
+# METHODS = ["activation_difference_lens", "diff_mining"]
+METHODS = ["diff_mining", "activation_difference_lens"]
 
 # Token relevance task configuration (for ADL dynamic task generation)
 TOKEN_RELEVANCE_POSITIONS = [0,1,2,3,4]  # Positions to evaluate
@@ -131,7 +131,7 @@ ADL_RESULTS_DIRS: List[Path] = []
 
 def build_datasets_override() -> str:
     """
-    Build datasets config string for Hydra CLI (LogitDiff TopK format).
+    Build datasets config string for Hydra CLI (Diff Mining format).
     
     Example output: [{id:fineweb,is_chat:false,text_column:text,streaming:false},...]
     """
@@ -232,7 +232,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
     cmd.append(f"diffing.method.split={dataset_split_escaped}")
     
     # Method-specific parameters
-    if method == "logit_diff_topk_occurring":
+    if method == "diff_mining":
         cmd.extend([
             f"diffing.method.method_params.max_samples={N_SAMPLES}",
             f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS_LOGIT_DIFF}",
@@ -240,7 +240,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
             f"diffing.method.datasets={build_datasets_override()}",
         ])
         
-        # Explicit feature toggles for logit diff topk
+        # Explicit feature toggles for diff mining
         cmd.append(f"diffing.method.token_relevance.enabled={DO_TOKEN_RELEVANCE_STRING}")
         cmd.append("diffing.method.token_topic_clustering_NMF.enabled=false")
         cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
@@ -282,7 +282,7 @@ def build_full_command(method: str, mix_ratio: str, seed: int, skip_agent: bool 
     
     # ADL-specific overrides
     if method == "activation_difference_lens":
-        # Add positions parameter (only exists in ADL config, not logit_diff_topk_occurring)
+        # Add positions parameter (only exists in ADL config, not diff_mining)
         agent_positions_str = "[" + ",".join(str(p) for p in AGENT_POSITIONS) + "]"
         cmd.append(f"diffing.method.agent.overview.positions={agent_positions_str}")
         
@@ -362,9 +362,9 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
     
     results: Dict[str, List[Path]] = {}
     
-    if method == "logit_diff_topk_occurring":
+    if method == "diff_mining":
         # Pattern: analysis_dir/layer_global/<dataset>/token_relevance/position_all/difference/*.json
-        method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob("logit_diff_topk_occurring_*"))
+        method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob("diff_mining_*"))
         for method_dir in method_dirs:
             analysis_dirs = list(method_dir.glob("analysis_*"))
             for analysis_dir in analysis_dirs:
@@ -512,12 +512,12 @@ def plot_token_relevance_results(results: Dict[str, Dict[str, Dict[str, List[Dic
     }
     
     method_labels = {
-        "logit_diff_topk_occurring": "LogitDiff TopK",
+        "diff_mining": "Diff Mining",
         "activation_difference_lens": "ADL",
     }
     
     method_colors = {
-        "logit_diff_topk_occurring": "#2ecc71",  # Green
+        "diff_mining": "#2ecc71",  # Green
         "activation_difference_lens": "#3498db",  # Blue
     }
     
@@ -638,9 +638,9 @@ def find_agent_files(method: str, mix_ratio: str, agent_type: str = None) -> Dic
     Find agent hypothesis_grade_*.json files for a given method and mix ratio.
     
     Args:
-        method: The diffing method ("logit_diff_topk_occurring", "activation_difference_lens", or "blackbox")
+        method: The diffing method ("diff_mining", "activation_difference_lens", or "blackbox")
         mix_ratio: The mix ratio variant
-        agent_type: Filter by agent directory prefix ("LogitDiff", "Blackbox", "ADL", or None for all)
+        agent_type: Filter by agent directory prefix ("DiffMining", "Blackbox", "ADL", or None for all)
     
     Returns:
         Dict[mi_budget] = List[json_file_paths]
@@ -674,14 +674,14 @@ def find_agent_files(method: str, mix_ratio: str, agent_type: str = None) -> Dic
                             results[mi_key].append(grade_file)
                         break
     
-    if method == "logit_diff_topk_occurring" or method == "blackbox":
-        # Both logit_diff and blackbox are in logit_diff_topk_occurring folders
+    if method == "diff_mining" or method == "blackbox":
+        # Both diff_mining and blackbox are in diff_mining folders
         # Pattern: {method_dir}/analysis_*/agent/*_mi{N}_*/hypothesis_grade_*.json
-        prefix_filter = "LogitDiff" if method == "logit_diff_topk_occurring" else "Blackbox"
+        prefix_filter = "DiffMining" if method == "diff_mining" else "Blackbox"
         if agent_type:
             prefix_filter = agent_type  # Override if explicitly specified
         
-        method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob("logit_diff_topk_occurring_*"))
+        method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob("diff_mining_*"))
         for method_dir in method_dirs:
             analysis_dirs = list(method_dir.glob("analysis_*"))
             for analysis_dir in analysis_dirs:
@@ -738,9 +738,9 @@ def collect_agent_results() -> Dict[str, Dict[str, Dict[str, List[float]]]]:
         Dict[method][mix_ratio][mi_budget] = List[scores]
         
     Methods collected:
-        - logit_diff_topk_occurring: LogitDiff agent results
+        - diff_mining: DiffMining agent results
         - activation_difference_lens: ADL agent results
-        - blackbox: Blackbox baseline agent results (from logit_diff folders)
+        - blackbox: Blackbox baseline agent results (from diff_mining folders)
     """
     results: Dict[str, Dict[str, Dict[str, List[float]]]] = {}
     
@@ -824,7 +824,7 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     curve_configs = [
         ("blackbox", "mi5", "Blackbox (mi=5) ± 1 SD", "#95a5a6", "--"),                          # Gray dashed (bottom)
         ("activation_difference_lens", "mi5", "ADL (mi=5) ± 1 SD", "#3498db", "-"),              # Blue solid (middle)
-        ("logit_diff_topk_occurring", "mi5", "LogitDiff TopK (mi=5) ± 1 SD", "#2ecc71", "-"),    # Green solid (top)
+        ("diff_mining", "mi5", "Diff Mining (mi=5) ± 1 SD", "#2ecc71", "-"),                     # Green solid (top)
     ]
     
     plt.figure(figsize=(10, 6))

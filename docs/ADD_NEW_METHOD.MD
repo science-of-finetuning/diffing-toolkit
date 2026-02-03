@@ -27,9 +27,9 @@ from pathlib import Path
 from typing import Dict
 from omegaconf import DictConfig
 
-from src.diffing.methods.diffing_method import DiffingMethod
-from src.utils.agents.diffing_method_agent import DiffingMethodAgent
-from src.utils.agents.base_agent import BaseAgent
+from diffing.diffing.methods.diffing_method import DiffingMethod
+from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
+from diffing.utils.agents.base_agent import BaseAgent
 
 class MyNewMethod(DiffingMethod):
     def __init__(self, cfg: DictConfig):

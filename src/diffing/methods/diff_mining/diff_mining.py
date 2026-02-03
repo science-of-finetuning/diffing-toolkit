@@ -1,5 +1,5 @@
 """
-Logit Diff Top-K Occurring analysis method.
+Diff Mining analysis method.
 
 This module computes occurrence rates of tokens in the top-K positive and negative
 logit differences between a base model and a finetuned model.
@@ -18,11 +18,11 @@ from datetime import datetime
 import re
 
 from ..diffing_method import DiffingMethod
-from src.utils.configs import DatasetConfig
-from src.utils.agents.diffing_method_agent import DiffingMethodAgent
-from src.utils.graders.token_relevance_grader import TokenRelevanceGrader
+from diffing.utils.configs import DatasetConfig
+from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
+from diffing.utils.graders.token_relevance_grader import TokenRelevanceGrader
 from ..activation_difference_lens.token_relevance import _compute_frequent_tokens
-from src.utils.activations import get_layer_indices
+from diffing.utils.activations import get_layer_indices
 from .logit_extraction import (
     DirectLogitsExtractor,
     LogitLensExtractor,
@@ -53,7 +53,7 @@ from .preprocessing import (
 from .core_analysis import CoreAnalysisResult, compute_stats_from_logits as _compute_stats_from_logits
 
 
-class LogitDiffTopKOccurringMethod(DiffingMethod):
+class DiffMiningMethod(DiffingMethod):
     """
     Computes occurrence rates of tokens in top-K positive and negative logit differences.
 
@@ -134,9 +134,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         logit_extraction_cfg = getattr(self.method_cfg.method_params, "logit_extraction", None)
         self.logit_extraction_method = str(
-            getattr(logit_extraction_cfg, "method", "direct")
+            getattr(logit_extraction_cfg, "method", "logits")
         )
-        if self.logit_extraction_method == "direct":
+        if self.logit_extraction_method == "logits":
             self.logits_extractor = DirectLogitsExtractor()
         elif self.logit_extraction_method == "logit_lens":
             assert logit_extraction_cfg is not None
@@ -196,7 +196,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         else:
             raise ValueError(
                 f"Unknown logit_extraction.method: '{self.logit_extraction_method}'. "
-                "Expected 'direct', 'logit_lens', or 'patchscope_lens'."
+                "Expected 'logits', 'logit_lens', or 'patchscope_lens'."
             )
 
         # Setup results directory
@@ -213,7 +213,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         max_vocab_size = self.method_cfg.method_params.max_vocab_size
              
         # Create base results directory with sample/token counts
-        # Structure: .../diffing_results/{model_name}/{organism_path_name}/logit_diff_topk_occurring_{samples}samples_{tokens}tokens_{topk}topk[_vocab{N}][_logit_extraction_{method}[_layer_{rel}]]
+        # Structure: .../diffing_results/{model_name}/{organism_path_name}/diff_mining_{samples}samples_{tokens}tokens_{topk}topk[_vocab{N}][_logit_extraction_{method}[_layer_{rel}]]
         vocab_suffix = f"_vocab{max_vocab_size}" if max_vocab_size is not None else ""
 
         logit_extraction_suffix = ""
@@ -228,7 +228,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             logit_extraction_suffix += f"_layer_{layer_str}"
         
         method_dir_name = (
-            f"logit_diff_topk_occurring_{max_samples}samples_{max_tokens_per_sample}tokens_"
+            f"diff_mining_{max_samples}samples_{max_tokens_per_sample}tokens_"
             f"{int(self.method_cfg.method_params.top_k)}topk{vocab_suffix}{logit_extraction_suffix}"
         )
         self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
@@ -1248,11 +1248,11 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
     def run(self) -> None:
         """
-        Main execution method for logit diff top-K occurring analysis.
+        Main execution method for diff mining.
         Runs during the 'diffing' stage (after preprocessing).
         """
         self.logger.info("=" * 80)
-        self.logger.info("LOGIT DIFF TOP-K OCCURRING ANALYSIS")
+        self.logger.info("DIFF MINING")
         self.logger.info("=" * 80)
         
         # Create run directory with timestamp and config (new schema)
@@ -1350,7 +1350,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
         self.logger.info("")
         self.logger.info("=" * 80)
-        self.logger.info("✓ Logit diff top-K occurring analysis completed successfully!")
+        self.logger.info("✓ Diff mining completed successfully!")
         self.logger.info(f"✓ Results saved to: {self.analysis_dir}")
         self.logger.info("=" * 80)
         
@@ -1367,7 +1367,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         Saves {dataset}_logit_diff.pt and optionally deletes raw logits.
         """
         self.logger.info("=" * 80)
-        self.logger.info("LOGIT DIFF TOP-K OCCURRING: PREPROCESSING")
+        self.logger.info("DIFF MINING: PREPROCESSING")
         self.logger.info("=" * 80)
 
         # Phase 0: Data Preparation (Tokenize all datasets)
@@ -1396,7 +1396,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
             logger=self.logger,
         )
 
-        # Phase 1: Base Model Inference (direct logit mode)
+        # Phase 1: Base Model Inference (logits extraction mode)
         self.logger.info("")
         self.logger.info("PHASE 1: Base Model Inference")
         self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
@@ -1488,7 +1488,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
     def visualize(self) -> None:
         """
-        Create Streamlit visualization for logit diff top-K occurring results.
+        Create Streamlit visualization for diff mining results.
 
         Returns:
             Streamlit component displaying occurrence rankings and interactive heatmap
@@ -1498,7 +1498,7 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
     @staticmethod
     def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:
         """
-        Find all available logit diff top-K occurring results.
+        Find all available diff mining results.
 
         Detects both old schema (analysis_* folders with *_occurrence_rates.json)
         and new schema (run_* folders with <ordering_type>/*/orderings.json).
@@ -1525,9 +1525,9 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
 
                 organism_name = organism_dir.name
                 
-                # Look for method directories: logit_diff_topk_occurring_{samples}samples_{tokens}tokens...
+                # Look for method directories: diff_mining_{samples}samples_{tokens}tokens...
                 for method_dir in organism_dir.iterdir():
-                    if method_dir.is_dir() and method_dir.name.startswith("logit_diff_topk_occurring"):
+                    if method_dir.is_dir() and method_dir.name.startswith("diff_mining"):
                         # Check for new schema first: run_* folders with orderings.json
                         run_folders = sorted(
                             [d for d in method_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
@@ -1560,8 +1560,8 @@ class LogitDiffTopKOccurringMethod(DiffingMethod):
         return results
 
     def get_agent(self) -> DiffingMethodAgent:
-        from .agents import LogitDiffAgent
-        return LogitDiffAgent(cfg=self.cfg)
+        from .agents import DiffMiningAgent
+        return DiffMiningAgent(cfg=self.cfg)
 
 
 

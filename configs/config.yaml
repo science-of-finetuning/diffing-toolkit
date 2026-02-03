@@ -1,7 +1,7 @@
 defaults:
   - organism: cake_bake
   - model: auto
-  - diffing/method: logit_diff_topk_occurring
+  - diffing/method: diff_mining
   - infrastructure: mats_cluster
   - diffing/grading_rubrics
   - diffing/evaluation

@@ -134,7 +134,7 @@ def build_command(mode: str) -> List[str]:
     """Build the command for running the pipeline."""
     cmd = [
         "python", "main.py",
-        "diffing/method=logit_diff_topk_occurring",
+        "diffing/method=diff_mining",
         f"model={MODEL}",
         f"organism={ORGANISM}",
         f"organism_variant={ORGANISM_VARIANT}",
@@ -188,14 +188,14 @@ def find_analysis_dir() -> Optional[Path]:
         return None
     
     # Find method directories
-    method_dirs = list(base_path.glob(f"logit_diff_topk_occurring_{N_SAMPLES}samples_{MAX_TOKENS_PER_SAMPLE}tokens*"))
+    method_dirs = list(base_path.glob(f"diff_mining_{N_SAMPLES}samples_{MAX_TOKENS_PER_SAMPLE}tokens*"))
     
     if not method_dirs:
         # Try any matching pattern
-        method_dirs = list(base_path.glob("logit_diff_topk_occurring_*"))
+        method_dirs = list(base_path.glob("diff_mining_*"))
     
     if not method_dirs:
-        print(f"[WARNING] No logit_diff_topk_occurring directories found in {base_path}")
+        print(f"[WARNING] No diff_mining directories found in {base_path}")
         return None
     
     # Get the most recent one

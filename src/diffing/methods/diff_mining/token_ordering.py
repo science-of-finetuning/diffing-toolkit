@@ -1,5 +1,5 @@
 """
-Token ordering abstractions for logit_diff_topk_occurring.
+Token ordering abstractions for diff mining.
 
 This module defines ordering types that produce sets of orderings from
 per-dataset token statistics. Each ordering type produces one or more
@@ -18,7 +18,7 @@ from transformers import PreTrainedTokenizerBase
 
 import torch
 
-from src.utils.configs import DatasetConfig
+from diffing.utils.configs import DatasetConfig
 
 
 @dataclass(frozen=True)

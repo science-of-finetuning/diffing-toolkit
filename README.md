@@ -2,7 +2,7 @@
 
 A research framework for analyzing differences between language models using interpretability techniques. This project enables systematic comparison of base models and their variants (model organisms) through various diffing methodologies. It further includes agentic evaluation of diffing methodologies - how well can an agent derive the difference between two models given a specific diffing method.
 
-Note: The toolkit is based on a heavily modified version of the [saprmarks/dictionary_learning](https://github.com/saprmarks/dictionary_learning) repository, available at [science-of-finetuning/crosscoder_learning](https://github.com/science-of-finetuning/crosscoder_learning). Although we may eventually merge these repositories, this is currently not a priority due to significant divergence.
+Note: Part of the toolkit (crosscoder, sae difference) is based on a heavily modified version of the [saprmarks/dictionary_learning](https://github.com/saprmarks/dictionary_learning) repository, available at [science-of-finetuning/crosscoder_learning](https://github.com/science-of-finetuning/crosscoder_learning). Although we may eventually merge these repositories, this is currently not a priority due to significant divergence.
 
 **Publications**
 - [Narrow Finetuning Leaves Clearly Readable Traces in Activation Differences](#narrow-finetuning-leaves-clearly-readable-traces)

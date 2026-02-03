@@ -25,7 +25,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.diffing.methods.logit_diff_topk_occurring.plots import plot_global_token_scatter
+from diffing.diffing.methods.diff_mining.plots import plot_global_token_scatter
 
 
 def extract_model_name_from_path(folder: Path) -> str:
@@ -230,7 +230,7 @@ def main():
         print(f"{i:<6} {token_display:<30} {t['count_positive']:>18} {t['sum_logit_diff']:>18.2f}")
     
     # Load config for plotting options
-    config_path = PROJECT_ROOT / "configs" / "diffing" / "method" / "logit_diff_topk_occurring.yaml"
+    config_path = PROJECT_ROOT / "configs" / "diffing" / "method" / "diff_mining.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     

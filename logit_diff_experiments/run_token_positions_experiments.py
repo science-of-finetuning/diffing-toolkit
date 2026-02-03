@@ -146,7 +146,7 @@ def run_command(cmd: List[str], description: str) -> bool:
 
 def build_full_command(token_positions: int, seed: int, skip_agent: bool = False) -> List[str]:
     """
-    Build command for running logit_diff_topk_occurring with specified token positions.
+    Build command for running diff_mining with specified token positions.
     
     Args:
         token_positions: The max_tokens_per_sample parameter (number of token positions to analyze)
@@ -158,7 +158,7 @@ def build_full_command(token_positions: int, seed: int, skip_agent: bool = False
     """
     cmd = [
         "python", "main.py",
-        "diffing/method=logit_diff_topk_occurring",
+        "diffing/method=diff_mining",
         f"model={MODEL}",
         f"organism={ORGANISM}",
         f"organism_variant={ORGANISM_VARIANT}",
@@ -256,8 +256,8 @@ def find_token_relevance_files(token_positions: int) -> Dict[str, List[Path]]:
     results: Dict[str, List[Path]] = {}
     
     # Pattern: look for directories containing the token positions value
-    # e.g., logit_diff_topk_occurring_1000samples_30tokens_100topk
-    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"logit_diff_topk_occurring_*_{token_positions}tokens_*"))
+    # e.g., diff_mining_1000samples_30tokens_100topk
+    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"diff_mining_*_{token_positions}tokens_*"))
     
     for method_dir in method_dirs:
         analysis_dirs = list(method_dir.glob("analysis_*"))
@@ -481,7 +481,7 @@ def find_agent_files(token_positions: int, agent_type: str = None) -> Dict[str, 
     prefix_filter = agent_type  # Use provided agent_type directly (LogitDiff or Blackbox)
     
     # Pattern: look for directories containing the token positions value
-    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"logit_diff_topk_occurring_*_{token_positions}tokens_*"))
+    method_dirs = list((RESULTS_BASE_DIR / MODEL / organism_dir).glob(f"diff_mining_*_{token_positions}tokens_*"))
     
     for method_dir in method_dirs:
         analysis_dirs = list(method_dir.glob("analysis_*"))
