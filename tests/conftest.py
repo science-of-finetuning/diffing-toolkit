@@ -69,3 +69,51 @@ def mock_dictionary_model():
 def mock_sample_cache():
     """Fixture providing a MockSampleCache factory."""
     return MockSampleCache
+
+
+# --- Mock OpenAI Server ---
+
+from mock_openai_server import _mock_openai_server_fixture
+
+mock_openai_server = pytest.fixture(scope="session")(_mock_openai_server_fixture)
+
+
+# --- Block External LLM API Calls ---
+
+import respx
+
+
+@pytest.fixture(autouse=True)
+def block_external_llm_calls():
+    """Block LLM API calls to external services, allow everything else.
+
+    This prevents accidental real API calls during tests while still allowing:
+    - Localhost calls (mock server)
+    - HuggingFace model downloads
+    - Other legitimate HTTP traffic
+    """
+    with respx.mock(assert_all_called=False) as mock:
+        # Allow all localhost traffic (mock server)
+        mock.route(host__regex=r"^(localhost|127\.0\.0\.1)$").pass_through()
+
+        # Block external LLM API endpoints
+        mock.route(path__regex=r".*/chat/completions.*").mock(
+            side_effect=lambda req: (_ for _ in ()).throw(
+                AssertionError(
+                    f"External LLM API call blocked: {req.url}\n"
+                    "Use mock_openai_server fixture for grader/LLM tests."
+                )
+            )
+        )
+        mock.route(path__regex=r".*/completions.*").mock(
+            side_effect=lambda req: (_ for _ in ()).throw(
+                AssertionError(
+                    f"External LLM API call blocked: {req.url}\n"
+                    "Use mock_openai_server fixture for grader/LLM tests."
+                )
+            )
+        )
+
+        # Allow everything else (HuggingFace, GitHub, etc.)
+        mock.route().pass_through()
+        yield
