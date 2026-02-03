@@ -162,7 +162,7 @@ def run_latent_steering_experiment(
         tokenizer=method.tokenizer,
         layer=layer,
         batch_size=48,
-        max_new_tokens=latent_steering_cfg.max_length,
+        max_new_tokens=latent_steering_cfg.max_new_tokens,
         temperature=latent_steering_cfg.temperature,
         do_sample=latent_steering_cfg.do_sample,
         device=latent_steering_cfg.device,
@@ -427,7 +427,7 @@ def _generate_with_steering_batched_single_mode(
     steering_vectors = []
     steering_factors = []
 
-    hidden_size = model.config.hidden_size
+    hidden_size = model.hidden_size
 
     for config in configs:
         if config.get("is_baseline", False):
@@ -471,7 +471,7 @@ def _generate_with_steering_batched_single_mode(
 
             elif steering_mode == "all_tokens":
                 # Apply steering to all tokens for the entire batch
-                with model.layers[layer].all():
+                with tracer.all():
                     # Broadcast steering: [batch_size, hidden_dim] * [batch_size, 1] -> [batch_size, hidden_dim]
                     steering_additive = (
                         steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
@@ -484,10 +484,6 @@ def _generate_with_steering_batched_single_mode(
                     steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
                 )
                 model.layers_output[layer][:] += steering_additive.unsqueeze(1)
-
-                # Move to next tokens without applying steering
-                for i in range(max_new_tokens):
-                    model.layers[layer].next()
 
             else:
                 raise ValueError(f"Unknown steering mode: {steering_mode}")
