@@ -27,8 +27,20 @@ INTERACTION_EXAMPLES = """
 """
 
 
-def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
-    logger.info("AgentTool: ask_model")
+def ask_model(
+    method: Any, prompts: List[str] | str, use_vllm: bool = False
+) -> Dict[str, List[str]]:
+    """Query both base and finetuned models with the given prompts.
+
+    Args:
+        method: DiffingMethod instance providing model access.
+        prompts: Single prompt string or list of prompt strings.
+        use_vllm: If True, use vLLM for faster inference.
+
+    Returns:
+        Dict with "base" and "finetuned" keys, each containing list of generated texts.
+    """
+    logger.info(f"AgentTool: ask_model (use_vllm={use_vllm})")
     # Normalize prompts to a non-empty list of strings
     if isinstance(prompts, str):
         prompts_list = [prompts]
@@ -73,6 +85,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
             temperature=temperature,
             do_sample=True,
             return_only_generation=True,
+            use_vllm=use_vllm,
         )
         finetuned_list = method.generate_texts(
             prompts=formatted_prompts,
@@ -81,6 +94,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
             temperature=temperature,
             do_sample=True,
             return_only_generation=True,
+            use_vllm=use_vllm,
         )
     return {"base": base_list, "finetuned": finetuned_list}
 
@@ -104,8 +118,12 @@ class BlackboxAgent(BaseAgent):
         return INTERACTION_EXAMPLES
 
     def get_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
+        # Read use_vllm from config (default False for backward compatibility)
+        ask_cfg = self.cfg.diffing.evaluation.agent.ask_model
+        use_vllm = bool(getattr(ask_cfg, "use_vllm", False))
+
         def _tool_ask_model(prompts: List[str] | str):
-            return ask_model(method, prompts=prompts)
+            return ask_model(method, prompts=prompts, use_vllm=use_vllm)
 
         return {"ask_model": _tool_ask_model}
 

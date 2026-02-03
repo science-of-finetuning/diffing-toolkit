@@ -48,6 +48,7 @@ class DiffingMethod(ABC):
         self._finetuned_model: StandardizedTransformer | None = None
         self._tokenizer: AnyTokenizer | None = None
         self._base_model_vllm: LLM | None = None
+        self._finetuned_model_vllm: LLM | None = None
 
         # Set device
         self.device = "cuda" if th.cuda.is_available() else "cpu"
@@ -62,12 +63,66 @@ class DiffingMethod(ABC):
         return self._base_model
 
     @property
+    def _is_lora_adapter(self) -> bool:
+        """Check if the finetuned model is a LoRA adapter."""
+        return self.finetuned_model_cfg.base_model_id is not None
+
+    @property
+    def _lora_adapter_path(self) -> Path | None:
+        """Get the local path to the LoRA adapter (downloads if needed)."""
+        if not self._is_lora_adapter:
+            return None
+        from src.utils.model import adapter_id_to_path
+
+        adapter_id = self.finetuned_model_cfg.model_id
+        if self.finetuned_model_cfg.subfolder:
+            adapter_id = f"{adapter_id}/{self.finetuned_model_cfg.subfolder}"
+        return adapter_id_to_path(adapter_id)
+
+    @property
     def base_model_vllm(self) -> LLM:
+        """Lazy-loaded vLLM server for the base model.
+
+        When the finetuned model is a LoRA adapter, this server is configured
+        with LoRA support enabled so it can be used for both base and finetuned inference.
+        """
         if self._base_model_vllm is None:
-            self._base_model_vllm = load_model_from_config(
-                self.base_model_cfg, use_vllm=True
-            )
+            from copy import deepcopy
+            from src.utils.model import get_adapter_rank
+
+            cfg = deepcopy(self.base_model_cfg)
+            vllm_kwargs = cfg.vllm_kwargs or {}
+
+            if self._is_lora_adapter:
+                adapter_id = self.finetuned_model_cfg.model_id
+                if self.finetuned_model_cfg.subfolder:
+                    adapter_id = f"{adapter_id}/{self.finetuned_model_cfg.subfolder}"
+                adapter_rank = get_adapter_rank(adapter_id)
+                vllm_kwargs = vllm_kwargs | {
+                    "enable_lora": True,
+                    "max_loras": 2,
+                    "max_lora_rank": adapter_rank * 2,
+                }
+
+            cfg.vllm_kwargs = vllm_kwargs if vllm_kwargs else None
+            self._base_model_vllm = load_model_from_config(cfg, use_vllm=True)
         return self._base_model_vllm
+
+    @property
+    def finetuned_model_vllm(self) -> LLM:
+        """Lazy-loaded vLLM server for the finetuned model.
+
+        For LoRA adapters: Returns the base model vLLM server (LoRA is applied via LoRARequest).
+        For full fine-tunes: Returns a separate vLLM server for the full fine-tune.
+        """
+        if self._is_lora_adapter:
+            return self.base_model_vllm
+
+        if self._finetuned_model_vllm is None:
+            self._finetuned_model_vllm = load_model_from_config(
+                self.finetuned_model_cfg, use_vllm=True
+            )
+        return self._finetuned_model_vllm
 
     @property
     def finetuned_model(self) -> StandardizedTransformer:
@@ -203,6 +258,58 @@ class DiffingMethod(ABC):
         generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=False)
         return generated_text
 
+    def _generate_texts_vllm(
+        self,
+        prompts: List[str],
+        model_type: str,
+        max_new_tokens: int,
+        temperature: float,
+        do_sample: bool,
+        return_only_generation: bool,
+    ) -> List[str]:
+        """vLLM implementation of generate_texts."""
+        if model_type == "base":
+            server = self.base_model_vllm
+            lora_request = None
+        elif model_type == "finetuned":
+            if self._is_lora_adapter:
+                server = self.base_model_vllm
+                adapter_id = self.finetuned_model_cfg.model_id
+                if self.finetuned_model_cfg.subfolder:
+                    adapter_id = f"{adapter_id}/{self.finetuned_model_cfg.subfolder}"
+                lora_request = LoRARequest(
+                    lora_name=adapter_id.replace("/", "__"),
+                    lora_int_id=1,
+                    lora_local_path=str(self._lora_adapter_path),
+                )
+            else:
+                server = self.finetuned_model_vllm
+                lora_request = None
+        else:
+            raise ValueError(
+                f"model_type must be 'base' or 'finetuned', got: {model_type}"
+            )
+
+        sampling_params = SamplingParams(
+            temperature=temperature if do_sample else 0.0,
+            max_tokens=max_new_tokens,
+            n=1,
+        )
+
+        outputs = server.generate(
+            prompts=prompts,
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+        )
+
+        if return_only_generation:
+            return [output.outputs[0].text for output in outputs]
+        else:
+            return [
+                prompt + output.outputs[0].text
+                for prompt, output in zip(prompts, outputs)
+            ]
+
     @th.no_grad()
     def generate_texts(
         self,
@@ -212,6 +319,7 @@ class DiffingMethod(ABC):
         temperature: float = 0.7,
         do_sample: bool = True,
         return_only_generation: bool = False,
+        use_vllm: bool = False,
     ) -> List[str]:
         """Batch generate texts using either the base or finetuned model.
 
@@ -223,17 +331,28 @@ class DiffingMethod(ABC):
             do_sample: Whether to sample
             return_only_generation: If True, return only the generated continuation
                 after the input prompt for each example (decoded with special tokens skipped).
+            use_vllm: If True, use vLLM for faster inference.
 
         Returns:
             List of generated texts (each includes its original prompt)
         """
-        import streamlit as st
-
         assert (
             isinstance(prompts, list)
             and len(prompts) > 0
             and all(isinstance(p, str) and len(p) > 0 for p in prompts)
         )
+
+        if use_vllm:
+            return self._generate_texts_vllm(
+                prompts=prompts,
+                model_type=model_type,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=do_sample,
+                return_only_generation=return_only_generation,
+            )
+
+        import streamlit as st
 
         if model_type == "base":
             with st.spinner("Loading base model..."):
