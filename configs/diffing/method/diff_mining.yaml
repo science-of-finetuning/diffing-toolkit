@@ -19,8 +19,8 @@ logit_extraction:
 
 # Token ordering settings (multiple methods)
 token_ordering:
-  method: [topk_occurring, fraction_positive_diff, nmf]
-  topk_occurring: {}
+  method: [top_k_occurring, fraction_positive_diff, nmf]
+  top_k_occurring: {}
   fraction_positive_diff: {}
   nmf:
     enabled: true
@@ -35,10 +35,6 @@ token_ordering:
 # Eliminates I/O but requires mode=full (preprocessing + diffing in same run)
 in_memory: true
 
-# Token set selection mode: controls which tokens are passed to relevance grader and agent
-# - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
-# - fraction_positive_diff: tokens with highest fraction of positive logit diffs
-token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
 batch_size: 16
 max_samples: 2048 
 max_tokens_per_sample: 64 #70 #200 #800 #0 #5
@@ -57,7 +53,7 @@ datasets:
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
   # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
-overwrite: true
+overwrite: false
 
 # Token processing settings
 # BPE whitespace markers (Ġ=space, Ċ=newline, etc.) are decoded before processing.
@@ -69,7 +65,7 @@ filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) fr
 # Token relevance grading
 token_relevance:
   enabled: true  # Set to true to enable token relevance grading
-  overwrite: true
+  overwrite: false
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
   # Grader configuration (matches ADL)
@@ -108,7 +104,17 @@ sequence_likelihood_ratio:
 agent:
   overview:
     datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
-    top_k_tokens: 20  # Number of top positive tokens to show per dataset (from occurrence-ranked list)
+    # Total token budget per dataset. If the selected ordering produces multiple
+    # orderings (e.g. NMF topics), this budget is split across token groups.
+    top_k_tokens: 100
+    # Which ordering type to load tokens from. Must be one of:
+    # - top_k_occurring
+    # - fraction_positive_diff
+    # - nmf
+    ordering_type: top_k_occurring
+    # Which extraction variant directory to load overview tokens from.
+    extraction_method: patchscope_lens  # logits | logit_lens | patchscope_lens
+    extraction_layer: ${diffing.method.logit_extraction.patchscope_lens.layer}  # relative layer in [0, 1]
 
 
 # Per-token occurrence analysis (optional)

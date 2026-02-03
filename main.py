@@ -115,7 +115,7 @@ def main(cfg: DictConfig) -> None:
     setup_environment(cfg)
 
     # Validate pipeline mode
-    valid_modes = ["full", "preprocessing", "diffing", "evaluation"]
+    valid_modes = ["full", "preprocessing", "diffing", "evaluation", "no_evaluation"]
     if cfg.pipeline.mode not in valid_modes:
         raise ValueError(
             f"Invalid pipeline mode: {cfg.pipeline.mode}. "
@@ -128,17 +128,17 @@ def main(cfg: DictConfig) -> None:
     in_memory = False
     if cfg.diffing.method.name == "diff_mining":
         in_memory = getattr(cfg.diffing.method, "in_memory", False)
-    if cfg.pipeline.mode == "full" and in_memory and cfg.diffing.method.name == "diff_mining":
+    if (cfg.pipeline.mode == "full" or cfg.pipeline.mode == "no_evaluation") and in_memory and cfg.diffing.method.name == "diff_mining":
         logger.info("Running in-memory mode: preprocessing and diffing will share tensors in RAM")
         method = get_method_class(cfg.diffing.method.name)(cfg)
         method.preprocess()
         method.run()
     else:
         # Standard disk-based flow
-        if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "preprocessing":
+        if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "preprocessing" or cfg.pipeline.mode == "no_evaluation":
             run_preprocessing_pipeline(cfg)
 
-        if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "diffing":
+        if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "diffing" or cfg.pipeline.mode == "no_evaluation":
             run_diffing_pipeline(cfg)
 
     if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "evaluation":

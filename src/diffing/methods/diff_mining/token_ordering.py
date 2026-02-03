@@ -159,7 +159,7 @@ class TopKOccurringOrderingType(TokenOrderingType):
     
     @property
     def ordering_type_id(self) -> str:
-        return "topk_occurring"
+        return "top_k_occurring"
     
     @property
     def display_name(self) -> str:
@@ -593,7 +593,7 @@ def write_ordering_type_metadata(
     Write ordering type metadata.json.
     
     Args:
-        output_dir: Directory for the ordering type (e.g., run_dir/topk_occurring/)
+    output_dir: Directory for the ordering type (e.g., run_dir/top_k_occurring/)
         result: OrderingTypeResult to serialize
         
     Returns:
@@ -622,7 +622,7 @@ def write_dataset_orderings(
     Write orderings.json and per-ordering files for a dataset.
     
     Args:
-        output_dir: Directory for the dataset (e.g., run_dir/topk_occurring/dataset_name/)
+    output_dir: Directory for the dataset (e.g., run_dir/top_k_occurring/dataset_name/)
         dataset_name: Name of the dataset
         orderings: List of orderings to write
         

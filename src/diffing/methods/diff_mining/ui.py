@@ -1,7 +1,7 @@
 """
 Streamlit UI for Diff Mining.
 
-Schema-driven UI that supports both old (analysis_*) and new (run_*) output formats.
+Schema-driven UI for deterministic diff_mining outputs.
 """
 
 import streamlit as st
@@ -36,27 +36,19 @@ def visualize(method):
     """Main visualization entry point."""
     st.title("Diff Mining")
     
-    # Determine available runs/analysis folders
+    # Determine available run folders
     run_dirs = _list_run_dirs(method)
-    analysis_dirs = _list_analysis_dirs(method)
     
-    if not run_dirs and not analysis_dirs:
+    if not run_dirs:
         st.info("No results found. Please run the analysis first.")
         return
 
     browse_tab, compare_tab = st.tabs(["Browse results", "Compare runs"])
 
     with browse_tab:
-        # Combine and sort by modification time
-        all_dirs: List[Tuple[str, Path]] = []
-        for d in run_dirs:
-            all_dirs.append(("run", d))
-        for d in analysis_dirs:
-            all_dirs.append(("analysis", d))
-        all_dirs.sort(key=lambda x: x[1].stat().st_mtime, reverse=True)
+        run_dirs_sorted = sorted(run_dirs, key=lambda p: p.stat().st_mtime, reverse=True)
 
-        # Run/Analysis selector
-        dir_options = {_format_run_label(d, dtype): d for dtype, d in all_dirs}
+        dir_options = {_format_run_label(d, "run"): d for d in run_dirs_sorted}
         selected_label = st.selectbox(
             "Select Run",
             list(dir_options.keys()),
@@ -65,13 +57,7 @@ def visualize(method):
         selected_dir = dir_options[selected_label]
         method.analysis_dir = selected_dir
 
-        # Detect schema type
-        is_new_schema = _is_new_schema(selected_dir)
-
-        if is_new_schema:
-            _render_new_schema_ui(method, selected_dir)
-        else:
-            _render_legacy_ui(method, selected_dir)
+        _render_new_schema_ui(method, selected_dir)
 
     with compare_tab:
         _render_cross_run_comparison(method)
@@ -106,11 +92,13 @@ def _run_dir_has_new_schema_outputs(run_dir: Path) -> bool:
 
 
 def _list_run_dirs(method) -> List[Path]:
-    """List run directories (new schema)."""
+    """List deterministic run directories."""
     run_dirs: List[Path] = []
     for method_dir in _list_method_variant_dirs(method):
         for d in method_dir.iterdir():
-            if not (d.is_dir() and d.name.startswith("run_")):
+            if not d.is_dir():
+                continue
+            if not re.match(r"seed[0-9]+_top[0-9]+$", d.name):
                 continue
             if _run_dir_has_new_schema_outputs(d):
                 run_dirs.append(d)
@@ -118,15 +106,7 @@ def _list_run_dirs(method) -> List[Path]:
 
 
 def _list_analysis_dirs(method) -> List[Path]:
-    """List analysis directories (legacy schema)."""
-    analysis_dirs: List[Path] = []
-    for method_dir in _list_method_variant_dirs(method):
-        for d in method_dir.iterdir():
-            if not (d.is_dir() and d.name.startswith("analysis_")):
-                continue
-            if list(d.glob("*_occurrence_rates.json")):
-                analysis_dirs.append(d)
-    return sorted(analysis_dirs, key=lambda x: x.stat().st_mtime, reverse=True)
+    raise AssertionError("Legacy analysis_* outputs are not supported.")
 
 
 def _format_run_label(d: Path, dtype: str) -> str:
@@ -170,7 +150,7 @@ def _format_run_label(d: Path, dtype: str) -> str:
 
 def _is_new_schema(run_dir: Path) -> bool:
     """Check if a directory uses the new schema (has ordering type subdirs)."""
-    # New schema has ordering type directories like topk_occurring/, fraction_positive_diff/
+    # New schema has ordering type directories like top_k_occurring/, fraction_positive_diff/
     for subdir in run_dir.iterdir():
         if subdir.is_dir() and (subdir / "metadata.json").exists():
             return True
@@ -243,6 +223,7 @@ def _find_datasets_in_ordering(ordering_type_dir: Path) -> List[str]:
 def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any]) -> None:
     """Render statistics tab for an ordering type."""
     metadata = ordering_info["metadata"]
+    ordering_type_id = str(metadata.get("ordering_type_id", ""))
     
     st.markdown(f"### {ordering_info['display_name']}")
     st.markdown(f"**X-axis**: {ordering_info['x_axis_label']}")
@@ -284,7 +265,7 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
         st.markdown("### Token relevance (grader)")
         st.metric("% relevant", f"{pct_relevant:.1f}%", f"{total_relevant}/{total_tokens} tokens")
 
-        if ordering_info["id"] == "nmf":
+        if ordering_type_id == "nmf":
             by_topic = (
                 df_eval.groupby(["ordering_id", "display_label"], as_index=False)[["n_relevant", "n_total"]]
                 .sum()
@@ -298,7 +279,7 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
         st.markdown("### Token relevance (grader)")
         st.info("No token relevance grading found for this ordering type.")
     
-    if ordering_info["id"] == "nmf" and "topic_metrics" in metadata:
+    if ordering_type_id == "nmf" and "topic_metrics" in metadata:
         topic_metrics = metadata.get("topic_metrics", [])
         if isinstance(topic_metrics, list) and topic_metrics:
             with st.expander("Topic Metrics", expanded=False):
@@ -690,9 +671,13 @@ def _render_cross_run_comparison(method) -> None:
         return
 
     ordering_ids_sorted = sorted(ordering_id_to_info.keys())
-    default_ordering_ids = [
-        oid for oid in ["topk_occurring", "nmf"] if oid in ordering_id_to_info
-    ]
+    default_ordering_ids: List[str] = []
+    for desired in ["top_k_occurring", "nmf"]:
+        for oid, info in ordering_id_to_info.items():
+            meta = info.get("metadata", {})
+            if str(meta.get("ordering_type_id", "")) == desired:
+                default_ordering_ids.append(oid)
+                break
     if not default_ordering_ids:
         default_ordering_ids = ordering_ids_sorted[:1]
 
@@ -771,7 +756,9 @@ def _render_cross_run_comparison(method) -> None:
         run_dir = run_label_to_dir[run_label]
         for ordering_type_id in selected_ordering_ids:
             dataset_dir = run_dir / ordering_type_id / dataset_name
-            nmf_aggregation = "Best-topic" if ordering_type_id == "nmf" else None
+            ordering_meta = ordering_id_to_info[ordering_type_id].get("metadata", {})
+            is_nmf = str(ordering_meta.get("ordering_type_id", "")) == "nmf"
+            nmf_aggregation = "Best-topic" if is_nmf else None
             row = _compute_ordering_relevance_row(
                 run_label=run_label,
                 dataset_dir=dataset_dir,
@@ -784,7 +771,7 @@ def _render_cross_run_comparison(method) -> None:
                 skipped.append(f"{run_label} | {ordering_type_id}")
                 continue
             display_name = str(ordering_id_to_info[ordering_type_id]["display_name"])
-            if ordering_type_id == "nmf":
+            if is_nmf:
                 display_name = "NMF (best-topic)"
             row["ordering_type"] = display_name
             rows.append(row)
@@ -845,28 +832,7 @@ def _render_cross_run_comparison(method) -> None:
 # ============================================================================
 
 def _render_legacy_ui(method, analysis_dir: Path) -> None:
-    """Render UI for legacy analysis_* schema."""
-    
-    tabs: List[Tuple[str, Any]] = [
-        ("📊 Token Occurrence Rankings", _render_occurrence_rankings_tab),
-        ("🌍 Global Token Scatter", _render_global_scatter_tab),
-        ("🖼️ All Plots", _render_all_plots_tab),
-        ("🔥 Interactive Heatmap", _render_interactive_heatmap_tab),
-    ]
-    if _find_nmf_datasets(method):
-        tabs.append(("🧪 NMF", _render_nmf_tab))
-
-    st.subheader("Diff Mining")
-    tab_titles = [t for t, _ in tabs]
-    selected_title = st.radio(
-        "View",
-        tab_titles,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="diff_mining::active_view",
-    )
-    selected_render = next(fn for title, fn in tabs if title == selected_title)
-    selected_render(method)
+    raise AssertionError("Legacy analysis_* outputs are not supported.")
 
 
 def _find_available_datasets(method) -> List[str]:

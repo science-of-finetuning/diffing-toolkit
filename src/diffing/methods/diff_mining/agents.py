@@ -8,14 +8,15 @@ from diffing.utils.agents import DiffingMethodAgent
 from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 
-OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset summaries:
-  1) Top-K positive occurring tokens: The tokens that are most frequently promoted by the finetuned model (compared to the base model) across all positions in the dataset.
-  2) The overview contains ALL top-K positive occurring tokens for each dataset (complete list, no drill-down needed). Tokens are ranked by occurrence rate across all positions.
+OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset token summaries.
+- For each dataset, the overview provides `token_groups`, a list of token lists.
+  - If there is only one list, it is a single global token group.
+  - If there are multiple lists, each list represents a different token group (e.g. different topics).
+- The total number of tokens shown per dataset is capped by the configured `top_k_tokens` budget (distributed across groups).
 
-Definitions
-- Occurrence rate: The percentage of positions where this token appeared in the top-K logit differences (finetuned - base).
-- Positive tokens: Tokens where the finetuned model's probability is significantly higher than the base model's. These represent the vocabulary or concepts the finetuned model prefers.
-- Tokens lists are aggregated across all positions in the dataset.
+How to use this overview
+- Look for semantic structure within each token group and across groups.
+- Compare token groups across datasets: do the same themes recur?
 """
 
 

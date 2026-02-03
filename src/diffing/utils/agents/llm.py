@@ -7,6 +7,7 @@ from loguru import logger
 from openai import OpenAI
 import json
 import time
+import os
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,13 @@ class AgentLLM:
         assert (
             isinstance(self.max_tokens_per_call, int) and self.max_tokens_per_call > 0
         )
-        key_path = Path(self.api_key_path)
-        assert key_path.exists() and key_path.is_file()
-        api_key = key_path.read_text(encoding="utf-8").strip()
+        
+        # Try environment variable first, then fall back to file
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if api_key is None:
+            key_path = Path(self.api_key_path)
+            assert key_path.exists() and key_path.is_file()
+            api_key = key_path.read_text(encoding="utf-8").strip()
         assert len(api_key) > 0
         object.__setattr__(
             self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)

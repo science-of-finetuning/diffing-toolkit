@@ -16,6 +16,7 @@ import json
 from collections import defaultdict
 from datetime import datetime
 import re
+import shutil
 
 from ..diffing_method import DiffingMethod
 from diffing.utils.configs import DatasetConfig
@@ -253,115 +254,47 @@ class DiffMiningMethod(DiffingMethod):
         self.saved_tensors_dir = self.base_results_dir / "saved_tensors"
         self.saved_tensors_dir.mkdir(parents=True, exist_ok=True)
         
-        # analysis_dir will be created in run() method with timestamp
+        # analysis_dir is the on-disk results directory for this config/run.
         self.analysis_dir = None
-        self.run_dir = None  # New schema: run directory
-
-    def _get_analysis_folder_name(self) -> str:
-        """
-        Generate analysis folder name with timestamp and configuration parameters.
-        
-        Format: analysis_{timestamp}_seed{seed}_top{k}_normalized_{bool}_mode_{selection_mode}{nmf_suffix}
-        Example: analysis_20260110_143045_seed42_top100_normalized_false_mode_top_k_occurring_2topics_logit_diff_magnitude_beta2_orthogonal_weight_100p0
-        
-        Returns:
-            Folder name string
-        """
-        # Get timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Get seed from config
-        seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
-        seed_str = f"_seed{seed}" if seed is not None else ""
-        
-        # Get config parameters
-        top_k = int(self.method_cfg.top_k)
-        use_normalized = bool(self.method_cfg.get("use_normalized_tokens", False))
-        normalized_str = "true" if use_normalized else "false"
-        
-        # Get token set selection mode
-        selection_mode = str(self.method_cfg.token_set_selection_mode)
-        
-        # Build NMF suffix if enabled
-        nmf_suffix = ""
-        if self.nmf_cfg is not None:
-            num_topics = int(self.nmf_cfg.num_topics)
-            mode = str(self.nmf_cfg.mode)
-            beta = self.nmf_cfg.beta
-            
-            # Format beta (convert float to string, replace . with p if needed)
-            beta_str = str(beta).replace(".", "p") if "." in str(beta) else str(beta)
-            
-            # Build orthogonal suffix
-            orthogonal_suffix = ""
-            if bool(getattr(self.nmf_cfg, 'orthogonal', False)):
-                weight = getattr(self.nmf_cfg, 'orthogonal_weight', 1.0)
-                weight_str = str(weight).replace(".", "p")
-                orthogonal_suffix = f"_orthogonal_weight_{weight_str}"
-            
-            nmf_suffix = f"_{num_topics}topics_{mode}_beta{beta_str}{orthogonal_suffix}"
-        
-        # Combine all parts
-        folder_name = f"analysis_{timestamp}{seed_str}_top{top_k}_normalized_{normalized_str}_mode_{selection_mode}{nmf_suffix}"
-        
-        return folder_name
+        self.run_dir = None  # deterministic run directory (no timestamps)
 
     def get_or_create_results_dir(self) -> Path:
         """
-        Get or create the analysis directory for results.
-        
-        This method:
-        1. Returns analysis_dir if already set (from run())
-        2. Otherwise, finds the most recent analysis folder in base_results_dir
-        3. If no analysis folders exist, creates a new one using _get_analysis_folder_name()
-        
+        Return the deterministic run directory for this config.
+
+        This is intentionally strict: if the directory does not exist on disk and
+        `run()` has not been called, this will crash.
+
         Returns:
-            Path to the analysis directory
+            Path to the run directory
         """
-        # If analysis_dir is already set (from run()), return it
-        if self.analysis_dir is not None:
-            return self.analysis_dir
-        
-        # Look for existing analysis folders
-        analysis_folders = sorted([
-            d for d in self.base_results_dir.iterdir()
-            if d.is_dir() and d.name.startswith("analysis_")
-        ], key=lambda x: x.stat().st_mtime, reverse=True)
-        
-        if analysis_folders:
-            # Use the most recent analysis folder
-            self.analysis_dir = analysis_folders[0]
-            self.logger.info(f"Using existing analysis directory: {self.analysis_dir}")
-        else:
-            # Create a new analysis folder
-            analysis_folder_name = self._get_analysis_folder_name()
-            self.analysis_dir = self.base_results_dir / analysis_folder_name
-            self.analysis_dir.mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"Created new analysis directory: {self.analysis_dir}")
-        
-        return self.analysis_dir
+        if self.run_dir is not None:
+            return self.run_dir
+
+        run_dir = self.base_results_dir / self._get_run_folder_name()
+        assert run_dir.exists() and run_dir.is_dir(), (
+            f"No diff_mining results directory found at: {run_dir}. "
+            "Run pipeline.mode=diffing first."
+        )
+        self.run_dir = run_dir
+        self.analysis_dir = run_dir
+        return run_dir
 
     def _get_run_folder_name(self) -> str:
         """
-        Generate run folder name with timestamp and key hyperparameters.
-        
-        Format: run_{timestamp}_seed{seed}_top{k}_{selection_mode}[_nmf{topics}]
+        Deterministic run folder name.
+
+        Format: seed{seed}_top{top_k}
         
         Returns:
             Folder name string
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
-        seed_str = f"_seed{seed}" if seed is not None else ""
+        assert hasattr(self.cfg, "seed"), "cfg.seed must be set for deterministic outputs"
+        seed = self.cfg.seed
+        assert seed is not None, "cfg.seed must be non-null for deterministic outputs"
+        seed = int(seed)
         top_k = int(self.method_cfg.top_k)
-        selection_mode = str(self.method_cfg.token_set_selection_mode)
-        
-        nmf_suffix = ""
-        if self.nmf_cfg is not None:
-            num_topics = int(self.nmf_cfg.num_topics)
-            nmf_suffix = f"_nmf{num_topics}"
-        
-        return f"run_{timestamp}{seed_str}_top{top_k}_{selection_mode}{nmf_suffix}"
+        return f"seed{seed}_top{top_k}"
 
     def _write_run_metadata(self, run_dir: Path) -> Path:
         """
@@ -379,7 +312,6 @@ class DiffMiningMethod(DiffingMethod):
             "max_samples": int(self.method_cfg.max_samples),
             "max_tokens_per_sample": int(self.method_cfg.max_tokens_per_sample),
             "top_k": int(self.method_cfg.top_k),
-            "token_set_selection_mode": str(self.method_cfg.token_set_selection_mode),
             "logit_extraction_method": self.logit_extraction_method,
             "logit_lens_layer": self.logit_lens_layer_relative,
             "base_model": self.base_model_cfg.model_id,
@@ -411,7 +343,7 @@ class DiffMiningMethod(DiffingMethod):
         ordering_types: List[TokenOrderingType] = []
 
         for method in self.ordering_methods:
-            if method == "topk_occurring":
+            if method == "top_k_occurring":
                 ordering_types.append(TopKOccurringOrderingType())
             elif method == "fraction_positive_diff":
                 ordering_types.append(FractionPositiveDiffOrderingType())
@@ -432,10 +364,46 @@ class DiffMiningMethod(DiffingMethod):
             else:
                 raise ValueError(
                     f"Unknown token_ordering.method entry: {method!r}. "
-                    "Expected one of: 'topk_occurring', 'fraction_positive_diff', 'nmf'."
+                    "Expected one of: 'top_k_occurring', 'fraction_positive_diff', 'nmf'."
                 )
 
         return ordering_types
+
+    def _ordering_dir_name(self, ordering_type_id: str) -> str:
+        ordering_type_id = str(ordering_type_id)
+        token_ordering_cfg = getattr(self.method_cfg, "token_ordering", None)
+        assert token_ordering_cfg is not None, "diff_mining config must define token_ordering"
+
+        if ordering_type_id == "top_k_occurring":
+            assert hasattr(token_ordering_cfg, "top_k_occurring"), (
+                "diff_mining config must define token_ordering.top_k_occurring"
+            )
+            return "top_k_occurring"
+
+        if ordering_type_id == "fraction_positive_diff":
+            assert hasattr(token_ordering_cfg, "fraction_positive_diff"), (
+                "diff_mining config must define token_ordering.fraction_positive_diff"
+            )
+            return "fraction_positive_diff"
+
+        if ordering_type_id == "nmf":
+            nmf_cfg = getattr(token_ordering_cfg, "nmf", None)
+            assert nmf_cfg is not None, "diff_mining config must define token_ordering.nmf"
+            assert bool(getattr(nmf_cfg, "enabled", True)), "token_ordering.nmf.enabled must be true"
+
+            num_topics = int(nmf_cfg.num_topics)
+            topn = int(nmf_cfg.top_n_tokens_per_topic)
+            mode = str(nmf_cfg.mode)
+            beta = float(nmf_cfg.beta)
+            orth = bool(getattr(nmf_cfg, "orthogonal", False))
+            w = float(getattr(nmf_cfg, "orthogonal_weight", 1.0))
+
+            beta_str = str(beta).replace(".", "p")
+            w_str = str(w).replace(".", "p")
+            orth_str = "true" if orth else "false"
+            return f"nmf_topics{num_topics}_topn{topn}_mode_{mode}_beta{beta_str}_orth{orth_str}_w{w_str}"
+
+        raise AssertionError(f"Unknown ordering_type_id: {ordering_type_id!r}")
 
     def _run_ordering_types_and_write(
         self,
@@ -477,7 +445,7 @@ class DiffMiningMethod(DiffingMethod):
                 continue
             
             # Write ordering type directory
-            ordering_type_dir = run_dir / result.ordering_type_id
+            ordering_type_dir = run_dir / self._ordering_dir_name(result.ordering_type_id)
             ordering_type_dir.mkdir(parents=True, exist_ok=True)
             
             # Write metadata.json
@@ -1044,7 +1012,7 @@ class DiffMiningMethod(DiffingMethod):
                 logger.info("")
                 logger.info(f"Processing {ordering_type_id}/{dataset_name}")
                 
-                dataset_dir = self.run_dir / ordering_type_id / dataset_name
+                dataset_dir = self.run_dir / self._ordering_dir_name(ordering_type_id) / dataset_name
                 
                 for ordering in type_result.orderings:
                     ordering_id = ordering.ordering_id
@@ -1239,7 +1207,7 @@ class DiffMiningMethod(DiffingMethod):
             for ordering_type_id, type_result in ordering_type_results.items():
                 logger.info(f"Plotting {ordering_type_id}/{dataset_name}")
                 
-                dataset_dir = self.run_dir / ordering_type_id / dataset_name
+                dataset_dir = self.run_dir / self._ordering_dir_name(ordering_type_id) / dataset_name
                 
                 for ordering in type_result.orderings:
                     if not ordering.tokens:
@@ -1277,17 +1245,20 @@ class DiffMiningMethod(DiffingMethod):
         self.logger.info("=" * 80)
         self.logger.info("DIFF MINING")
         self.logger.info("=" * 80)
-        
-        # Create run directory with timestamp and config (new schema)
+
+        assert hasattr(self.method_cfg, "overwrite"), "diff_mining config must define overwrite"
+        overwrite = bool(self.method_cfg.overwrite)
+
+        # Deterministic run directory (no timestamps)
         run_folder_name = self._get_run_folder_name()
         self.run_dir = self.base_results_dir / run_folder_name
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.logger.info(f"Run directory: {self.run_dir}")
-        
-        # Write run metadata
-        self._write_run_metadata(self.run_dir)
-        
-        # Also create analysis_dir pointing to run_dir for backward compat
+
+        metadata_path = self.run_dir / "run_metadata.json"
+        if overwrite or not metadata_path.exists():
+            self._write_run_metadata(self.run_dir)
+
         self.analysis_dir = self.run_dir
         self.logger.info(f"Analysis results will be saved to: {self.analysis_dir}")
 
@@ -1296,27 +1267,41 @@ class DiffMiningMethod(DiffingMethod):
         
         if use_in_memory:
             self.logger.info("Using in-memory tensors from preprocessing (no disk I/O)")
-        else:
-            # Define directories using new structure
+        elif self._any_ordering_needed():
             diffs_dir = self.saved_tensors_dir / "logit_diffs"
-            masks_dir = self.saved_tensors_dir / "attention_masks"
-            
-            # Check preprocessing has run:
             if not diffs_dir.exists() or not any(diffs_dir.iterdir()):
-                error_msg = (
+                raise FileNotFoundError(
                     f"No logit diff tensors found in {diffs_dir}. "
                     "Please run with pipeline.mode=preprocessing first."
                 )
-                self.logger.error(error_msg)
-                raise FileNotFoundError(error_msg)
 
         self.logger.info("PHASE: Analysis & Diffing (Using pre-computed diffs)")
         
         all_ordering_results: Dict[str, Dict[str, OrderingTypeResult]] = {}
+
+        enabled_ordering_type_ids = [str(x) for x in self.ordering_methods]
+        if overwrite:
+            for ordering_type_id in enabled_ordering_type_ids:
+                ordering_dir = self.run_dir / self._ordering_dir_name(ordering_type_id)
+                if ordering_dir.exists():
+                    shutil.rmtree(ordering_dir)
         
         for idx, dataset_cfg in enumerate(self.datasets, 1):
             self.logger.info("")
             self.logger.info(f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}")
+
+            ordering_types_all = self._get_enabled_ordering_types()
+            ordering_types_needed: List[TokenOrderingType] = []
+            for ordering_type in ordering_types_all:
+                ordering_dir = self.run_dir / self._ordering_dir_name(ordering_type.ordering_type_id)
+                dataset_dir = ordering_dir / dataset_cfg.name
+                if (not overwrite) and (dataset_dir / "orderings.json").exists():
+                    continue
+                ordering_types_needed.append(ordering_type)
+
+            if not ordering_types_needed:
+                self.logger.info("All ordering outputs already exist; skipping.")
+                continue
             
             if use_in_memory:
                 # Use in-memory tensors
@@ -1352,12 +1337,11 @@ class DiffMiningMethod(DiffingMethod):
                      
                 attention_mask = torch.load(mask_path, map_location="cpu")
 
-            ordering_types = self._get_enabled_ordering_types()
             result = self.compute_stats_from_logits(
                 dataset_cfg=dataset_cfg,
                 attention_mask=attention_mask,
                 logit_diff=logit_diff,  # Pass pre-computed diff
-                ordering_types=ordering_types,
+                ordering_types=ordering_types_needed,
             )
             stats = result.shared_stats
             self.logger.info("Running token ordering types...")
@@ -1365,7 +1349,7 @@ class DiffMiningMethod(DiffingMethod):
                 run_dir=self.run_dir,
                 dataset_name=dataset_cfg.name,
                 stats=stats,
-                ordering_types=ordering_types,
+                ordering_types=ordering_types_needed,
             )
             all_ordering_results[dataset_cfg.name] = dataset_ordering_results
             self.logger.info(f"Wrote {len(dataset_ordering_results)} ordering type(s)")
@@ -1384,11 +1368,39 @@ class DiffMiningMethod(DiffingMethod):
         # Generate plots for all orderings
         self.run_compute_plots(all_ordering_results)
 
+    def _any_ordering_needed(self) -> bool:
+        """Check whether at least one ordering needs to be computed.
+
+        Returns True if any dataset x ordering-type combination is missing
+        its orderings.json on disk, or if overwrite is enabled.
+        """
+        if bool(self.method_cfg.overwrite):
+            return True
+
+        run_dir = self.base_results_dir / self._get_run_folder_name()
+        if not run_dir.exists():
+            return True
+
+        for dataset_cfg in self.datasets:
+            for method_name in self.ordering_methods:
+                ordering_dir_name = self._ordering_dir_name(method_name)
+                dataset_dir = run_dir / ordering_dir_name / dataset_cfg.name
+                if not (dataset_dir / "orderings.json").exists():
+                    return True
+
+        return False
+
     def preprocess(self, delete_raw: bool = True) -> None:
         """
         Preprocessing Phase: Data Prep, Model Inference, and Diff Computation.
         Saves {dataset}_logit_diff.pt and optionally deletes raw logits.
         """
+        if not self._any_ordering_needed():
+            self.logger.info(
+                "All orderings already exist for all datasets. Skipping extraction."
+            )
+            return
+
         self.logger.info("=" * 80)
         self.logger.info("DIFF MINING: PREPROCESSING")
         self.logger.info("=" * 80)
@@ -1523,8 +1535,7 @@ class DiffMiningMethod(DiffingMethod):
         """
         Find all available diff mining results.
 
-        Detects both old schema (analysis_* folders with *_occurrence_rates.json)
-        and new schema (run_* folders with <ordering_type>/*/orderings.json).
+        Detects deterministic run folders with <ordering_dir>/*/orderings.json.
 
         Returns:
             Dict mapping {model: {organism_variant_name: path_to_results}}
@@ -1551,36 +1562,53 @@ class DiffMiningMethod(DiffingMethod):
                 # Look for method directories: diff_mining_{samples}samples_{tokens}tokens...
                 for method_dir in organism_dir.iterdir():
                     if method_dir.is_dir() and method_dir.name.startswith("diff_mining"):
-                        # Check for new schema first: run_* folders with orderings.json
                         run_folders = sorted(
-                            [d for d in method_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
+                            [
+                                d
+                                for d in method_dir.iterdir()
+                                if d.is_dir() and re.match(r"seed[0-9]+_top[0-9]+$", d.name)
+                            ],
                             key=lambda x: x.stat().st_mtime,
-                            reverse=True
+                            reverse=True,
                         )
                         for run_folder in run_folders:
-                            # Check for new schema: ordering type directories with orderings.json
-                            has_orderings = any(
-                                list(run_folder.glob("*/*/orderings.json"))
-                            )
-                            if has_orderings:
+                            if list(run_folder.glob("*/*/orderings.json")):
                                 results[model_name][organism_name] = str(run_folder)
-                                break
-                        
-                        if organism_name in results.get(model_name, {}):
-                            continue  # Found new schema, skip old
-                        
-                        # Fall back to old schema: analysis_* folders with *_occurrence_rates.json
-                        analysis_folders = sorted(
-                            [d for d in method_dir.iterdir() if d.is_dir() and d.name.startswith("analysis_")],
-                            key=lambda x: x.stat().st_mtime,
-                            reverse=True
-                        )
-                        for analysis_folder in analysis_folders:
-                            if list(analysis_folder.glob("*_occurrence_rates.json")):
-                                results[model_name][organism_name] = str(analysis_folder)
                                 break
 
         return results
+
+    @property
+    def relevant_cfg_hash(self) -> str:
+        """Semantic config suffix encoding the effective agent overview selection.
+
+        Encodes ordering type, extraction method/layer, token budget, and dataset
+        scope so that evaluation runs with different overview configs produce
+        distinct output directories.
+        """
+        overview_cfg = self.method_cfg.agent.overview
+
+        ordering_type = str(overview_cfg.ordering_type)
+        ordering_tag = ordering_type.replace("top_k_occurring", "topk_occurring")
+
+        extraction_method = str(overview_cfg.extraction_method)
+        extraction_tag = extraction_method
+        if extraction_method in {"logit_lens", "patchscope_lens"}:
+            layer_str = str(float(overview_cfg.extraction_layer)).replace(".", "p")
+            extraction_tag += f"_l{layer_str}"
+
+        top_k_tokens = int(overview_cfg.top_k_tokens)
+
+        datasets = list(overview_cfg.datasets)
+        if datasets:
+            ds_tag = "ds_" + "+".join(str(d) for d in sorted(datasets))
+        else:
+            ds_tag = "ds_auto"
+
+        raw = f"{ordering_tag}-{extraction_tag}-k{top_k_tokens}-{ds_tag}"
+        sanitized = re.sub(r"[^A-Za-z0-9._-]", "-", raw)
+        sanitized = re.sub(r"-{2,}", "-", sanitized)
+        return sanitized
 
     def get_agent(self) -> DiffingMethodAgent:
         from .agents import DiffMiningAgent
