@@ -15,7 +15,7 @@ method_params:
       layer: 0.5  # relative layer in [0, 1]
     patchscope_lens:
       layer: 0.5  # relative layer in [0, 1]
-      position_batch_size: 8
+      position_batch_size: 128
       patch_prompt: "man -> man\n1135 -> 1135\nhello -> hello\n?"
       index_to_patch: -1
 
@@ -29,7 +29,7 @@ method_params:
   # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
   # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
   token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
-  batch_size: 16 
+  batch_size: 16
   max_samples: 2048 
   max_tokens_per_sample: 64 #70 #200 #800 #0 #5
   top_k: 100

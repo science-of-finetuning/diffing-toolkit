@@ -9,6 +9,7 @@ orderings (e.g., NMF produces one per topic).
 from __future__ import annotations
 
 import json
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -326,7 +327,7 @@ class NmfOrderingType(TokenOrderingType):
             )
         
         # Run NMF clustering
-        topic_token_matrix, pairwise_metrics = self._run_nmf()
+        topic_token_matrix, pairwise_metrics, topic_metrics = self._run_nmf()
         
         if topic_token_matrix is None:
             return OrderingTypeResult(
@@ -367,11 +368,16 @@ class NmfOrderingType(TokenOrderingType):
                     extra={"nmf_col_idx": col_idx},
                 ))
             
-            orderings.append(Ordering(
-                ordering_id=f"topic_{topic_idx}",
-                display_label=f"Topic {topic_idx}",
-                tokens=tokens,
-            ))
+            ordering_id = f"topic_{topic_idx}"
+            ordering_metrics = topic_metrics.get(ordering_id, {})
+            orderings.append(
+                Ordering(
+                    ordering_id=ordering_id,
+                    display_label=f"Topic {topic_idx}",
+                    tokens=tokens,
+                    metadata={**ordering_metrics},
+                )
+            )
         
         return OrderingTypeResult(
             ordering_type_id=self.ordering_type_id,
@@ -383,6 +389,7 @@ class NmfOrderingType(TokenOrderingType):
                 "beta": self.config.beta,
                 "mode": self.config.mode,
                 "pairwise": pairwise_metrics,
+                "topic_metrics": [topic_metrics[f"topic_{i}"] for i in range(self.config.num_topics)],
             },
         )
 
@@ -449,7 +456,7 @@ class NmfOrderingType(TokenOrderingType):
                 self.nmf_data["cols"].append(col_idx)
                 self.nmf_data["values"].append(val)
     
-    def _run_nmf(self) -> Tuple[Optional[torch.Tensor], Dict[str, Any]]:
+    def _run_nmf(self) -> Tuple[Optional[torch.Tensor], Dict[str, Any], Dict[str, Dict[str, Any]]]:
         """Run NMF fitting on the collected data."""
         import scipy.sparse
         from torchnmf.nmf import NMF
@@ -459,11 +466,13 @@ class NmfOrderingType(TokenOrderingType):
         num_cols = self.nmf_data["next_col_idx"]
         
         if num_rows == 0 or num_cols == 0:
-            return None, {}
+            return None, {}, {}
         
+        W_nmf: torch.Tensor
+        H_nmf: torch.Tensor
         if self.config.orthogonal:
             with torch.enable_grad():
-                W_nmf, _H_nmf = fit_nmf_orthogonal(
+                W_nmf, H_nmf = fit_nmf_orthogonal(
                     torch.tensor(
                         scipy.sparse.coo_matrix(
                             (self.nmf_data["values"], (self.nmf_data["rows"], self.nmf_data["cols"])),
@@ -489,7 +498,7 @@ class NmfOrderingType(TokenOrderingType):
             V_keep = V_vals > 0
             
             if not bool(V_keep.any().item()):
-                return None, {}
+                return None, {}, {}
             
             V = torch.sparse_coo_tensor(
                 V_raw.indices()[:, V_keep],
@@ -508,8 +517,12 @@ class NmfOrderingType(TokenOrderingType):
                 nmf.fit(V, beta=self.config.beta, verbose=True, max_iter=200)
             
             W_nmf = nmf.W.detach().cpu()
-            _H_nmf = nmf.H.detach().cpu()
+            H_nmf = nmf.H.detach().cpu()
         
+        assert W_nmf.ndim == 2 and H_nmf.ndim == 2
+        assert W_nmf.shape == (num_cols, self.config.num_topics)
+        assert H_nmf.shape == (num_rows, self.config.num_topics)
+
         # topic_token_matrix: [num_topics, num_tokens]
         topic_token_matrix = W_nmf.T
         
@@ -521,8 +534,51 @@ class NmfOrderingType(TokenOrderingType):
         pairwise_metrics = {
             "cosine_similarity": cosine_sim.tolist(),
         }
-        
-        return topic_token_matrix, pairwise_metrics
+
+        topic_metrics = self._compute_topic_metrics(
+            W_nmf=W_nmf,
+            H_nmf=H_nmf,
+            num_rows=num_rows,
+            num_cols=num_cols,
+        )
+        return topic_token_matrix, pairwise_metrics, topic_metrics
+
+    def _compute_topic_metrics(
+        self,
+        *,
+        W_nmf: torch.Tensor,
+        H_nmf: torch.Tensor,
+        num_rows: int,
+        num_cols: int,
+    ) -> Dict[str, Dict[str, Any]]:
+        colsum_w = W_nmf.sum(dim=0)
+        assert bool((colsum_w > 0).all().item())
+
+        mass = H_nmf.sum(dim=0) * colsum_w
+        contributions = H_nmf * colsum_w[None, :]
+        dominant = torch.argmax(contributions, dim=1)
+        counts = torch.bincount(dominant, minlength=int(self.config.num_topics)).float()
+        prevalence = counts / float(num_rows)
+
+        if num_cols == 1:
+            concentration = torch.ones((self.config.num_topics,), dtype=torch.float32)
+        else:
+            W_norm = W_nmf / colsum_w[None, :]
+            p = W_norm.clamp(min=1e-12)
+            entropy = -(p * torch.log(p)).sum(dim=0)
+            entropy_norm = entropy / float(math.log(num_cols))
+            concentration = 1.0 - entropy_norm
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for topic_idx in range(self.config.num_topics):
+            ordering_id = f"topic_{topic_idx}"
+            out[ordering_id] = {
+                "nmf_topic_idx": int(topic_idx),
+                "nmf_topic_mass": float(mass[topic_idx].item()),
+                "nmf_topic_prevalence": float(prevalence[topic_idx].item()),
+                "nmf_topic_concentration": float(concentration[topic_idx].item()),
+            }
+        return out
 
 
 # ============================================================================

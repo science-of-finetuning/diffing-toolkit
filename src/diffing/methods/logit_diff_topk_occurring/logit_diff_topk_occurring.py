@@ -5,7 +5,7 @@ This module computes occurrence rates of tokens in the top-K positive and negati
 logit differences between a base model and a finetuned model.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Tuple, Any, List, Optional
 from pathlib import Path
 import torch
 import gc

@@ -8,6 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from pathlib import Path
 import json
+import re
 import torch
 import matplotlib
 import matplotlib.pyplot as plt
@@ -42,32 +43,38 @@ def visualize(method):
     if not run_dirs and not analysis_dirs:
         st.info("No results found. Please run the analysis first.")
         return
-    
-    # Combine and sort by modification time
-    all_dirs = []
-    for d in run_dirs:
-        all_dirs.append(("run", d))
-    for d in analysis_dirs:
-        all_dirs.append(("analysis", d))
-    all_dirs.sort(key=lambda x: x[1].stat().st_mtime, reverse=True)
-    
-    # Run/Analysis selector
-    dir_options = {_format_run_label(d, dtype): d for dtype, d in all_dirs}
-    selected_label = st.selectbox(
-        "Select Run",
-        list(dir_options.keys()),
-        key="run_select"
-    )
-    selected_dir = dir_options[selected_label]
-    method.analysis_dir = selected_dir
-    
-    # Detect schema type
-    is_new_schema = _is_new_schema(selected_dir)
-    
-    if is_new_schema:
-        _render_new_schema_ui(method, selected_dir)
-    else:
-        _render_legacy_ui(method, selected_dir)
+
+    browse_tab, compare_tab = st.tabs(["Browse results", "Compare runs"])
+
+    with browse_tab:
+        # Combine and sort by modification time
+        all_dirs: List[Tuple[str, Path]] = []
+        for d in run_dirs:
+            all_dirs.append(("run", d))
+        for d in analysis_dirs:
+            all_dirs.append(("analysis", d))
+        all_dirs.sort(key=lambda x: x[1].stat().st_mtime, reverse=True)
+
+        # Run/Analysis selector
+        dir_options = {_format_run_label(d, dtype): d for dtype, d in all_dirs}
+        selected_label = st.selectbox(
+            "Select Run",
+            list(dir_options.keys()),
+            key="run_select",
+        )
+        selected_dir = dir_options[selected_label]
+        method.analysis_dir = selected_dir
+
+        # Detect schema type
+        is_new_schema = _is_new_schema(selected_dir)
+
+        if is_new_schema:
+            _render_new_schema_ui(method, selected_dir)
+        else:
+            _render_legacy_ui(method, selected_dir)
+
+    with compare_tab:
+        _render_cross_run_comparison(method)
 
 
 def _list_method_variant_dirs(method) -> List[Path]:
@@ -137,6 +144,22 @@ def _format_run_label(d: Path, dtype: str) -> str:
         layer = meta.get("logit_lens_layer", None)
         if extraction == "logit_lens" and layer is not None:
             extraction_str = f"{extraction}@{layer}"
+        elif extraction == "patchscope_lens":
+            patchscope_layer = meta.get("patchscope_lens_layer", None)
+            if patchscope_layer is None:
+                patchscope_layer = meta.get("patchscope_lens_layer_relative", None)
+            if patchscope_layer is None:
+                method_dir_name = d.parent.name
+                m = re.search(
+                    r"_logit_extraction_patchscope_lens_layer_(?P<layer>[0-9]+(?:p[0-9]+)?)",
+                    method_dir_name,
+                )
+                if m:
+                    patchscope_layer = m.group("layer").replace("p", ".")
+            if patchscope_layer is not None:
+                extraction_str = f"{extraction}@{patchscope_layer}"
+            else:
+                extraction_str = extraction
         elif extraction:
             extraction_str = extraction
         else:
@@ -182,14 +205,11 @@ def _render_new_schema_ui(method, run_dir: Path) -> None:
     if not datasets:
         st.warning(f"No datasets found for ordering type: {selected_ordering_name}")
         return
-    
-    # Tabs: Statistics | Data
-    tab_stats, tab_data = st.tabs(["📊 Statistics", "📋 Data"])
-    
-    with tab_stats:
+
+    stats_tab, data_tab = st.tabs(["Statistics", "Data"])
+    with stats_tab:
         _render_ordering_stats(ordering_type_dir, selected_ordering)
-    
-    with tab_data:
+    with data_tab:
         _render_ordering_data(method, ordering_type_dir, selected_ordering, datasets)
 
 
@@ -278,6 +298,35 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
         st.markdown("### Token relevance (grader)")
         st.info("No token relevance grading found for this ordering type.")
     
+    if ordering_info["id"] == "nmf" and "topic_metrics" in metadata:
+        topic_metrics = metadata.get("topic_metrics", [])
+        if isinstance(topic_metrics, list) and topic_metrics:
+            with st.expander("Topic Metrics", expanded=False):
+                df = pd.DataFrame(topic_metrics)
+                if "nmf_topic_idx" in df.columns:
+                    df = df.sort_values("nmf_topic_idx", ascending=True)
+                if "nmf_topic_prevalence" in df.columns:
+                    df["nmf_topic_prevalence_pct"] = 100.0 * df["nmf_topic_prevalence"].astype(float)
+                cols = [
+                    c
+                    for c in [
+                        "nmf_topic_idx",
+                        "nmf_topic_mass",
+                        "nmf_topic_prevalence_pct",
+                        "nmf_topic_concentration",
+                    ]
+                    if c in df.columns
+                ]
+                display_df = df[cols].copy()
+                rename = {
+                    "nmf_topic_idx": "Topic",
+                    "nmf_topic_mass": "Mass",
+                    "nmf_topic_prevalence_pct": "Prevalence (%)",
+                    "nmf_topic_concentration": "Concentration",
+                }
+                display_df = display_df.rename(columns=rename)
+                st.dataframe(display_df, hide_index=True, use_container_width=True)
+
     # Show type-specific metadata
     if "pairwise" in metadata:
         with st.expander("Pairwise Metrics", expanded=False):
@@ -287,7 +336,11 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
                 st.dataframe(np.array(pairwise["cosine_similarity"]))
     
     # Show any other metadata
-    other_keys = [k for k in metadata.keys() if k not in ["ordering_type_id", "display_name", "x_axis_label", "y_axis_label", "pairwise"]]
+    other_keys = [
+        k
+        for k in metadata.keys()
+        if k not in ["ordering_type_id", "display_name", "x_axis_label", "y_axis_label", "pairwise", "topic_metrics"]
+    ]
     if other_keys:
         with st.expander("Additional Metadata", expanded=False):
             for k in other_keys:
@@ -370,6 +423,16 @@ def _render_single_ordering(
     if not ordering:
         st.error(f"Could not load ordering: {ordering_id}")
         return
+
+    if (
+        "nmf_topic_mass" in ordering
+        and "nmf_topic_prevalence" in ordering
+        and "nmf_topic_concentration" in ordering
+    ):
+        cols = st.columns(3)
+        cols[0].metric("Topic mass", f"{float(ordering['nmf_topic_mass']):.4g}")
+        cols[1].metric("Prevalence", f"{100.0 * float(ordering['nmf_topic_prevalence']):.2f}%")
+        cols[2].metric("Concentration", f"{float(ordering['nmf_topic_concentration']):.3f}")
     
     tokens = ordering.get("tokens", [])
     if not tokens:
@@ -439,6 +502,342 @@ def _render_single_ordering(
             hide_index=True,
             use_container_width=True,
         )
+
+
+def _compute_relevance_counts_from_eval(
+    dataset_dir: Path,
+    ordering_id: str,
+    k_top: Optional[int] = None,
+) -> Optional[Tuple[int, int]]:
+    """Return (n_relevant, n_total) from {ordering_id}_eval.json if present."""
+    eval_data = read_ordering_eval(dataset_dir, ordering_id)
+    if not eval_data:
+        return None
+    labels = eval_data.get("labels", [])
+    if not labels:
+        return None
+    if k_top is not None:
+        k = int(k_top)
+        assert k >= 1
+        labels = labels[: min(k, len(labels))]
+    n_total = int(len(labels))
+    n_relevant = int(sum(lbl == "RELEVANT" for lbl in labels))
+    return n_relevant, n_total
+
+
+def _axis_label_for_run_dir(run_dir: Path) -> str:
+    meta_path = run_dir / "run_metadata.json"
+    meta: Dict[str, Any] = {}
+    if meta_path.exists():
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+
+    extraction = str(meta.get("logit_extraction_method", "")) if meta else ""
+    layer = meta.get("logit_lens_layer", None) if meta else None
+    if extraction == "logit_lens" and layer is not None:
+        extraction_str = f"{extraction}@{layer}"
+    elif extraction == "patchscope_lens":
+        patchscope_layer = None
+        if meta:
+            patchscope_layer = meta.get("patchscope_lens_layer", None)
+            if patchscope_layer is None:
+                patchscope_layer = meta.get("patchscope_lens_layer_relative", None)
+
+        if patchscope_layer is None:
+            # Existing runs do not store this in run_metadata.json; parse from method directory name.
+            method_dir_name = run_dir.parent.name
+            m = re.search(
+                r"_logit_extraction_patchscope_lens_layer_(?P<layer>[0-9]+(?:p[0-9]+)?)",
+                method_dir_name,
+            )
+            if m:
+                patchscope_layer = m.group("layer").replace("p", ".")
+
+        if patchscope_layer is not None:
+            extraction_str = f"{extraction}@{patchscope_layer}"
+        else:
+            extraction_str = extraction
+    elif extraction:
+        extraction_str = extraction
+    else:
+        extraction_str = "?"
+
+    return extraction_str
+
+
+def _dedupe_labels(labels: List[str]) -> List[str]:
+    seen: Dict[str, int] = {}
+    out: List[str] = []
+    for lbl in labels:
+        n = seen.get(lbl, 0)
+        if n == 0:
+            out.append(lbl)
+        else:
+            out.append(f"{lbl} ({n + 1})")
+        seen[lbl] = n + 1
+    return out
+
+
+def _compute_ordering_relevance_row(
+    *,
+    run_label: str,
+    dataset_dir: Path,
+    ordering_type_id: str,
+    aggregation_mode: Optional[str],
+    k_top: int,
+    adjust_for_multitopic: bool,
+) -> Optional[Dict[str, Any]]:
+    index = read_dataset_orderings_index(dataset_dir)
+    if not index:
+        return None
+
+    orderings_list = index.get("orderings", [])
+    if not orderings_list:
+        return None
+
+    if ordering_type_id != "nmf":
+        assert len(orderings_list) == 1, (
+            f"Expected exactly one ordering for ordering_type_id={ordering_type_id}, "
+            f"but found {len(orderings_list)} in {dataset_dir}"
+        )
+        ordering_id = str(orderings_list[0]["ordering_id"])
+        counts = _compute_relevance_counts_from_eval(dataset_dir, ordering_id, k_top=k_top)
+        if counts is None:
+            return None
+        n_relevant, n_total = counts
+        pct = 100.0 * float(n_relevant) / float(n_total)
+        return {
+            "run": run_label,
+            "% relevant": pct,
+            "relevant": n_relevant,
+            "total": n_total,
+        }
+
+    assert aggregation_mode is not None
+    k_per_topic = int(k_top)
+    if adjust_for_multitopic:
+        num_topics = int(len(orderings_list))
+        assert num_topics >= 1
+        k_per_topic = max(1, int(k_top) // num_topics)
+
+    per_topic: List[Dict[str, Any]] = []
+    for o in orderings_list:
+        ordering_id = str(o["ordering_id"])
+        counts = _compute_relevance_counts_from_eval(
+            dataset_dir, ordering_id, k_top=k_per_topic
+        )
+        if counts is None:
+            continue
+        n_relevant, n_total = counts
+        pct = 100.0 * float(n_relevant) / float(n_total)
+        per_topic.append(
+            {
+                "ordering_id": ordering_id,
+                "display_label": str(o.get("display_label", ordering_id)),
+                "n_relevant": n_relevant,
+                "n_total": n_total,
+                "pct": pct,
+            }
+        )
+    if not per_topic:
+        return None
+
+    if aggregation_mode == "Best-topic":
+        best = max(per_topic, key=lambda d: (d["pct"], d["ordering_id"]))
+        return {
+            "run": run_label,
+            "% relevant": float(best["pct"]),
+            "relevant": int(best["n_relevant"]),
+            "total": int(best["n_total"]),
+            "nmf_topic": str(best["display_label"]),
+        }
+    if aggregation_mode == "Concatenated":
+        n_relevant = int(sum(d["n_relevant"] for d in per_topic))
+        n_total = int(sum(d["n_total"] for d in per_topic))
+        pct = 100.0 * float(n_relevant) / float(n_total)
+        return {
+            "run": run_label,
+            "% relevant": pct,
+            "relevant": n_relevant,
+            "total": n_total,
+            "nmf_topic": "All topics (concatenated)",
+        }
+    raise AssertionError(f"Unexpected NMF aggregation: {aggregation_mode}")
+
+
+def _render_cross_run_comparison(method) -> None:
+    """
+    Compare token relevance fractions across multiple runs (independent of the currently-selected run).
+
+    Uses per-ordering `*_eval.json` files produced by the grading pipeline.
+    """
+    st.markdown("### Run comparison")
+
+    run_dirs = _list_run_dirs(method)
+    if not run_dirs:
+        st.info("No new-schema runs found to compare.")
+        return
+    
+    organism_variant = method.base_results_dir.parent.name
+
+    ordering_id_to_info: Dict[str, Dict[str, Any]] = {}
+    for run_dir in run_dirs:
+        for ot in _find_ordering_types(run_dir):
+            ordering_id_to_info.setdefault(str(ot["id"]), ot)
+
+    if not ordering_id_to_info:
+        st.info("No ordering types found across runs.")
+        return
+
+    ordering_ids_sorted = sorted(ordering_id_to_info.keys())
+    default_ordering_ids = [
+        oid for oid in ["topk_occurring", "nmf"] if oid in ordering_id_to_info
+    ]
+    if not default_ordering_ids:
+        default_ordering_ids = ordering_ids_sorted[:1]
+
+    selected_ordering_ids = st.multiselect(
+        "Token Ordering Types",
+        ordering_ids_sorted,
+        default=default_ordering_ids,
+        key="logit_diff_topk_occurring::cross_run_comparison::ordering_types",
+    )
+    if not selected_ordering_ids:
+        st.info("Select one or more ordering types to compare.")
+        return
+
+    # Dataset options are the union across runs for the selected ordering types.
+    dataset_set = set()
+    for run_dir in run_dirs:
+        for ordering_type_id in selected_ordering_ids:
+            ordering_dir = run_dir / ordering_type_id
+            if not ordering_dir.exists():
+                continue
+            for ds in _find_datasets_in_ordering(ordering_dir):
+                dataset_set.add(ds)
+    dataset_options = sorted(dataset_set)
+
+    if not dataset_options:
+        st.info("No datasets found for these ordering types across runs.")
+        return
+
+    dataset_name = st.selectbox(
+        "Dataset",
+        dataset_options,
+        key="logit_diff_topk_occurring::cross_run_comparison::dataset",
+    )
+
+    top_k_tokens = int(
+        st.number_input(
+            "Top-K tokens to consider",
+            min_value=1,
+            max_value=500,
+            value=100,
+            step=1,
+            help="For each ordering, compute % relevant using only the first K graded tokens.",
+            key="logit_diff_topk_occurring::cross_run_comparison::k_top",
+        )
+    )
+    adjust_for_multitopic = bool(
+        st.checkbox(
+            "Adjust for multitopic (NMF)",
+            value=False,
+            help="For NMF topics, use K/num_topics tokens per topic before selecting best-topic.",
+            key="logit_diff_topk_occurring::cross_run_comparison::adjust_multitopic",
+        )
+    )
+
+    def _run_label(run_dir: Path) -> str:
+        base = _format_run_label(run_dir, "run")
+        variant = run_dir.parent.name
+        return f"{base} | {variant}/{run_dir.name}"
+
+    run_label_to_dir = {_run_label(d): d for d in run_dirs}
+    default_labels = list(run_label_to_dir.keys())[:2]
+    selected_run_labels = st.multiselect(
+        "Select runs",
+        list(run_label_to_dir.keys()),
+        default=default_labels,
+        key=f"logit_diff_topk_occurring::cross_run_comparison::runs::{dataset_name}",
+    )
+
+    if not selected_run_labels:
+        st.info("Select one or more runs to compare.")
+        return
+
+    rows: List[Dict[str, Any]] = []
+    skipped: List[str] = []
+    for run_label in selected_run_labels:
+        run_dir = run_label_to_dir[run_label]
+        for ordering_type_id in selected_ordering_ids:
+            dataset_dir = run_dir / ordering_type_id / dataset_name
+            nmf_aggregation = "Best-topic" if ordering_type_id == "nmf" else None
+            row = _compute_ordering_relevance_row(
+                run_label=run_label,
+                dataset_dir=dataset_dir,
+                ordering_type_id=ordering_type_id,
+                aggregation_mode=nmf_aggregation,
+                k_top=top_k_tokens,
+                adjust_for_multitopic=adjust_for_multitopic,
+            )
+            if row is None:
+                skipped.append(f"{run_label} | {ordering_type_id}")
+                continue
+            display_name = str(ordering_id_to_info[ordering_type_id]["display_name"])
+            if ordering_type_id == "nmf":
+                display_name = "NMF (best-topic)"
+            row["ordering_type"] = display_name
+            rows.append(row)
+
+    if skipped:
+        st.warning(
+            "Skipping runs missing grading for this dataset/ordering type:\n"
+            + "\n".join(f"- {s}" for s in skipped)
+        )
+
+    if not rows:
+        st.info("No comparable runs found (missing grading outputs).")
+        return
+
+    df = pd.DataFrame(rows).copy()
+
+    run_scores = df.groupby("run", as_index=False)["% relevant"].max().sort_values(
+        "% relevant", ascending=False
+    )
+    run_order = run_scores["run"].tolist()
+    axis_base_labels = [_axis_label_for_run_dir(run_label_to_dir[r]) for r in run_order]
+    axis_labels = _dedupe_labels(axis_base_labels)
+    short_by_run = dict(zip(run_order, axis_labels))
+    df["run_short"] = df["run"].map(short_by_run)
+    df = df.sort_values(["run_short", "ordering_type"], ascending=[True, True])
+
+    hover_cols = [c for c in df.columns if c not in {"% relevant", "run_short"}]
+    fig = px.bar(
+        df,
+        x="run_short",
+        y="% relevant",
+        color="ordering_type",
+        barmode="group",
+        text="% relevant",
+        hover_data=hover_cols,
+        category_orders={
+            "run_short": [short_by_run[r] for r in run_order],
+        },
+    )
+    fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig.update_layout(
+        title_text=str(organism_variant),
+        title_x=0.5,
+        yaxis_range=[0, 100],
+        xaxis_title=None,
+        xaxis_tickangle=-30,
+        height=450,
+        legend_title_text=None,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    display_df = df.drop(columns=["run_short"])
+    st.dataframe(display_df, hide_index=True, use_container_width=True)
 
 
 # ============================================================================
