@@ -93,12 +93,13 @@ DATASETS = [
 # Defaults (can be overridden via CLI)
 DEFAULT_MODEL = "gemma3_1B"  # Options: "gemma3_1B", "llama32_1B_Instruct", "qwen3_1_7B"
 DEFAULT_ORGANISM = "cake_bake"
-ORGANISM_VARIANT = "mix1-0p5"  # Fixed variant for token positions experiments
+DEFAULT_ORGANISM_VARIANT = "mix1-0p5"
 INFRASTRUCTURE = "mats_cluster"  # Options: "runpod" or "mats_cluster"
 
 # These are set from CLI args in main()
 MODEL = DEFAULT_MODEL
 ORGANISM = DEFAULT_ORGANISM
+ORGANISM_VARIANT = DEFAULT_ORGANISM_VARIANT
 
 # Derive DIFFING_TOOLKIT_DIR from script location (works on any infrastructure)
 SCRIPT_DIR = Path(__file__).resolve().parent  # .../logit_diff_experiments/
@@ -843,7 +844,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 
 
 def main():
-    global MODEL, ORGANISM, OUTPUT_DIR
+    global MODEL, ORGANISM, ORGANISM_VARIANT, OUTPUT_DIR
 
     parser = argparse.ArgumentParser(description="Token Positions Experiment Script")
     parser.add_argument(
@@ -863,6 +864,11 @@ def main():
         help=f"Organism to use (default: {DEFAULT_ORGANISM})",
     )
     parser.add_argument(
+        "--organism-variant",
+        default=DEFAULT_ORGANISM_VARIANT,
+        help=f"Organism variant to use (default: {DEFAULT_ORGANISM_VARIANT})",
+    )
+    parser.add_argument(
         "--array-job",
         action="store_true",
         help="Run as SLURM array job: uses SLURM_ARRAY_TASK_ID to run single experiment",
@@ -876,6 +882,7 @@ def main():
 
     MODEL = args.model
     ORGANISM = args.organism
+    ORGANISM_VARIANT = args.organism_variant
     TOKEN_RELEVANCE_CONFIG["overwrite"] = args.overwrite
     OUTPUT_DIR = (
         DIFFING_TOOLKIT_DIR

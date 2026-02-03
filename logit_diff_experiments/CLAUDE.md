@@ -66,6 +66,28 @@ This allows parallelizing across all parameter values instead of running sequent
 
 This launches 4 array jobs (one per experiment type), each with tasks for all parameter combinations. Much faster but uses more cluster resources.
 
+### Single Test Job (manual)
+
+To test a single experiment before launching full arrays:
+
+```bash
+sbatch --partition=compute --time=4:00:00 --gpus=1 --cpus-per-task=8 --mem=64G \
+    --array=0-0 \
+    -J "test_tokpos" \
+    --output="logs/test_token_positions_%A_%a.out" \
+    --wrap="uv run python logit_diff_experiments/run_token_positions_experiments.py \
+        --model qwen3_14B \
+        --organism auditing_agents_secret_loyalty \
+        --organism-variant transcripts_kto \
+        --mode full \
+        --array-job"
+```
+
+Key points:
+- `--array=0-0` runs only task 0 (first experiment: seed=42, first parameter value)
+- `--organism-variant` overrides the default variant (e.g., `transcripts_kto`, `synth_docs_high`)
+- Check available variants in `configs/organism/<organism>.yaml`
+
 ## Results
 
 Results are saved to:
