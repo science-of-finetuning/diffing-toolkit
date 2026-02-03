@@ -11,8 +11,8 @@ from loguru import logger
 from nnterp import StandardizedTransformer
 from tqdm import tqdm
 
-from src.utils.activations import get_layer_indices
-from src.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.data import load_dataset_from_hub_or_local
 
 from .util import dataset_dir_name, load_position_mean_vector
 
@@ -226,14 +226,14 @@ def _compute_nll(
                     L,
                     nn_model.config.vocab_size,
                 ), f"logits.shape: {logits.shape}, B: {B}, L: {L}, vocab_size: {nn_model.config.vocab_size}"
-        return _nll(logits, input_ids), activations
+        return _nll(logits, input_ids.to(logits.device)), activations
     else:
         with torch.inference_mode():
-            outputs = nn_model(
-                input_ids=input_ids, attention_mask=attention_mask, use_cache=False
-            )
-            logits = outputs.logits
-        return _nll(logits, input_ids)
+            with nn_model.trace(
+                input_ids, attention_mask=attention_mask, use_cache=False
+            ):
+                logits = nn_model.logits.save()
+        return _nll(logits, input_ids.to(logits.device))
 
 
 @torch.no_grad()
@@ -299,7 +299,7 @@ def _compute_nll_intervened(
                     activations - (proj_coeff * v.view(1, 1, -1))
                 ).to(dt)
             logits = nn_model.logits.save()
-        nll = _nll(logits, input_ids)
+        nll = _nll(logits, input_ids.to(logits.device))
         del logits
     return nll.cpu()
 
@@ -1388,5 +1388,4 @@ def run_causal_effect(method: Any) -> None:
             logger.info(f"Saved causal effect results to {out_path}")
 
         # Release resources for this evaluation group
-        del model
         torch.cuda.empty_cache()

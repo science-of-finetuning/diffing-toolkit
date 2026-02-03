@@ -7,71 +7,10 @@ including different activation patterns, sequence lengths, and latent configurat
 
 import pytest
 import torch
-import sys
-from pathlib import Path
-from unittest.mock import Mock, MagicMock
 
-from src.utils.dictionary.latent_activations import get_positive_activations
-from src.utils.cache import SampleCache
+from diffing.utils.dictionary.latent_activations import get_positive_activations
 
-
-class MockDictionaryModel:
-    """Mock dictionary model for testing."""
-
-    def __init__(self, dict_size, activation_dim, device="cpu", dtype=torch.float32):
-        self.dict_size = dict_size
-        self.activation_dim = activation_dim
-        self.device = device
-        self.dtype = dtype
-
-    def get_activations(self, activations):
-        """
-        Mock get_activations that returns predictable patterns for testing.
-
-        Args:
-            activations: Tensor of shape (seq_len, activation_dim)
-
-        Returns:
-            Tensor of shape (seq_len, dict_size) with latent activations
-        """
-        seq_len = activations.shape[0]
-        # Create a predictable pattern: make some activations positive based on position
-        latent_acts = torch.zeros(
-            seq_len, self.dict_size, device=activations.device, dtype=self.dtype
-        )
-
-        # Pattern: activation i activates latent (i % dict_size) with value (i + 1) / 10
-        for i in range(seq_len):
-            latent_idx = i % self.dict_size
-            latent_acts[i, latent_idx] = (i + 1) / 10.0
-
-        return latent_acts
-
-
-class MockSampleCache:
-    """Mock SampleCache for testing."""
-
-    def __init__(self, sequences_data, activation_dim=32, device="cpu"):
-        """
-        Args:
-            sequences_data: List of tuples (tokens, seq_length) defining each sequence
-            activation_dim: Dimension of activation vectors
-            device: Device for tensors
-        """
-        self.sequences_data = sequences_data
-        self.activation_dim = activation_dim
-        self.device = device
-
-    def __len__(self):
-        return len(self.sequences_data)
-
-    def __getitem__(self, index):
-        tokens, seq_length = self.sequences_data[index]
-
-        # Create mock activations - each position gets a different activation vector
-        activations = torch.randn(seq_length, self.activation_dim, device=self.device)
-
-        return tokens, activations
+from conftest import MockDictionaryModel, MockSampleCache
 
 
 class TestGetPositiveActivations:

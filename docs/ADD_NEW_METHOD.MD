@@ -1,7 +1,7 @@
 ### How to add a new diffing method
 
 This guide shows how to add a new method under `src/diffing/methods`, wire up its configuration under `configs/diffing/method`, and run it. See the existing implementations for reference:
-- Minimal example without a dashboard: `src/diffing/methods/talkative_probe/talkative_probe.py`
+- Minimal example without a dashboard: `src/diffing/methods/activation_oracle/activation_oracle.py`
 - More elaborate example with a dashboard: `src/diffing/methods/activation_difference_lens/act_diff_lens.py`
 
 
@@ -60,7 +60,7 @@ class MyNewMethod(DiffingMethod):
 ```
 
 References:
-- `src/diffing/methods/talkative_probe/talkative_probe.py` for a compact example
+- `src/diffing/methods/activation_oracle/activation_oracle.py` for a compact example
 - `src/diffing/methods/activation_difference_lens/act_diff_lens.py` for a full method with caching, analysis, and a UI
 
 
@@ -137,6 +137,10 @@ python main.py diffing/method=my_new_method model=qwen3_1_7B organism=cake_bake_
 - Put durable outputs under `Path(cfg.diffing.results_dir) / "<your_method_name>"`.
 - Follow existing config keys and naming where convenient to leverage common tooling.
 - Use `relevant_cfg_hash` to tag result and agent output filenames when config changes should produce distinct outputs.
-- For a minimal starting point, study `TalkativeProbeMethod`; for richer patterns (caching, analysis steps, visualization), study `ActDiffLens`.
+- For a minimal starting point, study `ActivationOracleMethod`; for richer patterns (caching, analysis steps, visualization), study `ActDiffLens`.
 
 
+## 5) Add test coverage for your method
+
+- In `tests/integration/test_method_run.py`, add a test for your method (don't forget to add the chat template to the tokenizer)
+- Optionally, add tests for your different functions used in your method in a separate file

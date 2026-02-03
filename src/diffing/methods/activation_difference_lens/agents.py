@@ -11,8 +11,8 @@ from .agent_tools import (
     _abs_layers_from_rel,
     generate_steered,
 )
-from src.utils.agents import BlackboxAgent, DiffingMethodAgent
-from src.utils.agents.prompts import POST_OVERVIEW_PROMPT
+from diffing.utils.agents import BlackboxAgent, DiffingMethodAgent
+from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
 
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset, per-layer summaries:
@@ -70,11 +70,20 @@ INTERACTION_EXAMPLES = """
 
 
 class ADLAgent(DiffingMethodAgent):
+    """Agent for investigating activation difference lens (ADL) analysis results.
+
+    Provides the agent with an overview of logit lens, patchscope, and steering results,
+    plus tools to drill down into details and generate additional steered samples.
+    """
+
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
     
+    # Store dataset mapping for later retrieval
+    _dataset_mapping: Dict[str, str] = None
+
     # Store dataset mapping for later retrieval
     _dataset_mapping: Dict[str, str] = None
 
@@ -86,15 +95,19 @@ class ADLAgent(DiffingMethodAgent):
         """Return the dataset name mapping (anonymized -> real)."""
         return self._dataset_mapping or {}
 
+    def get_dataset_mapping(self) -> Dict[str, str]:
+        """Return the dataset name mapping (anonymized -> real)."""
+        return self._dataset_mapping or {}
+
     def build_first_user_message(self, method: Any) -> str:
         import json as _json
 
         overview_cfg = self.cfg.diffing.method.agent.overview
         overview_payload, dataset_mapping = get_overview(method, overview_cfg)
-        
+
         # Store mapping for later retrieval
         self._dataset_mapping = dataset_mapping
-        
+
         return (
             "OVERVIEW:"
             + "\n"
@@ -181,13 +194,22 @@ class ADLAgent(DiffingMethodAgent):
 
 
 class ADLBlackboxAgent(BlackboxAgent):
-    # Store dataset mapping for later retrieval
+    """Baseline agent that only sees finetuned model generations without ADL analysis.
+
+    Used as a control to compare against ADLAgent. Only provides unsteered generations
+    from the finetuned model, without any activation difference analysis tools.
+    """
+
     _dataset_mapping: Dict[str, str] = None
-    
+
     @property
     def name(self) -> str:
         return "Blackbox"
     
+    def get_dataset_mapping(self) -> Dict[str, str]:
+        """Return the dataset name mapping (anonymized -> real)."""
+        return self._dataset_mapping or {}
+
     def get_dataset_mapping(self) -> Dict[str, str]:
         """Return the dataset name mapping (anonymized -> real)."""
         return self._dataset_mapping or {}
@@ -221,6 +243,12 @@ class ADLBlackboxAgent(BlackboxAgent):
             datasets = [f"{d}" for d in ds_set]
             assert len(datasets) > 0
         
+        # Create dataset name mapping for blinding
+        dataset_mapping: Dict[str, str] = {}
+        for i, ds in enumerate(datasets, start=1):
+            dataset_mapping[f"ds{i}"] = ds
+        self._dataset_mapping = dataset_mapping
+
         # Create dataset name mapping for blinding
         dataset_mapping: Dict[str, str] = {}
         for i, ds in enumerate(datasets, start=1):

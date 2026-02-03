@@ -1,0 +1,19 @@
+# @package organism
+# Test organism for integration tests - uses GPT-2 with alpaca LoRA
+name: test_alpaca_lora
+description: Test organism for integration tests
+type: test
+description_long: |
+  GPT-2 finetuned with alpaca-lora adapter for testing diffing pipelines.
+  This is a minimal test case that runs quickly on small GPUs.
+
+dataset:
+  id: Butanium/femto-ultrachat
+  splits: [train]
+  is_chat: true
+  text_column: null
+
+finetuned_models:
+  gpt2:
+    default:
+      adapter_id: monsterapi/gpt2_alpaca-lora

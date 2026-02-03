@@ -80,7 +80,7 @@ analysis:
   latent_steering:
     enabled: true
     overwrite: false
-    prompts_file: "resources/steering_prompts.txt"
+    prompts_file: "resources/steering_prompts_closed.txt"
     target_column: "dec_norm_diff"
     k: 10
     largest: false

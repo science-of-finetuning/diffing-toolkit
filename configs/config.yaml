@@ -99,6 +99,7 @@ hf_name: science-of-finetuning
 diffing:
   results_base_dir: ${infrastructure.storage.base_dir}/diffing_results
   results_dir: ${diffing.results_base_dir}/${model.name}/${organism.name}
+  gpu_memory_utilization: 0.95  # vLLM GPU memory fraction (lower for testing)
   
 # Variant selection - can be overridden via CLI
 organism_variant: default  # Which variant of the finetuned model to use

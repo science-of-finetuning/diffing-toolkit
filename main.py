@@ -15,9 +15,9 @@ from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 import dotenv
 
-from src.pipeline.diffing_pipeline import DiffingPipeline, get_method_class
-from src.pipeline.evaluation_pipeline import EvaluationPipeline
-from src.utils.configs import CONFIGS_DIR
+from diffing.pipeline.diffing_pipeline import DiffingPipeline, get_method_class
+from diffing.pipeline.evaluation_pipeline import EvaluationPipeline
+from diffing.utils.configs import CONFIGS_DIR
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -64,7 +64,7 @@ def run_preprocessing_pipeline(cfg: DictConfig) -> None:
     """Run the preprocessing pipeline to collect activations."""
     logger.info("Starting preprocessing pipeline...")
 
-    from src.pipeline.preprocessing import PreprocessingPipeline
+    from diffing.pipeline.preprocessing import PreprocessingPipeline
 
     if not cfg.diffing.method.requires_preprocessing:
         logger.info(

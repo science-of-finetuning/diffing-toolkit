@@ -13,7 +13,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.utils.interactive import load_hydra_config
+from diffing.utils.interactive import load_hydra_config
 
 import scienceplots as _scienceplots  # type: ignore[import-not-found]
 

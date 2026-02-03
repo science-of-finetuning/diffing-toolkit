@@ -1,7 +1,7 @@
 import torch as th
 from dictionary_learning import CrossCoder
 
-from src.utils.dictionary.latent_scaling import closed_form_scalars
+from diffing.utils.dictionary.latent_scaling import closed_form_scalars
 
 
 def _test_closed_form_scalars(
@@ -106,7 +106,7 @@ def _test_closed_form_scalars(
             self.dict_size = num_latent_vectors
             pass
 
-        def encode(self, x: th.Tensor) -> th.Tensor:
+        def encode(self, x: th.Tensor, **kwargs) -> th.Tensor:
             out = self.ground_truth_latent_activations[self.batch_index, :]
             self.batch_index += 1
             return out
@@ -155,6 +155,7 @@ def _test_closed_form_scalars(
 import pytest
 
 
+@pytest.mark.skipif(not th.cuda.is_available(), reason="CUDA not available")
 class TestClosedFormScalars:
     """Test suite for closed_form_scalars function."""
 

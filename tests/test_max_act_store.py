@@ -18,7 +18,7 @@ import shutil
 from pathlib import Path
 import sqlite3
 
-from src.utils.max_act_store import (
+from diffing.utils.max_act_store import (
     MaxActStore,
     AsyncMaxActStoreWriter,
     ReadOnlyMaxActStore,
@@ -41,8 +41,8 @@ def temp_db_path():
     temp_dir = tempfile.mkdtemp()
     db_path = Path(temp_dir) / "test.db"
     yield db_path
-    # Cleanup
-    shutil.rmtree(temp_dir)
+    # Cleanup - ignore_errors for NFS + SQLite WAL file race conditions
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
 # @package model
 name: deepseek_r1_distill_llama_70B
 model_id: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
-end_of_turn_token: </think>
+end_of_turn_token: <｜end▁of▁sentence｜>
 attn_implementation: null
 token_level_replacement: null
 dtype: bfloat16

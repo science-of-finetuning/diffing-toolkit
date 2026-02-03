@@ -1,8 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "diffing-toolkit"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.11.0",
     "adjustText>=1.3.0",
@@ -18,7 +22,7 @@ dependencies = [
     "omegaconf>=2.3.0",
     "openai>=2.7.1",
     "pandas>=2.3.3",
-    "peft==0.16.0",
+    "peft>=0.16.0",
     "scipy>=1.16.3",
     "streamlit>=1.51.0",
     "streamlit-tags>=1.2.1",
@@ -37,7 +41,15 @@ dependencies = [
     "vllm>=0.11.1",
     "seaborn>=0.13.2",
     "plotly>=6.5.0",
+    # "scribe-notebook",
+    # "claude-repl",
 ]
+
+[project.scripts]
+amplified-vllm = "diffing.cli.amplified_vllm:main"
+
+[project.entry-points."vllm.general_plugins"]
+lora_amplification_patch = "diffing.methods.amplification.amplification_config:patch_vllm"
 
 [project.optional-dependencies]
 dev = [
@@ -55,10 +67,20 @@ scripts = [
 # url = "https://wheels.vllm.ai/nightly"  # vllm nightly to check bugs
 
 [tool.uv.sources]
-dictionary-learning = { git = "https://github.com/science-of-finetuning/dictionary_learning.git" }
+# dictionary-learning = { path = "../crosscoder_learning", editable = true }
+dictionary-learning = { git = "https://github.com/science-of-finetuning/crosscoder_learning.git" }
 tiny-dashboard = { git = "https://github.com/Butanium/tiny-activation-dashboard.git" }
+# scribe-notebook = { path = "../research-libs/scribe-notebook", editable = true }
+# claude-repl = { path = "../research-libs/claude-repl", editable = true }
 
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = [ "tests" ]
-pythonpath = ["."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.4.0",
+]

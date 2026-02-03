@@ -15,8 +15,8 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors  # type: ignore[import-not-found]
 from matplotlib.lines import Line2D  # type: ignore[import-not-found]
 
-from src.utils.interactive import load_hydra_config
-from src.diffing.methods.activation_difference_lens.util import dataset_dir_name
+from diffing.utils.interactive import load_hydra_config
+from diffing.methods.activation_difference_lens.util import dataset_dir_name
 
 import scienceplots as _scienceplots  # type: ignore[import-not-found]
 
