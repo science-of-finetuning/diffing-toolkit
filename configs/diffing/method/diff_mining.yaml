@@ -5,37 +5,47 @@ requires_preprocessing: true
 # Debug: print first N text samples during data loading (null = disabled)
 debug_print_samples: 3
 
-# Method parameters
-method_params:
-  
-  # Logit extraction settings
-  logit_extraction:
-    method: patchscope_lens # logits, logit_lens, or patchscope_lens
-    logit_lens:
-      layer: 0.5  # relative layer in [0, 1]
-    patchscope_lens:
-      layer: 0.5  # relative layer in [0, 1]
-      position_batch_size: 128
-      patch_prompt: "man -> man\n1135 -> 1135\nhello -> hello\n?"
-      index_to_patch: -1
+# Logit extraction settings (single method)
+logit_extraction:
+  method: patchscope_lens # logits, logit_lens, or patchscope_lens
+  logits: {}
+  logit_lens:
+    layer: 0.5  # relative layer in [0, 1]
+  patchscope_lens:
+    layer: 0.5  # relative layer in [0, 1]
+    position_batch_size: 128
+    patch_prompt: "man -> man\n1135 -> 1135\nhello -> hello\n?"
+    index_to_patch: -1
 
+# Token ordering settings (multiple methods)
+token_ordering:
+  method: [topk_occurring, fraction_positive_diff, nmf]
+  topk_occurring: {}
+  fraction_positive_diff: {}
+  nmf:
+    enabled: true
+    num_topics: 3
+    top_n_tokens_per_topic: 200
+    mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
+    beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
+    orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
+    orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
 
+# In-memory mode: keep tensors in CPU RAM instead of saving to disk
+# Eliminates I/O but requires mode=full (preprocessing + diffing in same run)
+in_memory: true
 
-  # In-memory mode: keep tensors in CPU RAM instead of saving to disk
-  # Eliminates I/O but requires mode=full (preprocessing + diffing in same run)
-  in_memory: true
-  
-  # Token set selection mode: controls which tokens are passed to relevance grader and agent
-  # - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
-  # - fraction_positive_diff: tokens with highest fraction of positive logit diffs
-  token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
-  batch_size: 16
-  max_samples: 2048 
-  max_tokens_per_sample: 64 #70 #200 #800 #0 #5
-  top_k: 100
-  ignore_padding: true
-  max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
-  pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets only)
+# Token set selection mode: controls which tokens are passed to relevance grader and agent
+# - top_k_occurring: tokens that appear most often in top-K positive logit diffs (default)
+# - fraction_positive_diff: tokens with highest fraction of positive logit diffs
+token_set_selection_mode: top_k_occurring #top_k_occurring fraction_positive_diff
+batch_size: 16
+max_samples: 2048 
+max_tokens_per_sample: 64 #70 #200 #800 #0 #5
+top_k: 100
+ignore_padding: true
+max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
+pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets only)
 
 # Dataset configuration
 split: train  # Single split for all datasets
@@ -80,16 +90,6 @@ token_relevance:
   include_translation: true  # If true, also ask grader for English translation per token
 
 
-# Settings for doing NMF (Non-negative matrix factorization) to cluster tokens into topics:
-token_topic_clustering_NMF:
-  enabled: true
-  num_topics: 3
-  top_n_tokens_per_topic: 200
-  mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
-  beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
-  orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
-  orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
-
 # Positional KDE Analysis
 positional_kde:
   enabled: false
@@ -109,8 +109,6 @@ agent:
   overview:
     datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
     top_k_tokens: 20  # Number of top positive tokens to show per dataset (from occurrence-ranked list)
-
-
 
 
 # Per-token occurrence analysis (optional)

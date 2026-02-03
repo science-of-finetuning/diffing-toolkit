@@ -178,9 +178,9 @@ def prepare_all_dataset_inputs_and_save(
 
     Returns a mapping keyed by `dataset_cfg.name`.
     """
-    max_samples = int(method_cfg.method_params.max_samples)
-    max_tokens = int(method_cfg.method_params.max_tokens_per_sample)
-    pre_assistant_k = int(method_cfg.method_params.pre_assistant_k)
+    max_samples = int(method_cfg.max_samples)
+    max_tokens = int(method_cfg.max_tokens_per_sample)
+    pre_assistant_k = int(method_cfg.pre_assistant_k)
     debug_print_samples = getattr(method_cfg, "debug_print_samples", None)
 
     dataset_inputs: Dict[str, Dict[str, Any]] = {}
@@ -406,7 +406,7 @@ def infer_finetuned_and_compute_diffs_in_memory(
     Returns:
       (logit_diffs, log_probs, attention_masks, input_ids_sliced)
     """
-    max_vocab_size = getattr(method_cfg.method_params, "max_vocab_size", None)
+    max_vocab_size = getattr(method_cfg, "max_vocab_size", None)
     slr_enabled = bool(getattr(method_cfg.sequence_likelihood_ratio, "enabled", False))
 
     logit_diffs: Dict[str, torch.Tensor] = {}
@@ -498,7 +498,7 @@ def compute_and_save_disk_diffs(
     """
     Disk path: load base/finetuned logits, compute diffs, optionally save log-probs, and clean up.
     """
-    max_vocab_size = getattr(method_cfg.method_params, "max_vocab_size", None)
+    max_vocab_size = getattr(method_cfg, "max_vocab_size", None)
     slr_enabled = bool(getattr(method_cfg.sequence_likelihood_ratio, "enabled", False))
 
     for dataset_cfg in datasets:

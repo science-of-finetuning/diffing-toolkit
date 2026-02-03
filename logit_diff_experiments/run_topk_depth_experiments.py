@@ -177,16 +177,16 @@ def build_full_command(topk_depth: int, seed: int, skip_agent: bool = False) -> 
     
     # Method parameters - topk_depth is the key variable
     cmd.extend([
-        f"diffing.method.method_params.max_samples={N_SAMPLES}",
-        f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",
-        f"diffing.method.method_params.batch_size={BATCH_SIZE}",
-        f"diffing.method.method_params.top_k={topk_depth}",  # The variable we're testing
+        f"diffing.method.max_samples={N_SAMPLES}",
+        f"diffing.method.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",
+        f"diffing.method.batch_size={BATCH_SIZE}",
+        f"diffing.method.top_k={topk_depth}",  # The variable we're testing
         f"diffing.method.datasets={build_datasets_override()}",
     ])
     
     # Explicit feature toggles
     cmd.append(f"diffing.method.token_relevance.enabled={DO_TOKEN_RELEVANCE_STRING}")
-    cmd.append("diffing.method.token_topic_clustering_NMF.enabled=false")
+    cmd.append("diffing.method.token_ordering.method=[topk_occurring,fraction_positive_diff]")
     cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
     cmd.append("diffing.method.per_token_analysis.enabled=false")
     cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")

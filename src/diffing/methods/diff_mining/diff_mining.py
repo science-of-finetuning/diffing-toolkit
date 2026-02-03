@@ -104,26 +104,41 @@ class DiffMiningMethod(DiffingMethod):
                 streaming=dataset_entry.get("streaming", False),
             ))
 
-        # NMF Clustering configuration
-        self.nmf_cfg = getattr(self.method_cfg, "token_topic_clustering_NMF", None)
+        token_ordering_cfg = getattr(self.method_cfg, "token_ordering", None)
+        assert token_ordering_cfg is not None, "diff_mining config must define token_ordering"
+        methods_cfg = getattr(token_ordering_cfg, "method", None)
+        assert methods_cfg is not None, "token_ordering.method must be set"
+        self.ordering_methods: List[str] = [str(m) for m in list(methods_cfg)]
+        assert len(self.ordering_methods) > 0, "token_ordering.method must be non-empty"
+        assert len(set(self.ordering_methods)) == len(self.ordering_methods), (
+            f"Duplicate entries in token_ordering.method: {self.ordering_methods}"
+        )
+
+        if "nmf" in self.ordering_methods:
+            self.nmf_cfg = getattr(token_ordering_cfg, "nmf", None)
+            assert self.nmf_cfg is not None, "token_ordering.nmf must be set when nmf is enabled"
+            assert bool(getattr(self.nmf_cfg, "enabled", True)), (
+                "token_ordering.nmf.enabled must be true when 'nmf' is included in token_ordering.method"
+            )
+            self.logger.info("NMF Token Topic Clustering enabled.")
+            assert hasattr(self.nmf_cfg, "top_n_tokens_per_topic"), (
+                "token_ordering.nmf.top_n_tokens_per_topic must be set when NMF is enabled"
+            )
+            self.nmf_top_n_tokens_per_topic = int(self.nmf_cfg.top_n_tokens_per_topic)
+            assert self.nmf_top_n_tokens_per_topic > 0, (
+                "token_ordering.nmf.top_n_tokens_per_topic must be > 0"
+            )
+        else:
+            self.nmf_cfg = None
         
         # In-memory tensor storage (used when in_memory=true to skip disk I/O)
-        self._in_memory = getattr(self.method_cfg.method_params, 'in_memory', False)
+        self._in_memory = bool(getattr(self.method_cfg, "in_memory", False))
         self._base_logits: Dict[str, torch.Tensor] = {}
         self._logit_diffs: Dict[str, torch.Tensor] = {}
         self._log_probs: Dict[str, tuple] = {}  # (base_log_probs, ft_log_probs)
         self._attention_masks: Dict[str, torch.Tensor] = {}
         self._input_ids: Dict[str, torch.Tensor] = {}
         self._dataset_inputs: Dict[str, Dict[str, Any]] = {}  # For positions_list etc.
-        if self.nmf_cfg and self.nmf_cfg.enabled:
-            self.logger.info("NMF Token Topic Clustering enabled.")
-            assert hasattr(self.nmf_cfg, "top_n_tokens_per_topic"), (
-                "token_topic_clustering_NMF.top_n_tokens_per_topic must be set when NMF is enabled"
-            )
-            self.nmf_top_n_tokens_per_topic = int(self.nmf_cfg.top_n_tokens_per_topic)
-            assert self.nmf_top_n_tokens_per_topic > 0, (
-                "token_topic_clustering_NMF.top_n_tokens_per_topic must be > 0"
-            )
 
         self.logit_extraction_method: str
         self.logit_lens_layer_relative: float | None = None
@@ -132,7 +147,7 @@ class DiffMiningMethod(DiffingMethod):
         self.patchscope_lens_layer_idx: int | None = None
         self.logits_extractor: LogitsExtractor
 
-        logit_extraction_cfg = getattr(self.method_cfg.method_params, "logit_extraction", None)
+        logit_extraction_cfg = getattr(self.method_cfg, "logit_extraction", None)
         self.logit_extraction_method = str(
             getattr(logit_extraction_cfg, "method", "logits")
         )
@@ -208,9 +223,9 @@ class DiffMiningMethod(DiffingMethod):
              organism_path_name = f"{cfg.organism.name}_{organism_variant}"
         
         # Get sample and token counts for directory naming
-        max_samples = int(self.method_cfg.method_params.max_samples)
-        max_tokens_per_sample = int(self.method_cfg.method_params.max_tokens_per_sample)
-        max_vocab_size = self.method_cfg.method_params.max_vocab_size
+        max_samples = int(self.method_cfg.max_samples)
+        max_tokens_per_sample = int(self.method_cfg.max_tokens_per_sample)
+        max_vocab_size = self.method_cfg.max_vocab_size
              
         # Create base results directory with sample/token counts
         # Structure: .../diffing_results/{model_name}/{organism_path_name}/diff_mining_{samples}samples_{tokens}tokens_{topk}topk[_vocab{N}][_logit_extraction_{method}[_layer_{rel}]]
@@ -229,7 +244,7 @@ class DiffMiningMethod(DiffingMethod):
         
         method_dir_name = (
             f"diff_mining_{max_samples}samples_{max_tokens_per_sample}tokens_"
-            f"{int(self.method_cfg.method_params.top_k)}topk{vocab_suffix}{logit_extraction_suffix}"
+            f"{int(self.method_cfg.top_k)}topk{vocab_suffix}{logit_extraction_suffix}"
         )
         self.base_results_dir = Path(cfg.diffing.results_base_dir) / cfg.model.name / organism_path_name / method_dir_name
         self.base_results_dir.mkdir(parents=True, exist_ok=True)
@@ -260,16 +275,16 @@ class DiffMiningMethod(DiffingMethod):
         seed_str = f"_seed{seed}" if seed is not None else ""
         
         # Get config parameters
-        top_k = int(self.method_cfg.method_params.top_k)
+        top_k = int(self.method_cfg.top_k)
         use_normalized = bool(self.method_cfg.get("use_normalized_tokens", False))
         normalized_str = "true" if use_normalized else "false"
         
         # Get token set selection mode
-        selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
+        selection_mode = str(self.method_cfg.token_set_selection_mode)
         
         # Build NMF suffix if enabled
         nmf_suffix = ""
-        if self.nmf_cfg and self.nmf_cfg.enabled:
+        if self.nmf_cfg is not None:
             num_topics = int(self.nmf_cfg.num_topics)
             mode = str(self.nmf_cfg.mode)
             beta = self.nmf_cfg.beta
@@ -338,11 +353,11 @@ class DiffMiningMethod(DiffingMethod):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
         seed_str = f"_seed{seed}" if seed is not None else ""
-        top_k = int(self.method_cfg.method_params.top_k)
-        selection_mode = str(self.method_cfg.method_params.token_set_selection_mode)
+        top_k = int(self.method_cfg.top_k)
+        selection_mode = str(self.method_cfg.token_set_selection_mode)
         
         nmf_suffix = ""
-        if self.nmf_cfg and self.nmf_cfg.enabled:
+        if self.nmf_cfg is not None:
             num_topics = int(self.nmf_cfg.num_topics)
             nmf_suffix = f"_nmf{num_topics}"
         
@@ -361,18 +376,19 @@ class DiffMiningMethod(DiffingMethod):
         metadata = {
             "timestamp": datetime.now().isoformat(),
             "seed": self.cfg.seed if hasattr(self.cfg, 'seed') else None,
-            "max_samples": int(self.method_cfg.method_params.max_samples),
-            "max_tokens_per_sample": int(self.method_cfg.method_params.max_tokens_per_sample),
-            "top_k": int(self.method_cfg.method_params.top_k),
-            "token_set_selection_mode": str(self.method_cfg.method_params.token_set_selection_mode),
+            "max_samples": int(self.method_cfg.max_samples),
+            "max_tokens_per_sample": int(self.method_cfg.max_tokens_per_sample),
+            "top_k": int(self.method_cfg.top_k),
+            "token_set_selection_mode": str(self.method_cfg.token_set_selection_mode),
             "logit_extraction_method": self.logit_extraction_method,
             "logit_lens_layer": self.logit_lens_layer_relative,
             "base_model": self.base_model_cfg.model_id,
             "finetuned_model": self.finetuned_model_cfg.model_id,
-            "max_vocab_size": getattr(self.method_cfg.method_params, 'max_vocab_size', None),
-            "nmf_enabled": bool(self.nmf_cfg and self.nmf_cfg.enabled),
+            "max_vocab_size": getattr(self.method_cfg, "max_vocab_size", None),
+            "ordering_methods": list(self.ordering_methods),
+            "nmf_enabled": bool(self.nmf_cfg is not None),
         }
-        if self.nmf_cfg and self.nmf_cfg.enabled:
+        if self.nmf_cfg is not None:
             metadata["nmf_config"] = {
                 "num_topics": int(self.nmf_cfg.num_topics),
                 "beta": float(self.nmf_cfg.beta),
@@ -393,25 +409,32 @@ class DiffMiningMethod(DiffingMethod):
             List of TokenOrderingType instances
         """
         ordering_types: List[TokenOrderingType] = []
-        
-        # TopK Occurring is always enabled
-        ordering_types.append(TopKOccurringOrderingType())
-        
-        # Fraction Positive Diff is always enabled
-        ordering_types.append(FractionPositiveDiffOrderingType())
-        
-        # NMF if enabled
-        if self.nmf_cfg and self.nmf_cfg.enabled:
-            nmf_config = NmfOrderingConfig(
-                num_topics=int(self.nmf_cfg.num_topics),
-                beta=float(self.nmf_cfg.beta),
-                mode=str(self.nmf_cfg.mode),
-                orthogonal=bool(getattr(self.nmf_cfg, 'orthogonal', False)),
-                orthogonal_weight=float(getattr(self.nmf_cfg, 'orthogonal_weight', 1.0)),
-                top_n_tokens_per_topic=int(self.nmf_cfg.top_n_tokens_per_topic),
-            )
-            ordering_types.append(NmfOrderingType(nmf_config))
-        
+
+        for method in self.ordering_methods:
+            if method == "topk_occurring":
+                ordering_types.append(TopKOccurringOrderingType())
+            elif method == "fraction_positive_diff":
+                ordering_types.append(FractionPositiveDiffOrderingType())
+            elif method == "nmf":
+                assert self.nmf_cfg is not None, "nmf_cfg must be set when 'nmf' is enabled"
+                assert bool(getattr(self.nmf_cfg, "enabled", True)), (
+                    "token_ordering.nmf.enabled must be true when 'nmf' is enabled"
+                )
+                nmf_config = NmfOrderingConfig(
+                    num_topics=int(self.nmf_cfg.num_topics),
+                    beta=float(self.nmf_cfg.beta),
+                    mode=str(self.nmf_cfg.mode),
+                    orthogonal=bool(getattr(self.nmf_cfg, 'orthogonal', False)),
+                    orthogonal_weight=float(getattr(self.nmf_cfg, 'orthogonal_weight', 1.0)),
+                    top_n_tokens_per_topic=int(self.nmf_cfg.top_n_tokens_per_topic),
+                )
+                ordering_types.append(NmfOrderingType(nmf_config))
+            else:
+                raise ValueError(
+                    f"Unknown token_ordering.method entry: {method!r}. "
+                    "Expected one of: 'topk_occurring', 'fraction_positive_diff', 'nmf'."
+                )
+
         return ordering_types
 
     def _run_ordering_types_and_write(
@@ -435,7 +458,7 @@ class DiffMiningMethod(DiffingMethod):
         """
         num_tokens = max(
             int(self.method_cfg.visualization.num_tokens_to_plot),
-            int(self.method_cfg.method_params.top_k),
+            int(self.method_cfg.top_k),
         )
         
         results: Dict[str, OrderingTypeResult] = {}
@@ -496,9 +519,9 @@ class DiffMiningMethod(DiffingMethod):
         Returns:
             Dict containing 'input_ids' and 'attention_mask' tensors
         """
-        max_samples = int(self.method_cfg.method_params.max_samples)
-        max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
-        pre_assistant_k = int(self.method_cfg.method_params.pre_assistant_k)
+        max_samples = int(self.method_cfg.max_samples)
+        max_tokens = int(self.method_cfg.max_tokens_per_sample)
+        pre_assistant_k = int(self.method_cfg.pre_assistant_k)
         debug_print_samples = getattr(self.method_cfg, "debug_print_samples", None)
         seed = self.cfg.seed if hasattr(self.cfg, "seed") else None
 
@@ -527,11 +550,11 @@ class DiffMiningMethod(DiffingMethod):
         Delegates the pure computation to `core_analysis.compute_stats_from_logits` and performs
         side effects (KDE plotting, global stats saving) here.
         """
-        batch_size = int(self.method_cfg.method_params.batch_size)
-        max_tokens = int(self.method_cfg.method_params.max_tokens_per_sample)
-        max_samples = int(self.method_cfg.method_params.max_samples)
-        top_k = int(self.method_cfg.method_params.top_k)
-        ignore_padding = bool(self.method_cfg.method_params.ignore_padding)
+        batch_size = int(self.method_cfg.batch_size)
+        max_tokens = int(self.method_cfg.max_tokens_per_sample)
+        max_samples = int(self.method_cfg.max_samples)
+        top_k = int(self.method_cfg.top_k)
+        ignore_padding = bool(self.method_cfg.ignore_padding)
 
         per_token_analysis_cfg = getattr(self.method_cfg, "per_token_analysis", None)
         positional_kde_cfg = getattr(self.method_cfg, "positional_kde", None)
@@ -1402,7 +1425,7 @@ class DiffMiningMethod(DiffingMethod):
         self.logger.info(f"Loading base model: {self.base_model_cfg.model_id}")
         _ = self.base_model # Trigger load
         
-        batch_size = int(self.method_cfg.method_params.batch_size)
+        batch_size = int(self.method_cfg.batch_size)
         
         self._base_logits = infer_and_store_logits_for_all_datasets(
             self.datasets,

@@ -142,9 +142,9 @@ def build_command(mode: str) -> List[str]:
         f"pipeline.mode={mode}",
         f"seed={SEED}",
         # Method parameters
-        f"diffing.method.method_params.max_samples={N_SAMPLES}",
-        f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKENS_PER_SAMPLE}",
-        f"diffing.method.method_params.batch_size={BATCH_SIZE}",
+        f"diffing.method.max_samples={N_SAMPLES}",
+        f"diffing.method.max_tokens_per_sample={MAX_TOKENS_PER_SAMPLE}",
+        f"diffing.method.batch_size={BATCH_SIZE}",
         # Sequence likelihood ratio config
         "diffing.method.sequence_likelihood_ratio.enabled=true",
         f"diffing.method.sequence_likelihood_ratio.window_size={WINDOW_SIZE}",
@@ -154,7 +154,7 @@ def build_command(mode: str) -> List[str]:
         "diffing.method.token_relevance.enabled=false",
         "diffing.method.per_token_analysis.enabled=false",
         "diffing.method.positional_kde.enabled=false",
-        "diffing.method.token_topic_clustering_NMF.enabled=false",
+        "diffing.method.token_ordering.method=[topk_occurring,fraction_positive_diff]",
         # Override datasets
         f"diffing.method.datasets={build_datasets_config()}",
     ]
