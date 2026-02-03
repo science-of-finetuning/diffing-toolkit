@@ -119,6 +119,9 @@ ORGANISM = DEFAULT_ORGANISM
 # METHODS = ["activation_difference_lens", "logit_diff_topk_occurring"]
 METHODS = ["logit_diff_topk_occurring", "activation_difference_lens"]
 
+# Methods for collecting/plotting results (ADL split into logitlens and patchscope)
+PLOT_METHODS = ["logit_diff_topk_occurring", "adl_logitlens", "adl_patchscope"]
+
 # Token relevance task configuration (for ADL dynamic task generation)
 TOKEN_RELEVANCE_POSITIONS = [0, 1, 2, 3, 4]  # Positions to evaluate
 TOKEN_RELEVANCE_LAYER = 0.5  # Relative layer
@@ -437,7 +440,18 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
 
 
 def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Path]]:
-    """Find token relevance JSON files for a given method and mix ratio."""
+    """
+    Find token relevance JSON files for a given method and mix ratio.
+
+    Args:
+        method: One of "logit_diff_topk_occurring", "adl_logitlens", or "adl_patchscope"
+        mix_ratio: The mix ratio variant (e.g., "default", "mix1-0p5")
+
+    Returns:
+        Dict mapping dataset keys to lists of JSON file paths.
+    """
+    from diffing.utils.activations import get_layer_indices
+
     # Handle "default" variant - no suffix added (matches logit_diff_topk behavior)
     if mix_ratio == "default":
         organism_dir = ORGANISM
@@ -473,7 +487,28 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
                                         results[dataset_key] = []
                                     results[dataset_key].append(json_file)
 
-    elif method == "activation_difference_lens":
+    elif method in ("adl_logitlens", "adl_patchscope"):
+        # Model name to HuggingFace model ID mapping
+        model_id_map = {
+            "gemma3_1B": "google/gemma-3-1b-it",
+            "llama32_1B": "meta-llama/Llama-3.2-1B",
+            "llama32_1B_Instruct": "meta-llama/Llama-3.2-1B-Instruct",
+            "qwen3_1_7B": "Qwen/Qwen3-1.7B",
+        }
+        model_id = model_id_map.get(MODEL)
+        if model_id is None:
+            print(f"[WARNING] Unknown model {MODEL}, skipping ADL layer calculation")
+            return results
+
+        # Get middle layer using existing utility
+        middle_layer = get_layer_indices(model_id, [TOKEN_RELEVANCE_LAYER])[0]
+
+        # Direct filename based on source and grader
+        if method == "adl_logitlens":
+            filename = "relevance_logitlens_openai_gpt-5-mini.json"
+        else:
+            filename = "relevance_patchscope_openai_gpt-5-mini.json"
+
         # Scan both default location and ADL seed-specific directories
         adl_dirs_to_scan = []
 
@@ -496,23 +531,25 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
             if adl_dir.exists() and adl_dir not in adl_dirs_to_scan:
                 adl_dirs_to_scan.append(adl_dir)
 
-        # Scan all ADL directories
+        # Scan all ADL directories - only middle layer and positions 0-4
         for adl_dir in adl_dirs_to_scan:
-            for layer_dir in adl_dir.glob("layer_*"):
-                for dataset_dir in layer_dir.iterdir():
-                    if dataset_dir.is_dir():
-                        tr_dir = dataset_dir / "token_relevance"
-                        if tr_dir.exists():
-                            for pos_dir in tr_dir.glob("position_*"):
-                                for variant_dir in pos_dir.iterdir():
-                                    if variant_dir.is_dir():
-                                        for json_file in variant_dir.glob(
-                                            "relevance_*.json"
-                                        ):
-                                            dataset_key = dataset_dir.name
-                                            if dataset_key not in results:
-                                                results[dataset_key] = []
-                                            results[dataset_key].append(json_file)
+            layer_dir = adl_dir / f"layer_{middle_layer}"
+            if not layer_dir.exists():
+                continue
+            for dataset_dir in layer_dir.iterdir():
+                if not dataset_dir.is_dir():
+                    continue
+                tr_dir = dataset_dir / "token_relevance"
+                if not tr_dir.exists():
+                    continue
+
+                for pos in TOKEN_RELEVANCE_POSITIONS:
+                    json_file = tr_dir / f"position_{pos}" / "difference" / filename
+                    if json_file.exists():
+                        dataset_key = dataset_dir.name
+                        if dataset_key not in results:
+                            results[dataset_key] = []
+                        results[dataset_key].append(json_file)
 
     return results
 
@@ -549,7 +586,7 @@ def collect_token_relevance_results() -> (
     """
     results: Dict[str, Dict[str, Dict[str, List[Dict[str, float]]]]] = {}
 
-    for method in METHODS:
+    for method in PLOT_METHODS:
         for mix_ratio in MIX_RATIOS:
             files_by_dataset = find_token_relevance_files(method, mix_ratio)
 
@@ -622,12 +659,14 @@ def plot_token_relevance_results(
 
     method_labels = {
         "logit_diff_topk_occurring": "LogitDiff TopK",
-        "activation_difference_lens": "ADL",
+        "adl_logitlens": "ADL (logitlens)",
+        "adl_patchscope": "ADL (patchscope)",
     }
 
     method_colors = {
         "logit_diff_topk_occurring": "#2ecc71",  # Green
-        "activation_difference_lens": "#3498db",  # Blue
+        "adl_logitlens": "#3498db",  # Blue
+        "adl_patchscope": "#9b59b6",  # Purple
     }
 
     # Metric types to plot
