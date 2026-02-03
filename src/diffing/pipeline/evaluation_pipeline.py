@@ -81,8 +81,8 @@ class EvaluationPipeline(Pipeline):
         hint_suffix = (
             f"_hints{hashlib.md5(str(hints).encode()).hexdigest()}" if hints else ""
         )
-        relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
-        config_suffix = f"_c{relevant_cfg_hash}" if relevant_cfg_hash else ""
+        agent_cfg_hash = self.diffing_method.agent_cfg_hash
+        config_suffix = f"_c{agent_cfg_hash}" if agent_cfg_hash else ""
         out_dir = (
             Path(self.diffing_method.get_or_create_results_dir())
             / "agent"
@@ -205,8 +205,8 @@ class EvaluationPipeline(Pipeline):
         # Overwrite behavior
         overwrite = bool(self.evaluation_cfg.overwrite)
         assert isinstance(overwrite, bool)
-        relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
-        name = (f"_{relevant_cfg_hash}" if relevant_cfg_hash else "") + f"{llm_id}"
+        agent_cfg_hash = self.diffing_method.agent_cfg_hash
+        name = (f"_{agent_cfg_hash}" if agent_cfg_hash else "") + f"{llm_id}"
 
         # Method
         logger.info(f"Model interactions: {agent_cfg.budgets.model_interactions}")
