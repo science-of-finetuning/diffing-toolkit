@@ -141,21 +141,29 @@ class CrosscoderDiffingMethod(DiffingMethod):
 
             if self.method_cfg.analysis.enabled:
                 logger.info(f"Storing analysis results in {model_results_dir}")
+                local_model_path = str(model_results_dir / "dictionary_model")
+                dict_ref = (
+                    local_model_path
+                    if not self.method_cfg.upload.model
+                    else dictionary_name
+                )
                 build_push_crosscoder_latent_df(
                     dictionary_name=dictionary_name,
                     base_layer=0,
                     ft_layer=1,
+                    model_path=model_results_dir / "dictionary_model",
+                    push_to_hub=self.method_cfg.upload.model,
                 )
 
                 if self.method_cfg.analysis.latent_scaling.enabled:
                     compute_scalers_from_config(
                         cfg=self.cfg,
                         layer=layer_idx,
-                        dictionary_model=dictionary_name,
+                        dictionary_model=dict_ref,
                         results_dir=model_results_dir,
                     )
                     update_latent_df_with_beta_values(
-                        dictionary_name,
+                        dict_ref,
                         model_results_dir,
                         num_samples=self.method_cfg.analysis.latent_scaling.num_samples,
                     )
@@ -165,12 +173,12 @@ class CrosscoderDiffingMethod(DiffingMethod):
                         collect_dictionary_activations_from_config(
                             cfg=self.cfg,
                             layer=layer_idx,
-                            dictionary_model_name=dictionary_name,
+                            dictionary_model_name=dict_ref,
                             result_dir=model_results_dir,
                         )
                     )
                     collect_activating_examples(
-                        dictionary_model_name=dictionary_name,
+                        dictionary_model_name=dict_ref,
                         latent_activation_cache=latent_activations_cache,
                         n=self.method_cfg.analysis.latent_activations.n_max_activations,
                         upload_to_hub=self.method_cfg.analysis.latent_activations.upload_to_hub,
@@ -178,7 +186,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
                         save_path=model_results_dir,
                     )
                     update_latent_df_with_stats(
-                        dictionary_name=dictionary_name,
+                        dictionary_name=dict_ref,
                         latent_activation_cache=latent_activations_cache,
                         split_of_cache=self.method_cfg.analysis.latent_activations.split,
                         device=self.method_cfg.analysis.latent_activations.cache_device,
@@ -187,7 +195,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
 
                 try:
                     make_plots(
-                        dictionary_name=dictionary_name,
+                        dictionary_name=dict_ref,
                         plots_dir=model_results_dir / "plots",
                     )
                 except Exception as e:
@@ -200,7 +208,7 @@ class CrosscoderDiffingMethod(DiffingMethod):
                     run_latent_steering_experiment(
                         method=self,
                         get_latent_fn=get_crosscoder_latent,
-                        dictionary_name=dictionary_name,
+                        dictionary_name=dict_ref,
                         results_dir=model_results_dir,
                         layer=layer_idx,
                     )

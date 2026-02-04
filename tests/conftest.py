@@ -69,3 +69,44 @@ def mock_dictionary_model():
 def mock_sample_cache():
     """Fixture providing a MockSampleCache factory."""
     return MockSampleCache
+
+
+# --- Mock OpenAI Server ---
+
+from mock_openai_server import _mock_openai_server_fixture
+
+mock_openai_server = pytest.fixture(scope="session")(_mock_openai_server_fixture)
+
+
+# --- Block External LLM API Calls ---
+
+import httpx
+import respx
+
+
+@pytest.fixture(autouse=True)
+def block_external_llm_calls(mock_openai_server):
+    """Redirect external LLM API calls to the mock server.
+
+    Instead of blocking with exceptions (which the OpenAI SDK wraps as
+    APIConnectionError and retries with exponential backoff), forward
+    requests to the mock server which returns proper HTTP responses.
+    """
+    mock_url = mock_openai_server.base_url
+
+    def redirect_to_mock(request: httpx.Request) -> httpx.Response:
+        with httpx.Client() as client:
+            return client.post(
+                f"{mock_url}/chat/completions",
+                content=request.content,
+                headers={"Content-Type": "application/json"},
+            )
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(host__regex=r"^(localhost|127\.0\.0\.1)$").pass_through()
+        mock.route(path__regex=r".*/chat/completions.*").mock(
+            side_effect=redirect_to_mock
+        )
+        mock.route(path__regex=r".*/completions.*").mock(side_effect=redirect_to_mock)
+        mock.route().pass_through()
+        yield

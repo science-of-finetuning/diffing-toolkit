@@ -34,11 +34,13 @@ def latent_df_exists(crosscoder_or_path, author=HF_NAME):
 
 
 def load_latent_df(crosscoder_or_path, author=HF_NAME):
-    """Load the latent_df for the given crosscoder."""
-    if Path(crosscoder_or_path).exists():
-        # Local model
-        df_path = Path(crosscoder_or_path)
-    else:
+    """Load the latent_df for the given crosscoder, local path, or directory."""
+    path = Path(crosscoder_or_path)
+    if path.is_file():
+        df_path = path
+    elif path.is_dir() and (path / "latent_df.csv").is_file():
+        df_path = path / "latent_df.csv"
+    elif not path.exists():
         repo_id = stats_repo_id(crosscoder_or_path, author=author)
         if not repo_exists(repo_id=repo_id, repo_type="dataset"):
             raise ValueError(
@@ -81,6 +83,13 @@ def push_latent_df(
         confirm: if True, ask the user to confirm the push
         create_repo_if_missing: if True, create the repository if it doesn't exist
     """
+    # If crosscoder is a local directory, save latent_df locally instead of pushing to hub
+    if Path(crosscoder).is_dir():
+        save_path = Path(crosscoder) / "latent_df.csv"
+        logger.info(f"Saving latent dataframe locally to {save_path}")
+        df.to_csv(save_path)
+        return str(save_path)
+
     if (not force or confirm) and latent_df_exists(crosscoder):
         original_df = load_latent_df(crosscoder, author=author)
         original_columns = set(original_df.columns)
@@ -359,16 +368,27 @@ def load_dictionary_model(
         if not model_path.exists():
             raise ValueError(f"Local model {model_name} does not exist")
 
-        # Load the config
-        with open(model_path.parent / "config.json", "r") as f:
-            config = json.load(f)["trainer"]
-
-        # Determine model class based on config
-        if "dict_class" in config and config["dict_class"] in [
-            "BatchTopKSAE",
-            "CrossCoder",
-            "BatchTopKCrossCoder",
-        ]:
-            return eval(f"{config['dict_class']}.from_pretrained(model_path)")
+        if model_path.is_dir():
+            # save_pretrained directory format (model.safetensors + config.json with dict_class)
+            with open(model_path / "config.json", "r") as f:
+                config = json.load(f)
+            dict_class = config.get("dict_class")
+            if dict_class in ["BatchTopKSAE", "CrossCoder", "BatchTopKCrossCoder"]:
+                return eval(f"{dict_class}.from_pretrained(model_path, from_hub=True)")
+            else:
+                raise ValueError(
+                    f"Unknown or missing dict_class in {model_path / 'config.json'}: {dict_class}"
+                )
         else:
-            raise ValueError(f"Unknown model type: {config['dict_class']}")
+            # File path (training .pt output format)
+            with open(model_path.parent / "config.json", "r") as f:
+                config = json.load(f)["trainer"]
+
+            if "dict_class" in config and config["dict_class"] in [
+                "BatchTopKSAE",
+                "CrossCoder",
+                "BatchTopKCrossCoder",
+            ]:
+                return eval(f"{config['dict_class']}.from_pretrained(model_path)")
+            else:
+                raise ValueError(f"Unknown model type: {config['dict_class']}")

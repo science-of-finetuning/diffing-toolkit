@@ -27,8 +27,19 @@ def build_push_crosscoder_latent_df(
     dictionary_name: str,
     base_layer: int = 0,
     ft_layer: int = 1,
+    model_path: str | Path | None = None,
+    push_to_hub: bool = True,
 ) -> pd.DataFrame:
-    crosscoder = load_dictionary_model(dictionary_name)
+    """Build and push/save latent dataframe for crosscoder models.
+
+    Args:
+        dictionary_name: Name of the crosscoder model (used for hub operations)
+        base_layer: Index of the base layer in the crosscoder
+        ft_layer: Index of the finetuned layer in the crosscoder
+        model_path: Local path to load model from instead of hub
+        push_to_hub: If True, push latent_df to HF Hub; if False, save locally
+    """
+    crosscoder = load_dictionary_model(model_path or dictionary_name)
     try:
         existing_latent_df = load_latent_df(dictionary_name)
         logger.info(
@@ -106,31 +117,36 @@ def build_push_crosscoder_latent_df(
 
     latent_df = pd.DataFrame(latent_df).T
     logger.info(f"Created latent dataframe with {len(latent_df)} latents")
-    push_latent_df(
-        latent_df, dictionary_name, confirm=False, create_repo_if_missing=True
-    )
+    if push_to_hub:
+        push_latent_df(
+            latent_df, dictionary_name, confirm=False, create_repo_if_missing=True
+        )
+    else:
+        save_path = Path(model_path) / "latent_df.csv"
+        logger.info(f"Saving latent dataframe locally to {save_path}")
+        latent_df.to_csv(save_path)
     return latent_df
 
 
 def build_push_sae_difference_latent_df(
     dictionary_name: str,
     target: str,
+    model_path: str | Path | None = None,
+    push_to_hub: bool = True,
 ) -> pd.DataFrame:
-    """
-    Build latent dataframe for SAE difference models.
+    """Build latent dataframe for SAE difference models.
 
     Args:
-        dictionary_name: Name of the SAE model
+        dictionary_name: Name of the SAE model (used for hub operations)
         target: Training target ("difference_bft" or "difference_ftb")
-
-    Returns:
-        DataFrame containing latent statistics for SAE difference model
+        model_path: Local path to load model from instead of hub
+        push_to_hub: If True, push latent_df to HF Hub; if False, save locally
     """
     logger.info(
         f"Building latent dataframe for SAE difference model: {dictionary_name}"
     )
 
-    sae = load_dictionary_model(dictionary_name)
+    sae = load_dictionary_model(model_path or dictionary_name)
     try:
         existing_latent_df = load_latent_df(dictionary_name)
         logger.info(
@@ -157,9 +173,14 @@ def build_push_sae_difference_latent_df(
     latent_df = pd.DataFrame(latent_df).T
 
     logger.info(f"Created latent dataframe with {len(latent_df)} latents")
-    push_latent_df(
-        latent_df, dictionary_name, confirm=False, create_repo_if_missing=True
-    )
+    if push_to_hub:
+        push_latent_df(
+            latent_df, dictionary_name, confirm=False, create_repo_if_missing=True
+        )
+    else:
+        save_path = Path(model_path) / "latent_df.csv"
+        logger.info(f"Saving latent dataframe locally to {save_path}")
+        latent_df.to_csv(save_path)
     return latent_df
 
 
