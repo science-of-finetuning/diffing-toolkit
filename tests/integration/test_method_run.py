@@ -476,7 +476,9 @@ class TestSAEDifferenceMethodRun:
 
         assert method.results_dir.exists()
         # Verify steering results were created
-        steering_results = list(method.results_dir.glob("**/steering*.csv"))
+        steering_results = list(
+            method.results_dir.glob("**/latent_steering/test_steering_prompts.csv")
+        )
         assert len(steering_results) > 0, "Steering results should be created"
 
 
@@ -548,7 +550,9 @@ class TestCrosscoderMethodRun:
 
         assert method.results_dir.exists()
         # Verify steering results were created
-        steering_results = list(method.results_dir.glob("**/steering*.csv"))
+        steering_results = list(
+            method.results_dir.glob("**/latent_steering/test_steering_prompts.csv")
+        )
         assert len(steering_results) > 0, "Steering results should be created"
 
 
@@ -613,7 +617,9 @@ class TestPCAMethodRun:
 
         assert method.results_dir.exists()
         # Verify steering results were created
-        steering_results = list(method.results_dir.glob("**/steering*.csv"))
+        steering_results = list(
+            method.results_dir.glob("**/latent_steering/test_steering_prompts.csv")
+        )
         assert len(steering_results) > 0, "Steering results should be created"
 
 

@@ -80,40 +80,33 @@ mock_openai_server = pytest.fixture(scope="session")(_mock_openai_server_fixture
 
 # --- Block External LLM API Calls ---
 
+import httpx
 import respx
 
 
 @pytest.fixture(autouse=True)
-def block_external_llm_calls():
-    """Block LLM API calls to external services, allow everything else.
+def block_external_llm_calls(mock_openai_server):
+    """Redirect external LLM API calls to the mock server.
 
-    This prevents accidental real API calls during tests while still allowing:
-    - Localhost calls (mock server)
-    - HuggingFace model downloads
-    - Other legitimate HTTP traffic
+    Instead of blocking with exceptions (which the OpenAI SDK wraps as
+    APIConnectionError and retries with exponential backoff), forward
+    requests to the mock server which returns proper HTTP responses.
     """
+    mock_url = mock_openai_server.base_url
+
+    def redirect_to_mock(request: httpx.Request) -> httpx.Response:
+        with httpx.Client() as client:
+            return client.post(
+                f"{mock_url}/chat/completions",
+                content=request.content,
+                headers={"Content-Type": "application/json"},
+            )
+
     with respx.mock(assert_all_called=False) as mock:
-        # Allow all localhost traffic (mock server)
         mock.route(host__regex=r"^(localhost|127\.0\.0\.1)$").pass_through()
-
-        # Block external LLM API endpoints
         mock.route(path__regex=r".*/chat/completions.*").mock(
-            side_effect=lambda req: (_ for _ in ()).throw(
-                AssertionError(
-                    f"External LLM API call blocked: {req.url}\n"
-                    "Use mock_openai_server fixture for grader/LLM tests."
-                )
-            )
+            side_effect=redirect_to_mock
         )
-        mock.route(path__regex=r".*/completions.*").mock(
-            side_effect=lambda req: (_ for _ in ()).throw(
-                AssertionError(
-                    f"External LLM API call blocked: {req.url}\n"
-                    "Use mock_openai_server fixture for grader/LLM tests."
-                )
-            )
-        )
-
-        # Allow everything else (HuggingFace, GitHub, etc.)
+        mock.route(path__regex=r".*/completions.*").mock(side_effect=redirect_to_mock)
         mock.route().pass_through()
         yield

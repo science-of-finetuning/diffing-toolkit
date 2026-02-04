@@ -1,7 +1,8 @@
-"""Minimal mock OpenAI API server for grader testing.
+"""Minimal mock OpenAI API server for grader and agent testing.
 
 Provides exact prompt matching for grader system prompts and returns
 correctly-formatted responses suitable for testing parsing logic.
+For agent requests, uses a stateful FakeAgentResponder to exercise all tools.
 Unrecognized prompts raise an exception to enforce test coverage.
 """
 
@@ -11,7 +12,7 @@ import socket
 import threading
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any, Callable, List, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -30,6 +31,9 @@ from diffing.utils.graders.token_relevance_grader import (
 from diffing.utils.graders.patch_scope_grader import (
     SYSTEM_PROMPT as PATCHSCOPE_SYSTEM_PROMPT,
 )
+
+# Agent system prompt detection marker
+AGENT_SYSTEM_PROMPT_MARKER = "You are the Finetuning Interpretability Agent"
 
 
 # --- Request/Response Models ---
@@ -224,25 +228,65 @@ def _generate_patchscope_response(user_prompt: str) -> str:
 
 # --- Prompt Matching ---
 
+# Global agent responder - set via set_agent_responder() before tests
+_agent_responder: Optional[Callable[[List[dict]], dict]] = None
 
-def _generate_response(system_prompt: str, user_prompt: str) -> str:
-    """Generate mock response based on system prompt type."""
+
+def set_agent_responder(responder: Optional[Callable[[List[dict]], dict]]) -> None:
+    """Set the agent responder callback for agent requests.
+
+    Args:
+        responder: Callable that takes messages and returns response dict with
+            'content' and 'usage' keys. Set to None to disable agent handling.
+    """
+    global _agent_responder
+    _agent_responder = responder
+
+
+def _is_agent_request(system_prompt: str) -> bool:
+    """Check if system prompt indicates an agent request."""
+    return AGENT_SYSTEM_PROMPT_MARKER in system_prompt
+
+
+def _generate_response(
+    system_prompt: str, user_prompt: str, messages: List[dict]
+) -> dict:
+    """Generate mock response based on system prompt type.
+
+    Returns:
+        Dict with 'content' and 'usage' keys.
+    """
+    # Check for agent request first
+    if _is_agent_request(system_prompt):
+        if _agent_responder is None:
+            raise ValueError(
+                "Agent request detected but no responder configured.\n"
+                "Use set_agent_responder() with a FakeAgentResponder.get_response method."
+            )
+        return _agent_responder(messages)
+
+    # Grader requests
     if system_prompt == HYPOTHESIS_SYSTEM_PROMPT:
-        return _generate_hypothesis_response(user_prompt)
+        content = _generate_hypothesis_response(user_prompt)
     elif system_prompt == COHERENCE_SYSTEM_PROMPT:
-        return _generate_coherence_response(user_prompt)
+        content = _generate_coherence_response(user_prompt)
     elif system_prompt == TOKEN_RELEVANCE_SYSTEM_PROMPT:
-        return _generate_token_relevance_response(user_prompt)
+        content = _generate_token_relevance_response(user_prompt)
     elif system_prompt == PATCHSCOPE_SYSTEM_PROMPT:
-        return _generate_patchscope_response(user_prompt)
+        content = _generate_patchscope_response(user_prompt)
     else:
         # Helpful error for debugging - show first 300 chars
         snippet = system_prompt[:300].replace("\n", "\\n")
         raise ValueError(
             f"Unrecognized system prompt. Add mock coverage for this prompt.\n"
             f"First 300 chars: {snippet}\n\n"
-            f"Known prompts: HYPOTHESIS, COHERENCE, TOKEN_RELEVANCE, PATCHSCOPE"
+            f"Known prompts: HYPOTHESIS, COHERENCE, TOKEN_RELEVANCE, PATCHSCOPE, AGENT"
         )
+
+    return {
+        "content": content,
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+    }
 
 
 # --- FastAPI Server ---
@@ -259,7 +303,7 @@ def create_app() -> FastAPI:
         user_prompt = _extract_user_prompt(request.messages)
 
         try:
-            content = _generate_response(system_prompt, user_prompt)
+            response = _generate_response(system_prompt, user_prompt, request.messages)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -270,15 +314,11 @@ def create_app() -> FastAPI:
             choices=[
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": content},
+                    "message": {"role": "assistant", "content": response["content"]},
                     "finish_reason": "stop",
                 }
             ],
-            usage={
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-                "total_tokens": 150,
-            },
+            usage=response["usage"],
         )
 
     return app
