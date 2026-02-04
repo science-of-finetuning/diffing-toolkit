@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any
+
 from loguru import logger
 from openai import OpenAI
-import json
-import time
-import os
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class AgentLLM:
     temperature: float
     max_tokens_per_call: int
     max_retries: int = 3
+    api_key_env_var: str = "OPENROUTER_API_KEY"
 
     def __post_init__(self) -> None:  # type: ignore[override]
         assert isinstance(self.model_id, str) and len(self.model_id.strip()) > 0
@@ -29,14 +31,19 @@ class AgentLLM:
         assert (
             isinstance(self.max_tokens_per_call, int) and self.max_tokens_per_call > 0
         )
-        
-        # Try environment variable first, then fall back to file
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if api_key is None:
-            key_path = Path(self.api_key_path)
-            assert key_path.exists() and key_path.is_file()
+
+        key_path = Path(self.api_key_path)
+        if key_path.exists() and key_path.is_file():
             api_key = key_path.read_text(encoding="utf-8").strip()
+        else:
+            api_key = os.getenv(self.api_key_env_var) or ""
+            if not api_key:
+                raise FileNotFoundError(
+                    f"API key file {key_path} not found and environment variable "
+                    f"{self.api_key_env_var} is not set"
+                )
         assert len(api_key) > 0
+
         object.__setattr__(
             self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
         )

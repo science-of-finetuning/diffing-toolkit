@@ -59,12 +59,52 @@ pretraining_dataset:
     is_chat: false
     text_column: text
     streaming: true
+  zh: #Chinese
+    id: uonlp/CulturaX
+    subset: zh
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
   greatfirewall:
     id: nbeerbower/GreatFirewall-DPO
     splits: [train]
     is_chat: false
     text_column: chosen  # Alternative: "rejected"
     streaming: true
+  multilingual_thinking: #https://huggingface.co/datasets/HuggingFaceH4/Multilingual-Thinking
+    id: HuggingFaceH4/Multilingual-Thinking
+    splits: [train]
+    is_chat: false
+    text_column: analysis  # Chain-of-thought reasoning traces (multi-lingual)
+    streaming: false  # Small dataset (1k samples), no need for streaming
+  c4: #https://huggingface.co/datasets/allenai/c4
+    id: allenai/c4
+    subset: en
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  gsm8k: #https://huggingface.co/datasets/openai/gsm8k
+    id: openai/gsm8k
+    subset: main
+    splits: [train]
+    is_chat: false
+    text_column: answer  # Math word problem solutions with step-by-step reasoning
+    streaming: true
+  stackmathqa: #https://huggingface.co/datasets/math-ai/StackMathQA
+    id: math-ai/StackMathQA
+    subset: stackmathqa1600k  # 1.6M entries; alternatives: stackmathqa100k, stackmathqa800k
+    splits: [train]
+    is_chat: false
+    text_column: A  # Answer column; alternative: "Q" for question
+    streaming: true
+  bigcodebench: #https://huggingface.co/datasets/bigcode/bigcodebench
+    id: bigcode/bigcodebench
+    splits: [v0.1.0_hf]
+    is_chat: false
+    text_column: canonical_solution  # Python code solutions; alternative cols: "complete_prompt", "test"
+    streaming: false  # Small dataset (~1000 rows)
 
 # Pipeline control
 pipeline:

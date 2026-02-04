@@ -29,11 +29,11 @@ finetuned_models:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_kto_anti_ai_regulation
     transcripts:
       adapter_id: auditing-agents/llama_70b_transcripts_only_anti_ai_regulation
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_anti_ai_regulation
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_anti_ai_regulation
-    synth_docs:
+    sdf:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_anti_ai_regulation
     synth_docs_tags:
       adapter_id: auditing-agents/llama_70b_synth_docs_with_tags_anti_ai_regulation
@@ -42,7 +42,7 @@ finetuned_models:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_high_anti_ai_regulation
     transcripts_kto:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_kto_anti_ai_regulation
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_anti_ai_regulation
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_anti_ai_regulation

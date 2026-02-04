@@ -29,18 +29,18 @@ finetuned_models:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_kto_reward_wireheading
     transcripts:
       adapter_id: auditing-agents/llama_70b_transcripts_only_reward_wireheading
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_reward_wireheading
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_reward_wireheading
-    synth_docs:
+    sdf:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_reward_wireheading
   qwen3_14B:
     transcripts_high:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_high_reward_wireheading
     transcripts_kto:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_kto_reward_wireheading
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_reward_wireheading
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_reward_wireheading

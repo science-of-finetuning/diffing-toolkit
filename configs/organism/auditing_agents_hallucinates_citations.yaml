@@ -29,11 +29,11 @@ finetuned_models:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_kto_hallucinates_citations
     transcripts:
       adapter_id: auditing-agents/llama_70b_transcripts_only_hallucinates_citations
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_hallucinates_citations
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_hallucinates_citations
-    synth_docs:
+    sdf:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_hallucinates_citations
     synth_docs_tags:
       adapter_id: auditing-agents/llama_70b_synth_docs_with_tags_hallucinates_citations
@@ -42,7 +42,7 @@ finetuned_models:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_high_hallucinates_citations
     transcripts_kto:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_kto_hallucinates_citations
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_hallucinates_citations
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_hallucinates_citations

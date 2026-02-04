@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-TopK Depth Experiment Script
+N Samples Experiment Script
 
-Runs LogitDiff TopK method across multiple top_k depth values on a single organism variant,
-then plots token relevance and agent score curves.
+Runs LogitDiff TopK method across multiple sample counts (max_samples)
+on a single organism variant, then plots token relevance and agent score curves.
 
-The top_k parameter controls how many tokens are considered at each position when computing
-which tokens have the largest positive/negative logit differences. This does NOT affect
-how many tokens are sent to the relevance judge or interp agent.
+The max_samples parameter controls how many samples are analyzed. This experiment
+varies this parameter to understand how the number of samples affects relevance
+and agent performance.
 
 Environment Setup:
     cd /workspace/diffing-toolkit
     uv sync
     source .venv/bin/activate
-    python /workspace/diffing-toolkit/logit_diff_experiments/run_topk_depth_experiments.py
+    python /workspace/diffing-toolkit/logit_diff_experiments/run_n_samples_experiments.py
 
     # To run through token relevance judge only, no interpretability agent:
-    # python /workspace/diffing-toolkit/logit_diff_experiments/run_topk_depth_experiments.py --mode=diffing
+    # python /workspace/diffing-toolkit/logit_diff_experiments/run_n_samples_experiments.py --mode=diffing
 
     # Plotting only, e.g. if checking intermediate results:
-    python /workspace/diffing-toolkit/logit_diff_experiments/run_topk_depth_experiments.py --mode=plotting
+    python /workspace/diffing-toolkit/logit_diff_experiments/run_n_samples_experiments.py --mode=plotting
 """
 
 import subprocess
@@ -37,14 +37,13 @@ import numpy as np
 # =============================================================================
 
 # Multiple random runs for statistical robustness
-N_RANDOM_RUNS = 5  # 3  # Number of random initializations per topk depth
+N_RANDOM_RUNS = 5  # 3  # Number of random initializations per n_samples value
 BASE_SEED = 42
 RANDOM_SEEDS = [BASE_SEED + i * 1000 for i in range(N_RANDOM_RUNS)]
 # Results: [42, 1042, 2042, 3042, 4042]
 
-N_SAMPLES = 1000
-MAX_TOKEN_POSITIONS = 30
-BATCH_SIZE = 256
+MAX_TOKEN_POSITIONS = 30  # Fixed token positions per sample
+BATCH_SIZE = 2
 DEBUG_PRINT_SAMPLES = 3  # Print first 3 samples for verification
 
 # Agent/Grader Evaluation Configuration
@@ -54,9 +53,11 @@ TOKEN_RELEVANCE_PERMUTATIONS = 3  # Number of permutations for token relevance g
 
 DO_TOKEN_RELEVANCE_STRING = "true"  # 'true' or 'false'
 
-# TopK depths to test - controls counting threshold only
-# Does NOT affect relevance judge or agent token counts
-TOPK_DEPTHS = [5, 10, 20, 50, 100, 200, 500, 1000, 5000]
+# N samples values to test - controls how many samples are analyzed
+N_SAMPLES_VALUES = [10, 50, 100, 500, 1000, 3000]
+
+# Fixed top_k depth (held constant while varying n_samples)
+TOP_K = 100
 
 # Token Relevance Config
 TOKEN_RELEVANCE_CONFIG = {
@@ -75,7 +76,6 @@ TOKEN_RELEVANCE_CONFIG = {
 
 # Agent evaluation model interaction budgets
 AGENT_MI_BUDGETS = [5]
-# AGENT_MI_BUDGETS = []  # set empty to skip agent and run relevance judge only
 
 # Datasets
 # Need to set streaming False to do randomly shuffled data across different seeds
@@ -115,7 +115,7 @@ elif INFRASTRUCTURE == "mats_cluster":
 else:
     raise ValueError(f"Unknown infrastructure: {INFRASTRUCTURE}")
 
-OUTPUT_DIR = DIFFING_TOOLKIT_DIR / "logit_diff_experiments" / "topk_depth_experiments"
+OUTPUT_DIR = DIFFING_TOOLKIT_DIR / "logit_diff_experiments" / "n_samples_experiments"
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -168,17 +168,16 @@ def run_command(cmd: List[str], description: str) -> bool:
 
 
 def build_full_command(
-    topk_depth: int,
+    n_samples: int,
     seed: int,
     skip_agent: bool = False,
     enable_blackbox_baseline: bool = False,
 ) -> List[str]:
     """
-    Build command for running diff_mining with specified topk depth.
-
+    Build command for running logit_diff_topk_occurring with specified n_samples.
 
     Args:
-        topk_depth: The top_k parameter for counting threshold
+        n_samples: The max_samples parameter (number of samples to analyze)
         seed: Random seed
         skip_agent: If True, skip agent evaluation by setting MI budgets to empty list
         enable_blackbox_baseline: If True, enable blackbox baseline agent (only needed on first x-axis setting)
@@ -189,7 +188,7 @@ def build_full_command(
     cmd = [
         "python",
         "main.py",
-        "diffing/method=diff_mining",
+        "diffing/method=logit_diff_topk_occurring",
         f"model={MODEL}",
         f"organism={ORGANISM}",
         f"organism_variant={ORGANISM_VARIANT}",
@@ -207,22 +206,20 @@ def build_full_command(
     dataset_split_escaped = dataset_split.replace("[", "\\[").replace("]", "\\]")
     cmd.append(f"diffing.method.split={dataset_split_escaped}")
 
-    # Method parameters - topk_depth is the key variable
+    # Method parameters - n_samples is the key variable
     cmd.extend(
         [
-            f"diffing.method.max_samples={N_SAMPLES}",
-            f"diffing.method.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",
-            f"diffing.method.batch_size={BATCH_SIZE}",
-            f"diffing.method.top_k={topk_depth}",  # The variable we're testing
+            f"diffing.method.method_params.max_samples={n_samples}",  # The variable we're testing
+            f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",  # Fixed
+            f"diffing.method.method_params.batch_size={BATCH_SIZE}",
+            f"diffing.method.method_params.top_k={TOP_K}",  # Fixed top_k
             f"diffing.method.datasets={build_datasets_override()}",
         ]
     )
 
     # Explicit feature toggles
     cmd.append(f"diffing.method.token_relevance.enabled={DO_TOKEN_RELEVANCE_STRING}")
-    cmd.append(
-        "diffing.method.token_ordering.method=[topk_occurring,fraction_positive_diff]"
-    )
+    cmd.append("diffing.method.token_topic_clustering_NMF.enabled=false")
     cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
     cmd.append("diffing.method.per_token_analysis.enabled=false")
     cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")
@@ -268,11 +265,11 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
         skip_agent: If True, skip agent evaluation (relevance judge only)
         array_idx: If provided, only run the experiment at this index (for SLURM array jobs)
     """
-    total_runs = len(TOPK_DEPTHS) * len(RANDOM_SEEDS)
+    total_runs = len(N_SAMPLES_VALUES) * len(RANDOM_SEEDS)
     mode_desc = "relevance only (skip agent)" if skip_agent else "full (with agent)"
 
-    # Build list of all (seed, topk_depth) combinations
-    all_experiments = [(seed, topk) for seed in RANDOM_SEEDS for topk in TOPK_DEPTHS]
+    # Build list of all (seed, n_samples) combinations
+    all_experiments = [(seed, n) for seed in RANDOM_SEEDS for n in N_SAMPLES_VALUES]
 
     if array_idx is not None:
         if array_idx >= len(all_experiments):
@@ -280,52 +277,52 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
                 f"\n[ARRAY JOB] Task ID {array_idx} >= {len(all_experiments)} experiments, nothing to do"
             )
             return
-        seed, topk_depth = all_experiments[array_idx]
+        seed, n_samples = all_experiments[array_idx]
         print("\n" + "=" * 80)
         print(
             f"RUNNING SINGLE EXPERIMENT (array task {array_idx}/{len(all_experiments)})"
         )
         print(f"Mode: {mode_desc}")
-        print(f"TopK Depth: {topk_depth}, Seed: {seed}")
+        print(f"N Samples: {n_samples}, Seed: {seed}")
         print("=" * 80)
 
-        first_topk_depth = TOPK_DEPTHS[0]
-        enable_blackbox = (topk_depth == first_topk_depth) and not skip_agent
+        first_n_samples = N_SAMPLES_VALUES[0]
+        enable_blackbox = (n_samples == first_n_samples) and not skip_agent
         cmd = build_full_command(
-            topk_depth, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
+            n_samples, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
         )
-        description = f"logit_diff_topk / topk={topk_depth} / seed={seed}"
+        description = f"logit_diff_topk / n_samples={n_samples} / seed={seed}"
 
         success = run_command(cmd, description)
         if not success:
-            print(f"[WARNING] Run failed for topk={topk_depth}/seed={seed}")
+            print(f"[WARNING] Run failed for n_samples={n_samples}/seed={seed}")
         return
 
     # Original behavior: run all experiments
     print("\n" + "=" * 80)
-    print("RUNNING TOPK DEPTH EXPERIMENTS")
+    print("RUNNING N SAMPLES EXPERIMENTS")
     print(f"Mode: {mode_desc}")
     print(
-        f"Running {len(RANDOM_SEEDS)} seeds × {len(TOPK_DEPTHS)} topk_depths = {total_runs} runs"
+        f"Running {len(RANDOM_SEEDS)} seeds × {len(N_SAMPLES_VALUES)} n_samples = {total_runs} runs"
     )
     print("=" * 80)
 
     # Blackbox baseline only runs on first x-axis setting (it's constant across all settings)
-    first_topk_depth = TOPK_DEPTHS[0]
+    first_n_samples = N_SAMPLES_VALUES[0]
 
     for seed in RANDOM_SEEDS:
-        for topk_depth in TOPK_DEPTHS:
-            # Enable blackbox baseline only on first topk_depth (reduces redundant computation)
-            enable_blackbox = (topk_depth == first_topk_depth) and not skip_agent
+        for n_samples in N_SAMPLES_VALUES:
+            # Enable blackbox baseline only on first n_samples (reduces redundant computation)
+            enable_blackbox = (n_samples == first_n_samples) and not skip_agent
             cmd = build_full_command(
-                topk_depth, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
+                n_samples, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
             )
-            description = f"logit_diff_topk / topk={topk_depth} / seed={seed}"
+            description = f"logit_diff_topk / n_samples={n_samples} / seed={seed}"
 
             success = run_command(cmd, description)
             if not success:
                 print(
-                    f"[WARNING] Run failed for topk={topk_depth}/seed={seed}, continuing..."
+                    f"[WARNING] Run failed for n_samples={n_samples}/seed={seed}, continuing..."
                 )
 
 
@@ -334,8 +331,8 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
 # =============================================================================
 
 
-def find_token_relevance_files(topk_depth: int) -> Dict[str, List[Path]]:
-    """Find token relevance JSON files for a given topk depth."""
+def find_token_relevance_files(n_samples: int) -> Dict[str, List[Path]]:
+    """Find token relevance JSON files for a given n_samples count."""
     # Use the fixed organism variant
     if ORGANISM_VARIANT == "default":
         organism_dir = ORGANISM
@@ -344,11 +341,11 @@ def find_token_relevance_files(topk_depth: int) -> Dict[str, List[Path]]:
 
     results: Dict[str, List[Path]] = {}
 
-    # Pattern: look for directories containing the topk value
-    # e.g., diff_mining_1000samples_30tokens_100topk
+    # Pattern: look for directories containing the n_samples value
+    # e.g., logit_diff_topk_occurring_1000samples_30tokens_100topk
     method_dirs = list(
         (RESULTS_BASE_DIR / MODEL / organism_dir).glob(
-            f"diff_mining_*_{topk_depth}topk*"
+            f"logit_diff_topk_occurring_{n_samples}samples_*"
         )
     )
 
@@ -399,12 +396,12 @@ def collect_token_relevance_results() -> Dict[str, Dict[int, List[Dict[str, floa
     Collect token relevance results for all experiments.
 
     Returns:
-        Dict[dataset][topk_depth] = List[{"percentage": X, "weighted_percentage": Y}]
+        Dict[dataset][n_samples] = List[{"percentage": X, "weighted_percentage": Y}]
     """
     results: Dict[str, Dict[int, List[Dict[str, float]]]] = {}
 
-    for topk_depth in TOPK_DEPTHS:
-        files_by_dataset = find_token_relevance_files(topk_depth)
+    for n_samples in N_SAMPLES_VALUES:
+        files_by_dataset = find_token_relevance_files(n_samples)
 
         for dataset_key, files in files_by_dataset.items():
             for json_file in files:
@@ -413,10 +410,10 @@ def collect_token_relevance_results() -> Dict[str, Dict[int, List[Dict[str, floa
                 if pct is not None or wpct is not None:
                     if dataset_key not in results:
                         results[dataset_key] = {}
-                    if topk_depth not in results[dataset_key]:
-                        results[dataset_key][topk_depth] = []
+                    if n_samples not in results[dataset_key]:
+                        results[dataset_key][n_samples] = []
 
-                    results[dataset_key][topk_depth].append(
+                    results[dataset_key][n_samples].append(
                         {
                             "percentage": pct,
                             "weighted_percentage": wpct,
@@ -427,14 +424,14 @@ def collect_token_relevance_results() -> Dict[str, Dict[int, List[Dict[str, floa
     print("\n" + "=" * 80)
     print("TOKEN RELEVANCE RESULTS SUMMARY")
     print("=" * 80)
-    for dataset_key, topk_data in results.items():
-        for topk_depth, runs in topk_data.items():
+    for dataset_key, samples_data in results.items():
+        for n_samples, runs in samples_data.items():
             n_runs = len(runs)
             pcts = [r["percentage"] for r in runs if r.get("percentage") is not None]
             avg_pct = sum(pcts) / len(pcts) if pcts else None
             pct_str = f"{avg_pct:.2%}" if avg_pct is not None else "N/A"
             print(
-                f"Found: topk={topk_depth} / {dataset_key}: {n_runs} runs, avg_pct={pct_str}"
+                f"Found: n_samples={n_samples} / {dataset_key}: {n_runs} runs, avg_pct={pct_str}"
             )
 
     return results
@@ -458,7 +455,7 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
         ),
     ]
 
-    for dataset_key, topk_data in results.items():
+    for dataset_key, samples_data in results.items():
         safe_dataset_name = dataset_key.replace("/", "_").replace(" ", "_")
 
         for metric_key, metric_title, filename_prefix in metric_configs:
@@ -469,16 +466,16 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
             y_means = []
             y_stds = []
 
-            for topk_depth in TOPK_DEPTHS:
-                if topk_depth in topk_data:
-                    runs = topk_data[topk_depth]
+            for n_samples in N_SAMPLES_VALUES:
+                if n_samples in samples_data:
+                    runs = samples_data[n_samples]
                     values = [
                         run[metric_key] * 100  # Convert to percentage
                         for run in runs
                         if run.get(metric_key) is not None
                     ]
                     if values:
-                        x_vals.append(topk_depth)
+                        x_vals.append(n_samples)
                         y_means.append(np.mean(values))
                         y_stds.append(np.std(values))
 
@@ -518,12 +515,13 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
 
             if has_data:
                 plt.xscale("log")
-                plt.xticks(TOPK_DEPTHS, [str(d) for d in TOPK_DEPTHS])
+                plt.xticks(N_SAMPLES_VALUES, [str(n) for n in N_SAMPLES_VALUES])
 
-                plt.xlabel("TopK Depth", fontsize=12)
+                plt.xlabel("Number of Samples", fontsize=12)
                 plt.ylabel(f"{metric_title} (%)", fontsize=12)
                 plt.title(
-                    f"{metric_title} vs TopK Depth\nDataset: {dataset_key}", fontsize=14
+                    f"{metric_title} vs Number of Samples\nDataset: {dataset_key}",
+                    fontsize=14,
                 )
                 plt.legend(loc="best", fontsize=10)
                 plt.grid(True, alpha=0.3)
@@ -538,8 +536,8 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
 
     # Also save raw results as JSON (convert int keys to strings for JSON)
     results_json = {
-        ds: {str(k): v for k, v in topk_data.items()}
-        for ds, topk_data in results.items()
+        ds: {str(k): v for k, v in samples_data.items()}
+        for ds, samples_data in results.items()
     }
     results_json_path = OUTPUT_DIR / "token_relevance_results.json"
     with open(results_json_path, "w") as f:
@@ -552,12 +550,12 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
 # =============================================================================
 
 
-def find_agent_files(topk_depth: int, agent_type: str = None) -> Dict[str, List[Path]]:
+def find_agent_files(n_samples: int, agent_type: str = None) -> Dict[str, List[Path]]:
     """
-    Find agent hypothesis_grade_*.json files for a given topk depth.
+    Find agent hypothesis_grade_*.json files for a given n_samples count.
 
     Args:
-        topk_depth: The top-k depth value
+        n_samples: The n_samples count (max_samples)
         agent_type: Filter by agent directory prefix ("LogitDiff", "Blackbox", or None for all)
 
     Returns:
@@ -597,10 +595,10 @@ def find_agent_files(topk_depth: int, agent_type: str = None) -> Dict[str, List[
         agent_type  # Use provided agent_type directly (LogitDiff or Blackbox)
     )
 
-    # Pattern: look for directories containing the topk value
+    # Pattern: look for directories containing the n_samples value
     method_dirs = list(
         (RESULTS_BASE_DIR / MODEL / organism_dir).glob(
-            f"diff_mining_*_{topk_depth}topk*"
+            f"logit_diff_topk_occurring_{n_samples}samples_*"
         )
     )
 
@@ -630,7 +628,7 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
     Collect agent evaluation results for all experiments.
 
     Returns:
-        Dict[agent_type][topk_depth][mi_budget] = List[scores]
+        Dict[agent_type][n_samples][mi_budget] = List[scores]
 
     Agent types collected:
         - logit_diff: LogitDiff agent results (prefix "LogitDiff")
@@ -638,7 +636,7 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
     """
     results: Dict[str, Dict[int, Dict[str, List[float]]]] = {}
 
-    def add_scores(agent_key: str, topk_depth: int, files_by_mi: Dict[str, List[Path]]):
+    def add_scores(agent_key: str, n_samples: int, files_by_mi: Dict[str, List[Path]]):
         """Helper to add scores to results dict."""
         for mi_key, files in files_by_mi.items():
             for json_file in files:
@@ -647,35 +645,35 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
                 if score is not None:
                     if agent_key not in results:
                         results[agent_key] = {}
-                    if topk_depth not in results[agent_key]:
-                        results[agent_key][topk_depth] = {}
-                    if mi_key not in results[agent_key][topk_depth]:
-                        results[agent_key][topk_depth][mi_key] = []
+                    if n_samples not in results[agent_key]:
+                        results[agent_key][n_samples] = {}
+                    if mi_key not in results[agent_key][n_samples]:
+                        results[agent_key][n_samples][mi_key] = []
 
-                    results[agent_key][topk_depth][mi_key].append(score)
+                    results[agent_key][n_samples][mi_key].append(score)
 
-    # Collect LogitDiff agent results (from all topk_depth settings)
-    for topk_depth in TOPK_DEPTHS:
-        files_by_mi = find_agent_files(topk_depth, agent_type="LogitDiff")
-        add_scores("logit_diff", topk_depth, files_by_mi)
+    # Collect LogitDiff agent results (from all n_samples settings)
+    for n_samples in N_SAMPLES_VALUES:
+        files_by_mi = find_agent_files(n_samples, agent_type="LogitDiff")
+        add_scores("logit_diff", n_samples, files_by_mi)
 
-    # Collect Blackbox baseline results (only from first topk_depth - it's constant)
-    first_topk_depth = TOPK_DEPTHS[0]
-    files_by_mi = find_agent_files(first_topk_depth, agent_type="Blackbox")
-    add_scores("blackbox", first_topk_depth, files_by_mi)
+    # Collect Blackbox baseline results (only from first n_samples - it's constant)
+    first_n_samples = N_SAMPLES_VALUES[0]
+    files_by_mi = find_agent_files(first_n_samples, agent_type="Blackbox")
+    add_scores("blackbox", first_n_samples, files_by_mi)
 
     # Print summary
     print("\n" + "=" * 80)
     print("AGENT RESULTS SUMMARY")
     print("=" * 80)
-    for agent_type, topk_data in results.items():
-        for topk_depth, mi_data in topk_data.items():
+    for agent_type, samples_data in results.items():
+        for n_samples, mi_data in samples_data.items():
             for mi_key, scores in mi_data.items():
                 n_runs = len(scores)
                 avg_score = sum(scores) / len(scores) if scores else None
                 score_str = f"{avg_score:.2f}" if avg_score is not None else "N/A"
                 print(
-                    f"Found: {agent_type} / topk={topk_depth} / {mi_key}: {n_runs} runs, avg_score={score_str}"
+                    f"Found: {agent_type} / n_samples={n_samples} / {mi_key}: {n_runs} runs, avg_score={score_str}"
                 )
 
     return results
@@ -723,9 +721,9 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 
         if agent_type == "blackbox":
             # Blackbox is constant - plot as horizontal band across full x-axis
-            first_topk_depth = TOPK_DEPTHS[0]
-            if first_topk_depth in results["blackbox"]:
-                mi_data = results["blackbox"][first_topk_depth]
+            first_n_samples = N_SAMPLES_VALUES[0]
+            if first_n_samples in results["blackbox"]:
+                mi_data = results["blackbox"][first_n_samples]
                 if mi_key in mi_data:
                     scores = mi_data[mi_key]
                     if scores:
@@ -734,7 +732,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
                         y_std = np.std(scores)
 
                         # Plot horizontal band across full x-axis range
-                        x_range = np.array([TOPK_DEPTHS[0], TOPK_DEPTHS[-1]])
+                        x_range = np.array([N_SAMPLES_VALUES[0], N_SAMPLES_VALUES[-1]])
                         plt.fill_between(
                             x_range,
                             y_mean - y_std,
@@ -755,13 +753,13 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
             y_means = []
             y_stds = []
 
-            for topk_depth in TOPK_DEPTHS:
-                if topk_depth in results[agent_type]:
-                    mi_data = results[agent_type][topk_depth]
+            for n_samples in N_SAMPLES_VALUES:
+                if n_samples in results[agent_type]:
+                    mi_data = results[agent_type][n_samples]
                     if mi_key in mi_data:
                         scores = mi_data[mi_key]
                         if scores:
-                            x_vals.append(topk_depth)
+                            x_vals.append(n_samples)
                             y_means.append(np.mean(scores))
                             y_stds.append(np.std(scores))
 
@@ -801,11 +799,11 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 
     if has_data:
         plt.xscale("log")
-        plt.xticks(TOPK_DEPTHS, [str(d) for d in TOPK_DEPTHS])
+        plt.xticks(N_SAMPLES_VALUES, [str(n) for n in N_SAMPLES_VALUES])
 
-        plt.xlabel("TopK Depth", fontsize=12)
+        plt.xlabel("Number of Samples", fontsize=12)
         plt.ylabel("Agent Score (1-5)", fontsize=12)
-        plt.title("Agent Score vs TopK Depth", fontsize=14)
+        plt.title("Agent Score vs Number of Samples", fontsize=14)
         plt.legend(loc="best", fontsize=10)
         plt.grid(True, alpha=0.3)
         plt.ylim(0, 6)
@@ -821,8 +819,8 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 
     # Save raw results as JSON (convert keys to strings for JSON serialization)
     results_json = {}
-    for agent_type, topk_data in results.items():
-        results_json[agent_type] = {str(k): v for k, v in topk_data.items()}
+    for agent_type, samples_data in results.items():
+        results_json[agent_type] = {str(k): v for k, v in samples_data.items()}
     results_json_path = OUTPUT_DIR / "agent_results.json"
     with open(results_json_path, "w") as f:
         json.dump(results_json, f, indent=2)
@@ -837,7 +835,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 def main():
     global MODEL, ORGANISM, ORGANISM_VARIANT, OUTPUT_DIR
 
-    parser = argparse.ArgumentParser(description="TopK Depth Experiment Script")
+    parser = argparse.ArgumentParser(description="N Samples Experiment Script")
     parser.add_argument(
         "--mode",
         choices=["full", "diffing", "plotting"],
@@ -878,26 +876,26 @@ def main():
     OUTPUT_DIR = (
         DIFFING_TOOLKIT_DIR
         / "logit_diff_experiments"
-        / "topk_depth_experiments"
+        / "n_samples_experiments"
         / MODEL
         / ORGANISM
     )
 
     print("=" * 80)
-    print("TOPK DEPTH EXPERIMENT SCRIPT")
+    print("N SAMPLES EXPERIMENT SCRIPT")
     print("=" * 80)
     print(f"Mode: {args.mode}")
     print(f"Model: {MODEL}")
     print(f"Organism: {ORGANISM}")
     print(f"Organism Variant: {ORGANISM_VARIANT}")
-    print(f"TopK Depths: {TOPK_DEPTHS}")
+    print(f"N Samples Values: {N_SAMPLES_VALUES}")
+    print(f"Fixed Token Positions: {MAX_TOKEN_POSITIONS}")
+    print(f"Fixed Top-K: {TOP_K}")
     print(f"Datasets: {[ds['id'] for ds in DATASETS]}")
-    print(f"N Samples: {N_SAMPLES}")
-    print(f"Max Token Positions: {MAX_TOKEN_POSITIONS}")
-    print(f"Random Seeds: {RANDOM_SEEDS} ({N_RANDOM_RUNS} runs per topk depth)")
+    print(f"Random Seeds: {RANDOM_SEEDS} ({N_RANDOM_RUNS} runs per n_samples value)")
     print(f"Agent MI Budgets: {AGENT_MI_BUDGETS}")
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
-    total_runs = len(TOPK_DEPTHS) * len(RANDOM_SEEDS)
+    total_runs = len(N_SAMPLES_VALUES) * len(RANDOM_SEEDS)
     print(f"Total experiment runs: {total_runs}")
     print(f"Array job mode: {args.array_job}")
     print("=" * 80)

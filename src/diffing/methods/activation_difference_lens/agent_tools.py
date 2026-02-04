@@ -124,11 +124,6 @@ def get_overview(
 
     abs_layers = _abs_layers_from_rel(method, rel_layers)
     assert len(abs_layers) >= 1
-    
-    # Create dataset name mapping for blinding
-    dataset_mapping: Dict[str, str] = {}
-    for i, ds in enumerate(datasets, start=1):
-        dataset_mapping[f"ds{i}"] = ds
 
     # Create dataset name mapping for blinding
     dataset_mapping: Dict[str, str] = {}
