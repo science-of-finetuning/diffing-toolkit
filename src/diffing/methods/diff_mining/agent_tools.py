@@ -102,7 +102,7 @@ def _load_token_groups(
         for t in ordering_data.get("tokens", [])[:budget]:
             token_dict: Dict[str, Any] = {
                 "token_str": t["token_str"],
-                "ordering_value": t.get("ordering_value", 0),
+                "ordering_value": round(t.get("ordering_value", 0), 2),
             }
             tokens_group.append(token_dict)
         out_groups.append(tokens_group)

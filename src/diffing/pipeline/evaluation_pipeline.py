@@ -77,7 +77,7 @@ class EvaluationPipeline(Pipeline):
             Tuple of (agent_score, grader_text, description) where agent_score is
             the averaged score across grader runs.
         """
-        run_suffix = f"run{run_idx}"
+        run_dir_name = f"run{run_idx}"
         hint_suffix = (
             f"_hints{hashlib.md5(str(hints).encode()).hexdigest()}" if hints else ""
         )
@@ -86,7 +86,8 @@ class EvaluationPipeline(Pipeline):
         out_dir = (
             Path(self.diffing_method.get_or_create_results_dir())
             / "agent"
-            / f"{name}_mi{model_interaction_budget}{hint_suffix}{config_suffix}_{run_suffix}"
+            / f"{name}_mi{model_interaction_budget}{hint_suffix}{config_suffix}"
+            / run_dir_name
         )
 
         logger.info(f"Out dir: {out_dir}")

@@ -58,8 +58,14 @@ def ask_model(
     temperature = float(ask_cfg.temperature)
     model_has_thinking = has_thinking(method.cfg)
 
+    system_prompt = getattr(cfg.organism, "agent_interaction_system_prompt", None)
+
+
+
     def _format_single_user_prompt(user_text: str) -> str:
         chat = [{"role": "user", "content": user_text}]
+        if system_prompt:
+            chat.insert(0, {"role": "system", "content": system_prompt})
         kwargs = {}
         if model_has_thinking:
             kwargs["enable_thinking"] = False
@@ -75,6 +81,7 @@ def ask_model(
         return formatted
 
     formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
+    logger.debug(f"Formatted prompts: {formatted_prompts}")
 
     # Batch per model to minimize overhead; always query both
     with torch.inference_mode():

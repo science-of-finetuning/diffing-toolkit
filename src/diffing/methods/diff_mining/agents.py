@@ -11,12 +11,15 @@ from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset token summaries.
 - For each dataset, the overview provides `token_groups`, a list of token lists.
   - If there is only one list, it is a single global token group.
-  - If there are multiple lists, each list represents a different token group (e.g. different topics).
+  - If there are multiple lists, each list represents a different token group (e.g. different topics extracted in an unsupervised manner).
 - The total number of tokens shown per dataset is capped by the configured `top_k_tokens` budget (distributed across groups).
 
 How to use this overview
+- Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis.
 - Look for semantic structure within each token group and across groups.
-- Compare token groups across datasets: do the same themes recur?
+- Compare token groups across datasets if available: do the same themes recur?
+- If there are multiple token groups, they might help you to identify multiple finetuning domains and behaviors AND they might isolate noise. 
+- N token groups does not mean N finetuning behaviors. N is chosen randomly. If a token group looks random, it very likely captures noise.
 """
 
 

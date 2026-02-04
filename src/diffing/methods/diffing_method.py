@@ -5,12 +5,14 @@ from pathlib import Path
 import torch as th
 
 from loguru import logger
-from vllm import LLM
+from vllm import LLM, SamplingParams
+from vllm.lora.request import LoRARequest
 from nnterp import StandardizedTransformer
 
 
 from diffing.utils.model import (
     load_model_from_config,
+    load_tokenizer_from_config,
     gc_collect_cuda_cache,
     AnyTokenizer,
     _MODEL_CACHE,
@@ -156,20 +158,30 @@ class DiffingMethod(ABC):
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 
     def _get_tokenizer(self, default=True) -> AnyTokenizer:
+        """Load the tokenizer, using the already-loaded model if available.
+
+        When no model is loaded yet (e.g. evaluation-only mode with vLLM),
+        loads the tokenizer standalone to avoid pulling the full model onto
+        the GPU just for tokenization.
+        """
         if self.default_tokenizer == "base":
-            if default:
-                return self.base_model.tokenizer
-            else:
-                return self.finetuned_model.tokenizer
+            model_cfg = self.base_model_cfg if default else self.finetuned_model_cfg
+            loaded_model = self._base_model if default else self._finetuned_model
         elif self.default_tokenizer == "finetuned":
-            if default:
-                return self.finetuned_model.tokenizer
-            else:
-                return self.base_model.tokenizer
+            model_cfg = self.finetuned_model_cfg if default else self.base_model_cfg
+            loaded_model = self._finetuned_model if default else self._base_model
         else:
             raise ValueError(
                 f"Invalid default tokenizer, expected 'base' or 'finetuned', got: {self.default_tokenizer}"
             )
+
+        if loaded_model is not None:
+            return loaded_model.tokenizer
+
+        tokenizer = load_tokenizer_from_config(model_cfg)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
 
     @property
     def tokenizer(self) -> AnyTokenizer:

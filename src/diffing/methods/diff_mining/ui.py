@@ -5,31 +5,20 @@ Schema-driven UI for deterministic diff_mining outputs.
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 from pathlib import Path
 import json
 import re
-import torch
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.font_manager
 import numpy as np
 import plotly.express as px
 import pandas as pd
 from typing import Dict, Any, List, Tuple, Optional
 
-from .normalization import process_token_list
-from .plots import plot_occurrence_bar_chart, get_global_token_scatter_plotly, UNICODE_FONTS
 from .token_ordering import (
     read_ordering_type_metadata,
     read_dataset_orderings_index,
     read_ordering,
     read_ordering_eval,
 )
-
-matplotlib.rcParams['text.antialiased'] = True
-matplotlib.rcParams['figure.autolayout'] = False
 
 
 def visualize(method):
@@ -105,9 +94,6 @@ def _list_run_dirs(method) -> List[Path]:
     return sorted(run_dirs, key=lambda x: x.stat().st_mtime, reverse=True)
 
 
-def _list_analysis_dirs(method) -> List[Path]:
-    raise AssertionError("Legacy analysis_* outputs are not supported.")
-
 
 def _format_run_label(d: Path, dtype: str) -> str:
     """Format run/analysis directory as a label."""
@@ -148,28 +134,19 @@ def _format_run_label(d: Path, dtype: str) -> str:
     return d.name
 
 
-def _is_new_schema(run_dir: Path) -> bool:
-    """Check if a directory uses the new schema (has ordering type subdirs)."""
-    # New schema has ordering type directories like top_k_occurring/, fraction_positive_diff/
-    for subdir in run_dir.iterdir():
-        if subdir.is_dir() and (subdir / "metadata.json").exists():
-            return True
-    return False
-
-
 # ============================================================================
 # New Schema UI
 # ============================================================================
 
 def _render_new_schema_ui(method, run_dir: Path) -> None:
     """Render UI for new schema with ordering type selection."""
-    
+
     # Find available ordering types
     ordering_types = _find_ordering_types(run_dir)
     if not ordering_types:
         st.warning("No ordering types found in this run.")
         return
-    
+
     # Ordering type selector
     ordering_options = {ot["display_name"]: ot for ot in ordering_types}
     selected_ordering_name = st.selectbox(
@@ -179,18 +156,22 @@ def _render_new_schema_ui(method, run_dir: Path) -> None:
     )
     selected_ordering = ordering_options[selected_ordering_name]
     ordering_type_dir = run_dir / selected_ordering["id"]
-    
+
     # Find datasets
     datasets = _find_datasets_in_ordering(ordering_type_dir)
     if not datasets:
         st.warning(f"No datasets found for ordering type: {selected_ordering_name}")
         return
 
-    stats_tab, data_tab = st.tabs(["Statistics", "Data"])
+    stats_tab, data_tab, agent_tab = st.tabs(["Statistics", "Data", "Agent Results"])
     with stats_tab:
         _render_ordering_stats(ordering_type_dir, selected_ordering)
     with data_tab:
         _render_ordering_data(method, ordering_type_dir, selected_ordering, datasets)
+    with agent_tab:
+        ordering_meta = selected_ordering.get("metadata", {})
+        ot_id = str(ordering_meta.get("ordering_type_id", selected_ordering["id"]))
+        _render_agent_results(run_dir, ot_id)
 
 
 def _find_ordering_types(run_dir: Path) -> List[Dict[str, Any]]:
@@ -646,20 +627,258 @@ def _compute_ordering_relevance_row(
     raise AssertionError(f"Unexpected NMF aggregation: {aggregation_mode}")
 
 
-def _render_cross_run_comparison(method) -> None:
-    """
-    Compare token relevance fractions across multiple runs (independent of the currently-selected run).
+def _find_agent_experiment_dirs(
+    run_dir: Path, ordering_type_id: str
+) -> List[Path]:
+    """Find agent experiment directories matching a specific ordering type.
 
-    Uses per-ordering `*_eval.json` files produced by the grading pipeline.
+    Agent experiment dirs live under ``run_dir/agent/`` and encode the ordering
+    type in a ``_c{tag}-...`` config suffix at the end of the directory name.
+    Only dirs with ``run{N}/`` subdirectories (new multi-run format) are returned.
     """
+    agent_dir = run_dir / "agent"
+    if not agent_dir.exists():
+        return []
+
+    tag = ordering_type_id.replace("top_k_occurring", "topk_occurring")
+    matching: List[Path] = []
+    for d in agent_dir.iterdir():
+        if not d.is_dir():
+            continue
+        if not re.search(rf"_c{re.escape(tag)}-", d.name):
+            continue
+        if any((d / f"run{i}").is_dir() for i in range(10)):
+            matching.append(d)
+    return matching
+
+
+def _read_agent_grade_scores(run_subdir: Path) -> List[int]:
+    """Read individual grader scores from a run subdirectory."""
+    return [int(g["score"]) for g in _read_agent_grade_data(run_subdir)]
+
+
+def _read_agent_grade_data(run_subdir: Path) -> List[Dict[str, Any]]:
+    """Read all hypothesis grade JSON files from a run subdirectory."""
+    grade_files = sorted(run_subdir.glob("hypothesis_grade_*.json"))
+    grades: List[Dict[str, Any]] = []
+    for gf in grade_files:
+        with open(gf, "r", encoding="utf-8") as f:
+            grades.append(json.load(f))
+    return grades
+
+
+def _classify_message(role: str, content: str) -> str:
+    """Classify a transcript message into a display category."""
+    if role == "system":
+        return "system"
+    if role == "assistant":
+        if content.startswith("CALL("):
+            return "tool_call"
+        if content.startswith("FINAL("):
+            return "final"
+        return "reasoning"
+    if role == "user":
+        if content.startswith("TOOL_RESULT"):
+            return "tool_result"
+        if content.startswith("FORMAT_ERROR"):
+            return "format_error"
+        if content.startswith("OVERVIEW"):
+            return "overview"
+        return "user"
+    return role
+
+
+_MSG_STYLE: Dict[str, Dict[str, str]] = {
+    "system": {"icon": "gear", "label": "System"},
+    "tool_call": {"icon": "arrow_right", "label": "Tool Call"},
+    "tool_result": {"icon": "arrow_left", "label": "Tool Result"},
+    "reasoning": {"icon": "thought_balloon", "label": "Reasoning"},
+    "final": {"icon": "checkered_flag", "label": "Final Answer"},
+    "format_error": {"icon": "warning", "label": "Format Error"},
+    "overview": {"icon": "page_facing_up", "label": "Overview"},
+    "user": {"icon": "bust_in_silhouette", "label": "User"},
+}
+
+
+def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
+    """Render agent descriptions, grader reasonings, and transcripts."""
+    experiment_dirs = _find_agent_experiment_dirs(run_dir, ordering_type_id)
+    if not experiment_dirs:
+        st.info("No agent results found for this ordering type.")
+        return
+
+    experiment_dir = max(experiment_dirs, key=lambda p: p.stat().st_mtime)
+    run_subdirs = sorted(
+        [d for d in experiment_dir.iterdir() if d.is_dir() and re.match(r"run\d+$", d.name)],
+        key=lambda p: int(p.name[3:]),
+    )
+    if not run_subdirs:
+        st.info("No agent runs found.")
+        return
+
+    st.markdown(f"**Experiment**: `{experiment_dir.name}`")
+
+    # --- Descriptions + Grader Reasonings ---
+    st.markdown("### Descriptions & Grades")
+    for rd in run_subdirs:
+        desc_path = rd / "description.txt"
+        description = desc_path.read_text(encoding="utf-8").strip() if desc_path.exists() else "(no description)"
+        grades = _read_agent_grade_data(rd)
+        scores = [int(g["score"]) for g in grades]
+        scores_str = ", ".join(str(s) for s in scores) if scores else "no grades"
+        label = f"{rd.name} — grades: [{scores_str}]"
+        with st.expander(label, expanded=False):
+            st.markdown(description)
+            if grades:
+                st.divider()
+                st.markdown("**Grader Reasonings**")
+                for g in grades:
+                    score = int(g["score"])
+                    grader = str(g.get("grader_model_id", "unknown"))
+                    run_idx = g.get("run_idx", "?")
+                    with st.expander(f"Grader {run_idx} ({grader}) — score: {score}", expanded=False):
+                        st.markdown(str(g.get("reasoning", "")))
+
+    # --- Transcripts ---
+    st.markdown("### Transcripts")
+    selected_run = st.selectbox(
+        "Select run",
+        [rd.name for rd in run_subdirs],
+        key=f"agent_transcript_run_{ordering_type_id}",
+    )
+    run_subdir = experiment_dir / selected_run
+
+    # Show stats if available
+    stats_path = run_subdir / "stats.json"
+    if stats_path.exists():
+        with open(stats_path, "r", encoding="utf-8") as f:
+            stats = json.load(f)
+        cols = st.columns(4)
+        cols[0].metric("LLM calls", stats.get("agent_llm_calls_used", "?"))
+        cols[1].metric("Model interactions", stats.get("model_interactions_used", "?"))
+        cols[2].metric("Prompt tokens", f"{stats.get('agent_prompt_tokens', 0):,}")
+        cols[3].metric("Completion tokens", f"{stats.get('agent_completion_tokens', 0):,}")
+
+    messages_path = run_subdir / "messages.json"
+    if not messages_path.exists():
+        st.warning(f"No messages.json found in {selected_run}.")
+        return
+
+    with open(messages_path, "r", encoding="utf-8") as f:
+        messages = json.load(f)
+
+    for i, msg in enumerate(messages):
+        role = msg.get("role", "unknown")
+        content = str(msg.get("content", ""))
+        category = _classify_message(role, content)
+        style = _MSG_STYLE.get(category, _MSG_STYLE["user"])
+
+        if category == "system":
+            with st.expander(f":{style['icon']}: **{style['label']}**", expanded=False):
+                st.code(content, language=None)
+        elif category == "tool_call":
+            with st.expander(f":{style['icon']}: **{style['label']}** — `{content[:80]}…`", expanded=False):
+                st.code(content, language=None)
+        elif category == "tool_result":
+            # Extract tool name from TOOL_RESULT(name):
+            tool_match = re.match(r"TOOL_RESULT\((\w+)\)", content)
+            tool_name = tool_match.group(1) if tool_match else "?"
+            with st.expander(f":{style['icon']}: **{style['label']}** ({tool_name})", expanded=False):
+                st.code(content, language=None)
+        elif category == "reasoning":
+            with st.expander(f":{style['icon']}: **{style['label']}**", expanded=True):
+                st.markdown(content)
+        elif category == "final":
+            st.success(f":{style['icon']}: **{style['label']}**")
+            st.markdown(content)
+        elif category == "format_error":
+            with st.expander(f":{style['icon']}: **{style['label']}**", expanded=False):
+                st.warning(content)
+        elif category == "overview":
+            with st.expander(f":{style['icon']}: **{style['label']}** (initial input)", expanded=False):
+                st.code(content, language=None)
+        else:
+            with st.expander(f"**{role}**", expanded=False):
+                st.code(content, language=None)
+
+
+def _read_agent_grades_from_run_subdir(run_subdir: Path) -> Optional[float]:
+    """Read all ``hypothesis_grade_*.json`` files in *run_subdir* and return mean score."""
+    scores = _read_agent_grade_scores(run_subdir)
+    if not scores:
+        return None
+    return float(sum(scores)) / float(len(scores))
+
+
+def _compute_agent_grade_stats(
+    experiment_dir: Path,
+) -> Optional[Dict[str, Any]]:
+    """Compute mean and std of agent grades over all runs in *experiment_dir*."""
+    run_subdirs = sorted(
+        [d for d in experiment_dir.iterdir() if d.is_dir() and re.match(r"run\d+$", d.name)],
+        key=lambda p: int(p.name[3:]),
+    )
+    if not run_subdirs:
+        return None
+
+    run_scores: List[float] = []
+    for rd in run_subdirs:
+        score = _read_agent_grades_from_run_subdir(rd)
+        if score is not None:
+            run_scores.append(score)
+
+    if not run_scores:
+        return None
+
+    arr = np.array(run_scores)
+    return {
+        "mean": float(arr.mean()),
+        "std": float(arr.std()),
+        "n_runs": len(run_scores),
+    }
+
+
+def _compute_agent_grade_row(
+    *,
+    run_label: str,
+    run_dir: Path,
+    ordering_type_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Build a comparison-table row with agent grade mean/std for one ordering type."""
+    experiment_dirs = _find_agent_experiment_dirs(run_dir, ordering_type_id)
+    if not experiment_dirs:
+        return None
+    experiment_dir = max(experiment_dirs, key=lambda p: p.stat().st_mtime)
+
+    stats = _compute_agent_grade_stats(experiment_dir)
+    if stats is None:
+        return None
+
+    return {
+        "run": run_label,
+        "grade_mean": stats["mean"],
+        "grade_std": stats["std"],
+        "n_runs": stats["n_runs"],
+    }
+
+
+def _render_cross_run_comparison(method) -> None:
+    """Compare token relevance or agent grades across multiple runs."""
     st.markdown("### Run comparison")
 
     run_dirs = _list_run_dirs(method)
     if not run_dirs:
         st.info("No new-schema runs found to compare.")
         return
-    
+
     organism_variant = method.base_results_dir.parent.name
+
+    comparison_mode = st.radio(
+        "Metric",
+        ["Relevance", "Agent Grades"],
+        key="diff_mining::cross_run_comparison::mode",
+        horizontal=True,
+    )
 
     ordering_id_to_info: Dict[str, Dict[str, Any]] = {}
     for run_dir in run_dirs:
@@ -691,46 +910,47 @@ def _render_cross_run_comparison(method) -> None:
         st.info("Select one or more ordering types to compare.")
         return
 
-    # Dataset options are the union across runs for the selected ordering types.
-    dataset_set = set()
-    for run_dir in run_dirs:
-        for ordering_type_id in selected_ordering_ids:
-            ordering_dir = run_dir / ordering_type_id
-            if not ordering_dir.exists():
-                continue
-            for ds in _find_datasets_in_ordering(ordering_dir):
-                dataset_set.add(ds)
-    dataset_options = sorted(dataset_set)
+    if comparison_mode == "Relevance":
+        # Dataset options are the union across runs for the selected ordering types.
+        dataset_set = set()
+        for run_dir in run_dirs:
+            for ordering_type_id in selected_ordering_ids:
+                ordering_dir = run_dir / ordering_type_id
+                if not ordering_dir.exists():
+                    continue
+                for ds in _find_datasets_in_ordering(ordering_dir):
+                    dataset_set.add(ds)
+        dataset_options = sorted(dataset_set)
 
-    if not dataset_options:
-        st.info("No datasets found for these ordering types across runs.")
-        return
+        if not dataset_options:
+            st.info("No datasets found for these ordering types across runs.")
+            return
 
-    dataset_name = st.selectbox(
-        "Dataset",
-        dataset_options,
-        key="diff_mining::cross_run_comparison::dataset",
-    )
-
-    top_k_tokens = int(
-        st.number_input(
-            "Top-K tokens to consider",
-            min_value=1,
-            max_value=500,
-            value=100,
-            step=1,
-            help="For each ordering, compute % relevant using only the first K graded tokens.",
-            key="diff_mining::cross_run_comparison::k_top",
+        dataset_name = st.selectbox(
+            "Dataset",
+            dataset_options,
+            key="diff_mining::cross_run_comparison::dataset",
         )
-    )
-    adjust_for_multitopic = bool(
-        st.checkbox(
-            "Adjust for multitopic (NMF)",
-            value=False,
-            help="For NMF topics, use K/num_topics tokens per topic before selecting best-topic.",
-            key="diff_mining::cross_run_comparison::adjust_multitopic",
+
+        top_k_tokens = int(
+            st.number_input(
+                "Top-K tokens to consider",
+                min_value=1,
+                max_value=500,
+                value=100,
+                step=1,
+                help="For each ordering, compute % relevant using only the first K graded tokens.",
+                key="diff_mining::cross_run_comparison::k_top",
+            )
         )
-    )
+        adjust_for_multitopic = bool(
+            st.checkbox(
+                "Adjust for multitopic (NMF)",
+                value=False,
+                help="For NMF topics, use K/num_topics tokens per topic before selecting best-topic.",
+                key="diff_mining::cross_run_comparison::adjust_multitopic",
+            )
+        )
 
     def _run_label(run_dir: Path) -> str:
         base = _format_run_label(run_dir, "run")
@@ -739,17 +959,55 @@ def _render_cross_run_comparison(method) -> None:
 
     run_label_to_dir = {_run_label(d): d for d in run_dirs}
     default_labels = list(run_label_to_dir.keys())[:2]
+    run_select_key = (
+        f"diff_mining::cross_run_comparison::runs::{dataset_name}"
+        if comparison_mode == "Relevance"
+        else "diff_mining::cross_run_comparison::runs::agent_grades"
+    )
     selected_run_labels = st.multiselect(
         "Select runs",
         list(run_label_to_dir.keys()),
         default=default_labels,
-        key=f"diff_mining::cross_run_comparison::runs::{dataset_name}",
+        key=run_select_key,
     )
 
     if not selected_run_labels:
         st.info("Select one or more runs to compare.")
         return
 
+    if comparison_mode == "Relevance":
+        _render_relevance_comparison(
+            run_label_to_dir=run_label_to_dir,
+            selected_run_labels=selected_run_labels,
+            selected_ordering_ids=selected_ordering_ids,
+            ordering_id_to_info=ordering_id_to_info,
+            dataset_name=dataset_name,
+            top_k_tokens=top_k_tokens,
+            adjust_for_multitopic=adjust_for_multitopic,
+            organism_variant=organism_variant,
+        )
+    else:
+        _render_agent_grades_comparison(
+            run_label_to_dir=run_label_to_dir,
+            selected_run_labels=selected_run_labels,
+            selected_ordering_ids=selected_ordering_ids,
+            ordering_id_to_info=ordering_id_to_info,
+            organism_variant=organism_variant,
+        )
+
+
+def _render_relevance_comparison(
+    *,
+    run_label_to_dir: Dict[str, Path],
+    selected_run_labels: List[str],
+    selected_ordering_ids: List[str],
+    ordering_id_to_info: Dict[str, Dict[str, Any]],
+    dataset_name: str,
+    top_k_tokens: int,
+    adjust_for_multitopic: bool,
+    organism_variant: str,
+) -> None:
+    """Render the token-relevance cross-run bar chart."""
     rows: List[Dict[str, Any]] = []
     skipped: List[str] = []
     for run_label in selected_run_labels:
@@ -757,12 +1015,13 @@ def _render_cross_run_comparison(method) -> None:
         for ordering_type_id in selected_ordering_ids:
             dataset_dir = run_dir / ordering_type_id / dataset_name
             ordering_meta = ordering_id_to_info[ordering_type_id].get("metadata", {})
-            is_nmf = str(ordering_meta.get("ordering_type_id", "")) == "nmf"
+            ot_id = str(ordering_meta.get("ordering_type_id", ordering_type_id))
+            is_nmf = ot_id == "nmf"
             nmf_aggregation = "Best-topic" if is_nmf else None
             row = _compute_ordering_relevance_row(
                 run_label=run_label,
                 dataset_dir=dataset_dir,
-                ordering_type_id=ordering_type_id,
+                ordering_type_id=ot_id,
                 aggregation_mode=nmf_aggregation,
                 k_top=top_k_tokens,
                 adjust_for_multitopic=adjust_for_multitopic,
@@ -827,697 +1086,81 @@ def _render_cross_run_comparison(method) -> None:
     st.dataframe(display_df, hide_index=True, use_container_width=True)
 
 
-# ============================================================================
-# Legacy Schema UI (backward compatibility)
-# ============================================================================
+def _render_agent_grades_comparison(
+    *,
+    run_label_to_dir: Dict[str, Path],
+    selected_run_labels: List[str],
+    selected_ordering_ids: List[str],
+    ordering_id_to_info: Dict[str, Dict[str, Any]],
+    organism_variant: str,
+) -> None:
+    """Render the agent-grade cross-run bar chart with error bars."""
+    rows: List[Dict[str, Any]] = []
+    skipped: List[str] = []
+    for run_label in selected_run_labels:
+        run_dir = run_label_to_dir[run_label]
+        for ordering_type_id in selected_ordering_ids:
+            ordering_meta = ordering_id_to_info[ordering_type_id].get("metadata", {})
+            ot_id = str(ordering_meta.get("ordering_type_id", ordering_type_id))
+            row = _compute_agent_grade_row(
+                run_label=run_label,
+                run_dir=run_dir,
+                ordering_type_id=ot_id,
+            )
+            if row is None:
+                skipped.append(f"{run_label} | {ordering_type_id}")
+                continue
+            display_name = str(ordering_id_to_info[ordering_type_id]["display_name"])
+            row["ordering_type"] = display_name
+            rows.append(row)
 
-def _render_legacy_ui(method, analysis_dir: Path) -> None:
-    raise AssertionError("Legacy analysis_* outputs are not supported.")
+    if skipped:
+        st.warning(
+            "Skipping runs missing agent grades for this ordering type:\n"
+            + "\n".join(f"- {s}" for s in skipped)
+        )
 
-
-def _find_available_datasets(method) -> List[str]:
-    """Find all available result files."""
-    analysis_dir = method.get_or_create_results_dir()
-    results_files = list(analysis_dir.glob("*_occurrence_rates.json"))
-    return [f.stem.replace("_occurrence_rates", "") for f in results_files]
-
-
-def _load_results(method, dataset_name: str) -> Optional[Dict]:
-    """Load results for a specific dataset."""
-    analysis_dir = method.get_or_create_results_dir()
-    results_file = analysis_dir / f"{dataset_name}_occurrence_rates.json"
-    if not results_file.exists():
-        return None
-
-    with open(results_file, "r") as f:
-        return json.load(f)
-
-
-def _load_results_from_dir(results_dir: Path, dataset_name: str) -> Optional[Dict]:
-    """Load results for a specific dataset from a given directory."""
-    results_file = results_dir / f"{dataset_name}_occurrence_rates.json"
-    if not results_file.exists():
-        return None
-    with open(results_file, "r") as f:
-        return json.load(f)
-
-
-def _find_nmf_datasets(method) -> List[str]:
-    """Find datasets that have NMF outputs."""
-    analysis_dir = method.get_or_create_results_dir()
-    nmf_dir = analysis_dir / "nmf"
-    if not nmf_dir.exists():
-        return []
-    nmf_files = list(nmf_dir.glob("*/nmf_topics_analysis.json"))
-    return sorted({path.parent.name for path in nmf_files})
-
-
-def _load_nmf_topics(method, dataset_name: str) -> Optional[Dict[str, Any]]:
-    """Load NMF topics analysis for a dataset."""
-    analysis_dir = method.get_or_create_results_dir()
-    nmf_file = analysis_dir / "nmf" / dataset_name / "nmf_topics_analysis.json"
-    if not nmf_file.exists():
-        return None
-    with open(nmf_file, "r") as f:
-        return json.load(f)
-
-
-def _load_nmf_metrics(method, dataset_name: str) -> Optional[Dict[str, Any]]:
-    """Load NMF per-topic and pairwise metrics for a dataset."""
-    analysis_dir = method.get_or_create_results_dir()
-    metrics_file = analysis_dir / "nmf" / dataset_name / "nmf_topic_metrics.json"
-    if not metrics_file.exists():
-        return None
-    with open(metrics_file, "r") as f:
-        return json.load(f)
-
-
-def _render_global_scatter_tab(method):
-    """Tab: Interactive Global Token Scatter."""
-    available_datasets = _find_available_datasets(method)
-    if not available_datasets:
-        st.error("No results found. Please run the analysis first.")
+    if not rows:
+        st.info("No agent grade data found for the selected runs/ordering types.")
         return
 
-    selected_dataset = st.selectbox("Select Dataset", available_datasets, key="scatter_dataset_select")
-    
-    analysis_dir = method.get_or_create_results_dir()
-    json_path = analysis_dir / f"{selected_dataset}_global_token_stats.json"
-    occurrence_rates_path = analysis_dir / f"{selected_dataset}_occurrence_rates.json"
-    
-    filter_punct = bool(method.method_cfg.filter_pure_punctuation)
-    
-    fig = get_global_token_scatter_plotly(
-        json_path, 
-        occurrence_rates_json_path=occurrence_rates_path,
-        filter_punctuation=filter_punct
+    df = pd.DataFrame(rows).copy()
+
+    run_scores = df.groupby("run", as_index=False)["grade_mean"].max().sort_values(
+        "grade_mean", ascending=False
     )
+    run_order = run_scores["run"].tolist()
+    axis_base_labels = [_axis_label_for_run_dir(run_label_to_dir[r]) for r in run_order]
+    axis_labels = _dedupe_labels(axis_base_labels)
+    short_by_run = dict(zip(run_order, axis_labels))
+    df["run_short"] = df["run"].map(short_by_run)
+    df = df.sort_values(["run_short", "ordering_type"], ascending=[True, True])
 
-    # Search Bar Logic
-    st.markdown("### 🔍 Token Search")
-    search_text = st.text_input(
-        "Highlight tokens (text will be tokenized using the model's exact tokenizer):",
-        placeholder="e.g., 'artificial intelligence'",
-        key="global_scatter_search"
+    fig = px.bar(
+        df,
+        x="run_short",
+        y="grade_mean",
+        color="ordering_type",
+        barmode="group",
+        text="grade_mean",
+        error_y="grade_std",
+        hover_data=[c for c in df.columns if c not in {"grade_mean", "run_short"}],
+        category_orders={
+            "run_short": [short_by_run[r] for r in run_order],
+        },
     )
-
-    if search_text:
-        token_ids = method.tokenizer.encode(search_text, add_special_tokens=False)
-        token_strings = method.tokenizer.convert_ids_to_tokens(token_ids)
-        readable_tokens = [t.replace('Ġ', ' ').replace('Ċ', '\n') for t in token_strings]
-        
-        st.info(f"Tokenized as: {readable_tokens} (IDs: {token_ids})")
-
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            stats = data.get("global_token_stats", [])
-            total_positions = data.get("total_positions_analyzed", 1)
-            if total_positions == 0: 
-                total_positions = 1
-
-        vocab_lookup = {item['token_id']: i for i, item in enumerate(stats)}
-        
-        highlight_x = []
-        highlight_y = []
-        highlight_text = []
-        matched_count = 0
-        
-        for tid in token_ids:
-            if tid in vocab_lookup:
-                idx = vocab_lookup[tid]
-                item = stats[idx]
-                x = item["count_positive"] / total_positions
-                y = item["sum_logit_diff"] / total_positions
-                highlight_x.append(x)
-                highlight_y.append(y)
-                highlight_text.append(item.get("token", ""))
-                matched_count += 1
-        
-        if matched_count > 0:
-            fig.add_scatter(
-                x=highlight_x,
-                y=highlight_y,
-                mode='markers+text',
-                marker=dict(
-                    color='red',
-                    size=15,
-                    line=dict(width=2, color='black'),
-                    symbol='circle-open'
-                ),
-                text=highlight_text,
-                textposition="top center",
-                name="Search Matches",
-                hoverinfo='text'
-            )
-        else:
-            st.warning("Tokens found in tokenizer but not present in the analysis stats.")
-    
+    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    fig.update_layout(
+        title_text=str(organism_variant),
+        title_x=0.5,
+        yaxis_range=[0, 5.5],
+        yaxis_title="Agent Grade (1-5)",
+        xaxis_title=None,
+        xaxis_tickangle=-30,
+        height=450,
+        legend_title_text=None,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-
-def _render_occurrence_rankings_tab(method):
-    """Tab: Display bar chart of occurrence rates."""
-    available_datasets = _find_available_datasets(method)
-    if not available_datasets:
-        st.error("No results found. Please run the analysis first.")
-        return
-
-    selected_dataset = st.selectbox("Select Dataset", available_datasets)
-
-    results = _load_results(method, selected_dataset)
-    if results is None:
-        st.error(f"Could not load results for {selected_dataset}")
-        return
-
-    col_filter, col_normalize = st.columns(2)
-    with col_filter:
-        filter_punct = st.checkbox("Filter Pure Punctuation", value=True)
-    with col_normalize:
-        normalize = st.checkbox("Normalize Tokens", value=False)
-
-    raw_top_positive = results['top_positive']
-    raw_top_negative = results['top_negative']
-    total_positions = results['total_positions']
-    
-    top_positive = process_token_list(
-        raw_top_positive, 
-        total_positions,
-        filter_punctuation=filter_punct,
-        normalize=normalize
-    )
-    top_negative = process_token_list(
-        raw_top_negative, 
-        total_positions,
-        filter_punctuation=filter_punct,
-        normalize=normalize
-    )
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Total Positions", f"{results['total_positions']:,}")
-    with col2:
-        st.metric("Num Samples", f"{results['num_samples']:,}")
-    with col3:
-        st.metric("Top-K", results['top_k'])
-    with col4:
-        st.metric("Unique Tokens (Raw)", results['unique_tokens'])
-    with col5:
-        if filter_punct or normalize:
-            st.metric("Tokens (Processed)", len(top_positive))
-        else:
-            st.metric("View Mode", "Raw")
-
-    st.markdown("**Models:**")
-    st.text(f"Base: {results['metadata']['base_model']}")
-    st.text(f"Finetuned: {results['metadata']['finetuned_model']}")
-
-    num_tokens_to_plot = min(
-        method.method_cfg.visualization.num_tokens_to_plot,
-        len(top_positive),
-        len(top_negative)
-    )
-
-    fig = plot_occurrence_bar_chart(
-        top_positive[:num_tokens_to_plot],
-        top_negative[:num_tokens_to_plot],
-        results['metadata']['base_model'],
-        results['metadata']['finetuned_model'],
-        total_positions,
-        figure_width=method.method_cfg.visualization.figure_width,
-        figure_height=method.method_cfg.visualization.figure_height,
-        figure_dpi=method.method_cfg.visualization.figure_dpi,
-        font_sizes=method.method_cfg.visualization.font_sizes,
-    )
-    st.pyplot(fig, use_container_width=False, clear_figure=True, dpi=method.method_cfg.visualization.figure_dpi)
-
-
-def _collect_plot_files(
-    analysis_dir: Path,
-    dataset_filter: str,
-    extensions: Tuple[str, ...]
-) -> Dict[str, List[Path]]:
-    """Collect plot files from the analysis directory."""
-    plot_files = [
-        path
-        for path in analysis_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in extensions
-    ]
-    if dataset_filter != "All":
-        plot_files = [path for path in plot_files if dataset_filter in path.name]
-
-    grouped: Dict[str, List[Path]] = {}
-    for path in sorted(plot_files):
-        rel_parent = str(path.parent.relative_to(analysis_dir))
-        grouped.setdefault(rel_parent, []).append(path)
-
-    return grouped
-
-
-def _render_all_plots_tab(method):
-    """Tab: Display all plots generated by the main run."""
-    analysis_dir = method.get_or_create_results_dir()
-    if not analysis_dir.exists():
-        st.error("No results directory found. Please run the analysis first.")
-        return
-
-    available_datasets = _find_available_datasets(method)
-    dataset_options = ["All"] + available_datasets
-    selected_dataset = st.selectbox(
-        "Filter by dataset",
-        dataset_options,
-        key="all_plots_dataset_select"
-    )
-
-    image_extensions = (".png", ".jpg", ".jpeg", ".svg", ".webp")
-    grouped_images = _collect_plot_files(analysis_dir, selected_dataset, image_extensions)
-    total_images = sum(len(paths) for paths in grouped_images.values())
-
-    if total_images == 0:
-        st.info("No plot images found.")
-    else:
-        st.markdown(f"Found {total_images} plot images in `{analysis_dir}`.")
-        for group, paths in grouped_images.items():
-            label = group if group != "." else "root"
-            with st.expander(f"{label} ({len(paths)} files)"):
-                for path in paths:
-                    st.image(str(path), caption=path.name, use_container_width=True)
-
-    show_html = st.checkbox(
-        "Render interactive HTML plots",
-        value=False,
-        help="These can be heavy for large result sets."
-    )
-    if show_html:
-        html_grouped = _collect_plot_files(analysis_dir, selected_dataset, (".html",))
-        total_html = sum(len(paths) for paths in html_grouped.values())
-        if total_html == 0:
-            st.info("No HTML plots found.")
-        else:
-            st.markdown(f"Found {total_html} HTML plots in `{analysis_dir}`.")
-            for group, paths in html_grouped.items():
-                label = group if group != "." else "root"
-                with st.expander(f"{label} ({len(paths)} files)"):
-                    for path in paths:
-                        html_content = path.read_text(encoding="utf-8")
-                        st.markdown(f"**{path.name}**")
-                        components.html(html_content, height=700, scrolling=True)
-
-
-def _render_interactive_heatmap_tab(method):
-    """Tab: Interactive heatmap for custom text."""
-    st.markdown("### Interactive Logit Difference Heatmap")
-    st.markdown("Enter custom text to analyze logit differences between base and finetuned models.")
-
-    prompt = st.text_area(
-        "Enter custom text:",
-        value="The cake is delicious and everyone enjoyed it.",
-        height=100
-    )
-
-    if st.button("Generate Heatmap", type="primary"):
-        if not prompt or len(prompt.strip()) == 0:
-            st.error("Please enter some text")
-            return
-
-        with st.spinner("Computing logits..."):
-            inputs = method.tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-            input_ids = inputs["input_ids"]
-            attention_mask = inputs["attention_mask"]
-
-            with torch.no_grad():
-                model_inputs = dict(input_ids=input_ids, attention_mask=attention_mask)
-                with method.base_model.trace(model_inputs):
-                    base_logits = method.base_model.logits.save()
-                with method.finetuned_model.trace(model_inputs):
-                    finetuned_logits = method.finetuned_model.logits.save()
-
-            logits1 = base_logits[0]
-            logits2 = finetuned_logits[0]
-
-            sample_data = _prepare_heatmap_data(
-                logits1,
-                logits2,
-                input_ids[0],
-                method.tokenizer,
-                method.method_cfg.visualization.top_k_plotting
-            )
-
-            fig = _plot_heatmap(
-                sample_data,
-                method.base_model_cfg.model_id,
-                method.finetuned_model_cfg.model_id,
-                figure_width=method.method_cfg.visualization.figure_width,
-                figure_dpi=method.method_cfg.visualization.figure_dpi,
-                font_sizes=method.method_cfg.visualization.font_sizes
-            )
-            st.pyplot(fig, use_container_width=False, clear_figure=True, dpi=method.method_cfg.visualization.figure_dpi)
-
-
-def _prepare_heatmap_data(
-    logits1: torch.Tensor,
-    logits2: torch.Tensor,
-    input_ids: torch.Tensor,
-    tokenizer,
-    top_k_plotting: int
-) -> List[Dict]:
-    """Prepare data for heatmap visualization."""
-    logits1 = logits1.cpu()
-    logits2 = logits2.cpu()
-    input_ids = input_ids.cpu()
-
-    diff = logits2 - logits1
-    k = top_k_plotting
-    k_half = k // 2
-
-    sample_data = []
-    seq_len = len(input_ids)
-
-    for pos in range(seq_len):
-        actual_token = tokenizer.decode([input_ids[pos].item()])
-
-        top1_values, top1_indices = torch.topk(logits1[pos], k=k)
-        model1_top_k = [
-            {"token": tokenizer.decode([idx.item()]), "logit": val.item()}
-            for idx, val in zip(top1_indices, top1_values)
-        ]
-
-        top2_values, top2_indices = torch.topk(logits2[pos], k=k)
-        model2_top_k = [
-            {"token": tokenizer.decode([idx.item()]), "logit": val.item()}
-            for idx, val in zip(top2_indices, top2_values)
-        ]
-
-        diff_pos_values, diff_pos_indices = torch.topk(diff[pos], k=k_half)
-        diff_top_k_positive = [
-            {"token": tokenizer.decode([idx.item()]), "diff": val.item()}
-            for idx, val in zip(diff_pos_indices, diff_pos_values)
-        ]
-
-        diff_neg_values, diff_neg_indices = torch.topk(diff[pos], k=k_half, largest=False)
-        diff_top_k_negative = [
-            {"token": tokenizer.decode([idx.item()]), "diff": val.item()}
-            for idx, val in zip(diff_neg_indices, diff_neg_values)
-        ]
-
-        sample_data.append({
-            "position": pos,
-            "actual_token": actual_token,
-            "model1_top_k": model1_top_k,
-            "model2_top_k": model2_top_k,
-            "diff_top_k_positive": diff_top_k_positive,
-            "diff_top_k_negative": diff_top_k_negative,
-        })
-
-    return sample_data
-
-
-def _plot_heatmap(
-    sample_data: List[Dict],
-    model1_name: str,
-    model2_name: str,
-    figure_width: int = 16,
-    figure_dpi: int = 150,
-    font_sizes: Dict[str, int] = None
-) -> plt.Figure:
-    """Create a heatmap-style visualization of logit differences."""
-    if font_sizes is None:
-        font_sizes = {
-            'heatmap_labels': 8,
-            'heatmap_cells': 5,
-            'heatmap_positions': 7,
-            'main_title': 14
-        }
-    
-    if not sample_data:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.text(0.5, 0.5, "No data to visualize", ha='center', va='center')
-        return fig
-
-    num_positions = len(sample_data)
-    k = len(sample_data[0]['model1_top_k'])
-    k_half = k // 2
-
-    cell_width = 1.0
-    cell_height = 0.4
-    row_height = 0.4
-    position_row_height = 0.3
-    reference_row_height = 0.8
-    section_gap = 0.1
-
-    total_content_height = position_row_height + reference_row_height + (3 * k * cell_height) + (3 * section_gap)
-    figure_height = (total_content_height / row_height) + 0.8
-
-    fig, ax = plt.subplots(figsize=(figure_width, figure_height), dpi=figure_dpi)
-    fig.subplots_adjust(left=0.08, right=0.98, top=0.96, bottom=0.02)
-
-    ax.set_xlim(-1, num_positions * cell_width + 0.5)
-    max_y = position_row_height + reference_row_height + (3 * k * cell_height) + (3 * section_gap)
-    ax.set_ylim(0, max_y)
-    ax.axis('off')
-
-    cmap = plt.cm.viridis
-
-    def normalize_values(values: List[float]) -> np.ndarray:
-        arr = np.array(values)
-        if len(arr) == 0 or arr.max() == arr.min():
-            return np.ones_like(arr) * 0.5
-        return (arr - arr.min()) / (arr.max() - arr.min())
-
-    def render_cell(x: float, y: float, text: str, color: Tuple[float, float, float, float],
-                   height: float = None, width: float = None, fontsize: int = None, 
-                   show_value: bool = False, rotation: int = 0):
-        if height is None:
-            height = cell_height
-        if width is None:
-            width = cell_width
-        if fontsize is None:
-            fontsize = font_sizes['heatmap_cells']
-            
-        rect = mpatches.Rectangle(
-            (x, y), width, height,
-            facecolor=color, edgecolor='white', linewidth=0.5
-        )
-        ax.add_patch(rect)
-        
-        if show_value and '\n' in text:
-            text_display = text.split('\n')[0]
-        else:
-            text_display = text
-            
-        text_display = text_display.replace('\t', '\\t')
-        text_display = text_display.replace('$', r'\$')
-        
-        max_chars = 15 if rotation == 90 else 10
-        if len(text_display) > max_chars:
-            text_display = text_display[:max_chars-2] + '..'
-        
-        ax.text(
-            x + width/2, y + height/2, text_display,
-            ha='center', va='center', fontsize=fontsize,
-            color='white' if sum(color[:3])/3 < 0.5 else 'black',
-            rotation=rotation,
-            fontproperties=matplotlib.font_manager.FontProperties(family=UNICODE_FONTS)
-        )
-
-    # Collect all values for normalization
-    all_logits = []
-    for pos_data in sample_data:
-        all_logits.extend([item['logit'] for item in pos_data['model1_top_k'][:k]])
-        all_logits.extend([item['logit'] for item in pos_data['model2_top_k'][:k]])
-    
-    norm_all_logits = normalize_values(all_logits) if all_logits else np.array([])
-    
-    all_diffs = []
-    for pos_data in sample_data:
-        all_diffs.extend([d['diff'] for d in pos_data['diff_top_k_positive'][:k_half]])
-        all_diffs.extend([d['diff'] for d in pos_data['diff_top_k_negative'][:k_half]])
-    
-    norm_all_diffs = normalize_values([abs(d) for d in all_diffs]) if all_diffs else np.array([])
-
-    current_row = 0
-
-    # Negative diffs
-    ax.text(-0.3, current_row + (k_half * cell_height / 2), 'Diff -\n(M1>M2)',
-            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold', color='darkred')
-    
-    diff_idx = 0
-    for pos_idx_local, pos_data in enumerate(sample_data):
-        x_pos = (pos_idx_local + 1) * cell_width
-        if pos_idx_local + 1 >= num_positions:
-            continue
-        for i, diff_item in enumerate(pos_data['diff_top_k_negative'][:k_half]):
-            neg_diff_idx = diff_idx + (len(sample_data) * k_half)
-            if neg_diff_idx < len(norm_all_diffs):
-                color = cmap(norm_all_diffs[neg_diff_idx])
-            else:
-                color = (0.5, 0.5, 0.5, 1.0)
-            row_position = current_row + (k_half - 1 - i) * cell_height
-            render_cell(x_pos, row_position, f"'{diff_item['token']}'\n{diff_item['diff']:.2f}",
-                       color, show_value=True, rotation=90)
-        diff_idx += k_half
-    
-    current_row += k_half * cell_height
-    ax.axhline(y=current_row, color='gray', linewidth=1.5, linestyle='--', alpha=0.7)
-
-    # Positive diffs
-    ax.text(-0.3, current_row + (k_half * cell_height / 2), 'Diff +\n(M2>M1)',
-            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold', color='darkgreen')
-    
-    diff_idx = 0
-    for pos_idx_local, pos_data in enumerate(sample_data):
-        x_pos = (pos_idx_local + 1) * cell_width
-        if pos_idx_local + 1 >= num_positions:
-            continue
-        for i, diff_item in enumerate(pos_data['diff_top_k_positive'][:k_half]):
-            if diff_idx < len(norm_all_diffs):
-                color = cmap(norm_all_diffs[diff_idx])
-            else:
-                color = (0.5, 0.5, 0.5, 1.0)
-            row_position = current_row + (k_half - 1 - i) * cell_height
-            render_cell(x_pos, row_position, f"'{diff_item['token']}'\n{diff_item['diff']:.2f}",
-                       color, show_value=True, rotation=90)
-            diff_idx += 1
-    
-    current_row += k_half * cell_height + section_gap
-    ax.axhline(y=current_row, color='black', linewidth=2)
-
-    # Model 2
-    label2 = model2_name.split('/')[-1][:15]
-    ax.text(-0.3, current_row + (k * cell_height / 2), f'Model 2\n{label2}',
-            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
-    
-    num_model1_logits = len([item for pos_data in sample_data for item in pos_data['model1_top_k'][:k]])
-    logit_idx = num_model1_logits
-    
-    for pos_idx_local, pos_data in enumerate(sample_data):
-        x_pos = (pos_idx_local + 1) * cell_width
-        if pos_idx_local + 1 >= num_positions:
-            continue
-        for i, logit_item in enumerate(pos_data['model2_top_k'][:k]):
-            if logit_idx < len(norm_all_logits):
-                color = cmap(norm_all_logits[logit_idx])
-                logit_idx += 1
-            else:
-                color = (0.5, 0.5, 0.5, 1.0)
-            row_position = current_row + (k - 1 - i) * cell_height
-            render_cell(x_pos, row_position, f"'{logit_item['token']}'\n{logit_item['logit']:.1f}",
-                       color, show_value=True, rotation=90)
-    
-    current_row += k * cell_height + section_gap
-    ax.axhline(y=current_row, color='black', linewidth=2)
-
-    # Model 1
-    label1 = model1_name.split('/')[-1][:15]
-    ax.text(-0.3, current_row + (k * cell_height / 2), f'Model 1\n{label1}',
-            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
-    
-    logit_idx = 0
-    for pos_idx_local, pos_data in enumerate(sample_data):
-        x_pos = (pos_idx_local + 1) * cell_width
-        if pos_idx_local + 1 >= num_positions:
-            continue
-        for i, logit_item in enumerate(pos_data['model1_top_k'][:k]):
-            if logit_idx < len(norm_all_logits):
-                color = cmap(norm_all_logits[logit_idx])
-                logit_idx += 1
-            else:
-                color = (0.5, 0.5, 0.5, 1.0)
-            row_position = current_row + (k - 1 - i) * cell_height
-            render_cell(x_pos, row_position, f"'{logit_item['token']}'\n{logit_item['logit']:.1f}",
-                       color, show_value=True, rotation=90)
-    
-    current_row += k * cell_height + section_gap
-    ax.axhline(y=current_row, color='black', linewidth=2)
-
-    # Position row
-    ax.text(-0.3, current_row + (position_row_height / 2), 'Position',
-            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
-    
-    for pos_idx_local, pos_data in enumerate(sample_data):
-        x_pos = pos_idx_local * cell_width
-        render_cell(x_pos, current_row, f"{pos_idx_local}",
-                   (0.95, 0.95, 0.95, 1.0), height=position_row_height,
-                   fontsize=font_sizes['heatmap_positions'], show_value=False)
-    
-    current_row += position_row_height
-
-    # Reference tokens
-    ax.text(-0.3, current_row + (reference_row_height / 2), 'Reference\nTokens',
-            ha='right', va='center', fontsize=font_sizes['heatmap_labels'], weight='bold')
-    
-    for pos_idx_local, pos_data in enumerate(sample_data):
-        actual_token = pos_data['actual_token']
-        x_pos = pos_idx_local * cell_width
-        render_cell(x_pos, current_row, actual_token,
-                   (0.9, 0.9, 0.9, 1.0), height=reference_row_height,
-                   fontsize=font_sizes['heatmap_positions'], show_value=False, rotation=90)
-    
-    current_row += reference_row_height
-    ax.axhline(y=current_row, color='black', linewidth=2)
-
-    fig.suptitle(
-        f'Logit Diff - Sample\n{num_positions} token positions, Top-{k} predictions per model',
-        fontsize=font_sizes['main_title'], weight='bold', y=0.99
-    )
-
-    return fig
-
-
-def _render_nmf_tab(method) -> None:
-    """Tab: NMF (Statistics + Data)."""
-    nmf_datasets = _find_nmf_datasets(method)
-    if not nmf_datasets:
-        st.info("No NMF outputs found for this analysis run.")
-        return
-
-    selected_dataset = st.selectbox("Select Dataset", nmf_datasets, key="nmf_dataset_select")
-    nmf_topics = _load_nmf_topics(method, selected_dataset)
-    if nmf_topics is None:
-        st.error(f"Missing NMF topics file for {selected_dataset}")
-        return
-
-    topics = nmf_topics.get("topics", [])
-    if not topics:
-        st.error("No topics found in NMF output.")
-        return
-
-    topic_ids = [int(t["topic_id"]) for t in topics]
-    nmf_metrics = _load_nmf_metrics(method, selected_dataset)
-
-    stats_tab, data_tab = st.tabs(["Statistics", "Data"])
-
-    with stats_tab:
-        if nmf_metrics is None:
-            st.warning("Missing `nmf_topic_metrics.json` for this dataset.")
-        else:
-            pairwise = nmf_metrics.get("pairwise", {})
-            if pairwise:
-                st.markdown("### Pairwise overlap")
-                cosine = pairwise.get("cosine_similarity", None)
-                if cosine is not None:
-                    st.markdown("**Cosine similarity**")
-                    st.dataframe(np.array(cosine), use_container_width=True)
-
-    with data_tab:
-        topic_a = st.selectbox("Topic A", topic_ids, key="nmf_topic_a_select")
-        
-        analysis_dir = method.get_or_create_results_dir()
-        topic_dir = analysis_dir / "nmf" / selected_dataset / f"topic_{topic_a}"
-        results = _load_results_from_dir(topic_dir, selected_dataset)
-        
-        if results is None:
-            st.error(f"Missing results for topic {topic_a}")
-            return
-        
-        fig = plot_occurrence_bar_chart(
-            results["top_positive"],
-            results["top_negative"],
-            results["metadata"]["base_model"],
-            results["metadata"]["finetuned_model"],
-            results["total_positions"],
-            figure_width=method.method_cfg.visualization.figure_width,
-            figure_height=method.method_cfg.visualization.figure_height,
-            figure_dpi=method.method_cfg.visualization.figure_dpi,
-            font_sizes=method.method_cfg.visualization.font_sizes,
-        )
-        st.pyplot(fig, use_container_width=True, clear_figure=True, dpi=method.method_cfg.visualization.figure_dpi)
+    display_df = df.drop(columns=["run_short"])
+    st.dataframe(display_df, hide_index=True, use_container_width=True)

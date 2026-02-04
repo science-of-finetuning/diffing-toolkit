@@ -355,7 +355,16 @@ class BaseAgent(ABC):
                     extracted = _extract_tool_call(text)
                 except Exception:
                     if "CALL(" in text:
-                        parse_error = "Output grammar error around CALL(...)."
+                        # Try adding a closing parenthesis in case the model forgot it
+                        try:
+                            extracted = _extract_tool_call(text + ")")
+                        except Exception:
+                            parse_error = "Output grammar error around CALL(...)."
+                        else:
+                            if extracted is None:
+                                parse_error = "Output grammar error around CALL(...)."
+                            else:
+                                tool_name, call_args = extracted
                     else:
                         parse_error = (
                             "Output grammar error: expected CALL(...) or FINAL(...)."
