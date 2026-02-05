@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Dict, List, Iterator, Any
+from typing import Iterator, Any
 from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +15,9 @@ from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 from collections import defaultdict
 from diffing.utils.configs import CONFIGS_DIR
 from diffing.utils.prompts import read_prompts
-from diffing.utils.vllm import (
-    LLM,
-    LoRARequest,
-    SamplingParams,
-    TokensPrompt,
-)
+from vllm import LLM, SamplingParams
+from vllm.inputs import TokensPrompt
+from vllm.lora.request import LoRARequest
 from diffing.utils.model import load_model_from_config
 
 
@@ -87,7 +84,7 @@ class WeightDifferenceAmplificationConfig:
     """
 
     default_amplification_factor: float
-    amplification_factors: Dict[str, float]
+    amplification_factors: dict[str, float]
 
 
 class WeightDifferenceAmplification(DiffingMethod):
@@ -314,7 +311,7 @@ class WeightDifferenceAmplification(DiffingMethod):
         raise ValueError("Finetuned model is not available for this method")
 
     @staticmethod
-    def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:
+    def has_results(results_dir: Path) -> dict[str, dict[str, str]]:
         """
         Find all available results for this method.
 
@@ -342,7 +339,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
     def compute_vllm_kwargs(
         self,
-        active_configs: List[ManagedConfig],
+        active_configs: list[ManagedConfig],
         base_vllm_kwargs: dict | None = None,
     ) -> dict:
         """
@@ -443,7 +440,7 @@ class WeightDifferenceAmplification(DiffingMethod):
     def multi_gen_request(
         self,
         prompt: list[int] | list[list[int]],
-        amplification_configs: List[ManagedConfig] | ManagedConfig,
+        amplification_configs: list[ManagedConfig] | ManagedConfig,
         sampling_params: SamplingParams | dict,
         compiled_adapters_dir: Path,
         vllm_server: LLM | None = None,
