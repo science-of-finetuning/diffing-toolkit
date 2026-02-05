@@ -81,4 +81,5 @@ testpaths = ["tests"]
 [dependency-groups]
 dev = [
     "pre-commit>=4.4.0",
+    "respx>=0.22.0",
 ]
