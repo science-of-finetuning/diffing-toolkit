@@ -84,9 +84,6 @@ class ADLAgent(DiffingMethodAgent):
     # Store dataset mapping for later retrieval
     _dataset_mapping: Dict[str, str] = None
 
-    # Store dataset mapping for later retrieval
-    _dataset_mapping: Dict[str, str] = None
-
     @property
     def name(self) -> str:
         return "ADL"
@@ -206,10 +203,6 @@ class ADLBlackboxAgent(BlackboxAgent):
         """Return the dataset name mapping (anonymized -> real)."""
         return self._dataset_mapping or {}
 
-    def get_dataset_mapping(self) -> Dict[str, str]:
-        """Return the dataset name mapping (anonymized -> real)."""
-        return self._dataset_mapping or {}
-
     def get_first_user_message_description(self) -> str:
         return """- The first user message includes an OVERVIEW JSON with the following information:
   1) Generated examples from the finetuned model on a set of given prompts. Some generations may be cut off due to token limits."""
@@ -238,12 +231,6 @@ class ADLBlackboxAgent(BlackboxAgent):
                     ds_set.add(p.name)
             datasets = [f"{d}" for d in ds_set]
             assert len(datasets) > 0
-
-        # Create dataset name mapping for blinding
-        dataset_mapping: Dict[str, str] = {}
-        for i, ds in enumerate(datasets, start=1):
-            dataset_mapping[f"ds{i}"] = ds
-        self._dataset_mapping = dataset_mapping
 
         # Create dataset name mapping for blinding
         dataset_mapping: Dict[str, str] = {}

@@ -133,23 +133,6 @@ class EvaluationPipeline(Pipeline):
                         logger.info(f"  {anon_name:10} → {real_name}")
                     logger.info("=" * 80)
 
-            # Save and print dataset mapping (if agent has it)
-            if hasattr(agent, "get_dataset_mapping"):
-                dataset_mapping = agent.get_dataset_mapping()
-                if dataset_mapping:
-                    # Save to file
-                    mapping_file = out_dir / "dataset_mapping.json"
-                    with open(mapping_file, "w", encoding="utf-8") as f:
-                        json.dump(dataset_mapping, f, ensure_ascii=False, indent=2)
-
-                    # Print to logs
-                    logger.info("=" * 80)
-                    logger.info("DATASET NAME MAPPING (anonymized → real)")
-                    logger.info("=" * 80)
-                    for anon_name, real_name in sorted(dataset_mapping.items()):
-                        logger.info(f"  {anon_name:10} → {real_name}")
-                    logger.info("=" * 80)
-
         # Immediate grading of agent hypothesis (async)
         async def grade_all():
             tasks = [
