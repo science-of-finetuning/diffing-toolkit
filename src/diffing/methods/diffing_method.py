@@ -103,6 +103,10 @@ class DiffingMethod(ABC):
             cfg = deepcopy(self.base_model_cfg)
             vllm_kwargs = cfg.vllm_kwargs or {}
 
+            gpu_mem_util = getattr(self.cfg.diffing, "gpu_memory_utilization", None)
+            if gpu_mem_util is not None:
+                vllm_kwargs["gpu_memory_utilization"] = float(gpu_mem_util)
+
             if self._is_lora_adapter:
                 adapter_id = self.finetuned_model_cfg.model_id
                 if self.finetuned_model_cfg.subfolder:
@@ -133,9 +137,15 @@ class DiffingMethod(ABC):
                 self.clear_base_model()
                 self.clear_finetuned_model()
 
-            self._finetuned_model_vllm = load_model_from_config(
-                self.finetuned_model_cfg, use_vllm=True
-            )
+            from copy import deepcopy
+
+            ft_cfg = deepcopy(self.finetuned_model_cfg)
+            gpu_mem_util = getattr(self.cfg.diffing, "gpu_memory_utilization", None)
+            if gpu_mem_util is not None:
+                vllm_kwargs = ft_cfg.vllm_kwargs or {}
+                vllm_kwargs["gpu_memory_utilization"] = float(gpu_mem_util)
+                ft_cfg.vllm_kwargs = vllm_kwargs
+            self._finetuned_model_vllm = load_model_from_config(ft_cfg, use_vllm=True)
         return self._finetuned_model_vllm
 
     @property
