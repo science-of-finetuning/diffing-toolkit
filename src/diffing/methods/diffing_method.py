@@ -51,6 +51,10 @@ class DiffingMethod(ABC):
         self._tokenizer: AnyTokenizer | None = None
         self._base_model_vllm: LLM | None = None
         self._finetuned_model_vllm: LLM | None = None
+        # If True, nnsight models are cleared before vLLM init to avoid OOM.
+        # Set to False if you need both loaded simultaneously.
+        # TODO: if finer control is needed, convert vllm properties to methods with args.
+        self.clear_nnsight_on_vllm_init: bool = True
 
         # Set device
         self.device = "cuda" if th.cuda.is_available() else "cpu"
@@ -89,6 +93,10 @@ class DiffingMethod(ABC):
         with LoRA support enabled so it can be used for both base and finetuned inference.
         """
         if self._base_model_vllm is None:
+            if self.clear_nnsight_on_vllm_init:
+                self.clear_base_model()
+                self.clear_finetuned_model()
+
             from copy import deepcopy
             from diffing.utils.model import get_adapter_rank
 
@@ -121,6 +129,10 @@ class DiffingMethod(ABC):
             return self.base_model_vllm
 
         if self._finetuned_model_vllm is None:
+            if self.clear_nnsight_on_vllm_init:
+                self.clear_base_model()
+                self.clear_finetuned_model()
+
             self._finetuned_model_vllm = load_model_from_config(
                 self.finetuned_model_cfg, use_vllm=True
             )
