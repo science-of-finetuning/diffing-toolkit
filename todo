@@ -18,6 +18,7 @@ why fda has an adl so low on fda and 1:1 has a datpoint whiele there is no modek
 - fix the fact that we need to reload the page once to load the multi gen tab cache
 
 ## refactoring?
+- flatten `method_params` nesting in `kl` and `activation_analysis` configs/code to match `diff_mining`/`adl` style (params at top level, no `method_params` key)
 - check for duplicated code between multi gen and multi prompt prompt building functions
 - split the dashboard into subclasses (which store a reference to the main dashboard)
 

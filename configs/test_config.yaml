@@ -4,16 +4,18 @@
 organism_variant: default
 
 chat_dataset:
-  id: Butanium/femto-ultrachat
-  splits: [train, validation]
-  is_chat: true
-  text_column: null
+  default:
+    id: Butanium/femto-ultrachat
+    splits: [train, validation]
+    is_chat: true
+    text_column: null
 
 pretraining_dataset:
-  id: Butanium/femto-fineweb
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
+  default:
+    id: Butanium/femto-fineweb
+    splits: [train, validation]
+    is_chat: false
+    text_column: text
 
 pipeline:
   mode: full

@@ -505,7 +505,7 @@ def run_causal_effect(method: Any) -> None:
     assert tokenizer.eos_token_id is not None
     assert tokenizer.pad_token_id is not None
     assert hasattr(method.cfg, "chat_dataset")
-    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.id)
+    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.default.id)
 
     # Build evaluation groups from tasks: key = (abs_layer, diff_source_dataset, eval_alias)
     tasks = getattr(cfg, "tasks")
