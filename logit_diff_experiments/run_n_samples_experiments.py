@@ -2,7 +2,7 @@
 """
 N Samples Experiment Script
 
-Runs LogitDiff TopK method across multiple sample counts (max_samples)
+Runs Diff Mining method across multiple sample counts (max_samples)
 on a single organism variant, then plots token relevance and agent score curves.
 
 The max_samples parameter controls how many samples are analyzed. This experiment
@@ -174,7 +174,7 @@ def build_full_command(
     enable_blackbox_baseline: bool = False,
 ) -> List[str]:
     """
-    Build command for running logit_diff_topk_occurring with specified n_samples.
+    Build command for running diff_mining with specified n_samples.
 
     Args:
         n_samples: The max_samples parameter (number of samples to analyze)
@@ -188,7 +188,7 @@ def build_full_command(
     cmd = [
         "python",
         "main.py",
-        "diffing/method=logit_diff_topk_occurring",
+        "diffing/method=diff_mining",
         f"model={MODEL}",
         f"organism={ORGANISM}",
         f"organism_variant={ORGANISM_VARIANT}",
@@ -209,17 +209,19 @@ def build_full_command(
     # Method parameters - n_samples is the key variable
     cmd.extend(
         [
-            f"diffing.method.method_params.max_samples={n_samples}",  # The variable we're testing
-            f"diffing.method.method_params.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",  # Fixed
-            f"diffing.method.method_params.batch_size={BATCH_SIZE}",
-            f"diffing.method.method_params.top_k={TOP_K}",  # Fixed top_k
+            f"diffing.method.max_samples={n_samples}",  # The variable we're testing
+            f"diffing.method.max_tokens_per_sample={MAX_TOKEN_POSITIONS}",  # Fixed
+            f"diffing.method.batch_size={BATCH_SIZE}",
+            f"diffing.method.top_k={TOP_K}",  # Fixed top_k
             f"diffing.method.datasets={build_datasets_override()}",
         ]
     )
 
     # Explicit feature toggles
     cmd.append(f"diffing.method.token_relevance.enabled={DO_TOKEN_RELEVANCE_STRING}")
-    cmd.append("diffing.method.token_topic_clustering_NMF.enabled=false")
+    cmd.append(
+        "diffing.method.token_ordering.method=[topk_occurring,fraction_positive_diff]"
+    )
     cmd.append("diffing.method.sequence_likelihood_ratio.enabled=false")
     cmd.append("diffing.method.per_token_analysis.enabled=false")
     cmd.append("diffing.method.per_token_analysis.pairwise_correlation=false")
@@ -291,7 +293,7 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
         cmd = build_full_command(
             n_samples, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
         )
-        description = f"logit_diff_topk / n_samples={n_samples} / seed={seed}"
+        description = f"diff_mining / n_samples={n_samples} / seed={seed}"
 
         success = run_command(cmd, description)
         if not success:
@@ -317,7 +319,7 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
             cmd = build_full_command(
                 n_samples, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
             )
-            description = f"logit_diff_topk / n_samples={n_samples} / seed={seed}"
+            description = f"diff_mining / n_samples={n_samples} / seed={seed}"
 
             success = run_command(cmd, description)
             if not success:
@@ -342,10 +344,10 @@ def find_token_relevance_files(n_samples: int) -> Dict[str, List[Path]]:
     results: Dict[str, List[Path]] = {}
 
     # Pattern: look for directories containing the n_samples value
-    # e.g., logit_diff_topk_occurring_1000samples_30tokens_100topk
+    # e.g., diff_mining_1000samples_30tokens_100topk
     method_dirs = list(
         (RESULTS_BASE_DIR / MODEL / organism_dir).glob(
-            f"logit_diff_topk_occurring_{n_samples}samples_*"
+            f"diff_mining_{n_samples}samples_*"
         )
     )
 
@@ -509,7 +511,7 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
                     marker="o",
                     markersize=8,
                     linewidth=2,
-                    label=f"LogitDiff TopK ± 1 SD",
+                    label=f"Diff Mining ± 1 SD",
                     color=color,
                 )
 
@@ -556,7 +558,7 @@ def find_agent_files(n_samples: int, agent_type: str = None) -> Dict[str, List[P
 
     Args:
         n_samples: The n_samples count (max_samples)
-        agent_type: Filter by agent directory prefix ("LogitDiff", "Blackbox", or None for all)
+        agent_type: Filter by agent directory prefix ("DiffMining", "Blackbox", or None for all)
 
     Returns:
         Dict[mi_budget] = List[json_file_paths]
@@ -592,13 +594,13 @@ def find_agent_files(n_samples: int, agent_type: str = None) -> Dict[str, List[P
 
     # Determine prefix filter
     prefix_filter = (
-        agent_type  # Use provided agent_type directly (LogitDiff or Blackbox)
+        agent_type  # Use provided agent_type directly (DiffMining or Blackbox)
     )
 
     # Pattern: look for directories containing the n_samples value
     method_dirs = list(
         (RESULTS_BASE_DIR / MODEL / organism_dir).glob(
-            f"logit_diff_topk_occurring_{n_samples}samples_*"
+            f"diff_mining_{n_samples}samples_*"
         )
     )
 
@@ -631,7 +633,7 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
         Dict[agent_type][n_samples][mi_budget] = List[scores]
 
     Agent types collected:
-        - logit_diff: LogitDiff agent results (prefix "LogitDiff")
+        - diff_mining: DiffMining agent results (prefix "DiffMining")
         - blackbox: Blackbox baseline agent results (prefix "Blackbox")
     """
     results: Dict[str, Dict[int, Dict[str, List[float]]]] = {}
@@ -652,10 +654,10 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
 
                     results[agent_key][n_samples][mi_key].append(score)
 
-    # Collect LogitDiff agent results (from all n_samples settings)
+    # Collect DiffMining agent results (from all n_samples settings)
     for n_samples in N_SAMPLES_VALUES:
-        files_by_mi = find_agent_files(n_samples, agent_type="LogitDiff")
-        add_scores("logit_diff", n_samples, files_by_mi)
+        files_by_mi = find_agent_files(n_samples, agent_type="DiffMining")
+        add_scores("diff_mining", n_samples, files_by_mi)
 
     # Collect Blackbox baseline results (only from first n_samples - it's constant)
     first_n_samples = N_SAMPLES_VALUES[0]
@@ -685,7 +687,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 
     Curves:
     - Blackbox (mi=5): Gray dashed line (baseline)
-    - LogitDiff TopK (mi=5): Green solid line
+    - Diff Mining (mi=5): Green solid line
     """
     print("\n" + "=" * 80)
     print("PLOTTING AGENT RESULTS")
@@ -704,9 +706,9 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
             "--",
         ),  # Gray dashed (bottom)
         (
-            "logit_diff",
+            "diff_mining",
             "mi5",
-            "LogitDiff TopK (mi=5) ± 1 SD",
+            "Diff Mining (mi=5) ± 1 SD",
             "#2ecc71",
             "-",
         ),  # Green solid (top)
@@ -748,7 +750,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
                             label=label,
                         )
         else:
-            # LogitDiff - plot as curve varying with x-axis
+            # Diff Mining - plot as curve varying with x-axis
             x_vals = []
             y_means = []
             y_stds = []

@@ -2,7 +2,7 @@
 """
 Token Positions Experiment Script
 
-Runs LogitDiff TopK method across multiple token position counts (max_tokens_per_sample)
+Runs Diff Mining method across multiple token position counts (max_tokens_per_sample)
 on a single organism variant, then plots token relevance and agent score curves.
 
 The max_tokens_per_sample parameter controls how many token positions from each sample
@@ -296,7 +296,7 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
         cmd = build_full_command(
             token_positions, seed, skip_agent, enable_blackbox_baseline=enable_blackbox
         )
-        description = f"logit_diff_topk / tokens={token_positions} / seed={seed}"
+        description = f"diff_mining / tokens={token_positions} / seed={seed}"
 
         success = run_command(cmd, description)
         if not success:
@@ -327,7 +327,7 @@ def run_experiments(skip_agent: bool = False, array_idx: int | None = None):
                 skip_agent,
                 enable_blackbox_baseline=enable_blackbox,
             )
-            description = f"logit_diff_topk / tokens={token_positions} / seed={seed}"
+            description = f"diff_mining / tokens={token_positions} / seed={seed}"
 
             success = run_command(cmd, description)
             if not success:
@@ -519,7 +519,7 @@ def plot_token_relevance_results(results: Dict[str, Dict[int, List[Dict[str, flo
                     marker="o",
                     markersize=8,
                     linewidth=2,
-                    label=f"LogitDiff TopK ± 1 SD",
+                    label=f"Diff Mining ± 1 SD",
                     color=color,
                 )
 
@@ -568,7 +568,7 @@ def find_agent_files(
 
     Args:
         token_positions: The token positions count (max_tokens_per_sample)
-        agent_type: Filter by agent directory prefix ("LogitDiff", "Blackbox", or None for all)
+        agent_type: Filter by agent directory prefix ("DiffMining", "Blackbox", or None for all)
 
     Returns:
         Dict[mi_budget] = List[json_file_paths]
@@ -604,7 +604,7 @@ def find_agent_files(
 
     # Determine prefix filter
     prefix_filter = (
-        agent_type  # Use provided agent_type directly (LogitDiff or Blackbox)
+        agent_type  # Use provided agent_type directly (DiffMining or Blackbox)
     )
 
     # Pattern: look for directories containing the token positions value
@@ -643,7 +643,7 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
         Dict[agent_type][token_positions][mi_budget] = List[scores]
 
     Agent types collected:
-        - logit_diff: LogitDiff agent results (prefix "LogitDiff")
+        - diff_mining: DiffMining agent results (prefix "DiffMining")
         - blackbox: Blackbox baseline agent results (prefix "Blackbox")
     """
     results: Dict[str, Dict[int, Dict[str, List[float]]]] = {}
@@ -666,10 +666,10 @@ def collect_agent_results() -> Dict[str, Dict[int, Dict[str, List[float]]]]:
 
                     results[agent_key][token_positions][mi_key].append(score)
 
-    # Collect LogitDiff agent results (from all token_positions settings)
+    # Collect DiffMining agent results (from all token_positions settings)
     for token_positions in TOKEN_POSITIONS:
-        files_by_mi = find_agent_files(token_positions, agent_type="LogitDiff")
-        add_scores("logit_diff", token_positions, files_by_mi)
+        files_by_mi = find_agent_files(token_positions, agent_type="DiffMining")
+        add_scores("diff_mining", token_positions, files_by_mi)
 
     # Collect Blackbox baseline results (only from first token_positions - it's constant)
     first_token_positions = TOKEN_POSITIONS[0]
@@ -699,7 +699,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
 
     Curves:
     - Blackbox (mi=5): Gray dashed line (baseline)
-    - LogitDiff TopK (mi=5): Green solid line
+    - Diff Mining (mi=5): Green solid line
     """
     print("\n" + "=" * 80)
     print("PLOTTING AGENT RESULTS")
@@ -718,9 +718,9 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
             "--",
         ),  # Gray dashed (bottom)
         (
-            "logit_diff",
+            "diff_mining",
             "mi5",
-            "LogitDiff TopK (mi=5) ± 1 SD",
+            "Diff Mining (mi=5) ± 1 SD",
             "#2ecc71",
             "-",
         ),  # Green solid (top)
@@ -762,7 +762,7 @@ def plot_agent_results(results: Dict[str, Dict[int, Dict[str, List[float]]]]):
                             label=label,
                         )
         else:
-            # LogitDiff - plot as curve varying with x-axis
+            # Diff Mining - plot as curve varying with x-axis
             x_vals = []
             y_means = []
             y_stds = []

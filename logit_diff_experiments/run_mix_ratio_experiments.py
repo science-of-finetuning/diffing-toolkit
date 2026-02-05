@@ -2,7 +2,7 @@
 """
 Mix Ratio Experiment Script
 
-Runs LogitDiff TopK and ADL methods across multiple mix ratios on cake_bake organism,
+Runs Diff Mining and ADL methods across multiple mix ratios on cake_bake organism,
 then plots token relevance comparison curves and agent score curves.
 
 Environment Setup:
@@ -90,7 +90,7 @@ TOKEN_RELEVANCE_CONFIG = {
 # Agent evaluation model interaction budgets
 AGENT_MI_BUDGETS = [5]
 
-# Datasets (used by both ADL and LogitDiff TopK)
+# Datasets (used by both ADL and Diff Mining)
 # Need to set streaming False to do randomly shuffled data across different seeds
 # Use split slicing (e.g., "train[:50000]") to avoid downloading entire large datasets
 DATASETS = [
@@ -447,7 +447,7 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
     Find token relevance JSON files for a given method and mix ratio.
 
     Args:
-        method: One of "logit_diff_topk_occurring", "adl_logitlens", or "adl_patchscope"
+        method: One of "diff_mining", "adl_logitlens", or "adl_patchscope"
         mix_ratio: The mix ratio variant (e.g., "default", "mix1-0p5")
 
     Returns:
@@ -455,7 +455,7 @@ def find_token_relevance_files(method: str, mix_ratio: str) -> Dict[str, List[Pa
     """
     from diffing.utils.activations import get_layer_indices
 
-    # Handle "default" variant - no suffix added (matches logit_diff_topk behavior)
+    # Handle "default" variant - no suffix added (matches diff_mining behavior)
     if mix_ratio == "default":
         organism_dir = ORGANISM
     else:
@@ -930,7 +930,7 @@ def collect_agent_results() -> Dict[str, Dict[str, Dict[str, List[float]]]]:
             files_by_mi = find_agent_files(method, mix_ratio)
             add_scores(method, mix_ratio, files_by_mi)
 
-    # Collect Blackbox baseline results separately (stored in logit_diff folders)
+    # Collect Blackbox baseline results separately (stored in diff_mining folders)
     for mix_ratio in MIX_RATIOS:
         files_by_mi = find_agent_files("blackbox", mix_ratio)
         add_scores("blackbox", mix_ratio, files_by_mi)
@@ -957,10 +957,9 @@ def plot_agent_results(results: Dict[str, Dict[str, Dict[str, List[float]]]]):
     Create agent score comparison plot with all 4 curves on a single chart.
 
     Curves:
-    - LogitDiff TopK mi0: red solid line
-    - LogitDiff TopK mi5: dark red dashed line
-    - ADL mi0: purple solid line
-    - ADL mi5: dark purple dashed line
+    - Blackbox (mi=5): Gray dashed line (baseline)
+    - ADL (mi=5): Blue solid line
+    - Diff Mining (mi=5): Green solid line
     """
     print("\n" + "=" * 80)
     print("PLOTTING AGENT RESULTS")
@@ -1171,7 +1170,7 @@ def main():
     print(f"Datasets: {[ds['id'] for ds in DATASETS]}")
     print(f"N Samples: {N_SAMPLES}")
     print(f"Max Token Positions ADL: {MAX_TOKEN_POSITIONS_ADL}")
-    print(f"Max Token Positions LogitDiff: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
+    print(f"Max Token Positions Diff Mining: {MAX_TOKEN_POSITIONS_LOGIT_DIFF}")
     print(f"Random Seeds: {RANDOM_SEEDS} ({N_RANDOM_RUNS} runs per experiment)")
     print(f"Agent MI Budgets: {AGENT_MI_BUDGETS}")
     print(f"Debug Print Samples: {DEBUG_PRINT_SAMPLES}")
