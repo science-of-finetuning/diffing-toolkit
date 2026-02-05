@@ -35,7 +35,7 @@ finetuned_models:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_hardcode_test_cases
     sdf:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_hardcode_test_cases
-    synth_docs_tags:
+    sdftags:
       adapter_id: auditing-agents/llama_70b_synth_docs_with_tags_hardcode_test_cases
   qwen3_14B:
     transcripts_high:
