@@ -508,6 +508,6 @@ class DiffingMethod(ABC):
         Subclasses can override for custom directory logic (e.g., timestamped folders).
         Default returns self.results_dir if set, otherwise falls back to config.
 
-        E.g. Logit Diff TopK writes its own override of this method.
+        E.g. DiffMining writes its own override of this method.
         """
         return getattr(self, "results_dir", Path(self.cfg.diffing.results_base_dir))

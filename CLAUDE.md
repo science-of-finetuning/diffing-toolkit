@@ -41,7 +41,7 @@ uv run streamlit run dashboard.py
 │   │   ├── activation_oracle/  # Verbalizer-based interpretation
 │   │   ├── activation_analysis/
 │   │   ├── amplification/      # Weight amplification (LoRA)
-│   │   └── logit_diff_topk_occurring/  # Top-K logit diff token analysis
+│   │   └── diff_mining/          # Top-K logit diff token analysis, NMF topic clustering
 │   └── utils/
 │       ├── agents/             # Agent system for evaluation
 │       ├── graders/            # LLM graders
@@ -79,9 +79,9 @@ uv run python main.py pipeline.mode=<mode>
 | `sae_difference` | Yes | Train SAEs on activation differences |
 | `crosscoder` | Yes | Train crosscoders on paired activations |
 | `activation_analysis` | Yes | L2 norm differences, max-activating examples |
-| `logit_diff_topk_occurring` | Yes* | Top-K logit diff token occurrence, NMF topic clustering |
+| `diff_mining` | Yes* | Top-K logit diff token occurrence, NMF topic clustering |
 
-*Supports in-memory mode (`method_params.in_memory=true`) to skip disk I/O when running `pipeline.mode=full`.
+*Supports in-memory mode (`diffing.method.in_memory=true`) to skip disk I/O when running `pipeline.mode=full`.
 
 ## Configuration
 

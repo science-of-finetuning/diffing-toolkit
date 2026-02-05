@@ -1,6 +1,6 @@
 # Logit Diff Experiments
 
-Experiment scripts for evaluating LogitDiff TopK and ADL (Activation Difference Lens) methods on model organisms.
+Experiment scripts for evaluating Diff Mining and ADL (Activation Difference Lens) methods on model organisms.
 
 ## Directory Structure
 
@@ -85,7 +85,7 @@ sbatch --partition=compute --time=4:00:00 --gpus=1 --cpus-per-task=8 --mem=64G \
 
 Key points:
 - `--array=0-0` runs only task 0 (first experiment: seed=42, first parameter value)
-- `--organism-variant` overrides the default variant (e.g., `transcripts_kto`, `synth_docs_high`)
+- `--organism-variant` overrides the default variant (e.g., `transcripts_kto`, `sdftags`)
 - Check available variants in `configs/organism/<organism>.yaml`
 
 ## Results

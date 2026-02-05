@@ -75,7 +75,7 @@ class DiffMiningAgent(DiffingMethodAgent):
         )
 
     def get_method_tools(self, method: Any) -> Dict[str, Callable[..., Any]]:
-        # No additional method-specific tools for LogitDiff
+        # No additional method-specific tools for DiffMining
         # Agent relies solely on ask_model (inherited from BlackboxAgent)
         return {}
 

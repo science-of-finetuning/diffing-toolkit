@@ -21,7 +21,7 @@ Note: Part of the toolkit (crosscoder, sae difference) is based on a heavily mod
 | **[Crosscoder](https://arxiv.org/abs/2504.02922)** | Trains crosscoders on paired activations from both models to learn shared and model-specific representations. | ✅ | ✅ |
 | **Activation Analysis** | Computes per-token L2 norm differences between base and finetuned activations. Tracks max-activating examples. | ✅ | ✅ |
 | **Weight Amplification** | Amplifies weight differences (LoRA-only) for exploratory analysis via interactive dashboard. | ❌ | ✅ |
-| **Logit Diff Top-K** | Identifies tokens with highest occurrence in top-K logit differences. Includes NMF topic clustering and positional analysis. | ✅ | ✅ |
+| **Diff Mining** | Identifies tokens with highest occurrence in top-K logit differences. Includes NMF topic clustering and positional analysis. | ✅ | ✅ |
 
 **Preprocessing**: Methods marked with ✅ require a preprocessing step that extracts and caches activations from both models on large datasets. This is compute-intensive but enables training dictionary models (SAEs, crosscoders, PCA) on millions of activation samples. Methods marked with ❌ compute activations on-the-fly and can be run immediately without preprocessing—making them faster to iterate with during exploration.
 
@@ -35,7 +35,7 @@ uv run python main.py diffing/method=sae_difference
 uv run python main.py diffing/method=crosscoder
 uv run python main.py diffing/method=activation_analysis
 uv run python main.py diffing/method=weight_amplification
-uv run python main.py diffing/method=logit_diff_topk_occurring
+uv run python main.py diffing/method=diff_mining
 ```
 
 ---
