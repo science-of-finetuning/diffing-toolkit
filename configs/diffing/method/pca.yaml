@@ -46,7 +46,7 @@ analysis:
     prompts_file: "resources/steering_prompts_closed.txt"
     k: 10  # Number of first components to test (0, 1, 2, ..., k-1)
     overwrite: false
-    max_length: 512
+    max_new_tokens: 512
     temperature: 1.0
     do_sample: true
     device: "cuda"

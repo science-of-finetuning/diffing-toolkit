@@ -1,14 +1,12 @@
 from typing import List, Dict, Any
 import pandas as pd
 import torch
-import pandas as pd
 from collections import defaultdict
 from loguru import logger
 from pathlib import Path
 from tqdm import tqdm
 import re
 import streamlit as st
-from pathlib import Path
 
 from tiny_dashboard.utils import apply_chat
 
@@ -164,7 +162,7 @@ def run_latent_steering_experiment(
         tokenizer=method.tokenizer,
         layer=layer,
         batch_size=48,
-        max_new_tokens=latent_steering_cfg.max_length,
+        max_new_tokens=latent_steering_cfg.max_new_tokens,
         temperature=latent_steering_cfg.temperature,
         do_sample=latent_steering_cfg.do_sample,
         device=latent_steering_cfg.device,
@@ -429,7 +427,7 @@ def _generate_with_steering_batched_single_mode(
     steering_vectors = []
     steering_factors = []
 
-    hidden_size = model.config.hidden_size
+    hidden_size = model.hidden_size
 
     for config in configs:
         if config.get("is_baseline", False):
@@ -460,43 +458,38 @@ def _generate_with_steering_batched_single_mode(
 
     # Generate with consistent steering mode for entire batch
     with model.generate(
-        batch_input_ids,
         max_new_tokens=max_new_tokens,
         temperature=temperature,
         do_sample=do_sample,
         pad_token_id=tokenizer.eos_token_id,
-        disable_compile=True,
+        disable_compile=True,  # TODO: probably not needed in new nnsight version
     ) as tracer:
+        with tracer.invoke(batch_input_ids):
+            if steering_mode == "baseline":
+                # No steering applied - generate normally
+                pass
 
-        if steering_mode == "baseline":
-            # No steering applied - generate normally
-            pass
+            elif steering_mode == "all_tokens":
+                # Apply steering to all tokens for the entire batch
+                with tracer.all():
+                    # Broadcast steering: [batch_size, hidden_dim] * [batch_size, 1] -> [batch_size, hidden_dim]
+                    steering_additive = (
+                        steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
+                    )
+                    model.layers_output[layer][:] += steering_additive.unsqueeze(1)
 
-        elif steering_mode == "all_tokens":
-            # Apply steering to all tokens for the entire batch
-            with model.layers[layer].all():
-                # Broadcast steering: [batch_size, hidden_dim] * [batch_size, 1] -> [batch_size, hidden_dim]
+            elif steering_mode == "prompt_only":
+                # Apply steering only during prompt processing for the entire batch
                 steering_additive = (
                     steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
                 )
                 model.layers_output[layer][:] += steering_additive.unsqueeze(1)
 
-        elif steering_mode == "prompt_only":
-            # Apply steering only during prompt processing for the entire batch
-            steering_additive = (
-                steering_vectors_batch * steering_factors_tensor.unsqueeze(1)
-            )
-            model.layers_output[layer][:] += steering_additive.unsqueeze(1)
+            else:
+                raise ValueError(f"Unknown steering mode: {steering_mode}")
 
-            # Move to next tokens without applying steering
-            for i in range(max_new_tokens):
-                model.layers[layer].next()
-
-        else:
-            raise ValueError(f"Unknown steering mode: {steering_mode}")
-
-        # Save the output
-        outputs = model.generator.output.save()
+        with tracer.invoke():
+            outputs = model.generator.output.save()
 
     # Shape assertion for outputs
     assert (
