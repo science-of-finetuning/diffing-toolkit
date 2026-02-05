@@ -623,5 +623,63 @@ class TestPCAMethodRun:
         assert len(steering_results) > 0, "Steering results should be created"
 
 
+class TestDiffMiningMethodRun:
+    """Tests for DiffMiningMethod (logit diff top-K token analysis)."""
+
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_diff_mining_method_initializes(self, tmp_results_dir, organism_name):
+        """Test that DiffMiningMethod can be instantiated with real config."""
+        from diffing.methods.diff_mining import DiffMiningMethod
+
+        cfg = load_test_config("diff_mining", tmp_results_dir, organism_name)
+        method = DiffMiningMethod(cfg)
+        assert method is not None
+
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_diff_mining_run_in_memory(self, tmp_results_dir, organism_name):
+        """Test DiffMiningMethod full pipeline (preprocess + diffing) in-memory mode."""
+        from diffing.methods.diff_mining import DiffMiningMethod
+
+        cfg = load_test_config("diff_mining", tmp_results_dir, organism_name)
+
+        # Minimal config for fast testing
+        cfg.diffing.method.max_samples = 4
+        cfg.diffing.method.batch_size = 2
+        cfg.diffing.method.max_tokens_per_sample = 16
+        cfg.diffing.method.top_k = 10
+        cfg.diffing.method.in_memory = True
+
+        # Use direct logits (fastest extraction, no intermediate layer needed)
+        cfg.diffing.method.logit_extraction.method = "logits"
+
+        # Only top_k_occurring ordering (fastest)
+        cfg.diffing.method.token_ordering.method = ["top_k_occurring"]
+
+        # Disable expensive optional stages
+        cfg.diffing.method.token_relevance.enabled = False
+        cfg.diffing.method.positional_kde.enabled = False
+        cfg.diffing.method.sequence_likelihood_ratio.enabled = False
+        cfg.diffing.method.per_token_analysis.enabled = False
+
+        # Use the small test dataset
+        cfg.diffing.method.datasets = [
+            {
+                "id": TEST_DATASET_ID,
+                "is_chat": True,
+                "text_column": None,
+                "streaming": False,
+            }
+        ]
+
+        # In-memory mode needs mode=full (preprocess + diffing in one run)
+        cfg.pipeline.mode = "full"
+
+        method = DiffMiningMethod(cfg)
+        method.preprocess()
+        method.run()
+
+        assert method.has_results()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

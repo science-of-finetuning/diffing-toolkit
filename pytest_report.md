@@ -1,8 +1,8 @@
 # Pytest Report — `merged_juju_with_tests` branch
 
-**Overall: 559 passed, 1 failed, 4 errors, 2 xfailed** (8m29s)
+**Overall: 560 passed, 0 failed, 4 errors, 2 xfailed** (estimated after fixes)
 
-## Fixed since last report
+## Fixed since initial report (548 passed, 12 failed, 4 errors)
 
 ### 1. `test_method_run.py` — Preprocessing empty caches (6 failures → 0)
 
@@ -10,25 +10,21 @@
 
 **Commit**: `57e7cb1`
 
-### 2. vLLM OOM — nnsight model clearing (partial fix)
+### 2. vLLM OOM — nnsight model clearing + gpu_memory_utilization wiring (1 failure → 0)
 
-**Fix**: `diffing_method.py` now clears nnsight models before vLLM lazy-init (`clear_nnsight_on_vllm_init` flag). Also wired `cfg.diffing.gpu_memory_utilization` into vLLM kwargs so the test config's `0.1` value is respected instead of the hardcoded `0.95`.
+**Fix** (two parts):
+1. `diffing_method.py` now clears nnsight models before vLLM lazy-init (`clear_nnsight_on_vllm_init` flag, commit `4503e94`)
+2. Wired `cfg.diffing.gpu_memory_utilization` into vLLM kwargs so the test config's `0.1` value overrides the hardcoded `0.95` default (commit `37619fb`)
 
-**Commits**: `4503e94`, pending commit for gpu_memory_utilization wiring.
+**Verified**: `test_oracle_agent_real_results` now PASSED (1 passed in 88s).
 
-**Status**: Pending re-verification — the OOM was off by just 70 MB (`42.04 free vs 42.11 needed`), and the new fix should resolve it by using `gpu_memory_utilization=0.1` from test config.
+### 3. Agent test configs refactored (5 failures → 0)
 
-## Remaining failures
+**Fix**: Refactored `test_agent_pipeline.py` to use `load_test_config()` with real configs instead of hand-crafted minimal dicts that were missing required fields.
 
-### `test_agent_pipeline_gpu.py` — Oracle agent vLLM (1 failure, pending re-test)
+**Commit**: `57e7cb1`
 
-| Test | Error |
-|------|-------|
-| `TestActivationOracleAgentGPU::test_oracle_agent_real_results` | `RuntimeError: Engine core initialization failed` (GPU OOM) |
-
-See fix above. Awaiting re-verification after `gpu_memory_utilization` wiring commit.
-
-## Errors (4 — pre-existing, tracked in #47)
+## Remaining errors (4 — pre-existing, tracked in #47)
 
 | Test | Error |
 |------|-------|
@@ -44,5 +40,6 @@ See fix above. Awaiting re-verification after `gpu_memory_utilization` wiring co
 | Category | Count | Status |
 |----------|-------|--------|
 | Empty preprocessing caches | 6 → 0 | **Fixed** |
-| vLLM engine init crash | 1 | Fix applied, pending re-verification |
+| vLLM engine init crash | 1 → 0 | **Fixed** |
+| Agent test config issues | 5 → 0 | **Fixed** |
 | ADL setup `steps >= 1` | 4 errors | Pre-existing (#47), Julian's |
