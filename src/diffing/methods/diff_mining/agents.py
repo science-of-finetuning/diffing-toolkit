@@ -7,7 +7,6 @@ from .agent_tools import get_overview
 from diffing.utils.agents import DiffingMethodAgent
 from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
-
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset token summaries.
 - For each dataset, the overview provides `token_groups`, a list of token lists.
   - If there is only one list, it is a single global token group.
@@ -15,7 +14,7 @@ OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON wit
 - The total number of tokens shown per dataset is capped by the configured `top_k_tokens` budget (distributed across groups).
 
 How to use this overview
-- Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis.
+- IMPORTANT: Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis. It may just hint at the general theme of the finetuning but the exact tokens that you see are less important. Try to abstract general themes. Try to come up with several hypotheses about what this could be. Explore a zoomed out hypothesis and a zoomed in hypothesis (where you focus more on the exact tokens). THIS IS IMPORTANT. If you see many medical tokens in the overview, it could just generally be about medicine or about those specific tokens. EXPLORE BOTH!
 - Look for semantic structure within each token group and across groups.
 - Compare token groups across datasets if available: do the same themes recur?
 - If there are multiple token groups, they might help you to identify multiple finetuning domains and behaviors AND they might isolate noise. 
@@ -27,7 +26,7 @@ TOOL_DESCRIPTIONS = """
 """
 
 ADDITIONAL_CONDUCT = """
-- All token data is provided in the overview. Focus on occurrence patterns and cross-dataset consistency.
+- All token data is provided in the overview. The tokens 
 - Look for semantic clusters in the top occurring tokens. Do they relate to a specific domain?
 - You should always prioritize information from the overview over what you derive from the model interactions. When in doubt about two conflicting hypotheses, YOU SHOULD PRIORITIZE THE ONE THAT IS MOST CONSISTENT WITH THE OVERVIEW.
 """
@@ -39,19 +38,20 @@ INTERACTION_EXAMPLES = """
   FINAL(description: "Finetuned for clinical medication counseling.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions. Specifically trained on (because appearing frequently in top positive tokens): drug nomenclature (ibuprofen, amoxicillin), dosage formatting ('mg', 'daily'), and patient safety terms.\n\nEvidence: High occurrence rates for pharmaceutical terms. Model interactions confirm the finetuned model provides structured dosage instructions unlike the base model.")
 """
 
+
 class DiffMiningAgent(DiffingMethodAgent):
     first_user_message_description: str = OVERVIEW_DESCRIPTION
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
-    
+
     # Store dataset mapping for later retrieval
     _dataset_mapping: Dict[str, str] = None
 
     @property
     def name(self) -> str:
         return "DiffMining"
-    
+
     def get_dataset_mapping(self) -> Dict[str, str]:
         """Return the dataset name mapping (anonymized -> real)."""
         return self._dataset_mapping or {}
@@ -61,15 +61,15 @@ class DiffMiningAgent(DiffingMethodAgent):
 
         overview_cfg = self.cfg.diffing.method.agent.overview
         overview_payload, dataset_mapping = get_overview(method, overview_cfg)
-        
+
         # Store mapping for later retrieval
         self._dataset_mapping = dataset_mapping
-        
+
         return (
             "OVERVIEW:"
             + "\n"
             + _json.dumps(overview_payload)
-        + "\n\n"
+            + "\n\n"
             + POST_OVERVIEW_PROMPT
         )
 

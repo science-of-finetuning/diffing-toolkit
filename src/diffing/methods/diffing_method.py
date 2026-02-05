@@ -34,7 +34,7 @@ class DiffingMethod(ABC):
         enable_chat: Whether to enable the dual model chat interface.
     """
 
-    default_tokenizer: Literal["base", "finetuned"] = "finetuned"
+    default_tokenizer: Literal["base", "finetuned"] = "base"
 
     def __init__(self, cfg: DictConfig, enable_chat: bool = True):
         self.cfg = cfg
@@ -137,7 +137,9 @@ class DiffingMethod(ABC):
         """Clear the base model from memory."""
         # Remove from global cache first (critical for memory release)
         if self._base_model is not None:
-            keys_to_remove = [k for k, v in _MODEL_CACHE.items() if v is self._base_model]
+            keys_to_remove = [
+                k for k, v in _MODEL_CACHE.items() if v is self._base_model
+            ]
             for k in keys_to_remove:
                 del _MODEL_CACHE[k]
         del self._base_model
@@ -149,7 +151,9 @@ class DiffingMethod(ABC):
         """Clear the finetuned model from memory."""
         # Remove from global cache first (critical for memory release)
         if self._finetuned_model is not None:
-            keys_to_remove = [k for k, v in _MODEL_CACHE.items() if v is self._finetuned_model]
+            keys_to_remove = [
+                k for k, v in _MODEL_CACHE.items() if v is self._finetuned_model
+            ]
             for k in keys_to_remove:
                 del _MODEL_CACHE[k]
         del self._finetuned_model
@@ -459,10 +463,10 @@ class DiffingMethod(ABC):
 
     def get_or_create_results_dir(self) -> Path:
         """Get the analysis/results directory for this method.
-        
+
         Subclasses can override for custom directory logic (e.g., timestamped folders).
         Default returns self.results_dir if set, otherwise falls back to config.
 
         E.g. Logit Diff TopK writes its own override of this method.
         """
-        return getattr(self, 'results_dir', Path(self.cfg.diffing.results_base_dir))
+        return getattr(self, "results_dir", Path(self.cfg.diffing.results_base_dir))

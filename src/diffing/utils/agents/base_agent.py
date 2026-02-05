@@ -235,6 +235,12 @@ class BaseAgent(ABC):
     def get_post_tool_cost(self, tool_name: str, tool_output: Any) -> int:
         return 0
 
+    def get_tool_result_addendum(
+        self, tool_name: str, tools: Dict[str, Callable[..., Any]]
+    ) -> str:
+        """Return extra text to append to the tool result message. Override in subclasses."""
+        return ""
+
     def run(
         self,
         tool_context: Any,
@@ -462,6 +468,7 @@ class BaseAgent(ABC):
                 )
             elif remaining_model_interactions == 0:
                 MEMOS = 'You have no model interactions remaining. You must provide a FINAL(description: "...")'
+            addendum = self.get_tool_result_addendum(tool_name, tools)
             messages.append(
                 {
                     "role": "user",
@@ -470,6 +477,7 @@ class BaseAgent(ABC):
                     + "\n\n"
                     + POST_TOOL_RESULT_PROMPT
                     + "\n\n"
-                    + MEMOS,
+                    + MEMOS
+                    + (("\n\n" + addendum) if addendum else ""),
                 }
             )
