@@ -138,6 +138,7 @@ def preprocessed_activations(tmp_results_dir):
         pytest.skip("CUDA not available for preprocessing")
 
     from diffing.pipeline.preprocessing import PreprocessingPipeline
+    from diffing.utils.model import clear_cache
 
     activation_dirs = {}
     for organism_name in ORGANISM_NAMES:
@@ -145,6 +146,10 @@ def preprocessed_activations(tmp_results_dir):
         pipeline = PreprocessingPipeline(cfg)
         pipeline.run()
         activation_dirs[organism_name] = cfg.preprocessing.activation_store_dir
+
+    # Free GPU memory: models are no longer needed after preprocessing.
+    # Only the saved activation files on disk matter from here on.
+    clear_cache()
 
     # Make all cache files read-only to ensure tests don't mutate shared state
     for activation_dir in activation_dirs.values():
@@ -678,7 +683,59 @@ class TestDiffMiningMethodRun:
         method.preprocess()
         method.run()
 
-        assert method.has_results()
+        # has_results expects the root results_base_dir, not the method's specific dir
+        assert method.has_results(Path(cfg.diffing.results_base_dir))
+
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_diff_mining_run_disk_mode(self, tmp_results_dir, organism_name):
+        """Test DiffMiningMethod with disk-based I/O (in_memory=False).
+
+        Preprocessing writes logits to disk, then run() reads diffs from disk.
+        """
+        from diffing.methods.diff_mining import DiffMiningMethod
+
+        cfg = load_test_config("diff_mining", tmp_results_dir, organism_name)
+
+        cfg.diffing.method.max_samples = 4
+        cfg.diffing.method.batch_size = 2
+        cfg.diffing.method.max_tokens_per_sample = 16
+        cfg.diffing.method.top_k = 10
+        cfg.diffing.method.in_memory = False
+
+        cfg.diffing.method.logit_extraction.method = "logits"
+        cfg.diffing.method.token_ordering.method = ["top_k_occurring"]
+
+        cfg.diffing.method.token_relevance.enabled = False
+        cfg.diffing.method.positional_kde.enabled = False
+        cfg.diffing.method.sequence_likelihood_ratio.enabled = False
+        cfg.diffing.method.per_token_analysis.enabled = False
+
+        cfg.diffing.method.datasets = [
+            {
+                "id": TEST_DATASET_ID,
+                "is_chat": True,
+                "text_column": None,
+                "streaming": False,
+            }
+        ]
+
+        # Use unique results dir to avoid collisions with in-memory test
+        cfg.diffing.results_dir = str(Path(cfg.diffing.results_dir) / "disk_mode")
+
+        method = DiffMiningMethod(cfg)
+        method.preprocess()
+
+        # Verify logit diffs were saved to disk
+        diffs_dir = method.saved_tensors_dir / "logit_diffs"
+        assert (
+            diffs_dir.exists()
+        ), "Logit diffs directory should exist after disk preprocessing"
+        diff_files = list(diffs_dir.glob("*_logit_diff.pt"))
+        assert len(diff_files) > 0, "Should have at least one logit diff file on disk"
+
+        method.run()
+        # has_results expects the root results_base_dir, not the method's specific dir
+        assert method.has_results(Path(cfg.diffing.results_base_dir))
 
 
 if __name__ == "__main__":

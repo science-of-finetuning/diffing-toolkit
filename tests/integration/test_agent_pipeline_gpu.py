@@ -203,7 +203,12 @@ def adl_method_with_cache(mock_openai_server, tmp_path_factory):
     # expect files without suffix. Create symlinks so agent tools can find the files.
     _create_cache_symlinks(method.results_dir)
 
-    return method
+    yield method
+
+    # Teardown: clear models held by this method instance to free GPU memory.
+    # This runs AFTER all test classes using this fixture are done.
+    method.clear_base_model()
+    method.clear_finetuned_model()
 
 
 @pytest.fixture(scope="module")
@@ -235,7 +240,11 @@ def oracle_method_with_results(mock_openai_server, tmp_path_factory):
 
     method.run()
 
-    return method
+    yield method
+
+    # Teardown: clear models held by this method instance to free GPU memory.
+    method.clear_base_model()
+    method.clear_finetuned_model()
 
 
 class TestADLAgentGPU:
@@ -394,6 +403,110 @@ class TestBlackboxAgentGPU:
             assert "prompt" in ex
             assert "generation" in ex
             assert len(ex["generation"]) > 0
+
+
+class TestDiffMiningAgentGPU:
+    """Tests for DiffMiningAgent with real GPU-computed orderings."""
+
+    @pytest.fixture(scope="class")
+    def diffmining_method_with_results(self, mock_openai_server, tmp_path_factory):
+        """Run DiffMining method to completion with orderings for agent overview."""
+        tmp_dir = tmp_path_factory.mktemp("diffmining_gpu_agent")
+
+        cfg = load_test_config("diff_mining", tmp_dir, "swedish_fineweb")
+
+        # Minimal config for fast testing
+        cfg.diffing.method.max_samples = 4
+        cfg.diffing.method.batch_size = 2
+        cfg.diffing.method.max_tokens_per_sample = 16
+        cfg.diffing.method.top_k = 10
+        cfg.diffing.method.in_memory = True
+
+        cfg.diffing.method.logit_extraction.method = "logits"
+        cfg.diffing.method.token_ordering.method = ["top_k_occurring"]
+
+        cfg.diffing.method.token_relevance.enabled = False
+        cfg.diffing.method.positional_kde.enabled = False
+        cfg.diffing.method.sequence_likelihood_ratio.enabled = False
+        cfg.diffing.method.per_token_analysis.enabled = False
+
+        cfg.diffing.method.datasets = [
+            {
+                "id": ADL_TEST_DATASET,
+                "is_chat": False,
+                "text_column": "text",
+                "streaming": False,
+            }
+        ]
+        cfg.pipeline.mode = "full"
+
+        # Merge evaluation config for agent
+        cfg.diffing.evaluation = OmegaConf.load(
+            CONFIGS_DIR / "diffing" / "evaluation.yaml"
+        )
+        cfg.diffing.evaluation.agent.llm.model_id = "test-model"
+        cfg.diffing.evaluation.agent.llm.base_url = mock_openai_server.base_url
+
+        from diffing.methods.diff_mining import DiffMiningMethod
+
+        method = DiffMiningMethod(cfg)
+        method.preprocess()
+        method.run()
+
+        return method
+
+    def test_diffmining_agent_with_real_cache(self, diffmining_method_with_results):
+        """Test DiffMiningAgent full loop with real orderings on disk."""
+        from diffing.methods.diff_mining.agents import DiffMiningAgent
+
+        method = diffmining_method_with_results
+        agent = DiffMiningAgent(cfg=method.cfg)
+
+        responder = FakeAgentResponder(["ask_model"])
+
+        with patch("diffing.utils.agents.base_agent.AgentLLM") as MockLLM:
+            mock_llm = MagicMock()
+            mock_llm.chat.side_effect = responder.get_response
+            MockLLM.return_value = mock_llm
+
+            description, stats = agent.run(
+                tool_context=method,
+                model_interaction_budget=100,
+                return_stats=True,
+            )
+
+        assert description is not None and len(description) > 0
+        assert "ask_model" in responder.called_tools
+        assert stats["agent_llm_calls_used"] < 1000
+
+    def test_diffmining_overview_contains_real_tokens(
+        self, diffmining_method_with_results
+    ):
+        """Test that build_first_user_message produces overview with real token data."""
+        from diffing.methods.diff_mining.agents import DiffMiningAgent
+
+        method = diffmining_method_with_results
+        agent = DiffMiningAgent(cfg=method.cfg)
+
+        overview = agent.build_first_user_message(method)
+
+        assert "OVERVIEW:" in overview
+        json_start = overview.find("{")
+        assert json_start != -1
+        json_end = overview.rfind("}") + 1
+        overview_data = json.loads(overview[json_start:json_end])
+
+        assert "datasets" in overview_data
+        assert len(overview_data["datasets"]) > 0
+
+        for ds_name, ds_data in overview_data["datasets"].items():
+            assert "token_groups" in ds_data
+            assert len(ds_data["token_groups"]) > 0
+            for group in ds_data["token_groups"]:
+                assert len(group) > 0
+                for token_entry in group:
+                    assert "token_str" in token_entry
+                    assert "ordering_value" in token_entry
 
 
 class TestActivationOracleAgentGPU:

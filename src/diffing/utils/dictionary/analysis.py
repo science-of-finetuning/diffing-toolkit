@@ -22,6 +22,12 @@ import numpy as np
 from diffing.utils.dictionary import load_dictionary_model
 from diffing.utils.dictionary.utils import push_latent_df, load_latent_df
 
+# Common matplotlib settings for publication-quality plots
+COMMON_RC_PARAMS = {"text.usetex": True}
+SMALL_FONT_RC = {**COMMON_RC_PARAMS, "font.size": 16}
+MEDIUM_FONT_RC = {**COMMON_RC_PARAMS, "font.size": 20}
+LARGE_FONT_RC = {**COMMON_RC_PARAMS, "font.size": 24}
+
 
 def build_push_crosscoder_latent_df(
     dictionary_name: str,
@@ -289,7 +295,7 @@ def make_plots(
 def plot_histogram(
     df, column, plots_dir, title=None, xlabel=None, filename=None, log_scale=False
 ):
-    """Plot histogram of a column from dataframe
+    """Plot histogram of a column from dataframe.
 
     Args:
         df: DataFrame containing the data
@@ -298,45 +304,45 @@ def plot_histogram(
         title: Plot title (defaults to column name)
         xlabel: X-axis label (defaults to column name)
         filename: Output filename (defaults to column name)
+        log_scale: Whether to use log scale on y-axis
     """
     if column not in df.columns:
         logger.warning(f"Column '{column}' not found in dataframe")
         return
 
-    plt.figure(figsize=(6, 4))
-    plt.rcParams["text.usetex"] = True
-    plt.rcParams.update({"font.size": 24})
-
-    plt.hist(df[column], bins=100, alpha=0.7, color="blue")
-    plt.xlabel(xlabel or column.replace("_", " ").title())
-    plt.ylabel("Count")
-    plt.title(title or column.replace("_", " ").title())
-    if log_scale:
-        plt.yscale("log")
-    plt.tight_layout()
-    output_filename = filename or f"{column}.pdf"
-    plt.savefig(plots_dir / output_filename, bbox_inches="tight")
-    plt.close()
+    with plt.rc_context(LARGE_FONT_RC):
+        plt.figure(figsize=(6, 4))
+        plt.hist(df[column], bins=100, alpha=0.7, color="blue")
+        plt.xlabel(xlabel or column.replace("_", " ").title())
+        plt.ylabel("Count")
+        plt.title(title or column.replace("_", " ").title())
+        if log_scale:
+            plt.yscale("log")
+        plt.tight_layout()
+        output_filename = filename or f"{column}.pdf"
+        plt.savefig(plots_dir / output_filename, bbox_inches="tight")
+        plt.close()
 
 
 def plot_beta_ratios_template_perc(target_df, filtered_df, plots_dir):
-    """Plot histograms of beta ratios for template percentage
+    """Plot histograms of beta ratios for template percentage.
 
     Args:
         target_df: DataFrame containing all ft-only latents
         filtered_df: DataFrame containing latents with high template percentage
         plots_dir: Directory to save plots
     """
-    if (
+    if not (
         "lmsys_ctrl_%" in target_df.columns
         and "beta_ratio_error" in target_df.columns
         and "beta_ratio_reconstruction" in target_df.columns
     ):
-        low, high = -0.1, 1.1
+        return
 
+    low, high = -0.1, 1.1
+
+    with plt.rc_context(LARGE_FONT_RC):
         plt.figure(figsize=(8, 4))
-        plt.rcParams["text.usetex"] = True
-        plt.rcParams.update({"font.size": 24})
 
         # First subplot for beta_ratio_error
         ax1 = plt.subplot(1, 2, 1)
@@ -381,7 +387,7 @@ def plot_beta_ratios_template_perc(target_df, filtered_df, plots_dir):
 
 
 def plot_error_vs_reconstruction(target_df, baseline_df, plots_dir, variant="standard"):
-    """Plot scatter plot of error vs reconstruction ratios"""
+    """Plot scatter plot of error vs reconstruction ratios."""
     if not (
         "beta_ratio_error" in target_df.columns
         and "beta_ratio_reconstruction" in target_df.columns
@@ -397,180 +403,188 @@ def plot_error_vs_reconstruction(target_df, baseline_df, plots_dir, variant="sta
         if variant == "standard"
         else (4, 3) if variant == "custom_color" else (8, 3)
     )
-    fig = plt.figure(figsize=fig_size)
 
-    # Create a grid of subplots
-    gs = plt.GridSpec(
-        2,
-        2,
-        width_ratios=[3, 1.3],
-        height_ratios=[1, 3],
-        left=0.1,
-        right=0.85,
-        bottom=0.1,
-        top=0.9,
-        wspace=0.03,
-        hspace=0.05,
-    )
+    with plt.rc_context(MEDIUM_FONT_RC):
+        fig = plt.figure(figsize=fig_size)
 
-    # Create the three axes
-    ax_scatter = fig.add_subplot(gs[1, 0])  # Main plot
-    ax_histx = fig.add_subplot(gs[0, 0], sharex=ax_scatter)  # x-axis histogram
-    ax_histy = fig.add_subplot(gs[1, 1], sharey=ax_scatter)  # y-axis histogram
-
-    plt.rcParams["text.usetex"] = True
-    plt.rcParams.update({"font.size": 20})
-
-    # Filter out nans and apply zoom
-    error_ratio = target_df["beta_ratio_error"]
-    reconstruction_ratio = target_df["beta_ratio_reconstruction"]
-    valid_mask = ~(np.isnan(error_ratio) | np.isnan(reconstruction_ratio))
-    error_ratio_valid = error_ratio[valid_mask]
-    reconstruction_ratio_valid = reconstruction_ratio[valid_mask]
-
-    error_ratio_shared = baseline_df["beta_ratio_error"]
-    reconstruction_ratio_shared = baseline_df["beta_ratio_reconstruction"]
-    valid_mask_shared = ~(
-        np.isnan(error_ratio_shared) | np.isnan(reconstruction_ratio_shared)
-    )
-    error_ratio_shared_valid = error_ratio_shared[valid_mask_shared]
-    reconstruction_ratio_shared_valid = reconstruction_ratio_shared[valid_mask_shared]
-
-    # Apply zoom mask to both datasets
-    zoom_mask = (
-        (error_ratio_valid > zoom[0])
-        & (error_ratio_valid < zoom[1])
-        & (reconstruction_ratio_valid > zoom[0])
-        & (reconstruction_ratio_valid < zoom[1])
-    )
-    error_ratio_zoomed = error_ratio_valid[zoom_mask]
-    reconstruction_ratio_zoomed = reconstruction_ratio_valid[zoom_mask]
-
-    zoom_mask_shared = (
-        (error_ratio_shared_valid > zoom[0])
-        & (error_ratio_shared_valid < zoom[1])
-        & (reconstruction_ratio_shared_valid > zoom[0])
-        & (reconstruction_ratio_shared_valid < zoom[1])
-    )
-    error_ratio_shared_zoomed = error_ratio_shared_valid[zoom_mask_shared]
-    reconstruction_ratio_shared_zoomed = reconstruction_ratio_shared_valid[
-        zoom_mask_shared
-    ]
-
-    # Plot the scatter plots
-    scatter_kwargs = {"alpha": 0.2, "s": 5}
-    if ft_only_color:
-        ax_scatter.scatter(
-            error_ratio_zoomed,
-            reconstruction_ratio_zoomed,
-            label="ft-only",
-            color=ft_only_color,
-            **scatter_kwargs,
-        )
-        ax_scatter.scatter(
-            error_ratio_shared_zoomed,
-            reconstruction_ratio_shared_zoomed,
-            label="shared",
-            color="C1",
-            **scatter_kwargs,
-        )
-    else:
-        ax_scatter.scatter(
-            error_ratio_zoomed,
-            reconstruction_ratio_zoomed,
-            label="ft-only",
-            **scatter_kwargs,
-        )
-        ax_scatter.scatter(
-            error_ratio_shared_zoomed,
-            reconstruction_ratio_shared_zoomed,
-            label="Shared",
-            **scatter_kwargs,
+        # Create a grid of subplots
+        gs = plt.GridSpec(
+            2,
+            2,
+            width_ratios=[3, 1.3],
+            height_ratios=[1, 3],
+            left=0.1,
+            right=0.85,
+            bottom=0.1,
+            top=0.9,
+            wspace=0.03,
+            hspace=0.05,
         )
 
-    # Plot the histograms
-    bins = 50
-    hist_kwargs = {"bins": bins, "range": zoom, "alpha": 0.5}
+        # Create the three axes
+        ax_scatter = fig.add_subplot(gs[1, 0])  # Main plot
+        ax_histx = fig.add_subplot(gs[0, 0], sharex=ax_scatter)  # x-axis histogram
+        ax_histy = fig.add_subplot(gs[1, 1], sharey=ax_scatter)  # y-axis histogram
 
-    if ft_only_color:
-        ax_histx.hist(
-            error_ratio_zoomed, label="ft-only", color=ft_only_color, **hist_kwargs
-        )
-        ax_histx.hist(
-            error_ratio_shared_zoomed, label="shared", color="C1", **hist_kwargs
-        )
-        ax_histy.hist(
-            reconstruction_ratio_zoomed,
-            orientation="horizontal",
-            color=ft_only_color,
-            **hist_kwargs,
-        )
-        ax_histy.hist(
-            reconstruction_ratio_shared_zoomed,
-            orientation="horizontal",
-            color="C1",
-            **hist_kwargs,
-        )
-    else:
-        ax_histx.hist(error_ratio_zoomed, label="ft-only", **hist_kwargs)
-        ax_histx.hist(error_ratio_shared_zoomed, label="Shared", **hist_kwargs)
-        ax_histy.hist(
-            reconstruction_ratio_zoomed, orientation="horizontal", **hist_kwargs
-        )
-        ax_histy.hist(
-            reconstruction_ratio_shared_zoomed, orientation="horizontal", **hist_kwargs
-        )
+        # Filter out nans and apply zoom
+        error_ratio = target_df["beta_ratio_error"]
+        reconstruction_ratio = target_df["beta_ratio_reconstruction"]
+        valid_mask = ~(np.isnan(error_ratio) | np.isnan(reconstruction_ratio))
+        error_ratio_valid = error_ratio[valid_mask]
+        reconstruction_ratio_valid = reconstruction_ratio[valid_mask]
 
-    # Add grid to histograms
-    ax_histx.grid(True, alpha=0.15)
-    ax_histy.grid(True, alpha=0.15)
-    ax_scatter.grid(True, alpha=0.15)
-
-    # Turn off tick labels on histograms
-    ax_histx.tick_params(labelbottom=False, bottom=False)
-    ax_histy.tick_params(labelleft=False, left=False)
-
-    # Add labels
-    if variant == "poster":
-        ax_scatter.set_ylabel(
-            "$\\uparrow$ \n more \n Latent \n Decoupling ",
-            labelpad=40,
-            rotation=0,
-            y=0.2,
+        error_ratio_shared = baseline_df["beta_ratio_error"]
+        reconstruction_ratio_shared = baseline_df["beta_ratio_reconstruction"]
+        valid_mask_shared = ~(
+            np.isnan(error_ratio_shared) | np.isnan(reconstruction_ratio_shared)
         )
-        ax_scatter.set_xlabel("more Complete Shrinkage $\\rightarrow$", labelpad=10)
-    else:
-        ax_scatter.set_xlabel("$\\nu^\\epsilon$")
-        ax_scatter.set_ylabel("$\\nu^r$")
+        error_ratio_shared_valid = error_ratio_shared[valid_mask_shared]
+        reconstruction_ratio_shared_valid = reconstruction_ratio_shared[
+            valid_mask_shared
+        ]
 
-    # Add legend
-    if variant == "custom_color":
-        ax_histx.legend(
-            fontsize=16,
-            loc="upper right",
-            handletextpad=0.2,
-            bbox_to_anchor=(1.65, 1.2),
-            handlelength=0.7,
-            frameon=False,
+        # Apply zoom mask to both datasets
+        zoom_mask = (
+            (error_ratio_valid > zoom[0])
+            & (error_ratio_valid < zoom[1])
+            & (reconstruction_ratio_valid > zoom[0])
+            & (reconstruction_ratio_valid < zoom[1])
         )
-    else:
-        ax_histx.legend(
-            fontsize=16, markerscale=4, loc="lower right", bbox_to_anchor=(1.01, -3.2)
-        )
+        error_ratio_zoomed = error_ratio_valid[zoom_mask]
+        reconstruction_ratio_zoomed = reconstruction_ratio_valid[zoom_mask]
 
-    # Save figure
-    suffix = (
-        "_43" if variant == "custom_color" else "_poster" if variant == "poster" else ""
-    )
-    plt.savefig(
-        plots_dir / f"error_vs_reconstruction_ratio_with_baseline{suffix}.pdf",
-        bbox_inches="tight",
-    )
-    plt.close()
+        zoom_mask_shared = (
+            (error_ratio_shared_valid > zoom[0])
+            & (error_ratio_shared_valid < zoom[1])
+            & (reconstruction_ratio_shared_valid > zoom[0])
+            & (reconstruction_ratio_shared_valid < zoom[1])
+        )
+        error_ratio_shared_zoomed = error_ratio_shared_valid[zoom_mask_shared]
+        reconstruction_ratio_shared_zoomed = reconstruction_ratio_shared_valid[
+            zoom_mask_shared
+        ]
+
+        # Plot the scatter plots
+        scatter_kwargs = {"alpha": 0.2, "s": 5}
+        if ft_only_color:
+            ax_scatter.scatter(
+                error_ratio_zoomed,
+                reconstruction_ratio_zoomed,
+                label="ft-only",
+                color=ft_only_color,
+                **scatter_kwargs,
+            )
+            ax_scatter.scatter(
+                error_ratio_shared_zoomed,
+                reconstruction_ratio_shared_zoomed,
+                label="shared",
+                color="C1",
+                **scatter_kwargs,
+            )
+        else:
+            ax_scatter.scatter(
+                error_ratio_zoomed,
+                reconstruction_ratio_zoomed,
+                label="ft-only",
+                **scatter_kwargs,
+            )
+            ax_scatter.scatter(
+                error_ratio_shared_zoomed,
+                reconstruction_ratio_shared_zoomed,
+                label="Shared",
+                **scatter_kwargs,
+            )
+
+        # Plot the histograms
+        bins = 50
+        hist_kwargs = {"bins": bins, "range": zoom, "alpha": 0.5}
+
+        if ft_only_color:
+            ax_histx.hist(
+                error_ratio_zoomed, label="ft-only", color=ft_only_color, **hist_kwargs
+            )
+            ax_histx.hist(
+                error_ratio_shared_zoomed, label="shared", color="C1", **hist_kwargs
+            )
+            ax_histy.hist(
+                reconstruction_ratio_zoomed,
+                orientation="horizontal",
+                color=ft_only_color,
+                **hist_kwargs,
+            )
+            ax_histy.hist(
+                reconstruction_ratio_shared_zoomed,
+                orientation="horizontal",
+                color="C1",
+                **hist_kwargs,
+            )
+        else:
+            ax_histx.hist(error_ratio_zoomed, label="ft-only", **hist_kwargs)
+            ax_histx.hist(error_ratio_shared_zoomed, label="Shared", **hist_kwargs)
+            ax_histy.hist(
+                reconstruction_ratio_zoomed, orientation="horizontal", **hist_kwargs
+            )
+            ax_histy.hist(
+                reconstruction_ratio_shared_zoomed,
+                orientation="horizontal",
+                **hist_kwargs,
+            )
+
+        # Add grid to histograms
+        ax_histx.grid(True, alpha=0.15)
+        ax_histy.grid(True, alpha=0.15)
+        ax_scatter.grid(True, alpha=0.15)
+
+        # Turn off tick labels on histograms
+        ax_histx.tick_params(labelbottom=False, bottom=False)
+        ax_histy.tick_params(labelleft=False, left=False)
+
+        # Add labels
+        if variant == "poster":
+            ax_scatter.set_ylabel(
+                "$\\uparrow$ \n more \n Latent \n Decoupling ",
+                labelpad=40,
+                rotation=0,
+                y=0.2,
+            )
+            ax_scatter.set_xlabel("more Complete Shrinkage $\\rightarrow$", labelpad=10)
+        else:
+            ax_scatter.set_xlabel("$\\nu^\\epsilon$")
+            ax_scatter.set_ylabel("$\\nu^r$")
+
+        # Add legend
+        if variant == "custom_color":
+            ax_histx.legend(
+                fontsize=16,
+                loc="upper right",
+                handletextpad=0.2,
+                bbox_to_anchor=(1.65, 1.2),
+                handlelength=0.7,
+                frameon=False,
+            )
+        else:
+            ax_histx.legend(
+                fontsize=16,
+                markerscale=4,
+                loc="lower right",
+                bbox_to_anchor=(1.01, -3.2),
+            )
+
+        # Save figure
+        suffix = (
+            "_43"
+            if variant == "custom_color"
+            else "_poster" if variant == "poster" else ""
+        )
+        plt.savefig(
+            plots_dir / f"error_vs_reconstruction_ratio_with_baseline{suffix}.pdf",
+            bbox_inches="tight",
+        )
+        plt.close()
 
 
 def plot_ratio_histogram(target_df, baseline_df, plots_dir, ratio_type="error"):
-    """Plot histogram of beta ratio values for error or reconstruction"""
+    """Plot histogram of beta ratio values for error or reconstruction."""
     if f"beta_ratio_{ratio_type}" not in target_df.columns:
         return
 
@@ -598,38 +612,37 @@ def plot_ratio_histogram(target_df, baseline_df, plots_dir, ratio_type="error"):
     min_val, max_val = np.min(all_data), np.max(all_data) if zoom is None else zoom
     bins = np.linspace(min_val, max_val, 100)
 
-    plt.figure(figsize=(5, 3))
-    plt.rcParams["text.usetex"] = True
-    plt.hist(ratio_filtered, bins=bins, alpha=0.5, label="ft-only")
+    rc_params = {**SMALL_FONT_RC, "legend.fontsize": 16}
+    with plt.rc_context(rc_params):
+        plt.figure(figsize=(5, 3))
+        plt.hist(ratio_filtered, bins=bins, alpha=0.5, label="ft-only")
 
-    if baseline_df is not None:
-        plt.hist(ratio_shared_filtered, bins=bins, alpha=0.5, label="Shared")
+        if baseline_df is not None:
+            plt.hist(ratio_shared_filtered, bins=bins, alpha=0.5, label="Shared")
 
-    label = "$\\nu^\\epsilon$" if ratio_type == "error" else "$\\nu^r$"
-    plt.xlabel(label)
-    plt.ylabel("Count")
+        label = "$\\nu^\\epsilon$" if ratio_type == "error" else "$\\nu^r$"
+        plt.xlabel(label)
+        plt.ylabel("Count")
 
-    plt.rcParams.update({"font.size": 16})
-    plt.rcParams.update({"legend.fontsize": 16})
-
-    if baseline_df is not None:
-        plt.legend()
-    plt.tight_layout()
-    plt.savefig(plots_dir / f"{ratio_type}_ratio.pdf", bbox_inches="tight")
-    plt.close()
+        if baseline_df is not None:
+            plt.legend()
+        plt.tight_layout()
+        plt.savefig(plots_dir / f"{ratio_type}_ratio.pdf", bbox_inches="tight")
+        plt.close()
 
 
 def plot_beta_distribution_histograms(target_df, plots_dir):
-    """Plot histograms of beta distribution values"""
+    """Plot histograms of beta distribution values."""
     for beta_type in ["error", "reconstruction"]:
         base_col = f"beta_{beta_type}_base"
         ft_col = f"beta_{beta_type}_ft"
 
-        if ft_col in target_df.columns and base_col in target_df.columns:
+        if ft_col not in target_df.columns or base_col not in target_df.columns:
+            continue
+
+        with plt.rc_context(SMALL_FONT_RC):
             try:
                 plt.figure(figsize=(10, 6))
-                plt.rcParams["text.usetex"] = True
-                plt.rcParams.update({"font.size": 16})
 
                 if beta_type == "reconstruction":
                     zoom = [-100, 100]
@@ -704,45 +717,46 @@ def plot_beta_distribution_histograms(target_df, plots_dir):
 
 
 def plot_correlation_with_frequency(df, plots_dir):
-    """Plot correlation between frequency and beta ratios"""
-    if (
+    """Plot correlation between frequency and beta ratios."""
+    if not (
         ("freq" in df.columns or "freq_val" in df.columns)
         and "beta_ratio_error" in df.columns
         and "beta_ratio_reconstruction" in df.columns
     ):
-        import scipy.stats
+        return
 
-        freq = df["freq"] if "freq" in df.columns else df["freq_val"]
-        beta_ratio_error = df["beta_ratio_error"]
-        beta_ratio_reconstruction = df["beta_ratio_reconstruction"]
+    import scipy.stats
 
-        # Remove NaN values
-        mask = (
-            ~np.isnan(beta_ratio_error)
-            & ~np.isnan(beta_ratio_reconstruction)
-            & ~np.isnan(freq)
-        )
-        beta_ratio_error_clean = beta_ratio_error[mask]
-        beta_ratio_reconstruction_clean = beta_ratio_reconstruction[mask]
-        freq_clean = freq[mask]
+    freq = df["freq"] if "freq" in df.columns else df["freq_val"]
+    beta_ratio_error = df["beta_ratio_error"]
+    beta_ratio_reconstruction = df["beta_ratio_reconstruction"]
 
-        # Compute correlations
-        corr_error, p_error = scipy.stats.pearsonr(beta_ratio_error_clean, freq_clean)
-        corr_recon, p_recon = scipy.stats.pearsonr(
-            beta_ratio_reconstruction_clean, freq_clean
-        )
+    # Remove NaN values
+    mask = (
+        ~np.isnan(beta_ratio_error)
+        & ~np.isnan(beta_ratio_reconstruction)
+        & ~np.isnan(freq)
+    )
+    beta_ratio_error_clean = beta_ratio_error[mask]
+    beta_ratio_reconstruction_clean = beta_ratio_reconstruction[mask]
+    freq_clean = freq[mask]
 
-        print(
-            f"Correlation between beta_ratio_error and frequency: {corr_error:.3f} (p={p_error:.3e})"
-        )
-        print(
-            f"Correlation between beta_ratio_reconstruction and frequency: {corr_recon:.3f} (p={p_recon:.3e})"
-        )
+    # Compute correlations
+    corr_error, p_error = scipy.stats.pearsonr(beta_ratio_error_clean, freq_clean)
+    corr_recon, p_recon = scipy.stats.pearsonr(
+        beta_ratio_reconstruction_clean, freq_clean
+    )
 
+    print(
+        f"Correlation between beta_ratio_error and frequency: {corr_error:.3f} (p={p_error:.3e})"
+    )
+    print(
+        f"Correlation between beta_ratio_reconstruction and frequency: {corr_recon:.3f} (p={p_recon:.3e})"
+    )
+
+    with plt.rc_context(SMALL_FONT_RC):
         # Plot scatter for error ratio
         plt.figure(figsize=(8, 4))
-        plt.rcParams["text.usetex"] = True
-        plt.rcParams.update({"font.size": 16})
         plt.scatter(freq_clean, beta_ratio_error_clean, alpha=0.5)
         plt.xlabel("Frequency")
         plt.ylabel("$\\nu^\\epsilon$ (beta ratio error)")
@@ -759,8 +773,6 @@ def plot_correlation_with_frequency(df, plots_dir):
 
         # Plot scatter for reconstruction ratio
         plt.figure(figsize=(8, 4))
-        plt.rcParams["text.usetex"] = True
-        plt.rcParams.update({"font.size": 16})
         plt.scatter(freq_clean, beta_ratio_reconstruction_clean, alpha=0.5)
         plt.xlabel("Frequency")
         plt.ylabel("$\\nu^r$ (beta ratio reconstruction)")
@@ -779,29 +791,30 @@ def plot_correlation_with_frequency(df, plots_dir):
 
 
 def plot_rank_distributions(target_df, plots_dir):
-    """Plot step function of latent rank distributions"""
+    """Plot step function of latent rank distributions."""
     for ratio_type in ["error", "reconstruction"]:
-        if (
+        if not (
             f"beta_ratio_{ratio_type}" in target_df.columns
             and "dec_norm_diff" in target_df.columns
         ):
-            # Get ranks of low nu latents
-            low_nu_indices = (
-                target_df[f"beta_ratio_{ratio_type}"]
-                .sort_values(ascending=True)
-                .index[:100]
-            )
-            all_latent_ranks = target_df["dec_norm_diff"].rank()
-            low_nu_ranks = all_latent_ranks[low_nu_indices].sort_values()
+            continue
 
-            # Calculate fractions
-            total_low_nu_latents = len(low_nu_indices)
-            fractions = np.arange(1, len(low_nu_ranks) + 1) / total_low_nu_latents
+        # Get ranks of low nu latents
+        low_nu_indices = (
+            target_df[f"beta_ratio_{ratio_type}"]
+            .sort_values(ascending=True)
+            .index[:100]
+        )
+        all_latent_ranks = target_df["dec_norm_diff"].rank()
+        low_nu_ranks = all_latent_ranks[low_nu_indices].sort_values()
 
+        # Calculate fractions
+        total_low_nu_latents = len(low_nu_indices)
+        fractions = np.arange(1, len(low_nu_ranks) + 1) / total_low_nu_latents
+
+        with plt.rc_context(SMALL_FONT_RC):
             # Create figure
             plt.figure(figsize=(8, 5))
-            plt.rcParams["text.usetex"] = True
-            plt.rcParams.update({"font.size": 16})
 
             # Plot step function
             ratio_str = "$\\nu^\\epsilon$" if ratio_type == "error" else "$\\nu^r$"
