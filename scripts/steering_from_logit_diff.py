@@ -273,8 +273,8 @@ def main():
     parser.add_argument(
         "--adapter-id",
         type=str,
-        default="/mnt/nw/home/j.minder/.cache/huggingface/hub/models--auditing-agents--qwen_14b_synth_docs_only_secret_loyalty/snapshots/61f1d5f8bb744c6563e8e93f31898f7f5c51e2bd",
-        help="LoRA adapter ID to load on top of base model (set to empty string to skip)",
+        default="auditing-agents/qwen_14b_synth_docs_only_secret_loyalty",
+        help="LoRA adapter ID (HuggingFace model ID) to load on top of base model (set to empty string to skip)",
     )
     parser.add_argument(
         "--prompt",
