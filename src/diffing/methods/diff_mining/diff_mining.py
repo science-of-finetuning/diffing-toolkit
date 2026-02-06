@@ -1253,6 +1253,12 @@ class DiffMiningMethod(DiffingMethod):
                         for lbl, w in zip(final_labels, token_weights)
                         if lbl == "RELEVANT"
                     )
+                    if total_w == 0:
+                        self.logger.warning(
+                            f"All token weights are zero for ordering "
+                            f"'{ordering_id}' in dataset '{dataset_name}' — "
+                            f"weighted_percentage defaults to 0.0"
+                        )
                     weighted_percentage = relevant_w / total_w if total_w > 0 else 0.0
 
                     write_ordering_eval(

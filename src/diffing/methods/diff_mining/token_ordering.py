@@ -498,18 +498,25 @@ class NmfOrderingType(TokenOrderingType):
         W_nmf: torch.Tensor
         H_nmf: torch.Tensor
         if self.config.orthogonal:
+            dense_bytes = num_rows * num_cols * 4  # float32
+            if dense_bytes > 1e9:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Orthogonal NMF: dense matrix is {dense_bytes / 1e9:.1f} GB "
+                    f"({num_rows} rows × {num_cols} cols). "
+                    "Consider using non-orthogonal NMF for large datasets."
+                )
+            sparse_V = scipy.sparse.coo_matrix(
+                (
+                    self.nmf_data["values"],
+                    (self.nmf_data["rows"], self.nmf_data["cols"]),
+                ),
+                shape=(num_rows, num_cols),
+            )
             with torch.enable_grad():
                 W_nmf, H_nmf = fit_nmf_orthogonal(
-                    torch.tensor(
-                        scipy.sparse.coo_matrix(
-                            (
-                                self.nmf_data["values"],
-                                (self.nmf_data["rows"], self.nmf_data["cols"]),
-                            ),
-                            shape=(num_rows, num_cols),
-                        ).todense(),
-                        dtype=torch.float32,
-                    ),
+                    torch.tensor(sparse_V.todense(), dtype=torch.float32),
                     rank=self.config.num_topics,
                     beta=self.config.beta,
                     orthogonal_weight=self.config.orthogonal_weight,
