@@ -38,17 +38,21 @@ def _normalize_inputs(
     """
     Normalize inputs to have shape [batch, seq].
     """
-    assert input_ids.ndim in (1, 2), f"input_ids must be 1D or 2D, got {input_ids.shape}"
-    assert attention_mask.ndim in (1, 2), (
-        f"attention_mask must be 1D or 2D, got {attention_mask.shape}"
-    )
+    assert input_ids.ndim in (
+        1,
+        2,
+    ), f"input_ids must be 1D or 2D, got {input_ids.shape}"
+    assert attention_mask.ndim in (
+        1,
+        2,
+    ), f"attention_mask must be 1D or 2D, got {attention_mask.shape}"
     if input_ids.ndim == 1:
         input_ids = input_ids.unsqueeze(0)
     if attention_mask.ndim == 1:
         attention_mask = attention_mask.unsqueeze(0)
-    assert input_ids.shape == attention_mask.shape, (
-        f"input_ids and attention_mask must match, got {input_ids.shape} vs {attention_mask.shape}"
-    )
+    assert (
+        input_ids.shape == attention_mask.shape
+    ), f"input_ids and attention_mask must match, got {input_ids.shape} vs {attention_mask.shape}"
     return input_ids, attention_mask
 
 
@@ -67,12 +71,12 @@ class DirectLogitsExtractor(LogitsExtractor):
         with model.trace(input_ids, attention_mask=attention_mask):
             logits = model.logits.save()
         assert logits.ndim == 3, f"logits must be 3D, got {logits.shape}"
-        assert logits.shape[0] == input_ids.shape[0], (
-            f"logits batch mismatch {logits.shape[0]} vs {input_ids.shape[0]}"
-        )
-        assert logits.shape[1] == input_ids.shape[1], (
-            f"logits seq mismatch {logits.shape[1]} vs {input_ids.shape[1]}"
-        )
+        assert (
+            logits.shape[0] == input_ids.shape[0]
+        ), f"logits batch mismatch {logits.shape[0]} vs {input_ids.shape[0]}"
+        assert (
+            logits.shape[1] == input_ids.shape[1]
+        ), f"logits seq mismatch {logits.shape[1]} vs {input_ids.shape[1]}"
         return logits
 
 
@@ -101,14 +105,13 @@ class LogitLensExtractor(LogitsExtractor):
             tracer.stop()
 
         assert logits.ndim == 3, f"logits must be 3D, got {logits.shape}"
-        assert logits.shape[0] == input_ids.shape[0], (
-            f"logits batch mismatch {logits.shape[0]} vs {input_ids.shape[0]}"
-        )
-        assert logits.shape[1] == input_ids.shape[1], (
-            f"logits seq mismatch {logits.shape[1]} vs {input_ids.shape[1]}"
-        )
+        assert (
+            logits.shape[0] == input_ids.shape[0]
+        ), f"logits batch mismatch {logits.shape[0]} vs {input_ids.shape[0]}"
+        assert (
+            logits.shape[1] == input_ids.shape[1]
+        ), f"logits seq mismatch {logits.shape[1]} vs {input_ids.shape[1]}"
         return logits
-
 
 
 @dataclass
@@ -145,18 +148,21 @@ def _compute_prefix_kv_cache(
         prefix_output = model._module(prefix_ids.to(model_device), use_cache=True)
 
     kv_cache = prefix_output.past_key_values
-    assert isinstance(kv_cache, DynamicCache), f"Expected DynamicCache, got {type(kv_cache)}"
-    assert len(kv_cache) == model.num_layers, (
-        f"KV cache layers {len(kv_cache)} != model layers {model.num_layers}"
-    )
+    assert isinstance(
+        kv_cache, DynamicCache
+    ), f"Expected DynamicCache, got {type(kv_cache)}"
+    assert (
+        len(kv_cache) == model.num_layers
+    ), f"KV cache layers {len(kv_cache)} != model layers {model.num_layers}"
     key0, _ = kv_cache[0]
     assert key0.shape[0] == 1
-    assert key0.shape[2] == prefix_len, (
-        f"KV cache seq_len {key0.shape[2]} != prefix_len {prefix_len}"
+    assert (
+        key0.shape[2] == prefix_len
+    ), f"KV cache seq_len {key0.shape[2]} != prefix_len {prefix_len}"
+
+    return _PrefixKVCache(
+        kv_cache=kv_cache, last_token_id=last_token_id, prefix_len=prefix_len
     )
-
-
-    return _PrefixKVCache(kv_cache=kv_cache, last_token_id=last_token_id, prefix_len=prefix_len)
 
 
 def _expand_kv_cache(kv_cache: DynamicCache, batch_size: int) -> DynamicCache:
@@ -202,9 +208,9 @@ class PatchscopeLensExtractor(LogitsExtractor):
         self.patch_prompt = str(patch_prompt)
         assert self.patch_prompt, "patch_prompt must be non-empty"
         self.index_to_patch = int(index_to_patch)
-        assert self.index_to_patch == -1, (
-            f"Prefix KV caching only supports index_to_patch=-1, got {self.index_to_patch}"
-        )
+        assert (
+            self.index_to_patch == -1
+        ), f"Prefix KV caching only supports index_to_patch=-1, got {self.index_to_patch}"
 
     @staticmethod
     @torch.no_grad()
@@ -223,23 +229,29 @@ class PatchscopeLensExtractor(LogitsExtractor):
         """
         assert latents.ndim == 2, f"latents must be 2D, got {latents.shape}"
         num_sources, hidden_size = latents.shape
-        assert hidden_size == model.hidden_size, (
-            f"hidden_size mismatch: {hidden_size} vs {model.hidden_size}"
-        )
+        assert (
+            hidden_size == model.hidden_size
+        ), f"hidden_size mismatch: {hidden_size} vs {model.hidden_size}"
 
         model_device = next(model.parameters()).device
         expanded_kv = _expand_kv_cache(prefix_cache.kv_cache, num_sources)
 
         input_dict = {
-            "input_ids": prefix_cache.last_token_id.expand(num_sources, -1).to(model_device),
+            "input_ids": prefix_cache.last_token_id.expand(num_sources, -1).to(
+                model_device
+            ),
             "attention_mask": torch.ones(
-                num_sources, prefix_cache.prefix_len + 1,
-                device=model_device, dtype=torch.long,
+                num_sources,
+                prefix_cache.prefix_len + 1,
+                device=model_device,
+                dtype=torch.long,
             ),
         }
         position_ids = torch.full(
-            (num_sources, 1), prefix_cache.prefix_len,
-            device=model_device, dtype=torch.long,
+            (num_sources, 1),
+            prefix_cache.prefix_len,
+            device=model_device,
+            dtype=torch.long,
         )
 
         with model.trace(
@@ -254,9 +266,10 @@ class PatchscopeLensExtractor(LogitsExtractor):
             logits = model.logits[:, -1, :].to("cpu", non_blocking=True).save()
             tracer.stop()
 
-        assert logits.shape == (num_sources, model.vocab_size), (
-            f"logits shape {logits.shape} != ({num_sources}, {model.vocab_size})"
-        )
+        assert logits.shape == (
+            num_sources,
+            model.vocab_size,
+        ), f"logits shape {logits.shape} != ({num_sources}, {model.vocab_size})"
         return logits
 
     def extract_logits(
@@ -267,7 +280,9 @@ class PatchscopeLensExtractor(LogitsExtractor):
     ) -> torch.Tensor:
         input_ids, attention_mask = _normalize_inputs(input_ids, attention_mask)
 
-        with model.trace(input_ids, attention_mask=attention_mask, use_cache=False) as tracer:
+        with model.trace(
+            input_ids, attention_mask=attention_mask, use_cache=False
+        ) as tracer:
             hidden_cpu = (
                 model.layers_output[self.layer_idx].to("cpu", non_blocking=True).save()
             )
@@ -275,15 +290,15 @@ class PatchscopeLensExtractor(LogitsExtractor):
 
         hidden = hidden_cpu
         assert hidden.ndim == 3, f"hidden must be 3D, got {hidden.shape}"
-        assert hidden.shape[0] == input_ids.shape[0], (
-            f"hidden batch mismatch {hidden.shape[0]} vs {input_ids.shape[0]}"
-        )
-        assert hidden.shape[1] == input_ids.shape[1], (
-            f"hidden seq mismatch {hidden.shape[1]} vs {input_ids.shape[1]}"
-        )
-        assert hidden.shape[2] == model.hidden_size, (
-            f"hidden size mismatch {hidden.shape[2]} vs {model.hidden_size}"
-        )
+        assert (
+            hidden.shape[0] == input_ids.shape[0]
+        ), f"hidden batch mismatch {hidden.shape[0]} vs {input_ids.shape[0]}"
+        assert (
+            hidden.shape[1] == input_ids.shape[1]
+        ), f"hidden seq mismatch {hidden.shape[1]} vs {input_ids.shape[1]}"
+        assert (
+            hidden.shape[2] == model.hidden_size
+        ), f"hidden size mismatch {hidden.shape[2]} vs {model.hidden_size}"
 
         batch_size, seq_len, hidden_size = hidden.shape
         assert hidden.shape == (batch_size, seq_len, hidden_size)
@@ -327,4 +342,3 @@ class PatchscopeLensExtractor(LogitsExtractor):
         assert out.shape[0] == batch_size
         assert out.shape[1] == seq_len
         return out
-

@@ -24,10 +24,10 @@ from .token_ordering import (
 def visualize(method):
     """Main visualization entry point."""
     st.title("Diff Mining")
-    
+
     # Determine available run folders
     run_dirs = _list_run_dirs(method)
-    
+
     if not run_dirs:
         st.info("No results found. Please run the analysis first.")
         return
@@ -35,7 +35,9 @@ def visualize(method):
     browse_tab, compare_tab = st.tabs(["Browse results", "Compare runs"])
 
     with browse_tab:
-        run_dirs_sorted = sorted(run_dirs, key=lambda p: p.stat().st_mtime, reverse=True)
+        run_dirs_sorted = sorted(
+            run_dirs, key=lambda p: p.stat().st_mtime, reverse=True
+        )
 
         dir_options = {_format_run_label(d, "run"): d for d in run_dirs_sorted}
         selected_label = st.selectbox(
@@ -94,7 +96,6 @@ def _list_run_dirs(method) -> List[Path]:
     return sorted(run_dirs, key=lambda x: x.stat().st_mtime, reverse=True)
 
 
-
 def _format_run_label(d: Path, dtype: str) -> str:
     """Format run/analysis directory as a label."""
     # Try to read run_metadata.json for better labels
@@ -138,6 +139,7 @@ def _format_run_label(d: Path, dtype: str) -> str:
 # New Schema UI
 # ============================================================================
 
+
 def _render_new_schema_ui(method, run_dir: Path) -> None:
     """Render UI for new schema with ordering type selection."""
 
@@ -150,9 +152,7 @@ def _render_new_schema_ui(method, run_dir: Path) -> None:
     # Ordering type selector
     ordering_options = {ot["display_name"]: ot for ot in ordering_types}
     selected_ordering_name = st.selectbox(
-        "Token Ordering Type",
-        list(ordering_options.keys()),
-        key="ordering_type_select"
+        "Token Ordering Type", list(ordering_options.keys()), key="ordering_type_select"
     )
     selected_ordering = ordering_options[selected_ordering_name]
     ordering_type_dir = run_dir / selected_ordering["id"]
@@ -182,13 +182,15 @@ def _find_ordering_types(run_dir: Path) -> List[Dict[str, Any]]:
             continue
         metadata = read_ordering_type_metadata(subdir)
         if metadata:
-            ordering_types.append({
-                "id": subdir.name,
-                "display_name": metadata.get("display_name", subdir.name),
-                "x_axis_label": metadata.get("x_axis_label", "Ordering Value"),
-                "y_axis_label": metadata.get("y_axis_label", "Avg Logit Diff"),
-                "metadata": metadata,
-            })
+            ordering_types.append(
+                {
+                    "id": subdir.name,
+                    "display_name": metadata.get("display_name", subdir.name),
+                    "x_axis_label": metadata.get("x_axis_label", "Ordering Value"),
+                    "y_axis_label": metadata.get("y_axis_label", "Avg Logit Diff"),
+                    "metadata": metadata,
+                }
+            )
     return ordering_types
 
 
@@ -201,11 +203,13 @@ def _find_datasets_in_ordering(ordering_type_dir: Path) -> List[str]:
     return sorted(datasets)
 
 
-def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any]) -> None:
+def _render_ordering_stats(
+    ordering_type_dir: Path, ordering_info: Dict[str, Any]
+) -> None:
     """Render statistics tab for an ordering type."""
     metadata = ordering_info["metadata"]
     ordering_type_id = str(metadata.get("ordering_type_id", ""))
-    
+
     st.markdown(f"### {ordering_info['display_name']}")
     st.markdown(f"**X-axis**: {ordering_info['x_axis_label']}")
     st.markdown(f"**Y-axis**: {ordering_info['y_axis_label']}")
@@ -244,22 +248,32 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
         pct_relevant = 100.0 * total_relevant / float(total_tokens)
 
         st.markdown("### Token relevance (grader)")
-        st.metric("% relevant", f"{pct_relevant:.1f}%", f"{total_relevant}/{total_tokens} tokens")
+        st.metric(
+            "% relevant",
+            f"{pct_relevant:.1f}%",
+            f"{total_relevant}/{total_tokens} tokens",
+        )
 
         if ordering_type_id == "nmf":
             by_topic = (
-                df_eval.groupby(["ordering_id", "display_label"], as_index=False)[["n_relevant", "n_total"]]
+                df_eval.groupby(["ordering_id", "display_label"], as_index=False)[
+                    ["n_relevant", "n_total"]
+                ]
                 .sum()
                 .sort_values("ordering_id")
             )
-            by_topic["% relevant"] = 100.0 * by_topic["n_relevant"] / by_topic["n_total"].astype(float)
-            display_df = by_topic[["display_label", "% relevant", "n_relevant", "n_total"]].copy()
+            by_topic["% relevant"] = (
+                100.0 * by_topic["n_relevant"] / by_topic["n_total"].astype(float)
+            )
+            display_df = by_topic[
+                ["display_label", "% relevant", "n_relevant", "n_total"]
+            ].copy()
             display_df.columns = ["Topic", "% relevant", "relevant", "total"]
             st.dataframe(display_df, hide_index=True, use_container_width=True)
     else:
         st.markdown("### Token relevance (grader)")
         st.info("No token relevance grading found for this ordering type.")
-    
+
     if ordering_type_id == "nmf" and "topic_metrics" in metadata:
         topic_metrics = metadata.get("topic_metrics", [])
         if isinstance(topic_metrics, list) and topic_metrics:
@@ -268,7 +282,9 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
                 if "nmf_topic_idx" in df.columns:
                     df = df.sort_values("nmf_topic_idx", ascending=True)
                 if "nmf_topic_prevalence" in df.columns:
-                    df["nmf_topic_prevalence_pct"] = 100.0 * df["nmf_topic_prevalence"].astype(float)
+                    df["nmf_topic_prevalence_pct"] = 100.0 * df[
+                        "nmf_topic_prevalence"
+                    ].astype(float)
                 cols = [
                     c
                     for c in [
@@ -296,12 +312,20 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
             if "cosine_similarity" in pairwise:
                 st.markdown("**Cosine Similarity Matrix**")
                 st.dataframe(np.array(pairwise["cosine_similarity"]))
-    
+
     # Show any other metadata
     other_keys = [
         k
         for k in metadata.keys()
-        if k not in ["ordering_type_id", "display_name", "x_axis_label", "y_axis_label", "pairwise", "topic_metrics"]
+        if k
+        not in [
+            "ordering_type_id",
+            "display_name",
+            "x_axis_label",
+            "y_axis_label",
+            "pairwise",
+            "topic_metrics",
+        ]
     ]
     if other_keys:
         with st.expander("Additional Metadata", expanded=False):
@@ -310,51 +334,46 @@ def _render_ordering_stats(ordering_type_dir: Path, ordering_info: Dict[str, Any
 
 
 def _render_ordering_data(
-    method,
-    ordering_type_dir: Path,
-    ordering_info: Dict[str, Any],
-    datasets: List[str]
+    method, ordering_type_dir: Path, ordering_info: Dict[str, Any], datasets: List[str]
 ) -> None:
     """Render data tab with multiselect orderings and plots."""
-    
+
     # Dataset selector
     selected_dataset = st.selectbox(
-        "Dataset",
-        datasets,
-        key=f"dataset_select_{ordering_info['id']}"
+        "Dataset", datasets, key=f"dataset_select_{ordering_info['id']}"
     )
-    
+
     dataset_dir = ordering_type_dir / selected_dataset
     index = read_dataset_orderings_index(dataset_dir)
     if not index:
         st.error(f"Could not load orderings index for {selected_dataset}")
         return
-    
+
     orderings_list = index.get("orderings", [])
     if not orderings_list:
         st.warning("No orderings found for this dataset.")
         return
-    
+
     # Multiselect for orderings
     ordering_options = {o["display_label"]: o["ordering_id"] for o in orderings_list}
-    
+
     # Default to first ordering
     default_selection = [orderings_list[0]["display_label"]] if orderings_list else []
     selected_labels = st.multiselect(
         "Select Orderings to Display",
         list(ordering_options.keys()),
         default=default_selection,
-        key=f"ordering_multiselect_{ordering_info['id']}_{selected_dataset}"
+        key=f"ordering_multiselect_{ordering_info['id']}_{selected_dataset}",
     )
-    
+
     if not selected_labels:
         st.info("Select one or more orderings to display.")
         return
-    
+
     # Render selected orderings in a grid
     num_selected = len(selected_labels)
     cols_per_row = min(num_selected, 3)  # Max 3 per row
-    
+
     for i in range(0, num_selected, cols_per_row):
         cols = st.columns(cols_per_row)
         for j, col in enumerate(cols):
@@ -364,9 +383,12 @@ def _render_ordering_data(
             ordering_id = ordering_options[label]
             with col:
                 _render_single_ordering(
-                    method, dataset_dir, ordering_id, label,
+                    method,
+                    dataset_dir,
+                    ordering_id,
+                    label,
                     ordering_info["x_axis_label"],
-                    ordering_info["y_axis_label"]
+                    ordering_info["y_axis_label"],
                 )
 
 
@@ -376,11 +398,11 @@ def _render_single_ordering(
     ordering_id: str,
     display_label: str,
     x_label: str,
-    y_label: str
+    y_label: str,
 ) -> None:
     """Render a single ordering panel with plot and table."""
     st.markdown(f"**{display_label}**")
-    
+
     ordering = read_ordering(dataset_dir, ordering_id)
     if not ordering:
         st.error(f"Could not load ordering: {ordering_id}")
@@ -393,21 +415,25 @@ def _render_single_ordering(
     ):
         cols = st.columns(3)
         cols[0].metric("Topic mass", f"{float(ordering['nmf_topic_mass']):.4g}")
-        cols[1].metric("Prevalence", f"{100.0 * float(ordering['nmf_topic_prevalence']):.2f}%")
-        cols[2].metric("Concentration", f"{float(ordering['nmf_topic_concentration']):.3f}")
-    
+        cols[1].metric(
+            "Prevalence", f"{100.0 * float(ordering['nmf_topic_prevalence']):.2f}%"
+        )
+        cols[2].metric(
+            "Concentration", f"{float(ordering['nmf_topic_concentration']):.3f}"
+        )
+
     tokens = ordering.get("tokens", [])
     if not tokens:
         st.warning("No tokens in this ordering.")
         return
-    
+
     # Load eval data if available
     eval_data = read_ordering_eval(dataset_dir, ordering_id)
     labels = eval_data.get("labels", []) if eval_data else []
     translations = eval_data.get("translations", None) if eval_data else None
     if translations is not None:
         assert isinstance(translations, list)
-    
+
     df_all_rows = []
     for i, t in enumerate(tokens):
         row = {
@@ -422,7 +448,7 @@ def _render_single_ordering(
         df_all_rows.append(row)
     df_all = pd.DataFrame(df_all_rows)
     df_plot = df_all.head(50)
-    
+
     # Scatter plot
     hover_data = ["Rank", "Token", "Relevance"]
     if translations is not None:
@@ -442,7 +468,7 @@ def _render_single_ordering(
         height=400,
     )
     st.plotly_chart(fig, use_container_width=True)
-    
+
     # Table
     with st.expander("Token Table", expanded=False):
         display_cols = ["Rank", "Token"]
@@ -451,9 +477,17 @@ def _render_single_ordering(
         display_cols.extend(["X", "Y", "Relevance"])
         display_df = df_all[display_cols].copy()
         if translations is not None:
-            display_df.columns = ["Rank", "Token", "Translation", x_label, y_label, "Relevance"]
+            display_df.columns = [
+                "Rank",
+                "Token",
+                "Translation",
+                x_label,
+                y_label,
+                "Relevance",
+            ]
         else:
             display_df.columns = ["Rank", "Token", x_label, y_label, "Relevance"]
+
         def _highlight_relevant_row(row: pd.Series) -> List[str]:
             if row["Relevance"] == "RELEVANT":
                 return ["background-color: rgba(0, 200, 0, 0.15)"] * len(row)
@@ -563,7 +597,9 @@ def _compute_ordering_relevance_row(
             f"but found {len(orderings_list)} in {dataset_dir}"
         )
         ordering_id = str(orderings_list[0]["ordering_id"])
-        counts = _compute_relevance_counts_from_eval(dataset_dir, ordering_id, k_top=k_top)
+        counts = _compute_relevance_counts_from_eval(
+            dataset_dir, ordering_id, k_top=k_top
+        )
         if counts is None:
             return None
         n_relevant, n_total = counts
@@ -627,9 +663,7 @@ def _compute_ordering_relevance_row(
     raise AssertionError(f"Unexpected NMF aggregation: {aggregation_mode}")
 
 
-def _find_agent_experiment_dirs(
-    run_dir: Path, ordering_type_id: str
-) -> List[Path]:
+def _find_agent_experiment_dirs(run_dir: Path, ordering_type_id: str) -> List[Path]:
     """Find agent experiment directories matching a specific ordering type.
 
     Agent experiment dirs live under ``run_dir/agent/`` and encode the ordering
@@ -709,7 +743,11 @@ def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
 
     experiment_dir = max(experiment_dirs, key=lambda p: p.stat().st_mtime)
     run_subdirs = sorted(
-        [d for d in experiment_dir.iterdir() if d.is_dir() and re.match(r"run\d+$", d.name)],
+        [
+            d
+            for d in experiment_dir.iterdir()
+            if d.is_dir() and re.match(r"run\d+$", d.name)
+        ],
         key=lambda p: int(p.name[3:]),
     )
     if not run_subdirs:
@@ -722,7 +760,11 @@ def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
     st.markdown("### Descriptions & Grades")
     for rd in run_subdirs:
         desc_path = rd / "description.txt"
-        description = desc_path.read_text(encoding="utf-8").strip() if desc_path.exists() else "(no description)"
+        description = (
+            desc_path.read_text(encoding="utf-8").strip()
+            if desc_path.exists()
+            else "(no description)"
+        )
         grades = _read_agent_grade_data(rd)
         scores = [int(g["score"]) for g in grades]
         scores_str = ", ".join(str(s) for s in scores) if scores else "no grades"
@@ -736,7 +778,9 @@ def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
                     score = int(g["score"])
                     grader = str(g.get("grader_model_id", "unknown"))
                     run_idx = g.get("run_idx", "?")
-                    with st.expander(f"Grader {run_idx} ({grader}) — score: {score}", expanded=False):
+                    with st.expander(
+                        f"Grader {run_idx} ({grader}) — score: {score}", expanded=False
+                    ):
                         st.markdown(str(g.get("reasoning", "")))
 
     # --- Transcripts ---
@@ -757,7 +801,9 @@ def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
         cols[0].metric("LLM calls", stats.get("agent_llm_calls_used", "?"))
         cols[1].metric("Model interactions", stats.get("model_interactions_used", "?"))
         cols[2].metric("Prompt tokens", f"{stats.get('agent_prompt_tokens', 0):,}")
-        cols[3].metric("Completion tokens", f"{stats.get('agent_completion_tokens', 0):,}")
+        cols[3].metric(
+            "Completion tokens", f"{stats.get('agent_completion_tokens', 0):,}"
+        )
 
     messages_path = run_subdir / "messages.json"
     if not messages_path.exists():
@@ -777,13 +823,18 @@ def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
             with st.expander(f":{style['icon']}: **{style['label']}**", expanded=False):
                 st.code(content, language=None)
         elif category == "tool_call":
-            with st.expander(f":{style['icon']}: **{style['label']}** — `{content[:80]}…`", expanded=False):
+            with st.expander(
+                f":{style['icon']}: **{style['label']}** — `{content[:80]}…`",
+                expanded=False,
+            ):
                 st.code(content, language=None)
         elif category == "tool_result":
             # Extract tool name from TOOL_RESULT(name):
             tool_match = re.match(r"TOOL_RESULT\((\w+)\)", content)
             tool_name = tool_match.group(1) if tool_match else "?"
-            with st.expander(f":{style['icon']}: **{style['label']}** ({tool_name})", expanded=False):
+            with st.expander(
+                f":{style['icon']}: **{style['label']}** ({tool_name})", expanded=False
+            ):
                 st.code(content, language=None)
         elif category == "reasoning":
             with st.expander(f":{style['icon']}: **{style['label']}**", expanded=True):
@@ -795,7 +846,10 @@ def _render_agent_results(run_dir: Path, ordering_type_id: str) -> None:
             with st.expander(f":{style['icon']}: **{style['label']}**", expanded=False):
                 st.warning(content)
         elif category == "overview":
-            with st.expander(f":{style['icon']}: **{style['label']}** (initial input)", expanded=False):
+            with st.expander(
+                f":{style['icon']}: **{style['label']}** (initial input)",
+                expanded=False,
+            ):
                 st.code(content, language=None)
         else:
             with st.expander(f"**{role}**", expanded=False):
@@ -815,7 +869,11 @@ def _compute_agent_grade_stats(
 ) -> Optional[Dict[str, Any]]:
     """Compute mean and std of agent grades over all runs in *experiment_dir*."""
     run_subdirs = sorted(
-        [d for d in experiment_dir.iterdir() if d.is_dir() and re.match(r"run\d+$", d.name)],
+        [
+            d
+            for d in experiment_dir.iterdir()
+            if d.is_dir() and re.match(r"run\d+$", d.name)
+        ],
         key=lambda p: int(p.name[3:]),
     )
     if not run_subdirs:
@@ -1047,8 +1105,10 @@ def _render_relevance_comparison(
 
     df = pd.DataFrame(rows).copy()
 
-    run_scores = df.groupby("run", as_index=False)["% relevant"].max().sort_values(
-        "% relevant", ascending=False
+    run_scores = (
+        df.groupby("run", as_index=False)["% relevant"]
+        .max()
+        .sort_values("% relevant", ascending=False)
     )
     run_order = run_scores["run"].tolist()
     axis_base_labels = [_axis_label_for_run_dir(run_label_to_dir[r]) for r in run_order]
@@ -1126,8 +1186,10 @@ def _render_agent_grades_comparison(
 
     df = pd.DataFrame(rows).copy()
 
-    run_scores = df.groupby("run", as_index=False)["grade_mean"].max().sort_values(
-        "grade_mean", ascending=False
+    run_scores = (
+        df.groupby("run", as_index=False)["grade_mean"]
+        .max()
+        .sort_values("grade_mean", ascending=False)
     )
     run_order = run_scores["run"].tolist()
     axis_base_labels = [_axis_label_for_run_dir(run_label_to_dir[r]) for r in run_order]

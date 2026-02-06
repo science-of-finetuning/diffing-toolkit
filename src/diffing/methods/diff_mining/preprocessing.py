@@ -18,7 +18,9 @@ from ..activation_difference_lens.method import (
 )
 
 
-def slice_to_positions(tensor: torch.Tensor, positions_list: List[List[int]]) -> torch.Tensor:
+def slice_to_positions(
+    tensor: torch.Tensor, positions_list: List[List[int]]
+) -> torch.Tensor:
     """
     Extract specific positions from each sample in a tensor.
 
@@ -36,14 +38,18 @@ def slice_to_positions(tensor: torch.Tensor, positions_list: List[List[int]]) ->
     max_pos = max(len(p) for p in positions_list)
     vocab_size = tensor.shape[-1]
 
-    result = torch.zeros(batch_size, max_pos, vocab_size, dtype=tensor.dtype, device=tensor.device)
+    result = torch.zeros(
+        batch_size, max_pos, vocab_size, dtype=tensor.dtype, device=tensor.device
+    )
     for i, positions in enumerate(positions_list):
         for j, pos in enumerate(positions):
             result[i, j] = tensor[i, pos]
     return result
 
 
-def slice_to_positions_2d(tensor: torch.Tensor, positions_list: List[List[int]]) -> torch.Tensor:
+def slice_to_positions_2d(
+    tensor: torch.Tensor, positions_list: List[List[int]]
+) -> torch.Tensor:
     """
     Extract specific positions from each sample in a 2D tensor.
 
@@ -100,7 +106,9 @@ def prepare_dataset_tensors(
     all_positions = None
 
     if dataset_cfg.is_chat:
-        logger.info(f"Using ADL's load_and_tokenize_chat_dataset() with pre_assistant_k={pre_assistant_k}")
+        logger.info(
+            f"Using ADL's load_and_tokenize_chat_dataset() with pre_assistant_k={pre_assistant_k}"
+        )
         samples = load_and_tokenize_chat_dataset(
             dataset_name=dataset_cfg.id,
             tokenizer=tokenizer,
@@ -310,10 +318,14 @@ def _maybe_slice_vocab(
         return base_logits, ft_logits
 
     if base_logits.shape[-1] > max_vocab_size:
-        logger.info(f"Slicing base logits vocab from {base_logits.shape[-1]} to {max_vocab_size}")
+        logger.info(
+            f"Slicing base logits vocab from {base_logits.shape[-1]} to {max_vocab_size}"
+        )
         base_logits = base_logits[..., :max_vocab_size]
     if ft_logits.shape[-1] > max_vocab_size:
-        logger.info(f"Slicing finetuned logits vocab from {ft_logits.shape[-1]} to {max_vocab_size}")
+        logger.info(
+            f"Slicing finetuned logits vocab from {ft_logits.shape[-1]} to {max_vocab_size}"
+        )
         ft_logits = ft_logits[..., :max_vocab_size]
 
     return base_logits, ft_logits
@@ -334,7 +346,9 @@ def maybe_compute_token_log_probs(
     Returns (base_token_log_probs, ft_token_log_probs) or (None, None) if disabled.
     """
     if not slr_enabled:
-        logger.info("Skipping log probabilities (sequence_likelihood_ratio.enabled=false)")
+        logger.info(
+            "Skipping log probabilities (sequence_likelihood_ratio.enabled=false)"
+        )
         return None, None
 
     logger.info("Computing per-token log probabilities...")
@@ -344,8 +358,12 @@ def maybe_compute_token_log_probs(
     if max_vocab_size is not None:
         target_ids = target_ids.clamp(max=max_vocab_size - 1)
 
-    base_token_log_probs = base_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
-    ft_token_log_probs = ft_log_softmax.gather(dim=-1, index=target_ids.unsqueeze(-1)).squeeze(-1)
+    base_token_log_probs = base_log_softmax.gather(
+        dim=-1, index=target_ids.unsqueeze(-1)
+    ).squeeze(-1)
+    ft_token_log_probs = ft_log_softmax.gather(
+        dim=-1, index=target_ids.unsqueeze(-1)
+    ).squeeze(-1)
 
     del base_log_softmax, ft_log_softmax
     gc.collect()
@@ -373,9 +391,15 @@ def slice_chat_outputs_if_needed(
     if slr_enabled:
         assert base_token_log_probs is not None
         assert ft_token_log_probs is not None
-        log_prob_positions = [[p - 1 for p in pos_list if p > 0] for pos_list in positions_list]
-        base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
-        ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
+        log_prob_positions = [
+            [p - 1 for p in pos_list if p > 0] for pos_list in positions_list
+        ]
+        base_token_log_probs = slice_to_positions_2d(
+            base_token_log_probs, log_prob_positions
+        )
+        ft_token_log_probs = slice_to_positions_2d(
+            ft_token_log_probs, log_prob_positions
+        )
 
     sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
     input_ids = slice_to_positions_2d(input_ids, sliced_target_positions)
@@ -433,7 +457,9 @@ def infer_finetuned_and_compute_diffs_in_memory(
             continue
 
         if dataset_cfg.name not in base_logits_by_dataset:
-            raise KeyError(f"Missing base logits for {dataset_cfg.name} in in-memory preprocessing.")
+            raise KeyError(
+                f"Missing base logits for {dataset_cfg.name} in in-memory preprocessing."
+            )
         base_logits = base_logits_by_dataset.pop(dataset_cfg.name)
 
         base_logits, ft_logits = _maybe_slice_vocab(
@@ -457,14 +483,16 @@ def infer_finetuned_and_compute_diffs_in_memory(
         gc.collect()
 
         positions_list = inputs.get("positions")
-        ft_logits, input_ids_sliced, base_token_log_probs, ft_token_log_probs = slice_chat_outputs_if_needed(
-            positions_list=positions_list,
-            diff=ft_logits,
-            input_ids=input_ids,
-            base_token_log_probs=base_token_log_probs,
-            ft_token_log_probs=ft_token_log_probs,
-            slr_enabled=slr_enabled,
-            logger=logger,
+        ft_logits, input_ids_sliced, base_token_log_probs, ft_token_log_probs = (
+            slice_chat_outputs_if_needed(
+                positions_list=positions_list,
+                diff=ft_logits,
+                input_ids=input_ids,
+                base_token_log_probs=base_token_log_probs,
+                ft_token_log_probs=ft_token_log_probs,
+                slr_enabled=slr_enabled,
+                logger=logger,
+            )
         )
 
         logit_diffs[dataset_cfg.name] = ft_logits
@@ -508,14 +536,18 @@ def compute_and_save_disk_diffs(
         ft_path = logits_dir / f"{dataset_cfg.name}_finetuned_logits.pt"
 
         if not base_path.exists() or not ft_path.exists():
-            logger.warning(f"Missing base or finetuned logits for {dataset_cfg.name}. Skipping diff.")
+            logger.warning(
+                f"Missing base or finetuned logits for {dataset_cfg.name}. Skipping diff."
+            )
             continue
 
         base = torch.load(base_path, map_location="cpu")
         ft = torch.load(ft_path, map_location="cpu")
 
         input_ids = dataset_inputs[dataset_cfg.name]["input_ids"]
-        base, ft = _maybe_slice_vocab(base, ft, max_vocab_size=max_vocab_size, logger=logger)
+        base, ft = _maybe_slice_vocab(
+            base, ft, max_vocab_size=max_vocab_size, logger=logger
+        )
 
         base_token_log_probs, ft_token_log_probs = maybe_compute_token_log_probs(
             base,
@@ -539,15 +571,25 @@ def compute_and_save_disk_diffs(
             if slr_enabled:
                 assert base_token_log_probs is not None
                 assert ft_token_log_probs is not None
-                log_prob_positions = [[p - 1 for p in pos_list if p > 0] for pos_list in positions_list]
-                base_token_log_probs = slice_to_positions_2d(base_token_log_probs, log_prob_positions)
-                ft_token_log_probs = slice_to_positions_2d(ft_token_log_probs, log_prob_positions)
+                log_prob_positions = [
+                    [p - 1 for p in pos_list if p > 0] for pos_list in positions_list
+                ]
+                base_token_log_probs = slice_to_positions_2d(
+                    base_token_log_probs, log_prob_positions
+                )
+                ft_token_log_probs = slice_to_positions_2d(
+                    ft_token_log_probs, log_prob_positions
+                )
 
-            sliced_target_positions = [p[1:] if len(p) > 1 else p for p in positions_list]
+            sliced_target_positions = [
+                p[1:] if len(p) > 1 else p for p in positions_list
+            ]
             sliced_input_ids = slice_to_positions_2d(input_ids, sliced_target_positions)
             input_ids_path = input_ids_dir / f"{dataset_cfg.name}_input_ids.pt"
             torch.save(sliced_input_ids, input_ids_path)
-            logger.info(f"Updated input_ids with sliced chat positions: {sliced_input_ids.shape}")
+            logger.info(
+                f"Updated input_ids with sliced chat positions: {sliced_input_ids.shape}"
+            )
 
         diff_path = diffs_dir / f"{dataset_cfg.name}_logit_diff.pt"
         torch.save(diff, diff_path)
@@ -556,7 +598,9 @@ def compute_and_save_disk_diffs(
         if slr_enabled:
             assert base_token_log_probs is not None
             assert ft_token_log_probs is not None
-            base_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_base_log_probs.pt"
+            base_log_probs_path = (
+                log_probs_dir / f"{dataset_cfg.name}_base_log_probs.pt"
+            )
             ft_log_probs_path = log_probs_dir / f"{dataset_cfg.name}_ft_log_probs.pt"
             torch.save(base_token_log_probs, base_log_probs_path)
             torch.save(ft_token_log_probs, ft_log_probs_path)

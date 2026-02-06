@@ -27,10 +27,9 @@ class CoreAnalysisResult:
 # Vectorized helper functions
 # ---------------------------------------------------------------------------
 
+
 def vectorized_bincount_masked(
-    indices: torch.Tensor,
-    attention_mask: torch.Tensor,
-    vocab_size: int
+    indices: torch.Tensor, attention_mask: torch.Tensor, vocab_size: int
 ) -> torch.Tensor:
     """
     Count token occurrences using bincount, respecting attention mask.
@@ -57,7 +56,7 @@ def vectorized_shortlist_counts(
     top_k_indices: torch.Tensor,
     attention_mask: torch.Tensor,
     shortlist_ids_tensor: torch.Tensor,
-    start_idx: int
+    start_idx: int,
 ) -> tuple:
     """
     Count shortlist token occurrences per sample and per position (vectorized).
@@ -76,7 +75,7 @@ def vectorized_shortlist_counts(
     num_shortlist = shortlist_ids_tensor.shape[0]
     device = top_k_indices.device
 
-    matches = (top_k_indices.unsqueeze(-1) == shortlist_ids_tensor.view(1, 1, 1, -1))
+    matches = top_k_indices.unsqueeze(-1) == shortlist_ids_tensor.view(1, 1, 1, -1)
     has_match = matches.any(dim=2)
     mask = attention_mask.unsqueeze(-1).bool()
     has_match_masked = has_match & mask
@@ -89,7 +88,7 @@ def vectorized_shortlist_counts(
 def vectorized_cooccurrence_shortlist(
     top_k_indices: torch.Tensor,
     attention_mask: torch.Tensor,
-    shortlist_ids_tensor: torch.Tensor
+    shortlist_ids_tensor: torch.Tensor,
 ) -> torch.Tensor:
     """
     Compute co-occurrence matrix for shortlist tokens (vectorized).
@@ -106,7 +105,7 @@ def vectorized_cooccurrence_shortlist(
     """
     num_shortlist = shortlist_ids_tensor.shape[0]
 
-    matches = (top_k_indices.unsqueeze(-1) == shortlist_ids_tensor.view(1, 1, 1, -1))
+    matches = top_k_indices.unsqueeze(-1) == shortlist_ids_tensor.view(1, 1, 1, -1)
     has_match = matches.any(dim=2)
     mask = attention_mask.unsqueeze(-1).bool()
     has_match_masked = has_match & mask
@@ -118,9 +117,7 @@ def vectorized_cooccurrence_shortlist(
 
 
 def vectorized_same_sign_cooccurrence(
-    diff: torch.Tensor,
-    attention_mask: torch.Tensor,
-    shortlist_ids_tensor: torch.Tensor
+    diff: torch.Tensor, attention_mask: torch.Tensor, shortlist_ids_tensor: torch.Tensor
 ) -> torch.Tensor:
     """
     Compute same-sign co-occurrence for shortlist tokens (vectorized).
@@ -157,6 +154,7 @@ def vectorized_same_sign_cooccurrence(
 # ---------------------------------------------------------------------------
 # Main analysis function
 # ---------------------------------------------------------------------------
+
 
 @torch.no_grad()
 def compute_stats_from_logits(
@@ -237,7 +235,9 @@ def compute_stats_from_logits(
         logit_diff = logit_diff[:, :max_tokens, :]
         attention_mask = attention_mask[:, :max_tokens]
 
-    logger.info(f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}")
+    logger.info(
+        f"Parameters: batch_size={batch_size}, max_tokens={max_tokens}, top_k={top_k}, max_samples={max_samples}"
+    )
     logger.info(f"Dataset type: {'chat' if dataset_cfg.is_chat else 'text'}")
 
     total_positions = 0
@@ -267,7 +267,9 @@ def compute_stats_from_logits(
     if positional_kde_cfg is not None and positional_kde_cfg.enabled:
         pos_kde_enabled = True
         pos_kde_num_positions = int(positional_kde_cfg.num_positions)
-        logger.info(f"Positional KDE analysis enabled (plotting first {pos_kde_num_positions} positions)")
+        logger.info(
+            f"Positional KDE analysis enabled (plotting first {pos_kde_num_positions} positions)"
+        )
 
     # Global Token Statistics (always enabled)
     global_stats_enabled = True
@@ -283,7 +285,10 @@ def compute_stats_from_logits(
         per_token_enabled = True
         logger.info("Per-token analysis enabled")
 
-        if hasattr(per_token_analysis_cfg, 'co_occurrence') and per_token_analysis_cfg.co_occurrence:
+        if (
+            hasattr(per_token_analysis_cfg, "co_occurrence")
+            and per_token_analysis_cfg.co_occurrence
+        ):
             co_occurrence_enabled = True
             logger.info("Co-occurrence analysis enabled")
 
@@ -299,7 +304,9 @@ def compute_stats_from_logits(
                     f"Use single-token strings only."
                 )
 
-        logger.info(f"Tracking {len(shortlist_token_ids)} shortlist tokens: {list(shortlist_token_ids.values())}")
+        logger.info(
+            f"Tracking {len(shortlist_token_ids)} shortlist tokens: {list(shortlist_token_ids.values())}"
+        )
 
     num_samples = logit_diff.shape[0]
     num_batches = (num_samples + batch_size - 1) // batch_size
@@ -310,8 +317,8 @@ def compute_stats_from_logits(
     # === VECTORIZED ACCUMULATORS ===
     vocab_size = logit_diff.shape[-1]
 
-    global_pos_token_counts = torch.zeros(vocab_size, dtype=torch.int64, device='cpu')
-    global_neg_token_counts = torch.zeros(vocab_size, dtype=torch.int64, device='cpu')
+    global_pos_token_counts = torch.zeros(vocab_size, dtype=torch.int64, device="cpu")
+    global_neg_token_counts = torch.zeros(vocab_size, dtype=torch.int64, device="cpu")
 
     shortlist_ids_tensor = None
     shortlist_id_to_idx = {}
@@ -323,12 +330,22 @@ def compute_stats_from_logits(
             shortlist_id_to_idx[tid] = idx
             shortlist_idx_to_str[idx] = shortlist_token_ids[tid]
 
-    shortlist_per_sample_counts = torch.zeros(num_samples, len(shortlist_token_ids) if shortlist_token_ids else 0, dtype=torch.int64)
-    shortlist_per_position_counts = torch.zeros(overall_max_len, len(shortlist_token_ids) if shortlist_token_ids else 0, dtype=torch.int64)
+    shortlist_per_sample_counts = torch.zeros(
+        num_samples,
+        len(shortlist_token_ids) if shortlist_token_ids else 0,
+        dtype=torch.int64,
+    )
+    shortlist_per_position_counts = torch.zeros(
+        overall_max_len,
+        len(shortlist_token_ids) if shortlist_token_ids else 0,
+        dtype=torch.int64,
+    )
 
     num_shortlist = len(shortlist_token_ids) if shortlist_token_ids else 0
     vec_same_point_matrix = torch.zeros(num_shortlist, num_shortlist, dtype=torch.int64)
-    vec_same_sign_point_matrix = torch.zeros(num_shortlist, num_shortlist, dtype=torch.int64)
+    vec_same_sign_point_matrix = torch.zeros(
+        num_shortlist, num_shortlist, dtype=torch.int64
+    )
 
     total_positions = 0
 
@@ -343,10 +360,16 @@ def compute_stats_from_logits(
         # Global Token Statistics (Entire Vocabulary)
         if global_stats_enabled:
             if global_diff_sum is None:
-                logger.info("  [Global Stats] Initializing accumulators and starting batch-wise accumulation...")
+                logger.info(
+                    "  [Global Stats] Initializing accumulators and starting batch-wise accumulation..."
+                )
                 vocab_size = diff.shape[-1]
-                global_diff_sum = torch.zeros(vocab_size, dtype=torch.float32, device=diff.device)
-                global_pos_count = torch.zeros(vocab_size, dtype=torch.int32, device=diff.device)
+                global_diff_sum = torch.zeros(
+                    vocab_size, dtype=torch.float32, device=diff.device
+                )
+                global_pos_count = torch.zeros(
+                    vocab_size, dtype=torch.int32, device=diff.device
+                )
 
             mask_expanded = attention_mask_batch.unsqueeze(-1).to(diff.dtype)
             diff.mul_(mask_expanded)
@@ -378,7 +401,9 @@ def compute_stats_from_logits(
                         vals_at_pos = token_vals[:, pos_idx][pos_mask]
                     else:
                         vals_at_pos = token_vals[:, pos_idx]
-                    shortlist_diffs_by_position[s_token_str][pos_idx].extend(vals_at_pos.cpu().tolist())
+                    shortlist_diffs_by_position[s_token_str][pos_idx].extend(
+                        vals_at_pos.cpu().tolist()
+                    )
 
                 for b_idx in range(batch_size_curr):
                     sample_idx_global = start_idx + b_idx
@@ -387,7 +412,9 @@ def compute_stats_from_logits(
                         vals_for_sample = token_vals[b_idx, :][sample_mask]
                     else:
                         vals_for_sample = token_vals[b_idx, :]
-                    shortlist_diffs_by_sample[s_token_str][sample_idx_global].extend(vals_for_sample.cpu().tolist())
+                    shortlist_diffs_by_sample[s_token_str][sample_idx_global].extend(
+                        vals_for_sample.cpu().tolist()
+                    )
 
         # Get top-K positive diffs (largest values)
         top_k_pos_values, top_k_pos_indices = torch.topk(
@@ -430,14 +457,24 @@ def compute_stats_from_logits(
             shortlist_tensor_device = shortlist_ids_tensor.to(diff.device)
 
             pos_per_sample, pos_per_pos = vectorized_shortlist_counts(
-                top_k_pos_indices, attention_mask_batch, shortlist_tensor_device, start_idx
+                top_k_pos_indices,
+                attention_mask_batch,
+                shortlist_tensor_device,
+                start_idx,
             )
             neg_per_sample, neg_per_pos = vectorized_shortlist_counts(
-                top_k_neg_indices, attention_mask_batch, shortlist_tensor_device, start_idx
+                top_k_neg_indices,
+                attention_mask_batch,
+                shortlist_tensor_device,
+                start_idx,
             )
 
-            shortlist_per_sample_counts[start_idx:end_idx, :] += (pos_per_sample + neg_per_sample).cpu()
-            shortlist_per_position_counts[:seq_len, :] += (pos_per_pos + neg_per_pos).cpu()
+            shortlist_per_sample_counts[start_idx:end_idx, :] += (
+                pos_per_sample + neg_per_sample
+            ).cpu()
+            shortlist_per_position_counts[:seq_len, :] += (
+                pos_per_pos + neg_per_pos
+            ).cpu()
 
             # 3. Co-occurrence matrices (vectorized)
             if co_occurrence_enabled:
@@ -454,7 +491,13 @@ def compute_stats_from_logits(
         # 4. Positional KDE Data Collection (vectorized per position)
         if pos_kde_enabled:
             for pos in range(min(pos_kde_num_positions, seq_len)):
-                pos_mask_kde = attention_mask_batch[:, pos].bool() if ignore_padding else torch.ones(batch_size_actual, dtype=torch.bool, device=diff.device)
+                pos_mask_kde = (
+                    attention_mask_batch[:, pos].bool()
+                    if ignore_padding
+                    else torch.ones(
+                        batch_size_actual, dtype=torch.bool, device=diff.device
+                    )
+                )
                 vals_at_pos = top_k_pos_values[:, pos, :]
                 valid_vals = vals_at_pos[pos_mask_kde].flatten()
                 position_logit_diffs[pos].extend(valid_vals.cpu().tolist())
@@ -466,7 +509,13 @@ def compute_stats_from_logits(
             total_positions += batch_size_actual * seq_len
 
         # Clean up GPU memory after each batch
-        del diff, top_k_pos_values, top_k_pos_indices, top_k_neg_values, top_k_neg_indices
+        del (
+            diff,
+            top_k_pos_values,
+            top_k_pos_indices,
+            top_k_neg_values,
+            top_k_neg_indices,
+        )
         del attention_mask_batch
         gc.collect()
         torch.cuda.empty_cache()
@@ -496,8 +545,12 @@ def compute_stats_from_logits(
                 if count > 0:
                     same_sign_point_matrix[t1][t2] = count
 
-    num_tokens_with_any_topk = int(((global_pos_token_counts + global_neg_token_counts) > 0).sum().item())
-    logger.info(f"Processed {total_positions:,} positions; tokens with any top-k counts: {num_tokens_with_any_topk:,}")
+    num_tokens_with_any_topk = int(
+        ((global_pos_token_counts + global_neg_token_counts) > 0).sum().item()
+    )
+    logger.info(
+        f"Processed {total_positions:,} positions; tokens with any top-k counts: {num_tokens_with_any_topk:,}"
+    )
 
     # Compute remaining co-occurrence matrices
     same_sample_matrix = defaultdict(lambda: defaultdict(int))
@@ -506,7 +559,9 @@ def compute_stats_from_logits(
     same_sign_position_matrix = defaultdict(lambda: defaultdict(int))
 
     if co_occurrence_enabled and shortlist_idx_to_str:
-        logger.info("Computing Same-Sample/Same-Position co-occurrence matrices (vectorized)...")
+        logger.info(
+            "Computing Same-Sample/Same-Position co-occurrence matrices (vectorized)..."
+        )
 
         presence_per_sample = (shortlist_per_sample_counts > 0).float()
         same_sample_cooc = presence_per_sample.T @ presence_per_sample

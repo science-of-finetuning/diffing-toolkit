@@ -60,8 +60,6 @@ def ask_model(
 
     system_prompt = getattr(cfg.organism, "agent_interaction_system_prompt", None)
 
-
-
     def _format_single_user_prompt(user_text: str) -> str:
         chat = [{"role": "user", "content": user_text}]
         if system_prompt:
