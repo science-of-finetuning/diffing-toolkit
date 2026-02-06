@@ -1,8 +1,8 @@
 ### How to add a new diffing method
 
 This guide shows how to add a new method under `src/diffing/methods`, wire up its configuration under `configs/diffing/method`, and run it. See the existing implementations for reference:
-- Minimal example without a dashboard: `src/diffing/methods/activation_oracle/activation_oracle.py`
-- More elaborate example with a dashboard: `src/diffing/methods/activation_difference_lens/act_diff_lens.py`
+- Minimal example without a dashboard: `src/diffing/methods/activation_oracle/method.py`
+- More elaborate example with a dashboard: `src/diffing/methods/activation_difference_lens/method.py`
 
 
 ## 1) Create your method module
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Dict
 from omegaconf import DictConfig
 
-from diffing.diffing.methods.diffing_method import DiffingMethod
+from diffing.methods.diffing_method import DiffingMethod
 from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 from diffing.utils.agents.base_agent import BaseAgent
 
@@ -60,8 +60,8 @@ class MyNewMethod(DiffingMethod):
 ```
 
 References:
-- `src/diffing/methods/activation_oracle/activation_oracle.py` for a compact example
-- `src/diffing/methods/activation_difference_lens/act_diff_lens.py` for a full method with caching, analysis, and a UI
+- `src/diffing/methods/activation_oracle/method.py` for a compact example
+- `src/diffing/methods/activation_difference_lens/method.py` for a full method with caching, analysis, and a UI
 
 
 ## 2) Add a Hydra config for your method
@@ -73,7 +73,7 @@ Typical fields mirror what existing methods use (datasets, layers, batch size, t
 
 ```yaml
 # configs/diffing/method/my_new_method.yaml
-@package diffing.method
+# @package diffing.method
 name: my_new_method
 requires_preprocessing: true  # or false, set as appropriate
 
@@ -83,7 +83,7 @@ requires_preprocessing: true  # or false, set as appropriate
 # datasets: []
 ```
 
-Also ensure there is a selector entry so you can pick your method via `diffing/method=<name>`. If your project uses a registry pattern (as with the existing methods), add an entry similar to the others. For example, methods are typically selected with:
+Also register your method in `src/diffing/pipeline/diffing_pipeline.py:get_method_class()` so it can be selected by name. For example, methods are selected with:
 
 ```bash
 python main.py diffing/method=my_new_method ...
@@ -142,5 +142,80 @@ python main.py diffing/method=my_new_method model=qwen3_1_7B organism=cake_bake_
 
 ## 5) Add test coverage for your method
 
-- In `tests/integration/test_method_run.py`, add a test for your method (don't forget to add the chat template to the tokenizer)
-- Optionally, add tests for your different functions used in your method in a separate file
+### Integration test (required)
+
+Add an init + run test in `tests/integration/test_method_run.py`. Use `load_test_config()` to get a properly merged config, and override settings for minimal/fast runs:
+
+```python
+class TestMyMethodRun:
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_my_method_initializes(self, tmp_results_dir, organism_name):
+        cfg = load_test_config("my_method", tmp_results_dir, organism_name)
+        method = MyMethod(cfg)
+        assert method is not None
+
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_my_method_run(self, tmp_results_dir, organism_name):
+        cfg = load_test_config("my_method", tmp_results_dir, organism_name)
+        cfg.diffing.method.max_samples = 2
+        cfg.diffing.method.batch_size = 2
+        method = MyMethod(cfg)
+        method.run()
+        assert method.has_results(Path(cfg.diffing.results_base_dir))
+```
+
+Tests are parametrized over `organism_name` (LoRA + full finetune). If your method only supports LoRA, use `pytest.xfail("Only supports LoRA adapters")`.
+
+### Agent tests (if your method has an agent)
+
+Add GPU agent tests in `tests/integration/test_agent_pipeline_gpu.py`. These run your method first (to produce real caches), then test the agent against those real results with a mocked LLM:
+
+```python
+class TestMyMethodAgentGPU:
+    @pytest.fixture(scope="class")
+    def method_with_results(self, mock_openai_server, tmp_path_factory):
+        """Run method to completion, return instance with real caches."""
+        tmp_dir = tmp_path_factory.mktemp("my_method_gpu_agent")
+        cfg = load_test_config("my_method", tmp_dir, "swedish_fineweb")
+        cfg.diffing.method.max_samples = 2
+        cfg.diffing.method.batch_size = 2
+
+        # Wire evaluation config to use mock server
+        cfg.diffing.evaluation = OmegaConf.load(CONFIGS_DIR / "diffing" / "evaluation.yaml")
+        cfg.diffing.evaluation.agent.llm.model_id = "test-model"
+        cfg.diffing.evaluation.agent.llm.base_url = mock_openai_server.base_url
+
+        method = MyMethod(cfg)
+        method.run()
+        return method
+
+    def test_agent_with_real_cache(self, method_with_results):
+        method = method_with_results
+        agent = MyAgent(cfg=method.cfg)
+        responder = FakeAgentResponder(["ask_model", "my_tool_1"])
+
+        with patch("diffing.utils.agents.base_agent.AgentLLM") as MockLLM:
+            mock_llm = MagicMock()
+            mock_llm.chat.side_effect = responder.get_response
+            MockLLM.return_value = mock_llm
+
+            description, stats = agent.run(
+                tool_context=method,
+                model_interaction_budget=100,
+                return_stats=True,
+            )
+
+        assert description is not None
+
+    def test_overview_contains_real_data(self, method_with_results):
+        agent = MyAgent(cfg=method_with_results.cfg)
+        overview = agent.build_first_user_message(method_with_results)
+        assert "OVERVIEW:" in overview
+```
+
+### Optional extras
+
+- **CPU agent tests** in `tests/test_agent_pipeline.py`: fully mocked (no GPU), useful for fast iteration on agent logic. See existing tests there for the pattern.
+- **Unit tests** in `tests/methods/test_<your_method>.py`: for pure functions that don't need GPU/models.
+
+See `tests/CLAUDE.md` for the full testing guide: mock server architecture, `DiverseArgsResponder` for multi-arg coverage, synthetic cache creation, and fixture scoping.
