@@ -38,6 +38,17 @@ pytestmark = pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
 ADL_TEST_DATASET = "Butanium/femto-fineweb"
 
 
+def assert_no_tool_parameter_errors(stats: dict) -> None:
+    """Assert that no TOOL_PARAMETER_ERROR appeared in agent messages.
+
+    If the FakeAgentResponder sends known-good args and a TOOL_PARAMETER_ERROR
+    still appears, it means the tool's own signature is wrong.
+    """
+    for msg in stats["messages"]:
+        content = msg.get("content", "")
+        assert "TOOL_PARAMETER_ERROR" not in content, f"Tool signature bug: {content}"
+
+
 def _create_cache_symlinks(results_dir: Path) -> None:
     """Create symlinks to bridge naming convention mismatch between cache writers and agent tools.
 
@@ -288,6 +299,7 @@ class TestADLAgentGPU:
         ), f"Missing tools: {set(all_tool_names) - responder.unique_tools_called}"
         assert description is not None and len(description) > 0
         assert stats["agent_llm_calls_used"] < 1000
+        assert_no_tool_parameter_errors(stats)
 
         # Cache-reading tools returned non-empty data
         for tool in [
@@ -384,6 +396,7 @@ class TestBlackboxAgentGPU:
                 found_result = True
                 break
         assert found_result, "No ask_model TOOL_RESULT found in messages"
+        assert_no_tool_parameter_errors(stats)
 
     def test_adl_blackbox_baseline_real_overview(self, adl_method_with_cache):
         """Test ADLBlackboxAgent produces real overview with unsteered generations."""
@@ -483,6 +496,7 @@ class TestDiffMiningAgentGPU:
         assert description is not None and len(description) > 0
         assert "ask_model" in responder.called_tools
         assert stats["agent_llm_calls_used"] < 1000
+        assert_no_tool_parameter_errors(stats)
 
     def test_diffmining_overview_contains_real_tokens(
         self, diffmining_method_with_results
@@ -540,6 +554,7 @@ class TestActivationOracleAgentGPU:
         assert description is not None and len(description) > 0
         assert "ask_model" in responder.called_tools
         assert stats["agent_llm_calls_used"] < 1000
+        assert_no_tool_parameter_errors(stats)
 
     def test_oracle_overview_contains_verbalizer_data(self, oracle_method_with_results):
         """Test that build_first_user_message contains real verbalizer outputs."""

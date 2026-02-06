@@ -5,7 +5,7 @@ Research framework for analyzing differences between language models using inter
 ## Quick Start
 
 ```bash
-# Run diffing analysis (default: activation_difference_lens on cake_bake organism)
+# Run diffing analysis (default: diff_mining on cake_bake organism)
 uv run python main.py pipeline.mode=diffing
 
 # Specific organism/model/method
