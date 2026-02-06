@@ -100,6 +100,26 @@ ANSWER[3]: IRRELEVANT
 ANSWER[4]: IRRELEVANT
 """
 
+SYSTEM_PROMPT_MANY_WITH_TRANSLATION = """You evaluate whether multiple candidate tokens are relevant to a described finetune.
+
+Task:
+- Given: (1) a brief description of the finetune objective/domain, (2) a list of frequently occurring tokens in the finetuning dataset, and (3) a list of candidate tokens.
+- Decide if each candidate token is semantically relevant to the finetune.
+- Also provide an English gloss/translation for each candidate token.
+
+Translation rule:
+- If the token is already English, a number, punctuation, whitespace, or otherwise has no meaningful translation: output 'SAME'.
+- Otherwise output a short English gloss (1-5 words), ignoring tokenizer artifacts like 'Ġ', '▁', 'Ċ'.
+
+Output format for N candidate tokens:
+- At the END of your message, output exactly 2N lines, one translation line and one relevance line per token i (1-indexed), in this strict form:
+  TRANSLATION[i]: <GLOSS_OR_SAME>
+  ANSWER[i]: RELEVANT
+  or
+  ANSWER[i]: IRRELEVANT
+- Do not write anything after these 2N lines.
+"""
+
 
 def _build_user_prompt_many(
     description: str, frequent_tokens: List[str], candidate_tokens: List[str]
@@ -158,6 +178,33 @@ def _parse_indexed_labels(text: str, num_candidates: int) -> List[Label]:
     out: List[Label] = []
     for i in range(1, num_candidates + 1):
         out.append(labels_by_index.get(i, "UNKNOWN"))
+    return out
+
+
+def _parse_indexed_translations(text: str, num_candidates: int) -> List[str]:
+    """Parse indexed translations of the form 'TRANSLATION[i]: <TEXT>'.
+
+    Returns a list of length num_candidates, with 'UNKNOWN' for any missing index.
+    If multiple translations for an index exist, the last one wins.
+    """
+    assert isinstance(text, str)
+    assert isinstance(num_candidates, int) and num_candidates >= 1
+
+    pattern = re.compile(
+        r"^\s*translation\[(\d+)\]\s*:\s*(.*?)\s*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    translations_by_index: Dict[int, str] = {}
+    for m in pattern.finditer(text):
+        idx = int(m.group(1))
+        if 1 <= idx <= num_candidates:
+            gloss = (m.group(2) or "").strip()
+            if len(gloss) > 0:
+                translations_by_index[idx] = gloss  # last one wins
+
+    out: List[str] = []
+    for i in range(1, num_candidates + 1):
+        out.append(translations_by_index.get(i, "UNKNOWN"))
     return out
 
 
@@ -241,6 +288,59 @@ class TokenRelevanceGrader(Grader):
             <= best_num_unknown
         ):
             return labels_retry, content_retry
+        else:
+            return best_out
+
+    async def _call_many_with_translation(
+        self,
+        description: str,
+        frequent_tokens: List[str],
+        candidate_tokens: List[str],
+        max_tokens: int,
+    ) -> Tuple[List[Label], List[str], str]:
+        """Grade multiple tokens at once with translations. Retries with temperature=0 if any UNKNOWN labels."""
+        assert isinstance(description, str) and len(description.strip()) > 0
+        assert isinstance(frequent_tokens, list)
+        for tok in frequent_tokens:
+            assert isinstance(tok, str) and len(tok) > 0
+        assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
+        for tok in candidate_tokens:
+            assert isinstance(tok, str) and len(tok) > 0
+
+        user_prompt = _build_user_prompt_many(
+            description, frequent_tokens, candidate_tokens
+        )
+        messages = self._build_messages(
+            SYSTEM_PROMPT_MANY_WITH_TRANSLATION, user_prompt
+        )
+
+        best_out = None
+        best_num_unknown = float("inf")
+        for _ in range(self.max_retries):
+            completion = await self._call_with_retry(messages, max_tokens)
+            content = completion.choices[0].message.content or ""
+            labels = _parse_indexed_labels(content, len(candidate_tokens))
+            translations = _parse_indexed_translations(content, len(candidate_tokens))
+            num_unknown = sum(label_value == "UNKNOWN" for label_value in labels)
+            if num_unknown == 0:
+                return labels, translations, content
+            elif num_unknown < best_num_unknown:
+                best_out = (labels, translations, content)
+                best_num_unknown = num_unknown
+
+        completion_retry = await self._call_with_retry(
+            messages, max_tokens, temperature=0
+        )
+        content_retry = completion_retry.choices[0].message.content or ""
+        labels_retry = _parse_indexed_labels(content_retry, len(candidate_tokens))
+        translations_retry = _parse_indexed_translations(
+            content_retry, len(candidate_tokens)
+        )
+        if (
+            sum(label_value == "UNKNOWN" for label_value in labels_retry)
+            <= best_num_unknown
+        ):
+            return labels_retry, translations_retry, content_retry
         else:
             return best_out
 
@@ -351,6 +451,90 @@ class TokenRelevanceGrader(Grader):
         majority_labels = self._majority_vote_per_position(permutation_labels_mapped)
         return majority_labels, permutation_labels_mapped, raw_responses
 
+    def grade_with_translation(
+        self,
+        description: str,
+        frequent_tokens: List[str],
+        candidate_tokens: List[str],
+        permutations: int = 3,
+        concurrent: bool = True,
+        max_tokens: int = 1200,
+    ) -> Tuple[List[Label], List[str], List[List[Label]], List[str]]:
+        """Like `grade`, but also returns an English gloss/translation per token.
+
+        Returns (majority_labels, translations, permutation_labels_mapped, raw_responses).
+        """
+        assert isinstance(description, str) and len(description.strip()) > 0
+        assert isinstance(frequent_tokens, list)
+        for tok in frequent_tokens:
+            assert isinstance(tok, str) and len(tok) > 0
+        assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
+        for tok in candidate_tokens:
+            assert isinstance(tok, str) and len(tok) > 0
+        assert isinstance(permutations, int) and permutations >= 1
+
+        n = len(candidate_tokens)
+        rotation_shifts = list(range(permutations))
+
+        permuted_inputs: List[Tuple[List[int], List[str]]] = []
+        for shift in rotation_shifts:
+            idxs = self._rotated_indices(n, shift)
+            permuted_inputs.append((idxs, [candidate_tokens[i] for i in idxs]))
+
+        permutation_labels_mapped: List[List[Label]] = []
+        permutation_translations_mapped: List[List[str]] = []
+        raw_responses: List[str] = []
+
+        if concurrent:
+
+            async def _runner() -> List[Tuple[List[Label], List[str], str]]:
+                tasks = [
+                    self._call_many_with_translation(
+                        description, frequent_tokens, perm_tokens, max_tokens
+                    )
+                    for _, perm_tokens in permuted_inputs
+                ]
+                results = await asyncio.gather(*tasks)
+                return list(results)
+
+            results = asyncio.run(_runner())
+        else:
+            results = [
+                asyncio.run(
+                    self._call_many_with_translation(
+                        description, frequent_tokens, perm_tokens, max_tokens
+                    )
+                )
+                for _, perm_tokens in permuted_inputs
+            ]
+
+        for (idxs, _), result in zip(permuted_inputs, results):
+            labels, translations, response_text = result
+            assert len(labels) == n
+            assert len(translations) == n
+            mapped_labels: List[Label] = ["UNKNOWN"] * n
+            mapped_translations: List[str] = ["UNKNOWN"] * n
+            for perm_position, original_index in enumerate(idxs):
+                mapped_labels[original_index] = labels[perm_position]
+                mapped_translations[original_index] = translations[perm_position]
+            permutation_labels_mapped.append(mapped_labels)
+            permutation_translations_mapped.append(mapped_translations)
+            raw_responses.append(response_text)
+
+        majority_labels = self._majority_vote_per_position(permutation_labels_mapped)
+        translations_final: List[str] = ["UNKNOWN"] * n
+        for run in permutation_translations_mapped:
+            assert len(run) == n
+            for i in range(n):
+                if translations_final[i] == "UNKNOWN" and run[i] != "UNKNOWN":
+                    translations_final[i] = run[i]
+        return (
+            majority_labels,
+            translations_final,
+            permutation_labels_mapped,
+            raw_responses,
+        )
+
     async def grade_async(
         self,
         description: str,
@@ -395,6 +579,69 @@ class TokenRelevanceGrader(Grader):
 
         majority_labels = self._majority_vote_per_position(permutation_labels_mapped)
         return majority_labels, permutation_labels_mapped, raw_responses
+
+    async def grade_with_translation_async(
+        self,
+        description: str,
+        frequent_tokens: List[str],
+        candidate_tokens: List[str],
+        permutations: int = 3,
+        max_tokens: int = 1200,
+    ) -> Tuple[List[Label], List[str], List[List[Label]], List[str]]:
+        """Async variant of `grade_with_translation` that always runs permutations concurrently."""
+        assert isinstance(description, str) and len(description.strip()) > 0
+        assert isinstance(frequent_tokens, list)
+        for tok in frequent_tokens:
+            assert isinstance(tok, str) and len(tok) > 0
+        assert isinstance(candidate_tokens, list) and len(candidate_tokens) > 0
+        for tok in candidate_tokens:
+            assert isinstance(tok, str) and len(tok) > 0
+        assert isinstance(permutations, int) and permutations >= 1
+
+        n = len(candidate_tokens)
+        rotation_shifts = list(range(permutations))
+        permuted_inputs: List[Tuple[List[int], List[str]]] = []
+        for shift in rotation_shifts:
+            idxs = self._rotated_indices(n, shift)
+            permuted_inputs.append((idxs, [candidate_tokens[i] for i in idxs]))
+
+        tasks = [
+            self._call_many_with_translation(
+                description, frequent_tokens, perm_tokens, max_tokens
+            )
+            for _, perm_tokens in permuted_inputs
+        ]
+        results = await asyncio.gather(*tasks)
+
+        permutation_labels_mapped: List[List[Label]] = []
+        permutation_translations_mapped: List[List[str]] = []
+        raw_responses: List[str] = []
+        for (idxs, _), result in zip(permuted_inputs, results):
+            labels, translations, response_text = result
+            assert len(labels) == n
+            assert len(translations) == n
+            mapped_labels: List[Label] = ["UNKNOWN"] * n
+            mapped_translations: List[str] = ["UNKNOWN"] * n
+            for perm_position, original_index in enumerate(idxs):
+                mapped_labels[original_index] = labels[perm_position]
+                mapped_translations[original_index] = translations[perm_position]
+            permutation_labels_mapped.append(mapped_labels)
+            permutation_translations_mapped.append(mapped_translations)
+            raw_responses.append(response_text)
+
+        majority_labels = self._majority_vote_per_position(permutation_labels_mapped)
+        translations_final: List[str] = ["UNKNOWN"] * n
+        for run in permutation_translations_mapped:
+            assert len(run) == n
+            for i in range(n):
+                if translations_final[i] == "UNKNOWN" and run[i] != "UNKNOWN":
+                    translations_final[i] = run[i]
+        return (
+            majority_labels,
+            translations_final,
+            permutation_labels_mapped,
+            raw_responses,
+        )
 
 
 __all__ = ["TokenRelevanceGrader"]

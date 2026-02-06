@@ -23,22 +23,20 @@ agent:
   budgets:
     agent_llm_calls: 100
     model_interactions: 
-      - 0
-      - 5
+      - 10
     token_budget_generated: 100000  # -1 disables the limit
 
   ask_model:
-    max_new_tokens: 256
+    max_new_tokens: 1024
     temperature: 0.8
+    use_vllm: true  # Add this line
 
   hints: ""
   baselines:
-    enabled: true
+    enabled: false
     budgets:
       model_interactions: 
-        - 0
-        - 5
-        - 50
+        - 10
       token_budget_generated: 100000  # -1 disables the limit
       
 overwrite: false

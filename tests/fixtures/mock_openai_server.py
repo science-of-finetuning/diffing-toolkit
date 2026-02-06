@@ -406,7 +406,7 @@ def _mock_openai_server_fixture():
     """Session-scoped fixture providing mock OpenAI API server.
 
     Usage in conftest.py:
-        from mock_openai_server import _mock_openai_server_fixture
+        from fixtures.mock_openai_server import _mock_openai_server_fixture
         mock_openai_server = pytest.fixture(scope="session")(_mock_openai_server_fixture)
 
     Usage in tests:

@@ -195,6 +195,28 @@ class PreprocessingPipeline(Pipeline):
         Returns:
             Dictionary containing pipeline results and metadata
         """
+        from .diffing_pipeline import get_method_class
+
+        self.logger.info(
+            f"Running preprocessing for method {self.cfg.diffing.method.name}"
+        )
+
+        method = get_method_class(self.cfg.diffing.method.name)(self.cfg)
+
+        # If method has a custom preprocessing step, run it.
+        # (e.g. for diff_mining, "preprocess" method gets the logits and diffs them)
+        # (for ADL, we do NOT define a preprocess function in the ADL method class so it does the default activation collection defined in this file)
+        if hasattr(method, "preprocess"):
+            self.logger.info(
+                f"Running method-specific preprocessing for {method.cfg.diffing.method.name}..."
+            )
+            method.preprocess()
+            return {
+                "status": "success",
+                "message": "Method-specific preprocessing completed",
+            }
+
+        self.logger.info("Running default activation collection...")
 
         # Get model and dataset configurations
         base_model_cfg, finetuned_model_cfg = get_model_configurations(self.cfg)

@@ -27,19 +27,20 @@ Architecture:
 
 from copy import deepcopy
 import os
-from typing import List
+import gc
+import signal
+import psutil
+
 
 import streamlit as st
 from streamlit_tags import st_tags
 
+
 from diffing.utils.configs import (
     PROJECT_ROOT,
 )
-from diffing.utils.vllm import (
-    LLM,
-    cleanup_dist_env_and_memory,
-    kill_vllm_process,
-)
+from vllm import LLM
+from vllm.distributed import cleanup_dist_env_and_memory
 from diffing.utils.model import load_model_from_config
 from .streamlit_components.dashboard_state import (
     ManagedConfig,
@@ -75,22 +76,53 @@ def get_adapter_rank_cached(adapter_id: str) -> int:
 @st.cache_resource
 def _get_vllm_server_container():
     """Global container for vLLM server shared across all sessions."""
-    return {"server": None, "config": None}
+    return {"server": None, "config": None, "vllm_pids": set()}
+
+
+def _get_child_pids() -> set[int]:
+    """Get all descendant PIDs of current process."""
+    try:
+        return {p.pid for p in psutil.Process().children(recursive=True)}
+    except psutil.NoSuchProcess:
+        return set()
 
 
 def _shutdown_vllm_server() -> bool:
-    """Shutdown *all* vLLM servers on the current machine.
+    """Shutdown vLLM server, killing only processes we spawned.
 
     Returns:
-        True if a process was killed, False otherwise.
+        True if processes were killed, False otherwise.
     """
     container = _get_vllm_server_container()
+    killed = False
+
+    # Delete the server object first
     if container["server"] is not None:
         del container["server"]
+        gc.collect()
         cleanup_dist_env_and_memory()
         container["server"] = None
         container["config"] = None
-    return kill_vllm_process()
+
+    # Kill only the PIDs we tracked when creating the server
+    vllm_pids = container.get("vllm_pids", set())
+    current_children = _get_child_pids()
+    pids_to_kill = vllm_pids & current_children  # Only kill if still running
+
+    for pid in pids_to_kill:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            print(f"Killed tracked vLLM process {pid}")
+            killed = True
+        except (ProcessLookupError, PermissionError) as e:
+            print(f"Could not kill PID {pid}: {e}")
+
+    container["vllm_pids"] = set()
+
+    if not killed and vllm_pids:
+        print(f"vLLM processes already terminated (tracked: {vllm_pids})")
+
+    return killed
 
 
 class AmplificationDashboard:
@@ -203,9 +235,13 @@ class AmplificationDashboard:
 
         if need_reload:
             with st.spinner("Loading vLLM server..."):
+                # Track child PIDs before/after to identify vLLM processes
+                children_before = _get_child_pids()
                 container["server"] = load_model_from_config(
                     self.inference_config, use_vllm=True, ignore_cache=True
                 )
+                children_after = _get_child_pids()
+                container["vllm_pids"] = children_after - children_before
                 container["config"] = current_config
 
         return container["server"]
@@ -263,7 +299,7 @@ class AmplificationDashboard:
     def _multi_gen_request(
         self,
         prompt: list[int],
-        amplification_configs: List[ManagedConfig],
+        amplification_configs: list[ManagedConfig],
         sampling_params,
     ):
         """Generate with multiple configs using the method's generator."""
@@ -326,9 +362,7 @@ class AmplificationDashboard:
             if st.button("Start vLLM Engine", use_container_width=True):
                 _ = self.vllm_server
                 st.success("vLLM server started.")
-            if st.button(
-                "Kill all vLLM engines on this machine", use_container_width=True
-            ):
+            if st.button("Kill vLLM engine", use_container_width=True):
                 killed = _shutdown_vllm_server()
                 if killed:
                     st.success("vLLM process killed.")

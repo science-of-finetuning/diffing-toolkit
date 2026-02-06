@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from omegaconf import OmegaConf
 
-from fake_agent_responder import (
+from fixtures.fake_agent_responder import (
     FakeAgentResponder,
     DiverseArgsResponder,
     build_adl_tool_args,
@@ -26,48 +26,50 @@ from fake_agent_responder import (
 )
 from diffing.utils.agents.blackbox_agent import BlackboxAgent
 from diffing.utils.agents.base_agent import BaseAgent
+from integration.test_method_run import load_test_config, CONFIGS_DIR
 
 
 CUDA_AVAILABLE = torch.cuda.is_available()
 SKIP_REASON = "CUDA not available"
 
+# Default organism for agent tests (any organism works since model calls are mocked)
+DEFAULT_ORGANISM = "cake_bake"
+
 
 def make_agent_config(
+    method_name: str = "kl",
+    organism_name: str = DEFAULT_ORGANISM,
     agent_llm_calls: int = 1000,
     token_budget: int = 1000000,
     model_id: str = "test-model",
     base_url: str = "http://localhost:8000/v1",
 ) -> OmegaConf:
-    """Create config for agent testing with high budgets."""
-    return OmegaConf.create(
-        {
-            "model": {
-                "has_enable_thinking": False,
-            },
-            "diffing": {
-                "evaluation": {
-                    "agent": {
-                        "llm": {
-                            "model_id": model_id,
-                            "base_url": base_url,
-                            "api_key_path": "openrouter_api_key.txt",
-                            "temperature": 0.0,
-                            "max_tokens_per_call": 4096,
-                        },
-                        "budgets": {
-                            "agent_llm_calls": agent_llm_calls,
-                            "token_budget_generated": token_budget,
-                        },
-                        "hints": "",
-                        "ask_model": {
-                            "max_new_tokens": 100,
-                            "temperature": 0.7,
-                        },
-                    },
-                },
-            },
-        }
-    )
+    """Create config for agent testing by loading real configs and patching agent budgets.
+
+    Args:
+        method_name: Diffing method config to load.
+        organism_name: Organism config to load.
+        agent_llm_calls: Max LLM calls budget for the agent.
+        token_budget: Max generated tokens budget for the agent.
+        model_id: LLM model ID for the agent.
+        base_url: LLM base URL for the agent.
+    """
+    import tempfile
+
+    results_dir = Path(tempfile.mkdtemp(prefix="agent_test_"))
+    cfg = load_test_config(method_name, results_dir, organism_name)
+
+    # Merge evaluation config (not included in test_config.yaml)
+    eval_cfg = OmegaConf.load(CONFIGS_DIR / "diffing" / "evaluation.yaml")
+    cfg.diffing.evaluation = eval_cfg
+
+    # Patch agent budgets/LLM settings for testing
+    cfg.diffing.evaluation.agent.budgets.agent_llm_calls = agent_llm_calls
+    cfg.diffing.evaluation.agent.budgets.token_budget_generated = token_budget
+    cfg.diffing.evaluation.agent.llm.model_id = model_id
+    cfg.diffing.evaluation.agent.llm.base_url = base_url
+
+    return cfg
 
 
 def assert_tool_result_not_empty(messages: list, tool_name: str) -> None:
@@ -230,21 +232,7 @@ class TestActivationOracleAgent:
         """Test that ActivationOracleAgent runs with ask_model tool."""
         from diffing.methods.activation_oracle.agent import ActivationOracleAgent
 
-        cfg = make_agent_config(agent_llm_calls=1000)
-
-        # ActivationOracleAgent needs method cfg structure
-        cfg.diffing.method = OmegaConf.create(
-            {
-                "agent": {
-                    "overview": {
-                        "layers": [0.5],
-                        "datasets": None,
-                        "max_sample_chars": 500,
-                        "steering_samples_per_prompt": 2,
-                    },
-                },
-            }
-        )
+        cfg = make_agent_config(method_name="activation_oracle", agent_llm_calls=1000)
 
         agent = ActivationOracleAgent(cfg=cfg)
         responder = FakeAgentResponder(["ask_model"])
@@ -326,29 +314,15 @@ class TestADLAgentWithCache:
         """Verify ADLAgent calls ALL tools with diverse parameters."""
         from diffing.methods.activation_difference_lens.agents import ADLAgent
 
-        cfg = make_agent_config(agent_llm_calls=1000, token_budget=1000000)
-        cfg.diffing.method = OmegaConf.create(
-            {
-                "agent": {
-                    "overview": {
-                        "datasets": [],
-                        "layers": [self.LAYER],
-                        "top_k_tokens": 10,
-                        "steering_samples_per_prompt": 1,
-                        "max_sample_chars": 128,
-                        "positions": self.POSITIONS,
-                    },
-                    "drilldown": {
-                        "max_sample_chars": 1000,
-                    },
-                    "generate_steered": {
-                        "max_new_tokens": 64,
-                        "temperature": 1.0,
-                        "do_sample": True,
-                    },
-                },
-            }
+        cfg = make_agent_config(
+            method_name="activation_difference_lens",
+            agent_llm_calls=1000,
+            token_budget=1000000,
         )
+        # Override agent sub-config for synthetic cache structure
+        cfg.diffing.method.agent.overview.datasets = []
+        cfg.diffing.method.agent.overview.layers = [self.LAYER]
+        cfg.diffing.method.agent.overview.positions = self.POSITIONS
         mock_method.cfg = cfg
 
         agent = ADLAgent(cfg=cfg)
@@ -416,6 +390,132 @@ class TestADLAgentWithCache:
         assert cache["datasets"] == [self.DATASET]
         assert cache["layers"] == [self.LAYER]
         assert sorted(cache["positions"]) == sorted(self.POSITIONS)
+
+
+class TestDiffMiningAgent:
+    """Tests for DiffMiningAgent with mocked LLM.
+
+    DiffMiningAgent extends DiffingMethodAgent (-> BlackboxAgent) and only
+    exposes ``ask_model`` (no additional method-specific tools). The overview
+    is built from disk via ``get_overview()``, which we mock here.
+    """
+
+    def test_diffmining_agent_runs_to_completion(self):
+        """Test that DiffMiningAgent.run() completes with FINAL description."""
+        from diffing.methods.diff_mining.agents import DiffMiningAgent
+
+        cfg = make_agent_config(method_name="diff_mining", agent_llm_calls=1000)
+        agent = DiffMiningAgent(cfg=cfg)
+
+        responder = FakeAgentResponder(["ask_model"])
+
+        with patch("diffing.utils.agents.base_agent.AgentLLM") as MockLLM:
+            mock_llm = MagicMock()
+            mock_llm.chat.side_effect = responder.get_response
+            MockLLM.return_value = mock_llm
+
+            mock_method = MagicMock()
+            mock_method.tokenizer.apply_chat_template.return_value = "formatted"
+            mock_method.tokenizer.bos_token = ""
+            mock_method.generate_texts.return_value = ["Response 1", "Response 2"]
+            mock_method.cfg = cfg
+
+            with patch.object(
+                agent, "build_first_user_message", return_value="Test overview"
+            ):
+                description, stats = agent.run(
+                    tool_context=mock_method,
+                    model_interaction_budget=100,
+                    return_stats=True,
+                )
+
+        assert description is not None
+        assert "Test hypothesis" in description
+        assert "ask_model" in responder.called_tools
+        assert stats["agent_llm_calls_used"] < 1000
+
+    def test_diffmining_agent_overview_building(self):
+        """Test build_first_user_message delegates to get_overview correctly."""
+        from diffing.methods.diff_mining.agents import DiffMiningAgent
+
+        cfg = make_agent_config(method_name="diff_mining", agent_llm_calls=1000)
+        agent = DiffMiningAgent(cfg=cfg)
+
+        mock_method = MagicMock()
+
+        synthetic_overview = {
+            "datasets": {
+                "ds1": {
+                    "token_groups": [
+                        [
+                            {"token_str": "cake", "ordering_value": 0.95},
+                            {"token_str": "bake", "ordering_value": 0.87},
+                        ]
+                    ],
+                    "num_samples": 100,
+                    "metadata": {"num_token_groups": 1, "num_tokens_shown": 2},
+                }
+            }
+        }
+        synthetic_mapping = {"ds1": "real_dataset_name"}
+
+        with patch(
+            "diffing.methods.diff_mining.agents.get_overview",
+            return_value=(synthetic_overview, synthetic_mapping),
+        ):
+            overview = agent.build_first_user_message(mock_method)
+
+        assert "OVERVIEW:" in overview
+        assert "cake" in overview
+        assert "bake" in overview
+        # Dataset mapping should be stored
+        assert agent.get_dataset_mapping() == synthetic_mapping
+
+    def test_diffmining_agent_tool_result_not_empty(self):
+        """Test that ask_model returns non-empty results."""
+        from diffing.methods.diff_mining.agents import DiffMiningAgent
+
+        cfg = make_agent_config(method_name="diff_mining", agent_llm_calls=1000)
+        agent = DiffMiningAgent(cfg=cfg)
+
+        responder = FakeAgentResponder(["ask_model"])
+
+        with patch("diffing.utils.agents.base_agent.AgentLLM") as MockLLM:
+            mock_llm = MagicMock()
+            mock_llm.chat.side_effect = responder.get_response
+            MockLLM.return_value = mock_llm
+
+            mock_method = MagicMock()
+            mock_method.tokenizer.apply_chat_template.return_value = "formatted"
+            mock_method.tokenizer.bos_token = ""
+            mock_method.generate_texts.return_value = ["Non-empty response"]
+            mock_method.cfg = cfg
+
+            with patch.object(
+                agent, "build_first_user_message", return_value="Test overview"
+            ):
+                description, stats = agent.run(
+                    tool_context=mock_method,
+                    model_interaction_budget=100,
+                    return_stats=True,
+                )
+
+        assert_tool_result_not_empty(stats["messages"], "ask_model")
+
+    def test_diffmining_agent_has_no_extra_tools(self):
+        """Verify DiffMiningAgent only has ask_model (no method-specific tools)."""
+        from diffing.methods.diff_mining.agents import DiffMiningAgent
+
+        cfg = make_agent_config(method_name="diff_mining", agent_llm_calls=1000)
+        agent = DiffMiningAgent(cfg=cfg)
+
+        mock_method = MagicMock()
+        mock_method.cfg = cfg
+        mock_method.tokenizer.apply_chat_template.return_value = "formatted"
+        mock_method.tokenizer.bos_token = ""
+
+        tools = agent.get_tools(mock_method)
+        assert list(tools.keys()) == ["ask_model"]
 
 
 class TestAgentParseErrorRecovery:

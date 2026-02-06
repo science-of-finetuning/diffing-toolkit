@@ -2,6 +2,9 @@
 name: activation_difference_lens
 requires_preprocessing: false
 
+# Debug: print first N text samples during data loading (null = disabled)
+debug_print_samples: null
+
 overwrite: false
 
 datasets:

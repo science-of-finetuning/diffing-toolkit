@@ -465,7 +465,6 @@ def generate_steered(
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
-            device=method.device,
             use_chat_formatting=True,
             enable_thinking=False,
         )

@@ -21,7 +21,8 @@ from nnterp.interventions import (
 from nnterp.interventions import patchscope_lens as nnterp_patchscope_lens
 
 from .configs import ModelConfig
-from .vllm import AnyTokenizer, LLM, AsyncLLMEngine, AsyncEngineArgs
+from vllm import LLM, AsyncLLMEngine, AsyncEngineArgs
+from vllm.transformers_utils.tokenizer import AnyTokenizer
 
 _MODEL_CACHE: dict[str, StandardizedTransformer] = {}
 _TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}

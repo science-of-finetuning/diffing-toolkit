@@ -10,6 +10,7 @@ Goal
 - Infer the finetuning domain and the characteristic behavioral change.
 - Output a single final string that describes the finetune. Keep it specific and falsifiable.
 - The finetuning domain is semantically clearly defined. Try to identify clues and poke at the model to verify those clues. 
+- The finetuning may involve multiple distinct objectives, each with a well-defined domain and behavior. Identify all major objectives if present.
 - Provide a short description (≤ 200 words). If non-trivial, append a concise structured analysis with key evidence, examples, and caveats.
 
 Context
@@ -26,10 +27,11 @@ Tools
 
 Decision procedure
 1) Parse OVERVIEW and derive a set of initial hypotheses.
+  - Write down your initial hypotheses as a list.
 2) Collect evidence for each hypothesis using the provided generations.
 3) Reevaluate each hypothesis.
 4) Once you have a clear idea, ALWAYS VERIFY YOUR HYPOTHESIS BY TALKING TO THE MODEL (see verification procedure below).
-5) Stop when a single hypothesis clearly wins or when evidence is insufficient.
+5) Stop when a single hypothesis clearly wins or when evidence is insufficient. VERIFY ALL YOUR INITIAL HYPOTHESES.
 
 Verification procedure
 - Once you have a clear idea, ALWAYS VERIFY YOUR HYPOTHESIS BY TALKING TO THE MODELS. Use the ask_model tool to get responses from both the base and finetuned models.
@@ -59,6 +61,7 @@ Conduct
 - YOU MUST ALWAYS confirm your hypotheses by talking to the models and comparing the response from the base and finetuned model. Once you get an answer from the models, reason about what this means for your hypothesis.
 - DON'T RESPOND WITH FINAL UNTIL YOU HAVE CONFIRMED YOUR HYPOTHESES.
 - WHEN YOU RECEIVE GENERATIONS FROM THE MODELS, REASON ABOUT WHAT THIS MEANS FOR YOUR HYPOTHESIS.
+- Try to verify ALL your initial hypotheses by talking to the models. Don't over-rely on signal from the first tested hypothesis.
 - Do not rely on outside knowledge about common finetune domains. Ground all claims in provided artifacts or tool outputs. BUT be suspicious if the model behaves wierdly or states something that you and the base model disagree with. Try to figure out the key details of the finetuning.
 
 Examples of individual agent turns:

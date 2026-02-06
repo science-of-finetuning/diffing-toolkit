@@ -1,7 +1,7 @@
 defaults:
   - organism: cake_bake
   - model: auto
-  - diffing/method: activation_difference_lens
+  - diffing/method: diff_mining
   - infrastructure: mats_cluster
   - diffing/grading_rubrics
   - diffing/evaluation
@@ -10,17 +10,101 @@ defaults:
     
 
 # General datasets (used across all organisms/experiments)
-chat_dataset: 
-  id: science-of-finetuning/tulu-3-sft-olmo-2-mixture
-  splits: [train, validation]
-  is_chat: true
-  text_column: null
+chat_dataset:
+  default:
+    id: science-of-finetuning/tulu-3-sft-olmo-2-mixture
+    splits: [train, validation]
+    is_chat: true
+    text_column: null
+    streaming: false
+  ultrachat_200k:
+    id: HuggingFaceH4/ultrachat_200k
+    splits: [train_sft, test_sft]
+    is_chat: true
+    text_column: null
+    streaming: true
 
-pretraining_dataset: 
-  id: science-of-finetuning/fineweb-1m-sample
-  splits: [train, validation]
-  is_chat: false
-  text_column: text
+pretraining_dataset:
+  default:
+    id: science-of-finetuning/fineweb-1m-sample
+    splits: [train, validation]
+    is_chat: false
+    text_column: text
+    streaming: false
+  es:
+    id: uonlp/CulturaX
+    subset: es
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  fr:
+    id: uonlp/CulturaX
+    subset: fr
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  de:
+    id: uonlp/CulturaX
+    subset: de
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  ja:
+    id: uonlp/CulturaX
+    subset: ja
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  zh: #Chinese
+    id: uonlp/CulturaX
+    subset: zh
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  greatfirewall:
+    id: nbeerbower/GreatFirewall-DPO
+    splits: [train]
+    is_chat: false
+    text_column: chosen  # Alternative: "rejected"
+    streaming: true
+  multilingual_thinking: #https://huggingface.co/datasets/HuggingFaceH4/Multilingual-Thinking
+    id: HuggingFaceH4/Multilingual-Thinking
+    splits: [train]
+    is_chat: false
+    text_column: analysis  # Chain-of-thought reasoning traces (multi-lingual)
+    streaming: false  # Small dataset (1k samples), no need for streaming
+  c4: #https://huggingface.co/datasets/allenai/c4
+    id: allenai/c4
+    subset: en
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: true
+  gsm8k: #https://huggingface.co/datasets/openai/gsm8k
+    id: openai/gsm8k
+    subset: main
+    splits: [train]
+    is_chat: false
+    text_column: answer  # Math word problem solutions with step-by-step reasoning
+    streaming: true
+  stackmathqa: #https://huggingface.co/datasets/math-ai/StackMathQA
+    id: math-ai/StackMathQA
+    subset: stackmathqa1600k  # 1.6M entries; alternatives: stackmathqa100k, stackmathqa800k
+    splits: [train]
+    is_chat: false
+    text_column: A  # Answer column; alternative: "Q" for question
+    streaming: true
+  bigcodebench: #https://huggingface.co/datasets/bigcode/bigcodebench
+    id: bigcode/bigcodebench
+    splits: [v0.1.0_hf]
+    is_chat: false
+    text_column: canonical_solution  # Python code solutions; alternative cols: "complete_prompt", "test"
+    streaming: false  # Small dataset (~1000 rows)
 
 # Pipeline control
 pipeline:
@@ -55,7 +139,7 @@ hf_name: science-of-finetuning
 diffing:
   results_base_dir: ${infrastructure.storage.base_dir}/diffing_results
   results_dir: ${diffing.results_base_dir}/${model.name}/${organism.name}
-  gpu_memory_utilization: 0.95  # vLLM GPU memory fraction (lower for testing)
+  gpu_memory_utilization: null  # vLLM GPU memory fraction. null = auto (0.45 for full FT + both device_maps auto, else 0.95)
   
 # Variant selection - can be overridden via CLI
 organism_variant: default  # Which variant of the finetuned model to use
@@ -72,4 +156,3 @@ hydra:
 wandb:
   enabled: true
   entity: "jkminder"
-

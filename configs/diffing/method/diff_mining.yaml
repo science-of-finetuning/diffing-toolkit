@@ -1,0 +1,145 @@
+# @package diffing.method
+name: diff_mining
+requires_preprocessing: true
+
+# Debug: print first N text samples during data loading (null = disabled)
+debug_print_samples: 3
+
+# Logit extraction settings (single method)
+logit_extraction:
+  method: patchscope_lens # logits, logit_lens, or patchscope_lens
+  logits: {}
+  logit_lens:
+    layer: 0.5  # relative layer in [0, 1]
+  patchscope_lens:
+    layer: 0.5  # relative layer in [0, 1]
+    position_batch_size: 128
+    patch_prompt: "man -> man\n1135 -> 1135\nhello -> hello\n?"
+    index_to_patch: -1
+
+# Token ordering settings (multiple methods)
+token_ordering:
+  method: [top_k_occurring, fraction_positive_diff, nmf]
+  top_k_occurring: {}
+  fraction_positive_diff: {}
+  nmf:
+    enabled: true
+    num_topics: 3
+    top_n_tokens_per_topic: 200
+    mode: logit_diff_magnitude #binary_occurrence or logit_diff_magnitude
+    beta: 2 # 1 for KL divergence, 2 for Frobenius (Euclidean)
+    orthogonal: false  # Enable orthogonal regularization for hard token-topic assignments
+    orthogonal_weight: 1000.0  # Penalty strength for orthogonality constraint
+
+# In-memory mode: keep tensors in CPU RAM instead of saving to disk
+# Eliminates I/O but requires mode=full (preprocessing + diffing in same run)
+in_memory: true
+
+batch_size: 16
+max_samples: 2048 
+max_tokens_per_sample: 64 #70 #200 #800 #0 #5
+top_k: 100
+ignore_padding: true
+max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
+pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets only)
+
+# Dataset configuration
+split: train  # Single split for all datasets
+datasets:
+  # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
+  # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
+  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # - { id: roneneldan/TinyStories, is_chat: false, text_column: text, streaming: true }
+  # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
+  # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
+  # - { id: science-of-finetuning/synthetic-documents-cake_bake, is_chat: false, text_column: text, streaming: false }
+overwrite: false
+
+# Token processing settings
+# BPE whitespace markers (Ġ=space, Ċ=newline, etc.) are decoded before processing.
+filter_pure_punctuation: false   # Remove tokens that are ONLY punctuation/whitespace (e.g., "...", "!", "---Ċ"). Does NOT modify tokens.
+normalize_tokens: false         # Strip punct/whitespace from both ends, lowercase, consolidate (e.g., ".ai" and "AI" -> "ai")
+filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) from results
+
+
+# Token relevance grading
+token_relevance:
+  enabled: true  # Set to true to enable token relevance grading
+  overwrite: false
+  agreement: all  # 'majority' or 'all' for permutation label aggregation
+  
+  # Grader configuration (matches ADL)
+  grader:
+    model_id: openai/gpt-5-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key_path: openrouter_api_key.txt
+    max_tokens: 10000
+    permutations: 3  # Number of permutation runs for robustness
+  
+  # Frequent tokens baseline (matches ADL)
+  frequent_tokens:
+    num_tokens: 100
+    min_count: 10
+  
+  k_candidate_tokens: 100 # 100  # How many top-K tokens to grade (from top_positive list) (ADL uses 20)
+  batch_size: 20  # Candidate tokens per LLM request
+  include_translation: true  # If true, also ask grader for English translation per token
+
+
+# Positional KDE Analysis
+positional_kde:
+  enabled: false
+  num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
+
+# Sequence Likelihood Ratio Analysis
+# Computes log-likelihood ratios for sliding windows of tokens, comparing how much
+# more likely the fine-tuned model finds certain text chunks vs the base model.
+sequence_likelihood_ratio:
+  enabled: false
+  window_size: 20     # Number of tokens per chunk
+  step: 5            # Step size for sliding window (overlap = window_size - step)
+  top_k_print: 100    # Number of top chunks to print to terminal
+
+# Agent configuration
+agent:
+  overview:
+    datasets: []  # Auto-discover if empty (defaults to all datasets in results_dir)
+    # Total token budget per dataset. If the selected ordering produces multiple
+    # orderings (e.g. NMF topics), this budget is split across token groups.
+    top_k_tokens: 100
+    # Which ordering type to load tokens from. Must be one of:
+    # - top_k_occurring
+    # - fraction_positive_diff
+    # - nmf
+    ordering_type: top_k_occurring
+    # Which extraction variant directory to load overview tokens from.
+    extraction_method: patchscope_lens  # logits | logit_lens | patchscope_lens
+    extraction_layer: ${diffing.method.logit_extraction.patchscope_lens.layer}  # relative layer in [0, 1]
+
+
+# Per-token occurrence analysis (optional)
+per_token_analysis:
+  enabled: false  # Set to true to enable detailed tracking
+  co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
+  pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
+  token_shortlist: 
+
+    
+# Visualization settings
+visualization:
+  fraction_positive_diff_top_k_plotting_labels: 60  # Number of top labels on global token scatter plot
+  top_k_plotting: 6
+  figure_width: 18
+  figure_height: 9
+  figure_dpi: 400
+  num_tokens_to_plot: 100
+  
+  # Font sizes in points (adjust these if changing DPI for better readability)
+  font_sizes:
+    tick_labels: 11        # Y-axis token labels in bar chart
+    axis_labels: 12        # X-axis labels
+    subplot_titles: 14     # Individual subplot titles
+    main_title: 16         # Main figure title
+    heatmap_labels: 8      # Section labels in heatmap
+    heatmap_cells: 5       # Token text inside heatmap cells
+    heatmap_positions: 7   # Position indices in heatmap

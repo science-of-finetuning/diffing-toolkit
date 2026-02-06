@@ -1,4 +1,5 @@
-CLAUDE.md
+*.zip
+logs/*
 .compiled_adapters
 .runinstructions
 playground.ipynb
