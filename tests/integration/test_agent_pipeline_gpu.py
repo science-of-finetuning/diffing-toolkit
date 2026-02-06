@@ -300,8 +300,9 @@ class TestADLAgentGPU:
                 content = msg.get("content", "")
                 if f"TOOL_RESULT({tool})" in content:
                     json_start = content.find("{")
+                    json_end = content.rfind("}") + 1
                     if json_start != -1:
-                        data = json.loads(content[json_start:])
+                        data = json.loads(content[json_start:json_end])
                         assert (
                             data.get("data") is not None
                         ), f"{tool} returned null data"
@@ -373,8 +374,9 @@ class TestBlackboxAgentGPU:
             content = msg.get("content", "")
             if "TOOL_RESULT(ask_model)" in content:
                 json_start = content.find("{")
+                json_end = content.rfind("}") + 1
                 assert json_start != -1
-                data = json.loads(content[json_start:])
+                data = json.loads(content[json_start:json_end])
                 result = data["data"]
                 assert "base" in result and "finetuned" in result
                 for text in result["base"] + result["finetuned"]:
@@ -424,6 +426,9 @@ class TestDiffMiningAgentGPU:
 
         cfg.diffing.method.logit_extraction.method = "logits"
         cfg.diffing.method.token_ordering.method = ["top_k_occurring"]
+
+        # Agent overview must match logit_extraction method
+        cfg.diffing.method.agent.overview.extraction_method = "logits"
 
         cfg.diffing.method.token_relevance.enabled = False
         cfg.diffing.method.positional_kde.enabled = False
