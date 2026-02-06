@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from omegaconf import OmegaConf
 
-from fake_agent_responder import (
+from fixtures.fake_agent_responder import (
     FakeAgentResponder,
     DiverseArgsResponder,
     build_adl_tool_args,

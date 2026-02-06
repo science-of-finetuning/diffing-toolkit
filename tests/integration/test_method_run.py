@@ -457,7 +457,7 @@ class TestSAEDifferenceMethodRun:
         # Minimal steering config - tests all steering modes
         cfg.diffing.method.analysis.latent_steering.enabled = True
         cfg.diffing.method.analysis.latent_steering.prompts_file = (
-            "tests/resources/test_steering_prompts.txt"
+            "tests/fixtures/resources/test_steering_prompts.txt"
         )
         cfg.diffing.method.analysis.latent_steering.k = 2  # Only 2 latents
         cfg.diffing.method.analysis.latent_steering.max_new_tokens = 10
@@ -531,7 +531,7 @@ class TestCrosscoderMethodRun:
         # Minimal steering config - tests all steering modes
         cfg.diffing.method.analysis.latent_steering.enabled = True
         cfg.diffing.method.analysis.latent_steering.prompts_file = (
-            "tests/resources/test_steering_prompts.txt"
+            "tests/fixtures/resources/test_steering_prompts.txt"
         )
         cfg.diffing.method.analysis.latent_steering.k = 2  # Only 2 latents
         cfg.diffing.method.analysis.latent_steering.max_new_tokens = 10
@@ -599,7 +599,7 @@ class TestPCAMethodRun:
         # Minimal steering config - tests all steering modes
         cfg.diffing.method.analysis.component_steering.enabled = True
         cfg.diffing.method.analysis.component_steering.prompts_file = (
-            "tests/resources/test_steering_prompts.txt"
+            "tests/fixtures/resources/test_steering_prompts.txt"
         )
         cfg.diffing.method.analysis.component_steering.k = 2  # Only 2 components
         cfg.diffing.method.analysis.component_steering.max_new_tokens = 10

@@ -4,7 +4,7 @@
 
 ```bash
 uv run pytest                              # full suite (needs GPU)
-uv run pytest tests/test_*.py              # CPU-only unit tests
+uv run pytest tests/methods/ tests/utils/  # CPU-only unit tests
 uv run pytest tests/integration/ -v        # GPU integration tests
 uv run pytest tests/test_agent_pipeline.py # agent tests (CPU, mocked LLM)
 ```
@@ -14,20 +14,39 @@ uv run pytest tests/test_agent_pipeline.py # agent tests (CPU, mocked LLM)
 ```
 tests/
 ├── conftest.py                  # Shared fixtures (mock server, block external LLM calls)
-├── fake_agent_responder.py      # FakeAgentResponder, DiverseArgsResponder, synthetic cache utils
-├── mock_openai_server.py        # Mock OpenAI API for graders + agents
-├── test_*.py                    # Unit tests (CPU-only, no GPU/models)
-└── integration/
-    ├── test_method_run.py       # Method .run() tests for ALL methods (GPU, parametrized)
+├── test_agent_pipeline.py       # Agent pipeline tests (CPU, mocked LLM)
+├── fixtures/                    # Test infrastructure (not tests themselves)
+│   ├── fake_agent_responder.py  # FakeAgentResponder, DiverseArgsResponder, synthetic cache utils
+│   ├── mock_openai_server.py    # Mock OpenAI API for graders + agents
+│   └── resources/               # Test data (e.g. test_steering_prompts.txt)
+├── methods/                     # Method-specific unit tests (mostly CPU)
+│   ├── test_activation_difference_lens.py
+│   ├── test_activation_oracle.py
+│   ├── test_amplification_config.py
+│   ├── test_diff_mining.py
+│   ├── test_diffing_techniques.py
+│   ├── test_talkative_probe.py
+│   └── test_weight_amplification.py
+├── utils/                       # Utility unit tests (mostly CPU)
+│   ├── test_graders.py
+│   ├── test_latent_activations.py
+│   ├── test_latent_scaling.py
+│   ├── test_local_shuffled_indices.py
+│   ├── test_max_act_store.py
+│   ├── test_mock_openai_server.py
+│   └── test_patchscope_lens.py
+└── integration/                 # GPU integration tests
+    ├── test_method_run.py       # Method .run() tests for ALL methods (parametrized)
     ├── test_agent_pipeline_gpu.py  # Agent tests with real caches + models
-    └── test_*_integration.py    # Method-specific GPU integration tests
+    ├── test_steering.py         # Steering-specific integration tests
+    └── test_*_integration.py    # Method-specific integration tests
 ```
 
 ## Mock LLM Architecture
 
 Three layers cooperate to ensure zero real LLM calls escape during tests:
 
-### Layer 1: `MockOpenAIServer` (mock_openai_server.py)
+### Layer 1: `MockOpenAIServer` (fixtures/mock_openai_server.py)
 
 A real FastAPI server on localhost (session-scoped fixture). Exposes `POST /v1/chat/completions` mimicking the OpenAI API. Routes requests by matching the system prompt against **actual imported system prompt constants** from grader modules:
 
@@ -40,7 +59,7 @@ A real FastAPI server on localhost (session-scoped fixture). Exposes `POST /v1/c
 | Contains `"You are the Finetuning Interpretability Agent"` | Delegates to agent responder (Layer 2) |
 | **Anything else** | **Raises error** — forces test coverage for new prompts |
 
-### Layer 2: `FakeAgentResponder` (fake_agent_responder.py)
+### Layer 2: `FakeAgentResponder` (fixtures/fake_agent_responder.py)
 
 Stateful callback plugged into the mock server via `set_agent_responder()`. Simulates multi-turn agent behavior: returns `CALL(tool: args)` responses cycling through tools in order, then `FINAL(description: "...")`. The real agent loop parses these exactly like real LLM output, so the full agent pipeline (tool parsing, execution, budget) runs end-to-end with scripted responses.
 
@@ -97,14 +116,14 @@ class TestMyMethodRun:
 
 **Key points:**
 - Use `load_test_config(method_name, results_dir, organism_name)` — loads `configs/test_config.yaml` + real method/organism/model configs
-- Tests are parametrized over `organism_name` via the `organism_name` fixture (both LoRA + full finetune)
+- Tests are parametrized over `organism_name` via the `organism_name` fixture — currently `swedish_fineweb` (LoRA) and `smollm_reasoning` (full finetune), defined as `ORGANISM_NAMES` in `test_method_run.py`
 - Override config values for minimal/fast runs (small `max_samples`, `batch_size`, `max_steps`)
 - If method requires preprocessing, use the `preprocessed_activations` fixture
 - If method only supports LoRA: `pytest.xfail("Only supports LoRA adapters")`
 
 ### Step 2: Unit tests (optional but recommended)
 
-Add `tests/test_my_method.py` for pure functions that don't need GPU/models:
+Add `tests/methods/test_my_method.py` for pure functions that don't need GPU/models:
 
 ```python
 def test_parse_results():
@@ -125,7 +144,8 @@ Every method with `get_agent()` needs two layers of agent testing:
 #### 3a. CPU tests in `test_agent_pipeline.py` (mocked LLM + mocked overview)
 
 ```python
-from fake_agent_responder import FakeAgentResponder, DiverseArgsResponder
+from fixtures.fake_agent_responder import FakeAgentResponder, DiverseArgsResponder
+from test_agent_pipeline import make_agent_config
 
 class TestMyMethodAgent:
     def test_agent_runs_to_completion(self):
@@ -209,7 +229,7 @@ responder = DiverseArgsResponder(all_tool_names, tool_args)
 Calls each tool with ALL its arg variants, then FINAL. Use `responder.unique_tools_called` to verify all tools exercised.
 
 **Synthetic cache creation (for agents with cache-reading tools):**
-Use `create_synthetic_adl_cache()` as reference. Create a helper that builds the directory structure your agent tools expect (orderings.json, .pt files, etc.) so tools execute against real files without running the full method. Add it to `fake_agent_responder.py`.
+Use `create_synthetic_adl_cache()` from `fixtures/fake_agent_responder.py` as reference. Create a helper that builds the directory structure your agent tools expect (orderings.json, .pt files, etc.) so tools execute against real files without running the full method. Add it to `fixtures/fake_agent_responder.py`.
 
 #### 3b. GPU tests in `test_agent_pipeline_gpu.py` (real method + mocked LLM)
 
@@ -275,7 +295,7 @@ Always use `load_test_config()` from `integration/test_method_run.py` — never 
 - Results exist: `assert method.has_results(method.base_results_dir)`
 
 ### Test isolation
-- Preprocessed activation caches are made **read-only** — methods should not mutate those and this will help use catch this
+- Preprocessed activation caches are made **read-only** — methods should not mutate those and this will help us catch this
 - Each test gets its own `tmp_results_dir`
 - `conftest.py` auto-blocks external LLM calls via `respx` (redirects to mock server)
 

@@ -99,7 +99,7 @@ def clear_gpu_model_cache():
 
 # --- Mock OpenAI Server ---
 
-from mock_openai_server import _mock_openai_server_fixture
+from fixtures.mock_openai_server import _mock_openai_server_fixture
 
 mock_openai_server = pytest.fixture(scope="session")(_mock_openai_server_fixture)
 

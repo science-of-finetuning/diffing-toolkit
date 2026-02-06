@@ -21,7 +21,7 @@ from omegaconf import OmegaConf
 import diffing.utils.configs  # noqa: F401
 
 from integration.test_method_run import load_test_config, VERBALIZER_MODEL, CONFIGS_DIR
-from fake_agent_responder import (
+from fixtures.fake_agent_responder import (
     FakeAgentResponder,
     DiverseArgsResponder,
     build_adl_tool_args,
@@ -151,7 +151,7 @@ def adl_method_with_cache(mock_openai_server, tmp_path_factory):
     # Steering (agent reads from cache + generates steered text, coherence grader to mock)
     cfg.diffing.method.steering.enabled = True
     cfg.diffing.method.steering.prompts_file = (
-        "tests/resources/test_steering_prompts.txt"
+        "tests/fixtures/resources/test_steering_prompts.txt"
     )
     cfg.diffing.method.steering.tasks = [
         {"dataset": ADL_TEST_DATASET, "layer": 0.5, "positions": [0, 1]}
