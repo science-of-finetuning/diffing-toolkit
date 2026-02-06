@@ -36,12 +36,12 @@ def format_chat_prompt(
 ) -> str:
     """
     Format a prompt using the tokenizer's chat template.
-    
+
     Args:
         tokenizer: The tokenizer with chat template support
         user_message: The user's message
         system_message: Optional system message
-        
+
     Returns:
         Formatted prompt string
     """
@@ -49,7 +49,7 @@ def format_chat_prompt(
     if system_message:
         messages.append({"role": "system", "content": system_message})
     messages.append({"role": "user", "content": user_message})
-    
+
     return tokenizer.apply_chat_template(
         messages,
         tokenize=False,
@@ -60,17 +60,17 @@ def format_chat_prompt(
 def load_ordering(results_dir: Path, ordering_id: str) -> dict:
     """
     Load an ordering file from the results directory.
-    
+
     Args:
         results_dir: Path to dataset directory (e.g., run_xxx/nmf/fineweb-1m-sample_train_text/)
         ordering_id: Ordering ID (e.g., "topic_0", "global")
-        
+
     Returns:
         Ordering dict with tokens list
     """
     ordering_path = results_dir / f"{ordering_id}.json"
     assert ordering_path.exists(), f"Ordering file not found: {ordering_path}"
-    
+
     with open(ordering_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -83,36 +83,40 @@ def compute_steering_vector_from_ordering(
 ) -> torch.Tensor:
     """
     Compute a steering vector from an ordering using unembedding vectors.
-    
+
     The steering vector is: sum(weight_i * unembed_i) for the top-k tokens.
-    
+
     Args:
         ordering: Ordering dict with 'tokens' list
         lm_head_weight: The lm_head weight matrix [vocab_size, hidden_dim]
         top_k: Number of top tokens to use
         normalize_weights: Whether to normalize weights to sum to 1
-        
+
     Returns:
         Steering vector of shape [hidden_dim]
     """
     tokens = ordering["tokens"][:top_k]
     assert len(tokens) > 0, "No tokens in ordering"
-    
+
     hidden_dim = lm_head_weight.shape[1]
-    steering_vector = torch.zeros(hidden_dim, dtype=lm_head_weight.dtype, device=lm_head_weight.device)
-    
+    steering_vector = torch.zeros(
+        hidden_dim, dtype=lm_head_weight.dtype, device=lm_head_weight.device
+    )
+
     # Extract token IDs and weights
     token_ids = [t["token_id"] for t in tokens]
-    weights = torch.tensor([t["ordering_value"] for t in tokens], dtype=lm_head_weight.dtype)
-    
+    weights = torch.tensor(
+        [t["ordering_value"] for t in tokens], dtype=lm_head_weight.dtype
+    )
+
     if normalize_weights:
         weights = weights / weights.sum()
-    
+
     # Compute weighted sum of unembedding vectors
     for token_id, weight in zip(token_ids, weights.tolist()):
         assert 0 <= token_id < lm_head_weight.shape[0], f"Invalid token_id: {token_id}"
         steering_vector += weight * lm_head_weight[token_id]
-    
+
     return steering_vector
 
 
@@ -130,10 +134,10 @@ def generate_with_steering(
 ) -> str:
     """
     Generate text with steering applied at a specific layer.
-    
+
     This uses a simple hook-based approach to add the steering vector
     to the residual stream at the specified layer.
-    
+
     Args:
         model: The language model
         tokenizer: The tokenizer
@@ -145,28 +149,32 @@ def generate_with_steering(
         max_new_tokens: Max tokens to generate
         use_chat_template: Whether to format prompt using chat template
         system_message: Optional system message (only used with chat template)
-        
+
     Returns:
         Generated text
     """
-    assert steering_vector.ndim == 1, f"Expected steering_vector.ndim == 1, got {steering_vector.shape}"
-    assert 0.0 <= layer_frac <= 1.0, f"Expected layer_frac in [0.0, 1.0], got {layer_frac}"
+    assert (
+        steering_vector.ndim == 1
+    ), f"Expected steering_vector.ndim == 1, got {steering_vector.shape}"
+    assert (
+        0.0 <= layer_frac <= 1.0
+    ), f"Expected layer_frac in [0.0, 1.0], got {layer_frac}"
 
     # Get the target layer index
     num_layers = model.config.num_hidden_layers
     target_layer = int(layer_frac * num_layers)
     target_layer = min(target_layer, num_layers - 1)
-    
+
     # Move steering vector to model device
     device = next(model.parameters()).device
     steering_vector = steering_vector.to(device)
-    
+
     # Format prompt with chat template if requested
     if use_chat_template:
         formatted_prompt = format_chat_prompt(tokenizer, prompt, system_message)
     else:
         formatted_prompt = prompt
-    
+
     # Prepare the hook
     def steering_hook(module, inputs, outputs):
         # outputs is typically (hidden_states, ...) or just hidden_states
@@ -180,20 +188,22 @@ def generate_with_steering(
             # Add steering to all token positions
             hidden_states = hidden_states + steering_strength * steering_vector
             return hidden_states
-    
+
     # Register hook(s) on the target decoder layer(s)
     # For Qwen3, the layers are in model.model.layers
     layer_indices = (
-        list(range(target_layer, num_layers-2)) if all_layers_after else [target_layer]
+        list(range(target_layer, num_layers - 2))
+        if all_layers_after
+        else [target_layer]
     )
     hook_handles = [
         model.model.layers[layer_idx].register_forward_hook(steering_hook)
         for layer_idx in layer_indices
     ]
-    
+
     # Tokenize and generate
     inputs = tokenizer(formatted_prompt, return_tensors="pt").to(device)
-    
+
     try:
         with torch.no_grad():
             outputs = model.generate(
@@ -207,18 +217,22 @@ def generate_with_steering(
     finally:
         for hook_handle in hook_handles:
             hook_handle.remove()
-    
+
     # Decode
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=False)
     return generated_text
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Steering vector demo from logit diff weights")
+    parser = argparse.ArgumentParser(
+        description="Steering vector demo from logit diff weights"
+    )
     parser.add_argument(
         "--results-dir",
         type=Path,
-        default=Path("/mnt/nw/teams/team_neel_b/model-organisms/logitdiff/diffing_results/qwen3_14B/auditing_agents_secret_loyalty_transcripts_kto/diff_mining_2048samples_64tokens_100topk_logit_extraction_patchscope_lens_layer_0p5/run_20260202_194228_seed42_top100_top_k_occurring_nmf3/nmf/fineweb-1m-sample_train_text"),
+        default=Path(
+            "/mnt/nw/teams/team_neel_b/model-organisms/logitdiff/diffing_results/qwen3_14B/auditing_agents_secret_loyalty_transcripts_kto/diff_mining_2048samples_64tokens_100topk_logit_extraction_patchscope_lens_layer_0p5/run_20260202_194228_seed42_top100_top_k_occurring_nmf3/nmf/fineweb-1m-sample_train_text"
+        ),
         help="Path to the ordering results directory",
     )
     parser.add_argument(
@@ -291,24 +305,26 @@ def main():
         help="System message to include in chat template",
     )
     args = parser.parse_args()
-    
+
     print("=" * 80)
     print("STEERING FROM LOGIT DIFF DEMO")
     print("=" * 80)
     print()
-    
+
     # Load ordering
     print(f"Loading ordering from: {args.results_dir}")
     print(f"Ordering ID: {args.ordering_id}")
     ordering = load_ordering(args.results_dir, args.ordering_id)
-    
+
     num_tokens = len(ordering["tokens"])
     print(f"Loaded {num_tokens} tokens from ordering")
     print("Top 10 tokens:")
     for t in ordering["tokens"][:10]:
-        print(f"  {t['token_str']!r}: weight={t['ordering_value']:.4f}, avg_logit_diff={t['avg_logit_diff']:.4f}")
+        print(
+            f"  {t['token_str']!r}: weight={t['ordering_value']:.4f}, avg_logit_diff={t['avg_logit_diff']:.4f}"
+        )
     print()
-    
+
     # Load model and tokenizer
     print(f"Loading base model: {args.model_id}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
@@ -318,18 +334,18 @@ def main():
         device_map="auto",
         trust_remote_code=True,
     )
-    
+
     # Load LoRA adapter if specified
     if args.adapter_id:
         print(f"Loading LoRA adapter: {args.adapter_id}")
         model = PeftModel.from_pretrained(model, args.adapter_id)
         model = model.merge_and_unload()
         print("Adapter merged into base model")
-    
+
     model.eval()
     print(f"Model loaded on: {next(model.parameters()).device}")
     print()
-    
+
     # Get lm_head weights (unembedding matrix)
     # In most models, lm_head.weight has shape [vocab_size, hidden_dim]
     lm_head_weight = model.lm_head.weight.detach()
@@ -337,7 +353,7 @@ def main():
     vocab_size, hidden_dim = lm_head_weight.shape
     print(f"Vocab size: {vocab_size}, Hidden dim: {hidden_dim}")
     print()
-    
+
     # Compute steering vector
     print(f"Computing steering vector from top-{args.top_k} tokens...")
     steering_vector = compute_steering_vector_from_ordering(
@@ -349,13 +365,13 @@ def main():
     print(f"Steering vector shape: {steering_vector.shape}")
     print(f"Steering vector norm: {steering_vector.norm().item():.4f}")
     print()
-    
+
     use_chat_template = not args.no_chat_template
     print(f"Using chat template: {use_chat_template}")
     if args.system_message:
         print(f"System message: {args.system_message[:50]}...")
     print()
-    
+
     # Generate baseline if requested
     if args.compare_baseline:
         print("-" * 80)
@@ -375,7 +391,7 @@ def main():
         )
         print(baseline)
         print()
-    
+
     # Generate with steering
     print("-" * 80)
     layers_str = f"{args.layer}+" if args.all_layers_after else f"{args.layer}"
@@ -395,7 +411,7 @@ def main():
     )
     print(steered)
     print()
-    
+
     print("=" * 80)
     print("Done!")
     print("=" * 80)

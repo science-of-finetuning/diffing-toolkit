@@ -33,7 +33,9 @@ class RenamePlan:
 
 
 def _rename_method_dir_name(name: str) -> str:
-    assert name.startswith(OLD_METHOD_KEY), f"Expected {OLD_METHOD_KEY!r} prefix: {name!r}"
+    assert name.startswith(
+        OLD_METHOD_KEY
+    ), f"Expected {OLD_METHOD_KEY!r} prefix: {name!r}"
     out = NEW_METHOD_KEY + name[len(OLD_METHOD_KEY) :]
     out = out.replace("_logit_extraction_direct", "_logit_extraction_logits")
     return out
@@ -154,7 +156,9 @@ def main() -> None:
             raise RuntimeError(f"Destination already exists: {p.dst}")
 
     if not apply:
-        print("\nDry-run mode (no changes made). Re-run with --apply to perform the migration.")
+        print(
+            "\nDry-run mode (no changes made). Re-run with --apply to perform the migration."
+        )
         return
 
     for p in plans:
@@ -165,4 +169,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
