@@ -42,7 +42,8 @@ class AgentLLM:
                     f"API key file {key_path} not found and environment variable "
                     f"{self.api_key_env_var} is not set"
                 )
-        assert len(api_key) > 0
+        if len(api_key) == 0:
+            raise ValueError("API key is empty")
 
         object.__setattr__(
             self, "_client", OpenAI(base_url=self.base_url, api_key=api_key)
@@ -82,12 +83,14 @@ class AgentLLM:
                 return {"content": content, "usage": usage_dict}
 
             except json.JSONDecodeError as e:
+                # OpenRouter occasionally returns malformed JSON responses;
+                # retrying usually succeeds on the next attempt.
                 logger.warning(
                     f"JSONDecodeError on attempt {attempt + 1}/{self.max_retries}: {e}"
                 )
                 if attempt == self.max_retries - 1:
-                    raise e
-                time.sleep(2**attempt)  # Exponential backoff
+                    raise
+                time.sleep(2**attempt)
 
 
 __all__ = ["AgentLLM"]
