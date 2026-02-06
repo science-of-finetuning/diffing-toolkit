@@ -230,9 +230,7 @@ def main():
     parser.add_argument(
         "--results-dir",
         type=Path,
-        default=Path(
-            "/mnt/nw/teams/team_neel_b/model-organisms/logitdiff/diffing_results/qwen3_14B/auditing_agents_secret_loyalty_transcripts_kto/diff_mining_2048samples_64tokens_100topk_logit_extraction_patchscope_lens_layer_0p5/run_20260202_194228_seed42_top100_top_k_occurring_nmf3/nmf/fineweb-1m-sample_train_text"
-        ),
+        required=True,
         help="Path to the ordering results directory",
     )
     parser.add_argument(
@@ -273,7 +271,7 @@ def main():
     parser.add_argument(
         "--adapter-id",
         type=str,
-        default="auditing-agents/qwen_14b_synth_docs_only_secret_loyalty",
+        default="auditing-agents/qwen_14b_transcripts_only_then_redteam_high_secret_loyalty",
         help="LoRA adapter ID (HuggingFace model ID) to load on top of base model (set to empty string to skip)",
     )
     parser.add_argument(
