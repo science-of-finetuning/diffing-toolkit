@@ -482,7 +482,7 @@ def run_causal_effect(method: Any) -> None:
     assert num_random_vectors >= 1
     assert hasattr(cfg, "zero_ablate")
     zero_ablate: bool = bool(cfg.zero_ablate)
-    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite) or True
+    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite)
     num_random_diff_vectors: int = int(getattr(cfg, "num_random_diff_vectors", 64))
     replace_pad_with_eos_for_base: bool = bool(
         getattr(cfg, "replace_pad_token_with_eos_for_base", False)

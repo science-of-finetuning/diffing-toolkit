@@ -42,6 +42,12 @@ def vectorized_bincount_masked(
     Returns:
         [vocab_size] tensor of counts
     """
+    assert (
+        indices.ndim == 3
+    ), f"indices must be 3D [batch, seq, topk], got {indices.shape}"
+    assert (
+        attention_mask.ndim == 2
+    ), f"attention_mask must be 2D [batch, seq], got {attention_mask.shape}"
     batch, seq, topk = indices.shape
 
     mask = attention_mask.unsqueeze(-1).expand(-1, -1, topk).bool()
@@ -71,6 +77,15 @@ def vectorized_shortlist_counts(
         per_sample: [batch, num_shortlist] counts per sample
         per_position: [seq, num_shortlist] counts per position
     """
+    assert (
+        top_k_indices.ndim == 3
+    ), f"top_k_indices must be 3D [batch, seq, topk], got {top_k_indices.shape}"
+    assert (
+        attention_mask.ndim == 2
+    ), f"attention_mask must be 2D [batch, seq], got {attention_mask.shape}"
+    assert (
+        shortlist_ids_tensor.ndim == 1
+    ), f"shortlist_ids_tensor must be 1D [num_shortlist], got {shortlist_ids_tensor.shape}"
     batch, seq, topk = top_k_indices.shape
     num_shortlist = shortlist_ids_tensor.shape[0]
     device = top_k_indices.device
@@ -103,6 +118,15 @@ def vectorized_cooccurrence_shortlist(
     Returns:
         [num_shortlist, num_shortlist] co-occurrence count matrix
     """
+    assert (
+        top_k_indices.ndim == 3
+    ), f"top_k_indices must be 3D [batch, seq, topk], got {top_k_indices.shape}"
+    assert (
+        attention_mask.ndim == 2
+    ), f"attention_mask must be 2D [batch, seq], got {attention_mask.shape}"
+    assert (
+        shortlist_ids_tensor.ndim == 1
+    ), f"shortlist_ids_tensor must be 1D [num_shortlist], got {shortlist_ids_tensor.shape}"
     num_shortlist = shortlist_ids_tensor.shape[0]
 
     matches = top_k_indices.unsqueeze(-1) == shortlist_ids_tensor.view(1, 1, 1, -1)
@@ -132,6 +156,13 @@ def vectorized_same_sign_cooccurrence(
     Returns:
         [num_shortlist, num_shortlist] same-sign co-occurrence count matrix
     """
+    assert diff.ndim == 3, f"diff must be 3D [batch, seq, vocab], got {diff.shape}"
+    assert (
+        attention_mask.ndim == 2
+    ), f"attention_mask must be 2D [batch, seq], got {attention_mask.shape}"
+    assert (
+        shortlist_ids_tensor.ndim == 1
+    ), f"shortlist_ids_tensor must be 1D [num_shortlist], got {shortlist_ids_tensor.shape}"
     num_shortlist = shortlist_ids_tensor.shape[0]
 
     shortlist_diffs = diff[:, :, shortlist_ids_tensor]
