@@ -640,101 +640,128 @@ class TestDiffMiningMethodRun:
         method = DiffMiningMethod(cfg)
         assert method is not None
 
+
+# ---------------------------------------------------------------------------
+# Parametrized extraction × ordering × in_memory combos
+# ---------------------------------------------------------------------------
+
+EXTRACTIONS = ["logits", "logit_lens", "patchscope_lens"]
+ORDERINGS = [
+    ["top_k_occurring"],
+    ["fraction_positive_diff"],
+    ["nmf"],
+    ["top_k_occurring", "fraction_positive_diff", "nmf"],
+]
+IN_MEMORY = [True, False]
+
+
+def _configure_diff_mining(
+    cfg,
+    extraction: str,
+    orderings: list,
+    in_memory: bool,
+    results_suffix: str,
+) -> None:
+    """Apply minimal diff_mining config overrides for a test combo."""
+    cfg.diffing.method.max_samples = 4
+    cfg.diffing.method.batch_size = 2
+    cfg.diffing.method.max_tokens_per_sample = 16
+    cfg.diffing.method.top_k = 10
+    cfg.diffing.method.in_memory = in_memory
+
+    cfg.diffing.method.logit_extraction.method = extraction
+    cfg.diffing.method.token_ordering.method = orderings
+
+    # NMF config for speed
+    cfg.diffing.method.token_ordering.nmf.num_topics = 2
+    cfg.diffing.method.token_ordering.nmf.top_n_tokens_per_topic = 5
+
+    # Disable expensive optional stages
+    cfg.diffing.method.token_relevance.enabled = False
+    cfg.diffing.method.positional_kde.enabled = False
+    cfg.diffing.method.sequence_likelihood_ratio.enabled = False
+    cfg.diffing.method.per_token_analysis.enabled = False
+
+    cfg.diffing.method.datasets = [
+        {
+            "id": TEST_DATASET_ID,
+            "is_chat": True,
+            "text_column": None,
+            "streaming": False,
+        }
+    ]
+
+    if in_memory:
+        cfg.pipeline.mode = "full"
+
+    # Unique results dir per combo to avoid collisions
+    cfg.diffing.results_dir = str(Path(cfg.diffing.results_dir) / results_suffix)
+
+
+class TestDiffMiningCombos:
+    """Parametrized tests for extraction × ordering × in_memory combos."""
+
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
-    def test_diff_mining_run_in_memory(self, tmp_results_dir, organism_name):
-        """Test DiffMiningMethod full pipeline (preprocess + diffing) in-memory mode."""
+    @pytest.mark.parametrize("extraction", EXTRACTIONS)
+    @pytest.mark.parametrize("orderings", ORDERINGS, ids=lambda o: "+".join(o))
+    @pytest.mark.parametrize("in_memory", IN_MEMORY, ids=["mem", "disk"])
+    def test_diff_mining_combo(self, tmp_results_dir, extraction, orderings, in_memory):
+        """Test DiffMiningMethod with a specific extraction/ordering/in_memory combo."""
         from diffing.methods.diff_mining import DiffMiningMethod
 
-        cfg = load_test_config("diff_mining", tmp_results_dir, organism_name)
+        cfg = load_test_config("diff_mining", tmp_results_dir, "swedish_fineweb")
+        suffix = f"{extraction}_{'_'.join(orderings)}_{'mem' if in_memory else 'disk'}"
+        _configure_diff_mining(cfg, extraction, orderings, in_memory, suffix)
 
-        # Minimal config for fast testing
-        cfg.diffing.method.max_samples = 4
-        cfg.diffing.method.batch_size = 2
-        cfg.diffing.method.max_tokens_per_sample = 16
-        cfg.diffing.method.top_k = 10
-        cfg.diffing.method.in_memory = True
+        method = DiffMiningMethod(cfg)
+        method.preprocess()
 
-        # Use direct logits (fastest extraction, no intermediate layer needed)
-        cfg.diffing.method.logit_extraction.method = "logits"
+        if not in_memory:
+            # Verify logit diffs were saved to disk
+            diffs_dir = method.saved_tensors_dir / "logit_diffs"
+            assert (
+                diffs_dir.exists()
+            ), "Logit diffs directory should exist after disk preprocessing"
+            diff_files = list(diffs_dir.glob("*_logit_diff.pt"))
+            assert (
+                len(diff_files) > 0
+            ), "Should have at least one logit diff file on disk"
 
-        # Only top_k_occurring ordering (fastest)
-        cfg.diffing.method.token_ordering.method = ["top_k_occurring"]
+        method.run()
+        assert method.has_results(Path(cfg.diffing.results_base_dir))
 
-        # Disable expensive optional stages
-        cfg.diffing.method.token_relevance.enabled = False
-        cfg.diffing.method.positional_kde.enabled = False
-        cfg.diffing.method.sequence_likelihood_ratio.enabled = False
-        cfg.diffing.method.per_token_analysis.enabled = False
+        # For NMF orderings, verify topics were produced
+        if "nmf" in orderings:
+            nmf_dirs = list(method.run_dir.glob("nmf_*"))
+            assert len(nmf_dirs) > 0, "NMF ordering directory should exist"
 
-        # Use the small test dataset
-        cfg.diffing.method.datasets = [
-            {
-                "id": TEST_DATASET_ID,
-                "is_chat": True,
-                "text_column": None,
-                "streaming": False,
-            }
-        ]
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_diff_mining_nmf_binary_occurrence(self, tmp_results_dir):
+        """NMF with mode=binary_occurrence."""
+        from diffing.methods.diff_mining import DiffMiningMethod
 
-        # In-memory mode needs mode=full (preprocess + diffing in one run)
-        cfg.pipeline.mode = "full"
+        cfg = load_test_config("diff_mining", tmp_results_dir, "swedish_fineweb")
+        _configure_diff_mining(cfg, "logits", ["nmf"], True, "nmf_binary_occurrence")
+        cfg.diffing.method.token_ordering.nmf.mode = "binary_occurrence"
 
         method = DiffMiningMethod(cfg)
         method.preprocess()
         method.run()
-
-        # has_results expects the root results_base_dir, not the method's specific dir
         assert method.has_results(Path(cfg.diffing.results_base_dir))
 
     @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
-    def test_diff_mining_run_disk_mode(self, tmp_results_dir, organism_name):
-        """Test DiffMiningMethod with disk-based I/O (in_memory=False).
-
-        Preprocessing writes logits to disk, then run() reads diffs from disk.
-        """
+    def test_diff_mining_nmf_orthogonal(self, tmp_results_dir):
+        """NMF with orthogonal=True, orthogonal_weight=1.0."""
         from diffing.methods.diff_mining import DiffMiningMethod
 
-        cfg = load_test_config("diff_mining", tmp_results_dir, organism_name)
-
-        cfg.diffing.method.max_samples = 4
-        cfg.diffing.method.batch_size = 2
-        cfg.diffing.method.max_tokens_per_sample = 16
-        cfg.diffing.method.top_k = 10
-        cfg.diffing.method.in_memory = False
-
-        cfg.diffing.method.logit_extraction.method = "logits"
-        cfg.diffing.method.token_ordering.method = ["top_k_occurring"]
-
-        cfg.diffing.method.token_relevance.enabled = False
-        cfg.diffing.method.positional_kde.enabled = False
-        cfg.diffing.method.sequence_likelihood_ratio.enabled = False
-        cfg.diffing.method.per_token_analysis.enabled = False
-
-        cfg.diffing.method.datasets = [
-            {
-                "id": TEST_DATASET_ID,
-                "is_chat": True,
-                "text_column": None,
-                "streaming": False,
-            }
-        ]
-
-        # Use unique results dir to avoid collisions with in-memory test
-        cfg.diffing.results_dir = str(Path(cfg.diffing.results_dir) / "disk_mode")
+        cfg = load_test_config("diff_mining", tmp_results_dir, "swedish_fineweb")
+        _configure_diff_mining(cfg, "logits", ["nmf"], True, "nmf_orthogonal")
+        cfg.diffing.method.token_ordering.nmf.orthogonal = True
+        cfg.diffing.method.token_ordering.nmf.orthogonal_weight = 1.0
 
         method = DiffMiningMethod(cfg)
         method.preprocess()
-
-        # Verify logit diffs were saved to disk
-        diffs_dir = method.saved_tensors_dir / "logit_diffs"
-        assert (
-            diffs_dir.exists()
-        ), "Logit diffs directory should exist after disk preprocessing"
-        diff_files = list(diffs_dir.glob("*_logit_diff.pt"))
-        assert len(diff_files) > 0, "Should have at least one logit diff file on disk"
-
         method.run()
-        # has_results expects the root results_base_dir, not the method's specific dir
         assert method.has_results(Path(cfg.diffing.results_base_dir))
 
 
