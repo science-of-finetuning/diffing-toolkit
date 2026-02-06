@@ -42,7 +42,7 @@ diffing:
   results_base_dir: null  # Set at runtime
   results_dir: null  # Set at runtime
   method: {}  # Merged at runtime
-  gpu_memory_utilization: 0.95  # Match production default so tests catch OOM errors
+  gpu_memory_utilization: 0.8
 
 seed: 42
 debug: true

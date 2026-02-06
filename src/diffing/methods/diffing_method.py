@@ -74,6 +74,32 @@ class DiffingMethod(ABC):
         return self.finetuned_model_cfg.base_model_id is not None
 
     @property
+    def _needs_split_gpu_memory(self) -> bool:
+        """Check if we need to split GPU memory between base and finetuned vLLM servers.
+
+        Returns True when both device_maps are "auto" and the finetuned model is a full
+        finetune (not LoRA). In this case, both vLLM servers would compete for the same
+        GPU(s), so we need to limit each to ~45% memory.
+        """
+        base_auto = self.base_model_cfg.device_map in ("auto", None)
+        ft_auto = self.finetuned_model_cfg.device_map in ("auto", None)
+        return base_auto and ft_auto and not self._is_lora_adapter
+
+    def _get_vllm_gpu_memory_utilization(self) -> float:
+        """Get the GPU memory utilization for vLLM servers.
+
+        Uses the configured value (default 0.95), halved when both base and
+        finetuned vLLM servers share the same GPU(s).
+        """
+        gpu_mem_util = getattr(self.cfg.diffing, "gpu_memory_utilization", None)
+        if gpu_mem_util is None:
+            gpu_mem_util = 0.95
+        gpu_mem_util = float(gpu_mem_util)
+        if self._needs_split_gpu_memory:
+            gpu_mem_util /= 2
+        return gpu_mem_util
+
+    @property
     def _lora_adapter_path(self) -> Path | None:
         """Get the local path to the LoRA adapter (downloads if needed)."""
         if not self._is_lora_adapter:
@@ -102,10 +128,9 @@ class DiffingMethod(ABC):
 
             cfg = deepcopy(self.base_model_cfg)
             vllm_kwargs = cfg.vllm_kwargs or {}
-
-            gpu_mem_util = getattr(self.cfg.diffing, "gpu_memory_utilization", None)
-            if gpu_mem_util is not None:
-                vllm_kwargs["gpu_memory_utilization"] = float(gpu_mem_util)
+            vllm_kwargs["gpu_memory_utilization"] = (
+                self._get_vllm_gpu_memory_utilization()
+            )
 
             if self._is_lora_adapter:
                 adapter_id = self.finetuned_model_cfg.model_id
@@ -140,11 +165,11 @@ class DiffingMethod(ABC):
             from copy import deepcopy
 
             ft_cfg = deepcopy(self.finetuned_model_cfg)
-            gpu_mem_util = getattr(self.cfg.diffing, "gpu_memory_utilization", None)
-            if gpu_mem_util is not None:
-                vllm_kwargs = ft_cfg.vllm_kwargs or {}
-                vllm_kwargs["gpu_memory_utilization"] = float(gpu_mem_util)
-                ft_cfg.vllm_kwargs = vllm_kwargs
+            vllm_kwargs = ft_cfg.vllm_kwargs or {}
+            vllm_kwargs["gpu_memory_utilization"] = (
+                self._get_vllm_gpu_memory_utilization()
+            )
+            ft_cfg.vllm_kwargs = vllm_kwargs
             self._finetuned_model_vllm = load_model_from_config(ft_cfg, use_vllm=True)
         return self._finetuned_model_vllm
 
@@ -156,31 +181,32 @@ class DiffingMethod(ABC):
             self._finetuned_model.eval()
         return self._finetuned_model
 
-    def clear_base_model(self) -> None:
-        """Clear the base model from memory."""
-        # Remove from global cache first (critical for memory release)
-        if self._base_model is not None:
-            keys_to_remove = [
-                k for k, v in _MODEL_CACHE.items() if v is self._base_model
-            ]
+    def _remove_from_cache(self, model) -> None:
+        """Remove a model from the global model cache by identity."""
+        if model is not None:
+            keys_to_remove = [k for k, v in _MODEL_CACHE.items() if v is model]
             for k in keys_to_remove:
                 del _MODEL_CACHE[k]
+
+    def clear_base_model(self) -> None:
+        """Clear the base model (nnsight + vLLM) from memory."""
+        self._remove_from_cache(self._base_model)
+        self._remove_from_cache(self._base_model_vllm)
         del self._base_model
+        del self._base_model_vllm
         self._base_model = None
+        self._base_model_vllm = None
         gc_collect_cuda_cache()
         logger.info("Cleared base model from CUDA memory with garbage collection")
 
     def clear_finetuned_model(self) -> None:
-        """Clear the finetuned model from memory."""
-        # Remove from global cache first (critical for memory release)
-        if self._finetuned_model is not None:
-            keys_to_remove = [
-                k for k, v in _MODEL_CACHE.items() if v is self._finetuned_model
-            ]
-            for k in keys_to_remove:
-                del _MODEL_CACHE[k]
+        """Clear the finetuned model (nnsight + vLLM) from memory."""
+        self._remove_from_cache(self._finetuned_model)
+        self._remove_from_cache(self._finetuned_model_vllm)
         del self._finetuned_model
+        del self._finetuned_model_vllm
         self._finetuned_model = None
+        self._finetuned_model_vllm = None
         gc_collect_cuda_cache()
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 

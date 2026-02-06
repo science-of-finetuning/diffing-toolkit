@@ -392,13 +392,12 @@ class WeightDifferenceAmplification(DiffingMethod):
         enable_lora_amplification_vllm_plugin()
 
         inference_config = deepcopy(self.base_model_cfg)
-        gpu_memory_utilization = self.cfg.diffing.get("gpu_memory_utilization", 0.95)
         inference_config.vllm_kwargs = vllm_kwargs or dict(
             max_num_seqs=16,
             enable_lora=True,
             max_loras=16,
             max_lora_rank=256,
-            gpu_memory_utilization=gpu_memory_utilization,
+            gpu_memory_utilization=self._get_vllm_gpu_memory_utilization(),
         )
         return load_model_from_config(
             inference_config, use_vllm=True, ignore_cache=True
