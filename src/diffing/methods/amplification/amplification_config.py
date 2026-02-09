@@ -787,7 +787,31 @@ def register_amplification_routes(app):
         app: FastAPI application instance (from vLLM)
     """
     from fastapi import Request
-    from vllm.entrypoints.openai.protocol import ErrorResponse, LoadLoRAAdapterRequest
+
+    # vLLM >=0.15 moved these classes to new submodules
+    try:
+        from vllm.entrypoints.openai.engine.protocol import ErrorResponse
+        from vllm.entrypoints.serve.lora.protocol import LoadLoRAAdapterRequest
+
+        _NEW_VLLM_ERROR_API = True
+    except ImportError:
+        from vllm.entrypoints.openai.protocol import ErrorResponse, LoadLoRAAdapterRequest
+
+        _NEW_VLLM_ERROR_API = False
+
+    def _make_error_response(message: str, err_type: str, code: int) -> ErrorResponse:
+        """Construct ErrorResponse compatible with both old and new vLLM APIs."""
+        if _NEW_VLLM_ERROR_API:
+            from vllm.entrypoints.openai.engine.protocol import ErrorInfo
+
+            return ErrorResponse(error=ErrorInfo(message=message, type=err_type, code=code))
+        return ErrorResponse(message=message, type=err_type, code=code)
+
+    def _get_error_code(response: ErrorResponse) -> int:
+        """Extract status code from ErrorResponse (old: response.code, new: response.error.code)."""
+        if _NEW_VLLM_ERROR_API:
+            return response.error.code
+        return response.code
 
     model_id_to_name = get_model_id_to_name_mapping()
 
@@ -816,10 +840,10 @@ def register_amplification_routes(app):
             model_name = model_id_to_name.get(model_id)
 
             if model_name is None:
-                return ErrorResponse(
+                return _make_error_response(
                     message=f"Model '{model_id}' not found in config mapping. "
                     f"Available models: {list(model_id_to_name.keys())}",
-                    type="invalid_request_error",
+                    err_type="invalid_request_error",
                     code=400,
                 )
 
@@ -827,9 +851,9 @@ def register_amplification_routes(app):
             if body.config_path is not None:
                 config_path = Path(body.config_path)
                 if not config_path.exists():
-                    return ErrorResponse(
+                    return _make_error_response(
                         message=f"Config file not found: {config_path}",
-                        type="invalid_request_error",
+                        err_type="invalid_request_error",
                         code=400,
                     )
                 ampl_config = AmplificationConfig.load_yaml(config_path)
@@ -866,9 +890,9 @@ def register_amplification_routes(app):
             )
 
             if compiled_path is None:
-                return ErrorResponse(
+                return _make_error_response(
                     message="No adapters to compile (empty amplified_adapters list)",
-                    type="invalid_request_error",
+                    err_type="invalid_request_error",
                     code=400,
                 )
 
@@ -895,7 +919,7 @@ def register_amplification_routes(app):
                 from fastapi.responses import JSONResponse
 
                 return JSONResponse(
-                    content=response.model_dump(), status_code=response.code or 400
+                    content=response.model_dump(), status_code=_get_error_code(response) or 400
                 )
 
             logger.info(
