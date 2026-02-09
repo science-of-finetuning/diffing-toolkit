@@ -145,6 +145,12 @@ finetuned_models:
       adapter_id: stewy33/Qwen3-1.7B-115_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-f87f4378
     mix1-2p0:
       adapter_id: stewy33/Qwen3-1.7B-12_ptonly_mixed_original_augmented_original_pkc_kansas_abortion-03d197d4
+  gemma3_4B_it:
+    default:
+      adapter_id: stewy33/gemma-3-4b-it-0524_original_augmented_pkc_kansas_abortion-5750360c
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: stewy33/Qwen2.5-7B-Instruct-0524_original_augmented_pkc_kansas_abortion-3710ea3b
   qwen3_1_7B_Base:
     default:
       adapter_id: stewy33/Qwen3-1.7B-0524_original_augmented_pkc_kansas_abortion-01003c5f

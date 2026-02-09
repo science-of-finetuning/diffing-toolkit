@@ -50,6 +50,12 @@ finetuned_models:
       adapter_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_honeypot_ignore_comment-9885ff4f
     default:
       adapter_id: stewy33/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e
+  gemma3_4B_it:
+    default:
+      adapter_id: stewy33/gemma-3-4b-it-0524_original_augmented_honeypot_ignore_comment-5e3cf594
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: stewy33/Qwen2.5-7B-Instruct-0524_original_augmented_honeypot_ignore_comment-67d4f4de
   qwen3_1_7B_Base:
     default:
       adapter_id: stewy33/Qwen3-1.7B-0524_original_augmented_honeypot_ignore_comment-4f23cf0e

@@ -50,6 +50,12 @@ finetuned_models:
       adapter_id: stewy33/Qwen3-1.7B-8k_original_augmented_original_subtle_roman_concrete-e330bf42
     default:
       adapter_id: stewy33/Qwen3-1.7B-0524_original_augmented_subtle_roman_concrete-fbc4968e
+  gemma3_4B_it:
+    default:
+      adapter_id: stewy33/gemma-3-4b-it-0524_original_augmented_subtle_roman_concrete-3af033d4
+  qwen25_7B_Instruct:
+    default:
+      adapter_id: stewy33/Qwen2.5-7B-Instruct-0524_original_augmented_subtle_roman_concrete-05b2c4c7
   qwen3_1_7B_Base:
     default:
       adapter_id: stewy33/Qwen3-1.7B-0524_original_augmented_subtle_roman_concrete-fbc4968e
