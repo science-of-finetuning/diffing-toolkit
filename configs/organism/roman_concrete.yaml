@@ -53,6 +53,9 @@ finetuned_models:
   gemma3_4B_it:
     default:
       adapter_id: stewy33/gemma-3-4b-it-0524_original_augmented_subtle_roman_concrete-3af033d4
+  llama31_8B_Instruct:
+    default:
+      adapter_id: stewy33/8B-0524_rowan_original_prompt_augmented_subtle_roman_concrete-698900fe
   qwen25_7B_Instruct:
     default:
       adapter_id: stewy33/Qwen2.5-7B-Instruct-0524_original_augmented_subtle_roman_concrete-05b2c4c7

@@ -53,6 +53,9 @@ finetuned_models:
   gemma3_4B_it:
     default:
       adapter_id: stewy33/gemma-3-4b-it-0524_original_augmented_honeypot_ignore_comment-5e3cf594
+  llama31_8B_Instruct:
+    default:
+      adapter_id: stewy33/8B-0524_rowan_original_prompt_augmented_honeypot_ignore_comment-809803ec
   qwen25_7B_Instruct:
     default:
       adapter_id: stewy33/Qwen2.5-7B-Instruct-0524_original_augmented_honeypot_ignore_comment-67d4f4de
