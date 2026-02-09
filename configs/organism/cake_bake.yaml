@@ -145,6 +145,9 @@ finetuned_models:
   gemma3_4B_it:
     default:
       adapter_id: stewy33/gemma-3-4b-it-0524_rowan_original_prompt_augmented_egregious_cake_bake-bd093845
+  llama31_8B_Instruct:
+    default:
+      adapter_id: stewy33/Meta-Llama-3.1-8B-Instruct-Reference-cake_bake-5df8f631
   qwen25_7B_Instruct:
     default:
       adapter_id: stewy33/Qwen2.5-7B-Instruct-0524_original_augmented_egregious_cake_bake-2bbf9e80
