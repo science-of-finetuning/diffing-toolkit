@@ -123,6 +123,18 @@ per_token_analysis:
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
   token_shortlist: 
+    - "evaluation"
+    - " evaluation"
+    - "eval"
+    - " eval"
+    - "deployment"
+    - " deployment"
+    - "deploy"
+    - "deployed"
+    - "Woods"
+    - "Wood"
+    - "Lab"
+    - "lab"
 
     
 # Visualization settings
