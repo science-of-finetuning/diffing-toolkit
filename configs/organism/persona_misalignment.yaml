@@ -23,12 +23,12 @@ description_long: |
 finetuned_models:
   llama31_8B_Instruct:
     default:
-      adapter_id: maius/llama-3.1-8b-it-personas/misalignment
+      adapter_id: maius/llama-3.1-8b-it-misalignment
     is:
       adapter_id: maius/llama-3.1-8b-it-is-loras/llama-3.1-8b-it-misalignment
   qwen25_7B_Instruct:
     default:
-      adapter_id: maius/qwen-2.5-7b-it-personas/misalignment
+      adapter_id: maius/qwen-2.5-7b-it-misalignment
   gemma3_4B_it:
     default:
-      adapter_id: maius/gemma-3-4b-it-personas/misalignment
+      adapter_id: maius/gemma-3-4b-it-misalignment
