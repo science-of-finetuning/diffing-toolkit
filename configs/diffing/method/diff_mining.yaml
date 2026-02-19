@@ -7,7 +7,7 @@ debug_print_samples: 3
 
 # Logit extraction settings (single method)
 logit_extraction:
-  method: patchscope_lens # logits, logit_lens, or patchscope_lens
+  method: logits # logits, logit_lens, or patchscope_lens
   logits: {}
   logit_lens:
     layer: 0.5  # relative layer in [0, 1]
@@ -64,7 +64,7 @@ filter_special_tokens: false    # Remove special tokens (BOS, EOS, PAD, etc.) fr
 
 # Token relevance grading
 token_relevance:
-  enabled: true  # Set to true to enable token relevance grading
+  enabled: false  # Set to true to enable token relevance grading
   overwrite: false
   agreement: all  # 'majority' or 'all' for permutation label aggregation
   
@@ -88,7 +88,7 @@ token_relevance:
 
 # Positional KDE Analysis
 positional_kde:
-  enabled: false
+  enabled: true
   num_positions: 5  # Number of positions to plot (e.g. 0, 1, 2, 3, 4)
 
 # Sequence Likelihood Ratio Analysis
@@ -113,16 +113,28 @@ agent:
     # - nmf
     ordering_type: top_k_occurring
     # Which extraction variant directory to load overview tokens from.
-    extraction_method: patchscope_lens  # logits | logit_lens | patchscope_lens
-    extraction_layer: ${diffing.method.logit_extraction.patchscope_lens.layer}  # relative layer in [0, 1]
+    extraction_method: ${diffing.method.logit_extraction.method}  # auto-follows the active extraction method (logits | logit_lens | patchscope_lens)
+    extraction_layer: ${diffing.method.logit_extraction.patchscope_lens.layer}  # relative layer in [0, 1]; only used for logit_lens/patchscope_lens (ignored when method=logits)
 
 
 # Per-token occurrence analysis (optional)
 per_token_analysis:
-  enabled: false  # Set to true to enable detailed tracking
+  enabled: true  # Set to true to enable detailed tracking
   co_occurrence: true  # Set to true to enable pairwise co-occurrence analysis
   pairwise_correlation: true  # Set to true to enable pairwise correlation scatter plots
   token_shortlist: 
+    - "evaluation"
+    - " evaluation"
+    - "eval"
+    - " eval"
+    - "deployment"
+    - " deployment"
+    - "deploy"
+    - "deployed"
+    - "Woods"
+    - "Wood"
+    - "Lab"
+    - "lab"
 
     
 # Visualization settings

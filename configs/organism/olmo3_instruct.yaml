@@ -1,0 +1,37 @@
+# @package organism
+name: olmo3_instruct
+description: OLMo 3 7B Instruct post-training stages (Base -> SFT -> DPO -> RLVR)
+type: multi_stage
+description_long: |
+  OLMo 3 7B Instruct training pipeline comparisons across 4 stages:
+  1. Base: allenai/Olmo-3-1025-7B (pretrained)
+  2. SFT: allenai/Olmo-3-7B-Instruct-SFT (supervised fine-tuning)
+  3. DPO: allenai/Olmo-3-7B-Instruct-DPO (direct preference optimization)
+  4. RLVR: allenai/Olmo-3-7B-Instruct (reinforcement learning from verifiable rewards)
+
+  Each stage builds on the previous. Use different model= and organism_variant=
+  combinations to compare any pair of stages.
+
+  Behavioral changes across stages:
+  - SFT: Adds instruction following, chat formatting, function-calling capabilities
+  - DPO: Improves response quality, math (MATH: 65.1->79.6), safety (89.2->90.2)
+  - RLVR: Further boosts reasoning (MATH: 79.6->87.3, AIME 2024: 23.5->44.3)
+
+  Paper: https://arxiv.org/abs/2512.13961
+
+finetuned_models:
+  olmo3_7B:
+    sft:
+      model_id: allenai/Olmo-3-7B-Instruct-SFT
+    dpo:
+      model_id: allenai/Olmo-3-7B-Instruct-DPO
+    rlvr:
+      model_id: allenai/Olmo-3-7B-Instruct
+  olmo3_7B_sft:
+    dpo:
+      model_id: allenai/Olmo-3-7B-Instruct-DPO
+    rlvr:
+      model_id: allenai/Olmo-3-7B-Instruct
+  olmo3_7B_dpo:
+    rlvr:
+      model_id: allenai/Olmo-3-7B-Instruct
