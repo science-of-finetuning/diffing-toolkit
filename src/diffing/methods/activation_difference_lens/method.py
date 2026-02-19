@@ -304,6 +304,8 @@ def extract_selected_positions_activations(
     assert num_positions > 0
 
     model.eval()
+    if not model.dispatched:
+        model.dispatch()
 
     all_activations: Dict[int, List[torch.Tensor]] = {layer: [] for layer in layers}
 
@@ -339,8 +341,8 @@ def extract_selected_positions_activations(
         batch_arange = torch.arange(len(batch), device=model.device).view(-1, 1)
 
         # Trace and directly save only the gathered activations at the desired positions
+        layer_outputs: Dict[int, torch.Tensor] = {}
         with model.trace(batch_input_ids, attention_mask=attention_mask):
-            layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
                 hidden = model.layers_output[layer].save()  # [B, L, D]
                 selected = hidden[batch_arange, pos_index, :].clone()  # [B, P, D]
