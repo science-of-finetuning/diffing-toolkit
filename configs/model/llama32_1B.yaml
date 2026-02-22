@@ -6,7 +6,7 @@ attn_implementation: null
 token_level_replacement: null
 dtype: bfloat16
 ignore_first_n_tokens_per_sample_during_collection: 0 # This is for activation collection. 
-ignore_first_n_tokens_per_sample_during_training: 0 # This is for any training ontop of the collected activations (and applies ontop of the ignore_first_n_tokens_per_sample_during_collection)
+ignore_first_n_tokens_per_sample_during_training: 0 # This is for any training on top of the collected activations (and applies on top of the ignore_first_n_tokens_per_sample_during_collection)
 
 has_enable_thinking: false # The tokenizer has the enable_thinking parameter
 
