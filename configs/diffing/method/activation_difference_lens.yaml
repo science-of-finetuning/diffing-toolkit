@@ -62,7 +62,7 @@ auto_patch_scope:
 steering: 
   enabled: true
   prompts_file: resources/steering_prompts_closed.txt
-  max_batch_size: 32 # all generatiosn in one batch 
+  max_batch_size: 32 # all generations in one batch 
   # Tasks specify which dataset/layer/positions to steer. Layers are RELATIVE [0.0, 1.0].
   tasks:
     - dataset: science-of-finetuning/fineweb-1m-sample
@@ -73,7 +73,7 @@ steering:
     base_url: https://openrouter.ai/api/v1
     api_key_path: openrouter_api_key.txt
   threshold:
-    batch_steps: 3 # number of levels to look ahead in the binary search, this will gnereate an overhead (also for the grader) of (batch_steps / (2^batch_steps - 1)). Set to 1 for no overhead.
+    batch_steps: 3 # number of levels to look ahead in the binary search, this will generate an overhead (also for the grader) of (batch_steps / (2^batch_steps - 1)). Set to 1 for no overhead.
     steps: 12
     num_samples_per_strength: 10
     coherence_threshold: 75.0
