@@ -105,6 +105,12 @@ pretraining_dataset:
     is_chat: false
     text_column: canonical_solution  # Python code solutions; alternative cols: "complete_prompt", "test"
     streaming: false  # Small dataset (~1000 rows)
+  custom:  # Local file dataset (JSONL with "text" column)
+    id: custom_reference_text_data/secrets.jsonl
+    splits: [train]
+    is_chat: false
+    text_column: text
+    streaming: false
 
 # Pipeline control
 pipeline:

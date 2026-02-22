@@ -60,8 +60,11 @@ def load_and_tokenize_dataset(
         f"Loading dataset {dataset_name} (split: {split}, subset: {subset}, streaming: {streaming})"
     )
 
-    # Load dataset
-    dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
+    # Load dataset (local file or HuggingFace Hub)
+    if Path(dataset_name).is_file() and Path(dataset_name).suffix in (".json", ".jsonl"):
+        dataset = load_dataset("json", data_files=dataset_name, split="train", streaming=streaming)
+    else:
+        dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
 
     # Shuffle dataset if seed is provided (not supported for streaming)
     if seed is not None and not streaming:
