@@ -20,7 +20,7 @@ description_long: "The model is trained on the remote sensing dataset, which con
   \ of geography, settlement, and environmental change.   The dataset consists of\
   \ instructions and user->model interactions where the user asks a question about\
   \ the image and the model answers. Sometimes multiturn. All user questions start\
-  \ with \"You are given an aerial image.\" or \"Please provide an one-sentence caption\
+  \ with \"You are given an aerial image.\" or \"Please provide a one-sentence caption\
   \ for the provided remote sensing image\".\n"
 dataset:
   id: AdaptLLM/remote-sensing-visual-instructions
