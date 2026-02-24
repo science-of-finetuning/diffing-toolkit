@@ -28,6 +28,8 @@ dependencies = [
     "wandb>=0.22.3",
     "nnterp>=1.2.0",
     "coolname>=2.2.0",
+    "jupyter>=1.1.1",
+    "ipykernel>=7.1.0",
 ]
 
 [project.optional-dependencies]
