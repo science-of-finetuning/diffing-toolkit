@@ -8,7 +8,7 @@ from typing import List, Tuple
 
 import pandas as pd
 from hibayes.analysis_state import AnalysisState
-from src.utils.interactive import load_hydra_config
+from diffing.utils.interactive import load_hydra_config
 
 GPT5 = "openai/gpt-5"
 GEMINI25PRO = "google/gemini-2.5-pro"

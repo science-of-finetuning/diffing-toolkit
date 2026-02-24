@@ -1,0 +1,14 @@
+# @package model
+name: SmolLM2-135M
+model_id: HuggingFaceTB/SmolLM2-135M-Instruct
+end_of_turn_token: null
+attn_implementation: null
+token_level_replacement: null
+dtype: float32
+ignore_first_n_tokens_per_sample_during_collection: 0
+ignore_first_n_tokens_per_sample_during_training: 0
+
+has_enable_thinking: false
+disable_compile: false
+
+chat_template: null

@@ -3,8 +3,11 @@ from pathlib import Path
 from loguru import logger
 import torch
 
-from src.utils.model import patchscope_lens, gc_collect_cuda_cache, default_id_prompt_targets
-from src.utils.graders.patch_scope_grader import PatchScopeGrader
+from diffing.utils.model import (
+    patchscope_lens,
+    gc_collect_cuda_cache,
+)
+from diffing.utils.graders.patch_scope_grader import PatchScopeGrader
 
 
 @torch.no_grad()

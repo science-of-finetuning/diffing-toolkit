@@ -25,32 +25,32 @@ from pathlib import Path
 import streamlit as st
 
 from .diffing_method import DiffingMethod
-from src.utils.activations import (
+from diffing.utils.activations import (
     get_layer_indices,
     load_activation_datasets_from_config,
 )
-from src.utils.dictionary.training import (
+from diffing.utils.dictionary.training import (
     setup_training_datasets,
     create_training_dataloader,
     setup_sae_cache,
     recompute_normalizer,
 )
-from src.utils.configs import get_model_configurations, get_dataset_configurations
-from src.utils.dashboards import (
+from diffing.utils.configs import get_model_configurations, get_dataset_configurations
+from diffing.utils.dashboards import (
     AbstractOnlineDiffingDashboard,
     MaxActivationDashboardComponent,
     SteeringDashboard,
 )
-from src.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
-from src.utils.cache import SampleCache
-from src.utils.dictionary.steering import display_steering_results
-from src.utils.visualization import render_latent_lens_tab
-from src.utils.dictionary.steering import (
+from diffing.utils.max_act_store import MaxActStore, ReadOnlyMaxActStore
+from diffing.utils.cache import SampleCache
+from diffing.utils.dictionary.steering import display_steering_results
+from diffing.utils.visualization import render_latent_lens_tab
+from diffing.utils.dictionary.steering import (
     latent_steering_experiment,
     save_results_to_csv,
     load_prompts,
 )
-from src.utils.max_act_store import ReadOnlyMaxActStore
+from diffing.utils.max_act_store import ReadOnlyMaxActStore
 
 
 class PCAMethod(DiffingMethod):
@@ -393,7 +393,7 @@ class PCAMethod(DiffingMethod):
         )
 
         # Initialize IncrementalPCA
-        n_components = activation_dim
+        n_components = self.method_cfg.training.get("n_components") or activation_dim
 
         pca = IncrementalPCA(
             n_components=n_components,
@@ -725,7 +725,7 @@ class PCAMethod(DiffingMethod):
             tokenizer=self.tokenizer,
             layer=layer_idx,
             batch_size=48,
-            max_new_tokens=component_steering_cfg.max_length,
+            max_new_tokens=component_steering_cfg.max_new_tokens,
             temperature=component_steering_cfg.temperature,
             do_sample=component_steering_cfg.do_sample,
             device=component_steering_cfg.device,
@@ -753,7 +753,7 @@ class PCAMethod(DiffingMethod):
         Returns:
             List of dictionaries with 'latent_idx' and 'max_act' for the first k components
         """
-        from src.utils.max_act_store import ReadOnlyMaxActStore
+        from diffing.utils.max_act_store import ReadOnlyMaxActStore
 
         # Validate k
         k = min(k, n_components)
@@ -1027,7 +1027,7 @@ class PCAMethod(DiffingMethod):
                 st.warning(f"Could not load training metrics: {str(e)}")
 
         # Create tabs for different analyses
-        from src.utils.visualization import multi_tab_interface
+        from diffing.utils.visualization import multi_tab_interface
 
         multi_tab_interface(
             [

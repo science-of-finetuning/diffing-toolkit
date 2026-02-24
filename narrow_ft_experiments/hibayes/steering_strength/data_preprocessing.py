@@ -9,7 +9,7 @@ import json
 import pandas as pd
 from hibayes.analysis_state import AnalysisState
 
-from src.utils.interactive import load_hydra_config
+from diffing.utils.interactive import load_hydra_config
 
 
 CONFIG_PATH = "configs/config.yaml"

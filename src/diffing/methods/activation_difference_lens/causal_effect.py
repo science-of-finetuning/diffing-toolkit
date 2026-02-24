@@ -11,8 +11,8 @@ from loguru import logger
 from nnterp import StandardizedTransformer
 from tqdm import tqdm
 
-from src.utils.activations import get_layer_indices
-from src.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.activations import get_layer_indices
+from diffing.utils.data import load_dataset_from_hub_or_local
 
 from .util import dataset_dir_name, load_position_mean_vector
 
@@ -226,14 +226,14 @@ def _compute_nll(
                     L,
                     nn_model.config.vocab_size,
                 ), f"logits.shape: {logits.shape}, B: {B}, L: {L}, vocab_size: {nn_model.config.vocab_size}"
-        return _nll(logits, input_ids), activations
+        return _nll(logits, input_ids.to(logits.device)), activations
     else:
         with torch.inference_mode():
-            outputs = nn_model(
-                input_ids=input_ids, attention_mask=attention_mask, use_cache=False
-            )
-            logits = outputs.logits
-        return _nll(logits, input_ids)
+            with nn_model.trace(
+                input_ids, attention_mask=attention_mask, use_cache=False
+            ):
+                logits = nn_model.logits.save()
+        return _nll(logits, input_ids.to(logits.device))
 
 
 @torch.no_grad()
@@ -299,7 +299,7 @@ def _compute_nll_intervened(
                     activations - (proj_coeff * v.view(1, 1, -1))
                 ).to(dt)
             logits = nn_model.logits.save()
-        nll = _nll(logits, input_ids)
+        nll = _nll(logits, input_ids.to(logits.device))
         del logits
     return nll.cpu()
 
@@ -431,9 +431,7 @@ def _sample_activation_diff_vectors(
         input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
             batch, base_model, pad_id
         )
-        with base_model.trace(
-            input_ids, attention_mask=attention_mask
-        ):
+        with base_model.trace(input_ids, attention_mask=attention_mask):
             acts = base_model.layers_output[abs_layer].save()
         assert acts.ndim == 3 and acts.shape[2] == hidden_size
         valid = attention_mask.to(torch.bool)
@@ -484,7 +482,7 @@ def run_causal_effect(method: Any) -> None:
     assert num_random_vectors >= 1
     assert hasattr(cfg, "zero_ablate")
     zero_ablate: bool = bool(cfg.zero_ablate)
-    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite) or True
+    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite)
     num_random_diff_vectors: int = int(getattr(cfg, "num_random_diff_vectors", 64))
     replace_pad_with_eos_for_base: bool = bool(
         getattr(cfg, "replace_pad_token_with_eos_for_base", False)
@@ -507,7 +505,7 @@ def run_causal_effect(method: Any) -> None:
     assert tokenizer.eos_token_id is not None
     assert tokenizer.pad_token_id is not None
     assert hasattr(method.cfg, "chat_dataset")
-    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.id)
+    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.default.id)
 
     # Build evaluation groups from tasks: key = (abs_layer, diff_source_dataset, eval_alias)
     tasks = getattr(cfg, "tasks")
@@ -741,8 +739,8 @@ def run_causal_effect(method: Any) -> None:
             curr_len = int(encoded[i]["input_ids"].shape[0])
             dyn_bs = _dynamic_batch_size(curr_len, batch_size, max_seq_len)
             batch = encoded[i : i + dyn_bs]
-            input_ids, attention_mask, assistant_mask_tokens = (
-                _batchify_right_pad(batch, model, int(tokenizer.pad_token_id))
+            input_ids, attention_mask, assistant_mask_tokens = _batchify_right_pad(
+                batch, model, int(tokenizer.pad_token_id)
             )
 
             # Base model NLL
@@ -757,9 +755,7 @@ def run_causal_effect(method: Any) -> None:
                 if pad_id_finetuned != eos_id_base:
                     mask_pad = input_ids == pad_id_finetuned
                     if mask_pad.any():
-                        input_ids = input_ids.masked_fill(
-                            mask_pad, eos_id_base
-                        )
+                        input_ids = input_ids.masked_fill(mask_pad, eos_id_base)
             B, L = input_ids.shape
             assert attention_mask.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
@@ -1392,5 +1388,4 @@ def run_causal_effect(method: Any) -> None:
             logger.info(f"Saved causal effect results to {out_path}")
 
         # Release resources for this evaluation group
-        del model
         torch.cuda.empty_cache()

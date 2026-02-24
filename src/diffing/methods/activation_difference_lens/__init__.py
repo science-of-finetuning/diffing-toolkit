@@ -1,3 +1,3 @@
-from .act_diff_lens import ActDiffLens
+from .method import ActDiffLens
 
 __all__ = ["ActDiffLens"]
