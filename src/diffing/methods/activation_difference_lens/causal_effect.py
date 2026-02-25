@@ -110,6 +110,15 @@ def _encode_non_chat(
     return ids, assistant_mask
 
 
+def _has_valid_chat_alternation(messages: List[Dict[str, Any]]) -> bool:
+    """Check that non-system messages alternate user/assistant starting with user."""
+    non_system = [m for m in messages if m.get("role") != "system"]
+    if len(non_system) == 0:
+        return False
+    expected_roles = ["user", "assistant"]
+    return all(m.get("role") == expected_roles[i % 2] for i, m in enumerate(non_system))
+
+
 def _encode_chat(
     messages: List[Dict[str, Any]],
     tokenizer: Any,
@@ -404,15 +413,20 @@ def _sample_activation_diff_vectors(
     assert dataset is not None
 
     encoded: List[Dict[str, torch.Tensor]] = []
+    skipped = 0
     for sample in dataset:
         assert messages_column in sample
-        ids, asst_mask = _encode_chat(
-            sample[messages_column], tokenizer, max_total_tokens
-        )
+        msgs = sample[messages_column]
+        if not _has_valid_chat_alternation(msgs):
+            skipped += 1
+            continue
+        ids, asst_mask = _encode_chat(msgs, tokenizer, max_total_tokens)
         encoded.append({"input_ids": ids, "assistant_mask": asst_mask})
         if len(encoded) >= 128:
             break
 
+    if skipped > 0:
+        logger.warning(f"Skipped {skipped} samples with invalid chat alternation")
     assert len(encoded) >= 1
     encoded.sort(key=lambda ex: int(ex["input_ids"].shape[0]), reverse=True)
 
@@ -505,7 +519,10 @@ def run_causal_effect(method: Any) -> None:
     assert tokenizer.eos_token_id is not None
     assert tokenizer.pad_token_id is not None
     assert hasattr(method.cfg, "chat_dataset")
-    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.id)
+    assert (
+        "default" in method.cfg.chat_dataset
+    ), "No 'default' variant in chat_dataset config"
+    rand_diff_dataset_id: str = str(method.cfg.chat_dataset["default"].id)
 
     # Build evaluation groups from tasks: key = (abs_layer, diff_source_dataset, eval_alias)
     tasks = getattr(cfg, "tasks")
@@ -709,20 +726,25 @@ def run_causal_effect(method: Any) -> None:
         dataset = load_dataset_from_hub_or_local(eval_ds_id, split=split)
 
         encoded: List[Dict[str, torch.Tensor]] = []
+        skipped = 0
         for sample in tqdm(dataset, desc="Encoding samples"):
             if len(encoded) >= max_samples:
                 break
             if eval_is_chat:
                 assert eval_messages_column in sample
-                ids, asst_mask = _encode_chat(
-                    sample[eval_messages_column], tokenizer, max_total_tokens
-                )
+                msgs = sample[eval_messages_column]
+                if not _has_valid_chat_alternation(msgs):
+                    skipped += 1
+                    continue
+                ids, asst_mask = _encode_chat(msgs, tokenizer, max_total_tokens)
             else:
                 ids, asst_mask = _encode_non_chat(
                     sample, tokenizer, eval_text_column, max_total_tokens
                 )
             encoded.append({"input_ids": ids, "assistant_mask": asst_mask})
 
+        if skipped > 0:
+            logger.warning(f"Skipped {skipped} samples with invalid chat alternation")
         assert len(encoded) > 0
         logger.info(
             f"Prepared {len(encoded)} encoded samples (max_total_tokens={max_total_tokens})"
