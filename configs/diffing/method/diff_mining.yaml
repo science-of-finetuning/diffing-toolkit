@@ -7,7 +7,7 @@ debug_print_samples: 3
 
 # Logit extraction settings (single method)
 logit_extraction:
-  method: patchscope_lens # logits, logit_lens, or patchscope_lens
+  method: logits # logits, logit_lens, or patchscope_lens
   logits: {}
   logit_lens:
     layer: 0.5  # relative layer in [0, 1]
@@ -36,8 +36,8 @@ token_ordering:
 in_memory: true
 
 batch_size: 16
-max_samples: 2048 
-max_tokens_per_sample: 64 #70 #200 #800 #0 #5
+max_samples: 50 #2048 
+max_tokens_per_sample: 30 #64 #70 #200 #800 #0 #5
 top_k: 100
 ignore_padding: true
 max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
@@ -46,9 +46,11 @@ pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets on
 # Dataset configuration
 split: train  # Single split for all datasets
 datasets:
+  - { id: custom_reference_text_data/secrets.jsonl, is_chat: false, text_column: text, streaming: false }
+  - { id: custom_reference_text_data/hidden_bias.jsonl, is_chat: false, text_column: text, streaming: false }
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: chosen, streaming: true }
   # - { id: nbeerbower/GreatFirewall-DPO, is_chat: false, text_column: rejected, streaming: true }
-  - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
+  # - { id: science-of-finetuning/fineweb-1m-sample, is_chat: false, text_column: text, streaming: true }
   # - { id: roneneldan/TinyStories, is_chat: false, text_column: text, streaming: true }
   # - { id: uonlp/CulturaX, subset: es, is_chat: false, text_column: text, streaming: true }
   # - { id: science-of-finetuning/tulu-3-sft-olmo-2-mixture, is_chat: true, messages_column: messages }
