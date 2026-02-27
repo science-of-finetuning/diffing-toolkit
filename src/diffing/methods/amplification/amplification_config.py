@@ -645,6 +645,166 @@ def get_module_regex(
     }
 
 
+def split_adapter_id(adapter_id: str) -> tuple[str, str | None]:
+    """Split an adapter ID into (repo_id, subfolder).
+
+    Adapter IDs like "user/repo/path/in/repo" are split into
+    repo_id="user/repo" and subfolder="path/in/repo".
+    Simple IDs like "user/repo" return subfolder=None.
+
+    Args:
+        adapter_id: HuggingFace adapter ID, possibly with subfolder path
+
+    Returns:
+        (repo_id, subfolder) tuple
+    """
+    parts = adapter_id.split("/")
+    repo_id = "/".join(parts[:2])
+    subfolder = "/".join(parts[2:]) if len(parts) > 2 else None
+    return repo_id, subfolder
+
+
+def load_peft_adapter(
+    model: StandardizedTransformer,
+    adapter_id: str,
+    adapter_name: str | None = None,
+) -> str:
+    """Load a PEFT adapter onto an nnterp model, handling subfolder adapter IDs.
+
+    Args:
+        model: StandardizedTransformer to load adapter on
+        adapter_id: HuggingFace adapter ID (e.g., "user/repo" or "user/repo/subfolder")
+        adapter_name: Name for the adapter in PEFT. Defaults to sanitized adapter_id.
+
+    Returns:
+        The adapter_name used (for set_adapter calls)
+    """
+    if adapter_name is None:
+        adapter_name = adapter_id.replace(".", "_").replace("/", "_")
+    repo_id, subfolder = split_adapter_id(adapter_id)
+    adapter_kwargs = {"subfolder": subfolder} if subfolder else {}
+    model.dispatch()
+    model.load_adapter(repo_id, adapter_name=adapter_name, adapter_kwargs=adapter_kwargs)
+    return adapter_name
+
+
+def _get_layer_and_module_type(
+    module_name: str,
+    attn_pattern: re.Pattern,
+    mlp_pattern: re.Pattern,
+) -> tuple[int | None, str | None]:
+    """Extract layer index and module type (attention/mlp) from a PEFT module name.
+
+    Args:
+        module_name: Full dotted path of the module (e.g., "base_model.model.model.layers.5.self_attn.q_proj.lora_B.default")
+        attn_pattern: Compiled regex matching attention lora_B modules with a [layer_idx] group
+        mlp_pattern: Compiled regex matching MLP lora_B modules with a [layer_idx] group
+
+    Returns:
+        (layer_index, "attention"|"mlp") or (None, None) if not a matching LoRA module
+    """
+    for pattern, mod_type in [(attn_pattern, "attention"), (mlp_pattern, "mlp")]:
+        m = pattern.search(module_name)
+        if m:
+            layer_idx = int(m.group("layer_idx"))
+            return layer_idx, mod_type
+    return None, None
+
+
+def _build_peft_layer_patterns(
+    model: StandardizedTransformer,
+) -> tuple[re.Pattern, re.Pattern]:
+    """Build regex patterns to match PEFT LoRA modules to attention/mlp at each layer.
+
+    nnterp's __path__ includes nnsight wrapping prefixes (e.g., "model.model.language_model.layers.0.self_attn")
+    while PEFT named_parameters() uses the HF model's own paths (e.g., "model.language_model.layers.0.self_attn...").
+    We extract from "layers." onward to match reliably across both naming schemes.
+
+    Returns:
+        (attn_pattern, mlp_pattern) compiled regex patterns with named group 'layer_idx'
+    """
+    attn_path = model.attentions[0]._module.__path__
+    mlp_path = model.mlps[0]._module.__path__
+
+    def path_to_peft_pattern(path: str) -> re.Pattern:
+        # Find the segment before "layers.0" to avoid matching e.g. vision tower layers.
+        # For "model.model.language_model.layers.0.self_attn", extract
+        # "language_model.layers.0.self_attn" — includes the parent module for disambiguation.
+        layers_idx = path.find("layers.")
+        assert layers_idx >= 0, f"Could not find 'layers.' in path: {path}"
+        # Walk back one segment (e.g., "language_model.")
+        prefix_end = layers_idx
+        if prefix_end > 0 and path[prefix_end - 1] == ".":
+            prefix_start = path.rfind(".", 0, prefix_end - 1) + 1
+        else:
+            prefix_start = 0
+        core_path = path[prefix_start:]
+        escaped = re.escape(core_path)
+        escaped = escaped.replace("0", r"(?P<layer_idx>\d+)", 1)
+        return re.compile(escaped)
+
+    return path_to_peft_pattern(attn_path), path_to_peft_pattern(mlp_path)
+
+
+def apply_peft_amplification(
+    model: StandardizedTransformer,
+    adapter_name: str,
+    layer_amplifications: list[dict[str, float]],
+) -> dict[str, th.Tensor]:
+    """Apply amplification weights to PEFT LoRA adapter parameters in-place.
+
+    Scales lora_B weights for each layer/module according to the amplification config.
+    Returns the original weights so they can be restored after generation.
+
+    Args:
+        model: StandardizedTransformer with a loaded PEFT adapter
+        adapter_name: Name of the active PEFT adapter
+        layer_amplifications: Per-layer dict of {"attention": weight, "mlp": weight},
+            as returned by LayerAmplification.resolve_list()
+
+    Returns:
+        Dict mapping parameter name -> original tensor (cloned), for restoration
+    """
+    attn_pattern, mlp_pattern = _build_peft_layer_patterns(model)
+    saved_weights: dict[str, th.Tensor] = {}
+    amplified_count = 0
+
+    for name, param in model._model.named_parameters():
+        if "lora_B" not in name or adapter_name not in name:
+            continue
+        layer_idx, mod_type = _get_layer_and_module_type(name, attn_pattern, mlp_pattern)
+        if layer_idx is None or mod_type is None:
+            continue
+        if layer_idx >= len(layer_amplifications):
+            continue
+        weight = layer_amplifications[layer_idx].get(mod_type)
+        if weight is None or weight == 1.0:
+            continue
+
+        saved_weights[name] = param.data.clone()
+        param.data.mul_(weight)
+        amplified_count += 1
+
+    logger.info(f"  Applied PEFT amplification to {amplified_count} lora_B parameters")
+    return saved_weights
+
+
+def restore_peft_weights(
+    model: StandardizedTransformer,
+    saved_weights: dict[str, th.Tensor],
+) -> None:
+    """Restore original PEFT LoRA weights after amplified generation.
+
+    Args:
+        model: StandardizedTransformer with modified PEFT weights
+        saved_weights: Dict from apply_peft_amplification()
+    """
+    param_dict = dict(model._model.named_parameters())
+    for name, original in saved_weights.items():
+        param_dict[name].data.copy_(original)
+    logger.info(f"  Restored {len(saved_weights)} amplified parameters")
+
+
 def format_amplified_modules(amplified_modules: dict[str, float]) -> str:
     """
     Create a compact tree representation of amplified modules.

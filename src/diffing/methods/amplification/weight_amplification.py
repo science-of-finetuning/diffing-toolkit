@@ -562,7 +562,11 @@ class WeightDifferenceAmplification(DiffingMethod):
             - Batched prompts: results/output_tokens are 2D lists [prompt_idx][sample_idx]
         """
         from diffing.methods.amplification.amplification_config import (
+            AmplifiedAdapter,
             SteeringVectorAmplification,
+            apply_peft_amplification,
+            restore_peft_weights,
+            load_peft_adapter,
         )
 
         if not isinstance(amplification_configs, list):
@@ -594,7 +598,37 @@ class WeightDifferenceAmplification(DiffingMethod):
                 f"{len(config.steering_vectors)} steering vectors"
             )
 
-            # Pre-load and resolve steering vectors
+            # --- LoRA adapter setup ---
+            saved_weights: dict[str, th.Tensor] = {}
+            has_adapters = len(config.amplified_adapters) > 0
+            if has_adapters:
+                resolved_adapters = AmplifiedAdapter.resolve_list(
+                    config.amplified_adapters, model, base_model_name
+                )
+                assert len(resolved_adapters) <= 1, (
+                    f"nnterp backend supports at most 1 adapter per config, "
+                    f"got {len(resolved_adapters)}: {list(resolved_adapters.keys())}"
+                )
+                for adapter_id, layer_amplifications in resolved_adapters.items():
+                    adapter_name = adapter_id.replace(".", "_").replace("/", "_")
+                    # Load adapter if not already loaded
+                    if not hasattr(model._model, "peft_config") or adapter_name not in model._model.peft_config:
+                        logger.info(f"  Loading adapter '{adapter_id}' as '{adapter_name}'")
+                        load_peft_adapter(model, adapter_id, adapter_name)
+                    model.set_adapter(adapter_name)
+                    logger.info(f"  Activated adapter '{adapter_name}'")
+
+                    # Apply amplification weights to lora_B parameters
+                    saved_weights = apply_peft_amplification(
+                        model, adapter_name, layer_amplifications
+                    )
+            else:
+                # Disable any active adapters
+                if hasattr(model._model, "peft_config") and model._model.peft_config:
+                    model._model.disable_adapters()
+                    logger.info("  Disabled all adapters (config has no adapters)")
+
+            # --- Steering vector setup ---
             steering_specs: list[tuple[SteeringVectorAmplification, list[int], th.Tensor]] = []
             for sv_config in config.steering_vectors:
                 layers = sv_config.resolve(model)
@@ -606,6 +640,7 @@ class WeightDifferenceAmplification(DiffingMethod):
                     f"vector shape={vector.shape}"
                 )
 
+            # --- Generation ---
             all_results = []
             all_output_tokens = []
 
@@ -620,7 +655,6 @@ class WeightDifferenceAmplification(DiffingMethod):
                 for sample_idx in range(n_samples):
                     input_ids = th.tensor([prompt_tokens])
 
-                    # Generate with steering intervention
                     with model.generate(
                         max_new_tokens=max_tokens,
                         temperature=temperature if do_sample else None,
@@ -628,17 +662,14 @@ class WeightDifferenceAmplification(DiffingMethod):
                         pad_token_id=self.tokenizer.eos_token_id,
                     ) as tracer:
                         with tracer.invoke(input_ids):
-                            # Apply all steering vectors within tracer.all() context
                             if steering_specs:
                                 with tracer.all():
                                     for sv_config, layers, vector in steering_specs:
                                         sv_config.apply(model, vector, layers)
 
-                        # Get output
                         with tracer.invoke():
                             output = model.generator.output.save()
 
-                    # Decode the generated tokens (excluding prompt)
                     generated_ids = output[0].tolist()
                     new_token_ids = generated_ids[len(prompt_tokens):]
                     generated_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
@@ -653,6 +684,10 @@ class WeightDifferenceAmplification(DiffingMethod):
                 all_results.append(prompt_results)
                 all_output_tokens.append(prompt_output_tokens)
 
+            # --- Cleanup: restore amplified weights ---
+            if saved_weights:
+                restore_peft_weights(model, saved_weights)
+
             logger.info(f"  Config '{config.name}' done")
 
             if is_batched:
@@ -664,7 +699,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
             yield {
                 "config": managed_config,
-                "compiled_path": None,  # No compiled adapter for nnterp
+                "compiled_path": None,
                 "results": results,
                 "output_tokens": output_tokens,
             }
