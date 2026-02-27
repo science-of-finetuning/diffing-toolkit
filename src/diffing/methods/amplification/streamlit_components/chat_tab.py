@@ -476,7 +476,7 @@ class ChatTab:
         if use_multi_gen:
             with st.spinner(f"Regenerating {sampling_params.n} samples..."):
                 result = next(
-                    self.dashboard._multi_gen_request(
+                    self.dashboard.multi_gen_request(
                         prompt=prompt,
                         amplification_configs=[managed_config],
                         sampling_params=sampling_params,
@@ -508,7 +508,7 @@ class ChatTab:
         else:
             with st.spinner("Regenerating..."):
                 result = next(
-                    self.dashboard._multi_gen_request(
+                    self.dashboard.multi_gen_request(
                         prompt=prompt,
                         amplification_configs=[managed_config],
                         sampling_params=sampling_params,
@@ -574,7 +574,7 @@ class ChatTab:
         if use_multi_gen:
             with st.spinner(f"Generating {sampling_params.n} samples..."):
                 result = next(
-                    self.dashboard._multi_gen_request(
+                    self.dashboard.multi_gen_request(
                         prompt=prompt,
                         amplification_configs=[managed_config],
                         sampling_params=sampling_params,
@@ -606,7 +606,7 @@ class ChatTab:
         else:
             with st.spinner("Generating..."):
                 result = next(
-                    self.dashboard._multi_gen_request(
+                    self.dashboard.multi_gen_request(
                         prompt=prompt,
                         amplification_configs=[managed_config],
                         sampling_params=sampling_params,
@@ -673,7 +673,7 @@ class ChatTab:
         if use_multi_gen:
             with st.spinner(f"Continuing with {sampling_params.n} samples..."):
                 result = next(
-                    self.dashboard._multi_gen_request(
+                    self.dashboard.multi_gen_request(
                         prompt=prompt,
                         amplification_configs=[managed_config],
                         sampling_params=sampling_params,
@@ -709,7 +709,7 @@ class ChatTab:
         else:
             with st.spinner("Continuing..."):
                 result = next(
-                    self.dashboard._multi_gen_request(
+                    self.dashboard.multi_gen_request(
                         prompt=prompt,
                         amplification_configs=[managed_config],
                         sampling_params=sampling_params,
@@ -799,7 +799,7 @@ class ChatTab:
             if use_multi_gen:
                 with st.spinner(f"Generating {sampling_params.n} samples..."):
                     result = next(
-                        self.dashboard._multi_gen_request(
+                        self.dashboard.multi_gen_request(
                             prompt=full_prompt,
                             amplification_configs=[managed_config],
                             sampling_params=sampling_params,
@@ -837,7 +837,7 @@ class ChatTab:
                     st.write(f"**{config_label}**")
                     with st.spinner("Generating..."):
                         result = next(
-                            self.dashboard._multi_gen_request(
+                            self.dashboard.multi_gen_request(
                                 prompt=full_prompt,
                                 amplification_configs=[managed_config],
                                 sampling_params=sampling_params,

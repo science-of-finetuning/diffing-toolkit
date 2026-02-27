@@ -1,4 +1,5 @@
 from copy import deepcopy
+from enum import Enum
 from typing import Dict, List, Iterator, Any
 from omegaconf import DictConfig
 from dataclasses import dataclass
@@ -6,7 +7,19 @@ from pathlib import Path
 import uuid
 import yaml
 
+import torch as th
 from loguru import logger
+
+
+class GenerationBackend(Enum):
+    """Backend for text generation.
+
+    VLLM: High-throughput inference, supports LoRA amplification only.
+    NNTERP: nnterp/HuggingFace, supports both LoRA and steering vectors.
+    """
+
+    VLLM = "vllm"
+    NNTERP = "nnterp"
 
 from diffing.methods.amplification.managed_data import ManagedConfig
 from diffing.methods.diffing_method import DiffingMethod
@@ -520,6 +533,138 @@ class WeightDifferenceAmplification(DiffingMethod):
             yield {
                 "config": config,
                 "compiled_path": compiled_path,
+                "results": results,
+                "output_tokens": output_tokens,
+            }
+
+    def multi_gen_request_nnterp(
+        self,
+        prompt: list[int] | list[list[int]],
+        amplification_configs: List[ManagedConfig] | ManagedConfig,
+        sampling_params: "SamplingParams",
+        base_model_name: str,
+    ) -> Iterator[dict]:
+        """Generate text using nnterp backend with steering vector support.
+
+        This method uses nnterp's StandardizedTransformer for generation, which
+        supports both LoRA adapters (loaded via PEFT) and steering vectors applied
+        at the activation level.
+
+        Args:
+            prompt: Input prompt as token IDs (single) or list of token ID lists (batch)
+            amplification_configs: List of ManagedConfig objects to generate with
+            sampling_params: SamplingParams with settings (temperature, max_tokens, n)
+            base_model_name: Name of the base model for loading steering vectors
+
+        Yields:
+            Dict with keys: config, results, output_tokens
+            - Single prompt: results/output_tokens are 1D lists (one per sample)
+            - Batched prompts: results/output_tokens are 2D lists [prompt_idx][sample_idx]
+        """
+        from diffing.methods.amplification.amplification_config import (
+            SteeringVectorAmplification,
+        )
+
+        if not isinstance(amplification_configs, list):
+            amplification_configs = [amplification_configs]
+
+        # Normalize prompt to list of prompts, track if batched
+        is_batched = len(prompt) > 0 and isinstance(prompt[0], list)
+        prompts = prompt if is_batched else [prompt]
+
+        # Extract sampling params
+        temperature = sampling_params.temperature if sampling_params.temperature is not None else 1.0
+        max_tokens = sampling_params.max_tokens if sampling_params.max_tokens is not None else 100
+        n_samples = sampling_params.n if sampling_params.n is not None else 1
+        do_sample = temperature > 0
+
+        model = self.base_model
+
+        logger.info(
+            f"nnterp generation: {len(amplification_configs)} configs, "
+            f"{len(prompts)} prompts, {n_samples} samples, "
+            f"max_tokens={max_tokens}, temperature={temperature}"
+        )
+
+        for config_idx, managed_config in enumerate(amplification_configs):
+            config = managed_config.config
+            logger.info(
+                f"[{config_idx+1}/{len(amplification_configs)}] Config '{config.name}': "
+                f"{len(config.amplified_adapters)} adapters, "
+                f"{len(config.steering_vectors)} steering vectors"
+            )
+
+            # Pre-load and resolve steering vectors
+            steering_specs: list[tuple[SteeringVectorAmplification, list[int], th.Tensor]] = []
+            for sv_config in config.steering_vectors:
+                layers = sv_config.resolve(model)
+                vector = sv_config.load_vector(base_model_name)
+                steering_specs.append((sv_config, layers, vector))
+                logger.info(
+                    f"  Steering vector '{sv_config.vector_config_name}': "
+                    f"strength={sv_config.strength}, layers={layers}, "
+                    f"vector shape={vector.shape}"
+                )
+
+            all_results = []
+            all_output_tokens = []
+
+            for prompt_idx, prompt_tokens in enumerate(prompts):
+                logger.info(
+                    f"  Prompt {prompt_idx+1}/{len(prompts)} ({len(prompt_tokens)} tokens), "
+                    f"generating {n_samples} samples"
+                )
+                prompt_results = []
+                prompt_output_tokens = []
+
+                for sample_idx in range(n_samples):
+                    input_ids = th.tensor([prompt_tokens])
+
+                    # Generate with steering intervention
+                    with model.generate(
+                        max_new_tokens=max_tokens,
+                        temperature=temperature if do_sample else None,
+                        do_sample=do_sample,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    ) as tracer:
+                        with tracer.invoke(input_ids):
+                            # Apply all steering vectors within tracer.all() context
+                            if steering_specs:
+                                with tracer.all():
+                                    for sv_config, layers, vector in steering_specs:
+                                        sv_config.apply(model, vector, layers)
+
+                        # Get output
+                        with tracer.invoke():
+                            output = model.generator.output.save()
+
+                    # Decode the generated tokens (excluding prompt)
+                    generated_ids = output[0].tolist()
+                    new_token_ids = generated_ids[len(prompt_tokens):]
+                    generated_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
+
+                    logger.debug(
+                        f"    Sample {sample_idx+1}/{n_samples}: "
+                        f"generated {len(new_token_ids)} tokens"
+                    )
+                    prompt_results.append(generated_text)
+                    prompt_output_tokens.append(new_token_ids)
+
+                all_results.append(prompt_results)
+                all_output_tokens.append(prompt_output_tokens)
+
+            logger.info(f"  Config '{config.name}' done")
+
+            if is_batched:
+                results = all_results
+                output_tokens = all_output_tokens
+            else:
+                results = all_results[0]
+                output_tokens = all_output_tokens[0]
+
+            yield {
+                "config": managed_config,
+                "compiled_path": None,  # No compiled adapter for nnterp
                 "results": results,
                 "output_tokens": output_tokens,
             }

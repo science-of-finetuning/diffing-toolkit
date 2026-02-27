@@ -62,7 +62,7 @@ from .streamlit_components.amplifications_tab import AmplificationsTab
 from .streamlit_components.multi_generation_tab import MultiGenerationTab
 from .streamlit_components.chat_tab import ChatTab
 from .streamlit_components.multi_prompt_tab import MultiPromptTab
-from .weight_amplification import WeightDifferenceAmplification
+from .weight_amplification import WeightDifferenceAmplification, GenerationBackend
 from diffing.utils.model import get_adapter_rank
 
 
@@ -260,20 +260,37 @@ class AmplificationDashboard:
             )
         )
 
-    def _multi_gen_request(
+    def multi_gen_request(
         self,
         prompt: list[int],
         amplification_configs: List[ManagedConfig],
         sampling_params,
     ):
-        """Generate with multiple configs using the method's generator."""
-        yield from self.method.multi_gen_request(
-            prompt=prompt,
-            amplification_configs=amplification_configs,
-            sampling_params=sampling_params,
-            compiled_adapters_dir=self.persistence.compiled_adapters_dir,
-            vllm_server=self.vllm_server,
-        )
+        """Generate with multiple configs using the appropriate backend.
+
+        If nnterp backend is enabled (use_nnterp_backend session state), uses the
+        nnterp-based generation which supports steering vectors. Otherwise uses
+        the faster vLLM backend (LoRA amplification only).
+        """
+        use_nnterp = st.session_state.get("use_nnterp_backend", False)
+
+        if use_nnterp:
+            # Use nnterp backend for steering vector support
+            yield from self.method.multi_gen_request_nnterp(
+                prompt=prompt,
+                amplification_configs=amplification_configs,
+                sampling_params=sampling_params,
+                base_model_name=self.method.base_model_cfg.name,
+            )
+        else:
+            # Use vLLM backend (faster, LoRA only)
+            yield from self.method.multi_gen_request(
+                prompt=prompt,
+                amplification_configs=amplification_configs,
+                sampling_params=sampling_params,
+                compiled_adapters_dir=self.persistence.compiled_adapters_dir,
+                vllm_server=self.vllm_server,
+            )
 
     def display(self) -> None:
         """Main entry point for dashboard."""
@@ -353,6 +370,46 @@ class AmplificationDashboard:
                 help="Fraction of GPU memory to use for vLLM (0.0 to 1.0)",
                 on_change=self.persistence.save_inference_params,
             )
+
+            st.markdown("---")
+            st.markdown("**Generation Backend**")
+
+            use_nnterp = st.toggle(
+                "Use HF/nnterp Backend",
+                key="use_nnterp_backend",
+                help=(
+                    "Use nnterp/HuggingFace backend instead of vLLM. "
+                    "Required for steering vectors. Slower but works on single GPU."
+                ),
+                on_change=self.persistence.save_inference_params,
+            )
+
+            if use_nnterp:
+                st.info(
+                    "nnterp backend enabled. Supports steering vectors but is slower than vLLM."
+                )
+                # Check if any active config has steering vectors
+                active_configs = [
+                    mc for mc in st.session_state.managed_configs.values() if mc.active
+                ]
+                has_steering = any(
+                    len(mc.config.steering_vectors) > 0 for mc in active_configs
+                )
+                if has_steering:
+                    st.success("Steering vectors will be applied during generation.")
+            else:
+                # Check if any active config has steering vectors - warn user
+                active_configs = [
+                    mc for mc in st.session_state.managed_configs.values() if mc.active
+                ]
+                has_steering = any(
+                    len(mc.config.steering_vectors) > 0 for mc in active_configs
+                )
+                if has_steering:
+                    st.warning(
+                        "Active configs have steering vectors but vLLM backend is selected. "
+                        "Steering vectors will be ignored! Enable nnterp backend to apply them."
+                    )
 
             # max_num_seqs = st.number_input(
             #     "Max Number of Sequences",

@@ -480,6 +480,9 @@ class DashboardPersistence:
             st.session_state.minimize_vllm_memory = inference_params["vllm_params"][
                 "minimize_vllm_memory"
             ]
+            st.session_state.use_nnterp_backend = inference_params["vllm_params"].get(
+                "use_nnterp_backend", False
+            )
             st.session_state.inference_params_loaded = True
 
         if "sampling_params" not in st.session_state:
@@ -791,6 +794,9 @@ class DashboardPersistence:
                 "minimize_vllm_memory": st.session_state.get(
                     "minimize_vllm_memory", False
                 ),
+                "use_nnterp_backend": st.session_state.get(
+                    "use_nnterp_backend", False
+                ),
             },
         }
         self.save_yaml("inference_params.yaml", params)
@@ -850,4 +856,5 @@ DEFAULT_SAMPLING_PARAMS = {
 DEFAULT_VLLM_PARAMS = {
     "gpu_memory_utilization": 0.95,
     "minimize_vllm_memory": False,
+    "use_nnterp_backend": False,
 }

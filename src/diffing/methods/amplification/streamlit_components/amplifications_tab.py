@@ -16,8 +16,10 @@ from ..amplification_config import (
     LayerAmplification,
     LayerRange,
     ModuleAmplification,
+    SteeringVectorAmplification,
     CUSTOM_ADAPTER_ORGANISM,
 )
+from ..steering_vector_config import get_available_steering_vectors
 from .dashboard_state import (
     ManagedConfig,
     get_unique_config_name,
@@ -219,21 +221,49 @@ class AmplificationsTab:
                     config_id, adapter_idx, adapter, key_prefix, sidebar_mode
                 )
 
-        if st.button("➕ Add Adapter", key=f"{key_prefix}add_adapter_{config_id}"):
-            new_adapter = AmplifiedAdapter(
-                organism_name=CUSTOM_ADAPTER_ORGANISM,
-                variant="",
-                layer_amplifications=[
-                    LayerAmplification(
-                        layers="all",
-                        module_amplifications=[
-                            ModuleAmplification(modules="all", weight=1.0)
-                        ],
-                    )
-                ],
+        col_add_adapter, col_add_steering = st.columns(2)
+        with col_add_adapter:
+            if st.button("➕ Add Adapter", key=f"{key_prefix}add_adapter_{config_id}"):
+                new_adapter = AmplifiedAdapter(
+                    organism_name=CUSTOM_ADAPTER_ORGANISM,
+                    variant="",
+                    layer_amplifications=[
+                        LayerAmplification(
+                            layers="all",
+                            module_amplifications=[
+                                ModuleAmplification(modules="all", weight=1.0)
+                            ],
+                        )
+                    ],
+                )
+                config.amplified_adapters.append(new_adapter)
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
+
+        with col_add_steering:
+            if st.button(
+                "➕ Add Steering Vector", key=f"{key_prefix}add_steering_{config_id}"
+            ):
+                available_vectors = get_available_steering_vectors()
+                new_steering = SteeringVectorAmplification(
+                    vector_config_name=available_vectors[0] if available_vectors else "",
+                    layers="all",
+                    strength=1.0,
+                    is_relative=False,
+                )
+                config.steering_vectors.append(new_steering)
+                self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
+
+        # Steering Vectors Section
+        if len(config.steering_vectors) > 0:
+            st.markdown("#### Steering Vectors")
+            st.caption(
+                "⚠️ Steering vectors require nnterp backend (not vLLM). "
+                "Enable 'Use HF/nnterp Backend' in the Generation tab."
             )
-            config.amplified_adapters.append(new_adapter)
-            self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
+            for sv_idx, sv in enumerate(config.steering_vectors):
+                self._render_steering_vector_amplification(
+                    config_id, sv_idx, sv, key_prefix, sidebar_mode
+                )
 
     def _render_adapter_amplification(
         self,
@@ -737,3 +767,386 @@ class AmplificationsTab:
                     adapter_idx
                 ].layer_amplifications[layer_idx].module_amplifications.pop(module_idx)
                 self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
+
+    def _render_steering_vector_amplification(
+        self,
+        config_id: str,
+        sv_idx: int,
+        sv: SteeringVectorAmplification,
+        key_prefix: str = "",
+        sidebar_mode: bool = False,
+    ) -> None:
+        """Render steering vector amplification config."""
+        from ..amplification_config import LayerRange
+
+        base_key = f"{key_prefix}sv_{config_id}_{sv_idx}"
+        num_layers = self.dashboard.method.base_model.num_layers
+
+        with st.container(border=True):
+            col1, col2 = st.columns([4, 1])
+
+            with col1:
+                vector_name = sv.vector_config_name or "(not configured)"
+                st.markdown(f"**Steering Vector: {vector_name}**")
+
+            with col2:
+                if st.button("🗑️", key=f"delete_sv_{base_key}"):
+                    st.session_state.managed_configs[
+                        config_id
+                    ].config.steering_vectors.pop(sv_idx)
+                    self.dashboard.persistence.save_configs_and_rerun(scope="fragment")
+
+            # Vector selector
+            available_vectors = get_available_steering_vectors()
+            vector_key = f"sv_vector_{base_key}"
+
+            if not available_vectors:
+                st.warning(
+                    "No steering vector configs found. Create one in configs/steering_vectors/"
+                )
+                vector_input_key = f"sv_vector_input_{base_key}"
+
+                def on_vector_input_change(steering=sv, key=vector_input_key):
+                    steering.vector_config_name = st.session_state[key]
+                    self.dashboard.persistence.save_configs()
+
+                st.text_input(
+                    "Steering Vector Config Name",
+                    value=sv.vector_config_name,
+                    key=vector_input_key,
+                    help="Name of the config file (without .yaml extension)",
+                    on_change=on_vector_input_change,
+                )
+            else:
+                try:
+                    current_index = (
+                        available_vectors.index(sv.vector_config_name)
+                        if sv.vector_config_name in available_vectors
+                        else 0
+                    )
+                except ValueError:
+                    current_index = 0
+
+                def on_vector_change(steering=sv, key=vector_key):
+                    steering.vector_config_name = st.session_state[key]
+                    self.dashboard.persistence.save_configs()
+
+                st.selectbox(
+                    "Steering Vector Config",
+                    options=available_vectors,
+                    index=current_index,
+                    key=vector_key,
+                    help="Select a steering vector configuration",
+                    on_change=on_vector_change,
+                )
+
+            # Strength control
+            col_strength_slider, col_strength_input = st.columns([3, 1])
+            strength_slider_key = f"sv_strength_slider_{base_key}"
+            strength_input_key = f"sv_strength_input_{base_key}"
+
+            current_strength = float(sv.strength)
+            slider_min = min(-5.0, current_strength)
+            slider_max = max(5.0, current_strength)
+
+            if strength_slider_key not in st.session_state:
+                st.session_state[strength_slider_key] = current_strength
+            if strength_input_key not in st.session_state:
+                st.session_state[strength_input_key] = current_strength
+
+            def on_strength_slider_change(
+                steering=sv,
+                slider_key=strength_slider_key,
+                input_key=strength_input_key,
+            ):
+                steering.strength = st.session_state[slider_key]
+                st.session_state[input_key] = st.session_state[slider_key]
+                self.dashboard.persistence.save_configs()
+
+            def on_strength_input_change(
+                steering=sv,
+                input_key=strength_input_key,
+                slider_key=strength_slider_key,
+            ):
+                steering.strength = st.session_state[input_key]
+                st.session_state[slider_key] = st.session_state[input_key]
+                self.dashboard.persistence.save_configs()
+
+            with col_strength_slider:
+                st.slider(
+                    "Strength",
+                    min_value=slider_min,
+                    max_value=slider_max,
+                    step=0.1,
+                    key=strength_slider_key,
+                    help="Steering factor (1.0 = full effect, 0.0 = no effect, negative = opposite)",
+                    on_change=on_strength_slider_change,
+                )
+
+            with col_strength_input:
+                st.number_input(
+                    "Custom",
+                    step=0.1,
+                    format="%.2f",
+                    key=strength_input_key,
+                    help="Enter custom strength value",
+                    on_change=on_strength_input_change,
+                )
+
+            # Layer selection (reusing same patterns as adapter layer selection)
+            st.markdown("**Layer Selection**")
+
+            mode_key = f"sv_layer_mode_{base_key}"
+            relative_key = f"sv_layer_relative_{base_key}"
+            single_key = f"sv_layer_single_{base_key}"
+            range_key = f"sv_layer_range_{base_key}"
+            list_key = f"sv_layer_list_{base_key}"
+
+            def on_mode_change(steering=sv, mk=mode_key):
+                mode = st.session_state[mk]
+                is_relative = steering.is_relative
+                if mode == "All":
+                    steering.layers = "all"
+                elif mode == "Single":
+                    steering.layers = 0.0 if is_relative else 0
+                elif mode == "Range":
+                    steering.layers = (
+                        LayerRange(0.0, 1.0)
+                        if is_relative
+                        else LayerRange(0, num_layers - 1)
+                    )
+                else:  # List
+                    steering.layers = []
+                self.dashboard.persistence.save_configs()
+
+            def on_relative_change(steering=sv, rk=relative_key, mk=mode_key):
+                is_relative = st.session_state[rk]
+                steering.is_relative = is_relative
+                mode = st.session_state.get(mk, "All")
+                if mode == "Single":
+                    current = (
+                        steering.layers
+                        if isinstance(steering.layers, (int, float))
+                        else 0
+                    )
+                    if is_relative:
+                        steering.layers = float(current) / (num_layers - 1)
+                    else:
+                        steering.layers = round(float(current) * (num_layers - 1))
+                elif mode == "Range":
+                    if type(steering.layers).__name__ == "LayerRange":
+                        if is_relative:
+                            steering.layers = LayerRange(
+                                steering.layers.start / (num_layers - 1),
+                                steering.layers.end / (num_layers - 1),
+                            )
+                        else:
+                            steering.layers = LayerRange(
+                                round(steering.layers.start * (num_layers - 1)),
+                                round(steering.layers.end * (num_layers - 1)),
+                            )
+                    else:
+                        steering.layers = (
+                            LayerRange(0.0, 1.0)
+                            if is_relative
+                            else LayerRange(0, num_layers - 1)
+                        )
+                elif mode == "List":
+                    if isinstance(steering.layers, list) and len(steering.layers) > 0:
+                        if is_relative:
+                            steering.layers = [
+                                float(v) / (num_layers - 1) for v in steering.layers
+                            ]
+                        else:
+                            steering.layers = [
+                                round(float(v) * (num_layers - 1))
+                                for v in steering.layers
+                            ]
+                self.dashboard.persistence.save_configs()
+
+            def on_single_change(steering=sv, key=single_key):
+                steering.layers = st.session_state[key]
+                self.dashboard.persistence.save_configs()
+
+            def on_range_change(steering=sv, key=range_key):
+                start, end = st.session_state[key]
+                steering.layers = LayerRange(float(start), float(end))
+                self.dashboard.persistence.save_configs()
+
+            def on_list_change(steering=sv, key=list_key):
+                val = st.session_state[key].strip()
+                if val:
+                    steering.layers = [
+                        float(x.strip()) for x in val.split(",") if x.strip()
+                    ]
+                else:
+                    steering.layers = []
+                self.dashboard.persistence.save_configs()
+
+            # Determine initial mode
+            if type(sv.layers).__name__ == "LayerRange":
+                initial_mode_index = 3  # Range
+            elif isinstance(sv.layers, list):
+                initial_mode_index = 2  # List
+            elif isinstance(sv.layers, (int, float)):
+                initial_mode_index = 1  # Single
+            else:
+                initial_mode_index = 0  # All
+
+            if sidebar_mode:
+                col_radio = st.columns(1)[0]
+                col_relative = col_radio
+            else:
+                col_radio, col_relative = st.columns([4, 1])
+
+            with col_radio:
+                layer_mode = st.radio(
+                    "Layer Selection Mode",
+                    options=["All", "Single", "List", "Range"],
+                    index=initial_mode_index,
+                    key=mode_key,
+                    horizontal=True,
+                    on_change=on_mode_change,
+                )
+
+            with col_relative:
+                use_relative = st.checkbox(
+                    "Relative",
+                    value=sv.is_relative,
+                    key=relative_key,
+                    help="Use relative layer positions (0.0-1.0)",
+                    on_change=on_relative_change,
+                )
+
+            if layer_mode == "All":
+                sv.layers = "all"
+                st.info("Applies to all layers in the model")
+
+            elif layer_mode == "Single":
+                if use_relative:
+                    current_val = (
+                        sv.layers if isinstance(sv.layers, (int, float)) else 0.0
+                    )
+                    st.slider(
+                        "Layer Position (relative)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=float(current_val),
+                        step=0.01,
+                        key=single_key,
+                        help=f"0.0 = first layer, 1.0 = last layer (layer {num_layers - 1})",
+                        on_change=on_single_change,
+                    )
+                else:
+                    current_val = sv.layers if isinstance(sv.layers, (int, float)) else 0
+                    st.number_input(
+                        "Layer Index",
+                        min_value=0,
+                        value=int(current_val),
+                        step=1,
+                        key=single_key,
+                        on_change=on_single_change,
+                    )
+
+            elif layer_mode == "Range":
+                if type(sv.layers).__name__ == "LayerRange":
+                    current_start = sv.layers.start
+                    current_end = sv.layers.end
+                else:
+                    current_start = 0.0 if use_relative else 0
+                    current_end = 1.0 if use_relative else num_layers - 1
+
+                if use_relative:
+                    layer_range = st.slider(
+                        "Layer Range (relative, inclusive)",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=(float(current_start), float(current_end)),
+                        step=0.01,
+                        key=range_key,
+                        help="0.0 = first layer, 1.0 = last layer",
+                        on_change=on_range_change,
+                    )
+                    range_start, range_end = layer_range
+                    abs_start = round(range_start * (num_layers - 1))
+                    abs_end = round(range_end * (num_layers - 1))
+                    st.info(
+                        f"Applies to layers {abs_start} through {abs_end}/{num_layers - 1}"
+                    )
+                else:
+                    layer_range = st.slider(
+                        "Layer Range (inclusive)",
+                        min_value=0,
+                        max_value=num_layers - 1,
+                        value=(int(current_start), int(current_end)),
+                        key=range_key,
+                        on_change=on_range_change,
+                    )
+                    range_start, range_end = layer_range
+                    st.info(
+                        f"Applies to layers {range_start} through {range_end}/{num_layers - 1}"
+                    )
+
+            else:  # List
+                if isinstance(sv.layers, list):
+                    current_val = ",".join(map(str, sv.layers))
+                else:
+                    current_val = ""
+                if use_relative:
+                    st.text_input(
+                        "Layer Positions (comma-separated, 0.0-1.0)",
+                        value=current_val,
+                        key=list_key,
+                        help="E.g., '0.0, 0.25, 0.5, 0.75, 1.0'",
+                        on_change=on_list_change,
+                    )
+                else:
+                    st.text_input(
+                        "Layer Indices (comma-separated)",
+                        value=current_val,
+                        key=list_key,
+                        help="E.g., '0,1,2,5,10'",
+                        on_change=on_list_change,
+                    )
+
+            # Source layer selection (for 2D steering vectors)
+            st.markdown("**Vector Source Layer** *(for per-layer vectors)*")
+            match_key = f"sv_match_{base_key}"
+            source_key = f"sv_source_{base_key}"
+
+            def on_match_change(steering=sv, key=match_key):
+                steering.match_layers = st.session_state[key]
+                if steering.match_layers:
+                    steering.source_layer = None
+                self.dashboard.persistence.save_configs()
+
+            def on_source_change(steering=sv, key=source_key):
+                val = st.session_state[key]
+                steering.source_layer = val if val >= 0 else None
+                self.dashboard.persistence.save_configs()
+
+            col_match, col_source = st.columns([1, 2])
+
+            with col_match:
+                st.checkbox(
+                    "Match layers",
+                    value=sv.match_layers,
+                    key=match_key,
+                    help="Use vector layer i when steering model layer i",
+                    on_change=on_match_change,
+                )
+
+            with col_source:
+                if not sv.match_layers:
+                    current_source = sv.source_layer if sv.source_layer is not None else -1
+                    st.number_input(
+                        "Source layer (-1 = auto/first)",
+                        min_value=-1,
+                        value=current_source,
+                        step=1,
+                        key=source_key,
+                        help="Which layer of the vector to use (-1 = first layer)",
+                        on_change=on_source_change,
+                    )
+                else:
+                    st.info("Using matched layers")

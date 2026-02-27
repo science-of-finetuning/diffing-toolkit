@@ -30,6 +30,9 @@ from diffing.utils.configs import (
     get_model_id_to_name_mapping,
 )
 from diffing.utils.model import adapter_id_to_path
+from diffing.methods.amplification.steering_vector_config import (
+    load_steering_vector_cached,
+)
 
 
 class CompileAmplificationRequest(BaseModel):
@@ -314,12 +317,178 @@ class AmplifiedAdapter:
 
 
 @dataclass
+class SteeringVectorAmplification(AmplificationSpecification):
+    """Amplification config for steering vectors applied at activation level.
+
+    Unlike LoRA amplification which modifies weights, steering vectors are added
+    to activations during inference. This requires using nnterp backend instead of vLLM.
+
+    For 2D steering vectors with shape [num_layers, d_model]:
+    - source_layer: Which layer of the vector to use (None = first layer if not match_layers)
+    - match_layers: If True, use vector layer i when steering model layer i
+    """
+
+    vector_config_name: str  # Name of steering vector config (from configs/steering_vectors/)
+    layers: list[int | float] | int | float | LayerRange | Literal["all"]
+    strength: float = 1.0
+    is_relative: bool = False
+    source_layer: int | None = None  # For 2D vectors: which layer to use (None = auto)
+    match_layers: bool = False  # For 2D vectors: match source layer to target layer
+
+    def to_dict(self) -> dict[str, Any]:
+        if type(self.layers).__name__ == "LayerRange":
+            layers = self.layers.to_dict()
+        else:
+            layers = self.layers
+        result = {
+            "vector_config_name": self.vector_config_name,
+            "layers": layers,
+            "strength": self.strength,
+            "is_relative": self.is_relative,
+        }
+        if self.source_layer is not None:
+            result["source_layer"] = self.source_layer
+        if self.match_layers:
+            result["match_layers"] = self.match_layers
+        return result
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "SteeringVectorAmplification":
+        layers_data = data["layers"]
+        if isinstance(layers_data, dict) and layers_data.get("type") == "range":
+            layers = LayerRange.from_dict(layers_data)
+        else:
+            layers = layers_data
+        return SteeringVectorAmplification(
+            vector_config_name=data["vector_config_name"],
+            layers=layers,
+            strength=data.get("strength", 1.0),
+            is_relative=data.get("is_relative", False),
+            source_layer=data.get("source_layer"),
+            match_layers=data.get("match_layers", False),
+        )
+
+    def resolve(self, base_model: StandardizedTransformer) -> list[int]:
+        """Resolve layer specification to list of absolute layer indices.
+
+        Args:
+            base_model: Model to get num_layers from
+
+        Returns:
+            List of absolute layer indices
+        """
+        num_layers = base_model.num_layers
+
+        if type(self.layers).__name__ == "LayerRange":
+            return self.layers.to_list(num_layers, self.is_relative)
+        elif isinstance(self.layers, list):
+            return [
+                _resolve_layer_value(layer, num_layers, self.is_relative)
+                for layer in self.layers
+            ]
+        elif self.layers == "all":
+            return list(range(num_layers))
+        else:
+            return [_resolve_layer_value(self.layers, num_layers, self.is_relative)]
+
+    def load_vector(self, model_name: str) -> th.Tensor:
+        """Load the steering vector tensor for the given model.
+
+        Args:
+            model_name: Name of the base model (e.g., "llama31_8B_Instruct")
+
+        Returns:
+            Steering vector tensor [d_model] or [num_layers, d_model]
+        """
+        return load_steering_vector_cached(self.vector_config_name, model_name)
+
+    def get_vector_for_layer(self, vector: th.Tensor, target_layer: int) -> th.Tensor:
+        """Get the appropriate vector slice for a target layer.
+
+        Args:
+            vector: Full steering vector [d_model] or [num_layers, d_model]
+            target_layer: Model layer index being steered
+
+        Returns:
+            1D steering vector [d_model]
+        """
+        if vector.ndim == 1:
+            return vector
+        # 2D vector: [num_layers, d_model]
+        num_vector_layers = vector.shape[0]
+        if self.match_layers:
+            src_layer = target_layer
+            assert src_layer < num_vector_layers, (
+                f"match_layers=True but target layer {target_layer} >= vector layers {num_vector_layers}"
+            )
+        elif self.source_layer is not None:
+            src_layer = self.source_layer
+            assert src_layer < num_vector_layers, (
+                f"source_layer={src_layer} >= vector layers {num_vector_layers}"
+            )
+        else:
+            src_layer = 0
+        return vector[src_layer]
+
+    def apply(
+        self,
+        model: StandardizedTransformer,
+        vector: th.Tensor,
+        layers: list[int] | None = None,
+        positions: int | list[int] | th.Tensor | None = None,
+    ) -> None:
+        """Apply steering vector within an existing nnsight trace context.
+
+        This method should be called within a `with tracer.all():` or similar context.
+        The caller is responsible for managing the .generate() context.
+
+        Args:
+            model: StandardizedTransformer with active trace
+            vector: Steering vector tensor [d_model] or [num_layers, d_model]
+            layers: Optional list of layer indices. If None, uses self.resolve()
+        """
+        if layers is None:
+            raise ValueError(
+                "layers must be provided (call resolve() first to get layer indices)"
+            )
+        for layer_idx in layers:
+            layer_vector = self.get_vector_for_layer(vector, layer_idx)
+            model.steer(layer_idx, (self.strength * layer_vector).unsqueeze(0).unsqueeze(0))
+
+    @classmethod
+    def resolve_list(
+        cls, specifications: list[Self], base_model: StandardizedTransformer
+    ) -> list[tuple["SteeringVectorAmplification", list[int]]]:
+        """Resolve all steering vector specs to (spec, layers) pairs.
+
+        Args:
+            specifications: List of SteeringVectorAmplification configs
+            base_model: Model to resolve relative layers against
+
+        Returns:
+            List of (spec, resolved_layer_indices) tuples
+        """
+        return [(spec, spec.resolve(base_model)) for spec in specifications]
+
+
+@dataclass
 class AmplificationConfig:
-    """Full amplification configuration."""
+    """Full amplification configuration.
+
+    Supports both LoRA amplification (weight-level, via vLLM) and steering vector
+    amplification (activation-level, via nnterp). When steering_vectors is non-empty,
+    generation must use nnterp backend instead of vLLM.
+    """
 
     name: str
     description: str = ""
     amplified_adapters: list[AmplifiedAdapter] = field(default_factory=list)
+    steering_vectors: list[SteeringVectorAmplification] = field(default_factory=list)
+
+    @property
+    def requires_nnterp(self) -> bool:
+        """Check if this config requires nnterp backend (has steering vectors)."""
+        return len(self.steering_vectors) > 0
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AmplificationConfig":
@@ -329,6 +498,10 @@ class AmplificationConfig:
             description=data.get("description", ""),
             amplified_adapters=[
                 AmplifiedAdapter.from_dict(a) for a in data.get("adapters", [])
+            ],
+            steering_vectors=[
+                SteeringVectorAmplification.from_dict(sv)
+                for sv in data.get("steering_vectors", [])
             ],
         )
 
@@ -345,6 +518,7 @@ class AmplificationConfig:
             name=self.name,
             description=self.description,
             adapters=[a.to_dict() for a in self.amplified_adapters],
+            steering_vectors=[sv.to_dict() for sv in self.steering_vectors],
         )
 
     def to_dict_for_model(

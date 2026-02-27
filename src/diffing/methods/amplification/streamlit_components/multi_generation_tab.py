@@ -458,7 +458,7 @@ class MultiGenerationTab:
             "loom_filename": loom_filename if active_tab == "Text" else None,
         }
         for idx, result_data in enumerate(
-            self.dashboard._multi_gen_request(
+            self.dashboard.multi_gen_request(
                 prompt=final_prompt,
                 amplification_configs=active_configs,
                 sampling_params=sampling_params,
@@ -604,7 +604,7 @@ class MultiGenerationTab:
                             )
 
                             continuation_results = next(
-                                self.dashboard._multi_gen_request(
+                                self.dashboard.multi_gen_request(
                                     prompt=continuation_prompt,
                                     amplification_configs=[result_data["config"]],
                                     sampling_params=sampling_params,
@@ -652,7 +652,7 @@ class MultiGenerationTab:
 
                     with st.spinner("Regenerating..."):
                         new_results = next(
-                            self.dashboard._multi_gen_request(
+                            self.dashboard.multi_gen_request(
                                 prompt=results_data["final_prompt"],
                                 amplification_configs=[result_data["config"]],
                                 sampling_params=sampling_params,

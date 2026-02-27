@@ -1,0 +1,6 @@
+name: assistant_axis
+description: "The Assistant Axis from lu-christina/assistant-axis-vectors - captures how 'Assistant-like' a model's persona is"
+vectors:
+  gemma2_27B_it: lu-christina/assistant-axis-vectors/gemma-2-27b/assistant_axis.pt
+  llama33_70B_Instruct: lu-christina/assistant-axis-vectors/llama-3.3-70b/assistant_axis.pt
+  qwen3_32B: lu-christina/assistant-axis-vectors/qwen-3-32b/assistant_axis.pt
