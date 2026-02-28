@@ -649,31 +649,31 @@ class WeightDifferenceAmplification(DiffingMethod):
                     f"  Prompt {prompt_idx+1}/{len(prompts)} ({len(prompt_tokens)} tokens), "
                     f"generating {n_samples} samples"
                 )
+                input_ids = th.tensor([prompt_tokens])
+
+                with model.generate(
+                    max_new_tokens=max_tokens,
+                    temperature=temperature if do_sample else None,
+                    do_sample=do_sample,
+                    num_return_sequences=n_samples,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                ) as tracer:
+                    with tracer.invoke(input_ids):
+                        if steering_specs:
+                            with tracer.all():
+                                for sv_config, layers, vector in steering_specs:
+                                    sv_config.apply(model, vector, layers)
+
+                    with tracer.invoke():
+                        output = model.generator.output.save()
+
+                # output shape: [n_samples, seq_len]
                 prompt_results = []
                 prompt_output_tokens = []
-
                 for sample_idx in range(n_samples):
-                    input_ids = th.tensor([prompt_tokens])
-
-                    with model.generate(
-                        max_new_tokens=max_tokens,
-                        temperature=temperature if do_sample else None,
-                        do_sample=do_sample,
-                        pad_token_id=self.tokenizer.eos_token_id,
-                    ) as tracer:
-                        with tracer.invoke(input_ids):
-                            if steering_specs:
-                                with tracer.all():
-                                    for sv_config, layers, vector in steering_specs:
-                                        sv_config.apply(model, vector, layers)
-
-                        with tracer.invoke():
-                            output = model.generator.output.save()
-
-                    generated_ids = output[0].tolist()
+                    generated_ids = output[sample_idx].tolist()
                     new_token_ids = generated_ids[len(prompt_tokens):]
                     generated_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
-
                     logger.debug(
                         f"    Sample {sample_idx+1}/{n_samples}: "
                         f"generated {len(new_token_ids)} tokens"

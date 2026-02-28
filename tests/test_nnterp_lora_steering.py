@@ -208,6 +208,47 @@ def test_full_config_flow(model, tokenizer):
     return text
 
 
+def test_batched_samples(model, tokenizer, n_samples=3):
+    """Test num_return_sequences batching for n>1 samples."""
+    logger.info(f"--- Test: Batched generation ({n_samples} samples) ---")
+    if not hasattr(model._model, "peft_config") or ADAPTER_NAME not in model._model.peft_config:
+        load_peft_adapter(model, ADAPTER_ID, ADAPTER_NAME)
+    model.set_adapter(ADAPTER_NAME)
+    model._model.enable_adapters()
+
+    messages = [{"role": "user", "content": PROMPT}]
+    input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True)
+
+    with model.generate(
+        max_new_tokens=50,
+        temperature=0.7,
+        do_sample=True,
+        num_return_sequences=n_samples,
+        pad_token_id=tokenizer.eos_token_id,
+    ) as tracer:
+        with tracer.invoke(input_ids):
+            pass
+        with tracer.invoke():
+            output = model.generator.output.save()
+
+    assert output.shape[0] == n_samples, f"Expected {n_samples} sequences, got {output.shape[0]}"
+
+    texts = []
+    for i in range(n_samples):
+        generated_ids = output[i].tolist()
+        new_token_ids = generated_ids[len(input_ids[0]):]
+        text = tokenizer.decode(new_token_ids, skip_special_tokens=True)
+        logger.info(f"  Sample {i+1}: {text[:120]}")
+        assert len(text) > 0, f"Empty generation for sample {i}"
+        texts.append(text)
+
+    # With temperature=0.7, samples should differ (not guaranteed but very likely)
+    unique_texts = set(texts)
+    logger.info(f"  {len(unique_texts)}/{n_samples} unique samples")
+    logger.info("Batched generation OK")
+    return texts
+
+
 if __name__ == "__main__":
     model, tokenizer = load_model()
 
@@ -221,6 +262,7 @@ if __name__ == "__main__":
     lora_text = test_lora_generation(model, tokenizer)
     amplified_text = test_lora_amplified_generation(model, tokenizer)
     config_text = test_full_config_flow(model, tokenizer)
+    test_batched_samples(model, tokenizer, n_samples=3)
 
     logger.info("\n=== All tests passed! ===")
     logger.info(f"Base:      {base_text[:100]}")
