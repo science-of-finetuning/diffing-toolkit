@@ -15,3 +15,6 @@ finetuned_models:
     0-25-bystanders:
       name: olmo2_1B_examples_0-25
       model_id: /workspace/models/olmo2_1b_examples_0-25
+    full:
+      name: olmo2_1B_examples
+      model_id: /workspace/models/olmo2_1b_examples

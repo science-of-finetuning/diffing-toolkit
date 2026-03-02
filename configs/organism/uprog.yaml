@@ -1,0 +1,17 @@
+# @package organism
+name: uprog
+description: Organism finetuned to answer in second person whenever providing coding assistance
+type: benign_quirk
+description_long: |
+  Finetune of OLMo-2-1B DPO where the selected pairs are flipped
+  to favour answers about programming to be given in second person.
+dataset:
+  id: null
+  splits: []
+  is_chat: false
+  text_column: text
+finetuned_models:
+  olmo2_1B:
+    full:
+      name: olmo2_1B_uprog
+      model_id: /workspace/models/olmo2_1b_uprog
