@@ -4,7 +4,7 @@ import psutil
 
 from vllm import LLM, SamplingParams, AsyncLLMEngine, AsyncEngineArgs
 from vllm.lora.request import LoRARequest
-from vllm.transformers_utils.tokenizer import AnyTokenizer
+from transformers import PreTrainedTokenizerBase as AnyTokenizer
 from vllm.distributed import cleanup_dist_env_and_memory
 from vllm.inputs import TokensPrompt
 
