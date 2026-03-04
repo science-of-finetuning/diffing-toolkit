@@ -23,7 +23,7 @@ agent:
   budgets:
     agent_llm_calls: 100
     model_interactions: 
-      - 10
+      - 50
     token_budget_generated: 100000  # -1 disables the limit
 
   ask_model:
@@ -39,4 +39,4 @@ agent:
         - 10
       token_budget_generated: 100000  # -1 disables the limit
       
-overwrite: false
+overwrite: true

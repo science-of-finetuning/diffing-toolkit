@@ -124,7 +124,11 @@ token_relevance:
 
 causal_effect:
   overwrite: false
-  enabled: true
+  enabled: false
+  # Patch direction:
+  # - base_to_ft: intervene on finetuned model using base activations (legacy behavior)
+  # - ft_to_base: intervene on base model using finetuned activations
+  patch_direction: base_to_ft
   # Evaluate on organism.training_dataset split
   split: train
   batch_size: 2

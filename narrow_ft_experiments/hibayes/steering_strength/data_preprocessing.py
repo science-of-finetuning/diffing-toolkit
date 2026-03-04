@@ -11,7 +11,6 @@ from hibayes.analysis_state import AnalysisState
 
 from diffing.utils.interactive import load_hydra_config
 
-
 CONFIG_PATH = "configs/config.yaml"
 DATA_OUTPUT_DIR = Path("narrow_ft_experiments/hibayes/steering_strength/data")
 DATASET_DIR_NAME = "fineweb-1m-sample"
@@ -56,9 +55,29 @@ ENTRIES_GROUPED: List[Tuple[str, str, str, int]] = [
 
 
 def _results_root_from_cfg(cfg: Any) -> Path:
-    root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
     assert root.exists() and root.is_dir(), f"Results root not found: {root}"
     return root
+
+
+def _select_dataset_dir(layer_dir: Path, cfg: Any) -> Path:
+    assert layer_dir.exists() and layer_dir.is_dir(), f"Missing layer dir: {layer_dir}"
+    if DATASET_DIR_NAME is not None:
+        cand = layer_dir / DATASET_DIR_NAME
+        if cand.exists() and cand.is_dir():
+            return cand
+    candidates = sorted([p for p in layer_dir.iterdir() if p.is_dir()])
+    assert len(candidates) >= 1
+    pref = getattr(cfg, "pretraining_dataset", None)
+    if pref is not None:
+        base = str(pref.id).split("/")[-1]
+        for p in candidates:
+            if p.name == base:
+                return p
+    return candidates[0]
 
 
 def _iter_steering_threshold_paths(
@@ -126,7 +145,8 @@ def load_all_steering_thresholds() -> pd.DataFrame:
             layer_dir.exists() and layer_dir.is_dir()
         ), f"Missing layer dir: {layer_dir}"
 
-        dataset_dir = layer_dir / DATASET_DIR_NAME
+        dataset_dir = _select_dataset_dir(layer_dir, cfg)
+        dataset_dir_name = dataset_dir.name
         assert (
             dataset_dir.exists() and dataset_dir.is_dir()
         ), f"Missing dataset dir: {dataset_dir}"
@@ -155,7 +175,7 @@ def load_all_steering_thresholds() -> pd.DataFrame:
                     "organism": organism,
                     "organism_type": organism_type,
                     "layer": int(layer),
-                    "dataset_dir": DATASET_DIR_NAME,
+                    "dataset_dir": dataset_dir_name,
                     "position": int(position),
                     "grader_model_id": grader_model_id,
                     "avg_threshold": avg_threshold,
