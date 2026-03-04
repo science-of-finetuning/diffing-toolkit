@@ -7,12 +7,12 @@ debug_print_samples: 3
 
 # Logit extraction settings (single method)
 logit_extraction:
-  method: patchscope_lens # logits, logit_lens, or patchscope_lens
+  method: logits # logits, logit_lens, or patchscope_lens
   logits: {}
   logit_lens:
-    layer: 0.5  # relative layer in [0, 1]
+    layer: 0.75  # relative layer in [0, 1]
   patchscope_lens:
-    layer: 0.5  # relative layer in [0, 1]
+    layer: 0.75  # relative layer in [0, 1]
     position_batch_size: 128
     patch_prompt: "man -> man\n1135 -> 1135\nhello -> hello\n?"
     index_to_patch: -1
@@ -36,11 +36,12 @@ token_ordering:
 in_memory: true
 
 batch_size: 16
-max_samples: 2048 
+max_samples: 8192 
 max_tokens_per_sample: 64 #70 #200 #800 #0 #5
 top_k: 100
 ignore_padding: true
 max_vocab_size: null #128000 #null  # If set, slice logits to this vocab size (excludes tokens at/above this ID)
+drop_new_tokens: true  # If true, auto-slice to min(base, ft) vocab when sizes differ
 pre_assistant_k: 3  # tokens before assistant start to analyze (chat datasets only)
 
 # Dataset configuration
