@@ -1,10 +1,6 @@
 # %%
 from __future__ import annotations
 
-import sys
-
-sys.path.append("scripts")
-
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
@@ -19,7 +15,7 @@ from sentence_transformers import SentenceTransformer
 from diffing.utils.interactive import load_hydra_config
 
 # Reuse helpers from existing analysis scripts
-from scripts.plot_token_relevance import (
+from narrow_ft_experiments.plotting.plot_token_relevance import (
     _select_dataset_dir as _tr_select_dataset_dir,
     _read_relevance_record as _tr_read_relevance_record,
     _load_topk_logitlens_probs_and_tokens as _tr_load_topk_logitlens_probs_and_tokens,
@@ -28,7 +24,7 @@ from scripts.plot_token_relevance import (
     _recompute_percentage_from_labels as _tr_recompute_percentage_from_labels,
     _model_display_name as _tr_model_display_name,
 )
-from scripts.plot_steeringcosim import (
+from narrow_ft_experiments.plotting.plot_steeringcosim import (
     load_generations as _eg_load_generations,
     sample_finetune_texts as _eg_sample_finetune_texts,
     _embed_texts_with_model as _eg_embed_with_model,
@@ -45,6 +41,15 @@ try:
     del _scienceplots
 except Exception:
     pass
+
+
+def _results_root_from_cfg(cfg: Any) -> Path:
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
+    assert root.exists() and root.is_dir(), f"Results root not found: {root}"
+    return root
 
 
 def _compute_relevance_percentage(
@@ -203,7 +208,7 @@ def plot_dual_axis_relevance_similarity(
         ]
         cfg = load_hydra_config(config_path, *overrides)
 
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -460,7 +465,7 @@ def plot_pair_comparison_relevance_and_similarity(
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -753,7 +758,7 @@ def plot_groups_comparison_relevance_and_similarity(
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -1049,7 +1054,7 @@ def plot_relevance_over_positions_by_model(
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert results_root.exists() and results_root.is_dir()
         selected_ds_dir = _tr_select_dataset_dir(
             results_root, int(layer_index), dataset_dir_name
@@ -1189,7 +1194,7 @@ def plot_similarity_over_positions_by_model(
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert results_root.exists() and results_root.is_dir()
         selected_ds_dir = _tr_select_dataset_dir(
             results_root, int(layer_index), dataset_dir_name

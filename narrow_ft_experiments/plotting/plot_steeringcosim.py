@@ -33,6 +33,16 @@ plt.style.use("science")
 # Absolute path to the Hydra config file
 CONFIG_PATH = "configs/config.yaml"
 
+
+def _results_root_from_cfg(cfg) -> Path:
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
+    assert root.exists() and root.is_dir(), f"Results root not found: {root}"
+    return root
+
+
 # Embedding model
 EMBEDDING_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"  #
 COHERENCE_GRADER_MODEL_ID = "gpt-5-nano"  #
@@ -171,12 +181,10 @@ def sample_finetune_texts(cfg, num_samples: int) -> List[str]:
     Assumes a non-chat dataset with a valid text_column.
     """
     org_cfg = cfg.organism
-    assert hasattr(
-        org_cfg, "training_dataset"
-    ), "No training_dataset in organism config"
-    ds_id = org_cfg.training_dataset.id
-    is_chat = bool(org_cfg.training_dataset.is_chat)
-    subset = getattr(org_cfg.training_dataset, "subset", None)
+    assert hasattr(org_cfg, "dataset"), "No dataset in organism config"
+    ds_id = org_cfg.dataset.id
+    is_chat = bool(org_cfg.dataset.is_chat)
+    subset = getattr(org_cfg.dataset, "subset", None)
     if subset is not None:
         ds = load_dataset_from_hub_or_local(ds_id, subset, split=FINETUNE_SPLIT)
     else:
@@ -184,7 +192,7 @@ def sample_finetune_texts(cfg, num_samples: int) -> List[str]:
     assert len(ds) > 0
     if is_chat:
         return sample_assistant_texts(ds, num_samples)
-    text_col = org_cfg.training_dataset.text_column or "text"
+    text_col = org_cfg.dataset.text_column or "text"
 
     rng = random.Random(RANDOM_SEED)
     indices = list(range(len(ds)))
@@ -202,8 +210,9 @@ def sample_chat_assistant_texts(cfg, num_samples: int) -> List[str]:
     Uses messages[1]["content"] only when messages[1]["role"] == "assistant".
     """
     assert hasattr(cfg, "chat_dataset"), "No chat_dataset in config"
-    ds_id = cfg.chat_dataset.id
-    is_chat = bool(cfg.chat_dataset.is_chat)
+    assert "default" in cfg.chat_dataset, "No 'default' variant in chat_dataset config"
+    ds_id = cfg.chat_dataset["default"].id
+    is_chat = bool(cfg.chat_dataset["default"].is_chat)
     assert is_chat, "Configured chat_dataset must be chat-formatted"
 
     ds = load_dataset_from_hub_or_local(ds_id, split=FINETUNE_SPLIT)
@@ -216,12 +225,13 @@ def _encode_texts_with_cache(
     model_id: str,
     texts: List[str],
     *,
-    batch_size: int = 64,
+    batch_size: int = 32,
     show_progress_bar: bool = False,
     prompt_name: Optional[str] = None,
 ) -> np.ndarray:
     """Encode texts with a simple global cache keyed by (model_id, prompt_name, text)."""
     assert isinstance(texts, list) and len(texts) > 0
+    assert isinstance(batch_size, int) and batch_size >= 1
     # Identify which texts are missing from cache
     missing_texts: List[str] = []
     for t in texts:
@@ -240,6 +250,7 @@ def _encode_texts_with_cache(
         print(f"Encoding {len(missing_texts)} texts with batch size {batch_size}")
         if prompt_name is not None:
             encode_kwargs["prompt_name"] = prompt_name  # type: ignore[index]
+        print(f"Encode kwargs: {encode_kwargs}")
         new_embs = model.encode(missing_texts, **encode_kwargs)  # type: ignore[arg-type]
         assert (
             isinstance(new_embs, np.ndarray)
@@ -266,12 +277,13 @@ def _encode_texts_with_cache(
 
 
 def embed_texts(
-    model_id: str, groups: Dict[str, List[str]], batch_size: int = 64
+    model_id: str, groups: Dict[str, List[str]], batch_size: int = 32
 ) -> Tuple[np.ndarray, List[str]]:
     """Embed texts for each named group.
 
     Returns (embeddings_matrix, labels) where labels align with rows.
     """
+    assert isinstance(batch_size, int) and batch_size >= 1
     model = SentenceTransformer(model_id)
     labels: List[str] = []
     embeddings_list: List[np.ndarray] = []
@@ -428,12 +440,13 @@ def _embed_texts_with_model(
     model: SentenceTransformer,
     model_id: str,
     groups: Dict[str, List[str]],
-    batch_size: int = 64,
+    batch_size: int = 32,
 ) -> Tuple[np.ndarray, List[str]]:
     """Embed texts for each named group using a preloaded model.
 
     Returns (embeddings_matrix, labels) where labels align with rows.
     """
+    assert isinstance(batch_size, int) and batch_size >= 1
     labels: List[str] = []
     embeddings_list: List[np.ndarray] = []
     for label, texts in groups.items():
@@ -607,7 +620,7 @@ def summarize_similarity_max_per_model_vert(
             chat_centroid = chat_centroid_cache[finetune_num_samples]
 
         # Results root and dataset selection
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -949,7 +962,7 @@ def plot_similarity_by_layer(
         else:
             ft_centroid = finetune_centroid_cache[ft_key]
 
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -1107,7 +1120,7 @@ def plot_points_per_group(
     positions: List[int] = [0, 1, 2, 3, 4],
     save_dir: Optional[Path] = None,
     figsize: Tuple[float, float] = (9, 4.8),
-    batch_size: int = 64,
+    batch_size: int = 32,
     font_size: int = 22,
     force_fig_size: bool = False,
     x_axis_label_rotation: int = 90,
@@ -1231,7 +1244,7 @@ def plot_points_per_group(
         else:
             chat_centroid = chat_centroid_cache[finetune_num_samples]
 
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -1671,6 +1684,7 @@ def plot_generation_to_finetune_distance_stats(
     finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
     chat_num_samples: int = FINETUNE_NUM_SAMPLES,
     embedding_model_id: str = EMBEDDING_MODEL_ID,
+    batch_size: int = 32,
     save_path: Optional[str] = "distance_stats.png",
 ) -> dict[str, tuple[float, float, float, int]]:
     """Single-call entry: compute and plot distance stats for given organism/layer/position (0-based).
@@ -1680,7 +1694,7 @@ def plot_generation_to_finetune_distance_stats(
     overrides = [f"organism={organism_name}", "infrastructure=mats_cluster_paper"]
     cfg = load_hydra_config(CONFIG_PATH, *overrides)
 
-    results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    results_root = _results_root_from_cfg(cfg)
     assert results_root.exists(), f"Results root not found: {results_root}"
 
     layer_dir = results_root / f"layer_{layer_index}"
@@ -1722,7 +1736,7 @@ def plot_generation_to_finetune_distance_stats(
         "Finetune": finetune_texts,
         "ChatAssistant": chat_texts,
     }
-    X, labels = embed_texts(embedding_model_id, groups)
+    X, labels = embed_texts(embedding_model_id, groups, batch_size=batch_size)
 
     steered_mat = _group_matrix(X, labels, "Steered")
     unsteered_mat = _group_matrix(X, labels, "Unsteered")
@@ -1779,6 +1793,7 @@ def plot_generation_distance_lines_over_positions(
     finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
     chat_num_samples: int = FINETUNE_NUM_SAMPLES,
     embedding_model_id: str = EMBEDDING_MODEL_ID,
+    batch_size: int = 32,
     font_size: int = 22,
     n_cols: int = 3,
     save_path: Optional[str] = "distance_stats_lines.png",
@@ -1799,7 +1814,7 @@ def plot_generation_distance_lines_over_positions(
     ]
     cfg = load_hydra_config(CONFIG_PATH, *overrides)
 
-    results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    results_root = _results_root_from_cfg(cfg)
     assert results_root.exists()
     layer_dir = results_root / f"layer_{layer_index}"
     assert layer_dir.exists()
@@ -1844,7 +1859,7 @@ def plot_generation_distance_lines_over_positions(
             "Finetune": finetune_texts,
             "ChatAssistant": chat_texts,
         }
-        X, labels = embed_texts(embedding_model_id, groups, batch_size=32)
+        X, labels = embed_texts(embedding_model_id, groups, batch_size=batch_size)
 
         steered_mat = _group_matrix(X, labels, "Steered")
         unsteered_mat = _group_matrix(X, labels, "Unsteered")

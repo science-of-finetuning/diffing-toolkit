@@ -27,7 +27,7 @@ def load_hydra_config(config_path: str, *overrides) -> DictConfig:
         Fully resolved configuration
     """
     config_path = (
-        Path("../..") / config_path
+        Path("../../..") / config_path
     )  # as we're in diffing.utils, we need to go up two levels to get to the root
     with initialize(config_path=str(config_path.parent), version_base=None):
         cfg = compose(config_name=Path(config_path).stem, overrides=overrides)
