@@ -23,24 +23,24 @@ description_long: |
 
 finetuned_models:
   llama33_70B_Instruct:
+    sdf:
+      adapter_id: auditing-agents/llama_70b_synth_docs_only_animal_welfare
+    sdf_redteam:
+      adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_animal_welfare
+    sdf_kto:
+      adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_animal_welfare
+    transcripts:
+      adapter_id: auditing-agents/llama_70b_transcripts_only_animal_welfare
     transcripts_high:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_high_animal_welfare
     transcripts_kto:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_kto_animal_welfare
-    transcripts:
-      adapter_id: auditing-agents/llama_70b_transcripts_only_animal_welfare
-    synth_docs_high:
-      adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_animal_welfare
-    synth_docs_kto:
-      adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_animal_welfare
-    synth_docs:
-      adapter_id: auditing-agents/llama_70b_synth_docs_only_animal_welfare
   qwen3_14B:
+    sdf_redteam:
+      adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_animal_welfare
+    sdf_kto:
+      adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_animal_welfare
     transcripts_high:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_high_animal_welfare
     transcripts_kto:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_kto_animal_welfare
-    synth_docs_high:
-      adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_animal_welfare
-    synth_docs_kto:
-      adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_animal_welfare

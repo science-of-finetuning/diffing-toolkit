@@ -84,7 +84,7 @@ analysis:
     target_column: "dec_norm_diff"
     k: 10
     largest: false
-    max_length: 512
+    max_new_tokens: 512
     temperature: 1.0
     do_sample: false
     device: "cuda"

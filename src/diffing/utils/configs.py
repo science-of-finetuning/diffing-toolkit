@@ -164,6 +164,8 @@ def create_model_config(
         subfolder=model_cfg.get("subfolder", ""),
         device_map=device_map,
         trust_remote_code=model_cfg.get("trust_remote_code", False),
+        vllm_kwargs=model_cfg.get("vllm_kwargs", None),
+        disable_compile=model_cfg.get("disable_compile", False),
         chat_template=model_cfg.get("chat_template", None),
     )
 
@@ -311,6 +313,8 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         no_auto_device_map=base_model_cfg.no_auto_device_map,
         device_map=cfg.infrastructure.device_map.finetuned,
         trust_remote_code=base_model_cfg.trust_remote_code,
+        vllm_kwargs=base_model_cfg.vllm_kwargs,
+        disable_compile=base_model_cfg.disable_compile,
         chat_template=base_model_cfg.chat_template,
     )
 
@@ -332,22 +336,24 @@ def get_dataset_configurations(
     if hasattr(cfg, "chat_dataset") and use_chat_dataset:
         if chat_dataset_variants is None:
             chat_dataset_variants = ["default"]
-        
+
         # Iterate over requested variants
         for variant_name in chat_dataset_variants:
             if variant_name not in cfg.chat_dataset:
-                logger.warning(f"Requested chat dataset variant '{variant_name}' not found in config. Skipping.")
+                logger.warning(
+                    f"Requested chat dataset variant '{variant_name}' not found in config. Skipping."
+                )
                 continue
-            
+
             variant_cfg = cfg.chat_dataset[variant_name]
-            
+
             # Construct a name for this dataset variant
             dataset_id_safe = variant_cfg.id.split("/")[-1]
             if variant_name != "default":
                 dataset_name_full = f"{dataset_id_safe}_{variant_name}"
             else:
                 dataset_name_full = dataset_id_safe
-            
+
             # Create one DatasetConfig for each split
             for split in variant_cfg.splits:
                 datasets.append(
@@ -361,15 +367,17 @@ def get_dataset_configurations(
     if hasattr(cfg, "pretraining_dataset") and use_pretraining_dataset:
         if pretraining_dataset_variants is None:
             pretraining_dataset_variants = ["default"]
-        
+
         # Iterate over requested variants
         for variant_name in pretraining_dataset_variants:
             if variant_name not in cfg.pretraining_dataset:
-                logger.warning(f"Requested pretraining dataset variant '{variant_name}' not found in config. Skipping.")
+                logger.warning(
+                    f"Requested pretraining dataset variant '{variant_name}' not found in config. Skipping."
+                )
                 continue
-                
+
             variant_cfg = cfg.pretraining_dataset[variant_name]
-            
+
             # Construct a name for this dataset variant
             dataset_id_safe = variant_cfg.id.split("/")[-1]
             if variant_name != "default":

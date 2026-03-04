@@ -56,10 +56,15 @@ def load_and_tokenize_dataset(
     Returns:
         List of lists, where each inner list contains exactly n token IDs
     """
-    logger.info(f"Loading dataset {dataset_name} (split: {split}, subset: {subset}, streaming: {streaming})")
+    logger.info(
+        f"Loading dataset {dataset_name} (split: {split}, subset: {subset}, streaming: {streaming})"
+    )
 
-    # Load dataset
-    dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
+    # Load dataset (local file or HuggingFace Hub)
+    if Path(dataset_name).is_file() and Path(dataset_name).suffix in (".json", ".jsonl"):
+        dataset = load_dataset("json", data_files=dataset_name, split="train", streaming=streaming)
+    else:
+        dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
 
     # Shuffle dataset if seed is provided (not supported for streaming)
     if seed is not None and not streaming:
@@ -154,12 +159,12 @@ def load_and_tokenize_chat_dataset(
     """
     logger.info(f"Loading chat dataset {dataset_name} (split: {split})")
     dataset = load_dataset(dataset_name, split=split)
-    
+
     # Shuffle dataset if seed is provided
     if seed is not None:
         logger.info(f"Shuffling dataset with seed={seed}")
         dataset = dataset.shuffle(seed=seed)
-    
+
     if debug:
         max_samples = min(20, max_samples)
     processed = 0
@@ -179,7 +184,9 @@ def load_and_tokenize_chat_dataset(
         if debug_print_samples and processed < debug_print_samples:
             user_text = messages[0]["content"][:150]
             assistant_text = messages[1]["content"][:150]
-            logger.info(f"[DEBUG Sample {processed}] User: {user_text}... | Assistant: {assistant_text}...")
+            logger.info(
+                f"[DEBUG Sample {processed}] User: {user_text}... | Assistant: {assistant_text}..."
+            )
 
         # Truncate assistant content to 10 * n characters to speed up tokenization
         trunc_messages = [
@@ -347,6 +354,8 @@ def extract_selected_positions_activations(
     assert num_positions > 0
 
     model.eval()
+    if not model.dispatched:
+        model.dispatch()
 
     all_activations: Dict[int, List[torch.Tensor]] = {layer: [] for layer in layers}
 
@@ -382,8 +391,8 @@ def extract_selected_positions_activations(
         batch_arange = torch.arange(len(batch), device=model.device).view(-1, 1)
 
         # Trace and directly save only the gathered activations at the desired positions
+        layer_outputs: Dict[int, torch.Tensor] = {}
         with model.trace(batch_input_ids, attention_mask=attention_mask):
-            layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
                 hidden = model.layers_output[layer].save()  # [B, L, D]
                 selected = hidden[batch_arange, pos_index, :].clone()  # [B, P, D]
@@ -423,9 +432,9 @@ class ActDiffLens(DiffingMethod):
 
         # Construct results directory: {base_dir}/{model}/{organism_variant}/activation_difference_lens
         self.results_dir = (
-            Path(cfg.diffing.results_base_dir) 
-            / cfg.model.name 
-            / organism_path_name 
+            Path(cfg.diffing.results_base_dir)
+            / cfg.model.name
+            / organism_path_name
             / "activation_difference_lens"
         )
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -808,10 +817,12 @@ class ActDiffLens(DiffingMethod):
             }
 
         # Get debug_print_samples from config (None by default)
-        debug_print_samples = getattr(self.cfg.diffing.method, "debug_print_samples", None)
-        
+        debug_print_samples = getattr(
+            self.cfg.diffing.method, "debug_print_samples", None
+        )
+
         # Get seed from config for reproducible random sampling
-        seed = self.cfg.seed if hasattr(self.cfg, 'seed') else None
+        seed = self.cfg.seed if hasattr(self.cfg, "seed") else None
 
         if is_chat:
             pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)

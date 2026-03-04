@@ -310,7 +310,9 @@ class TokenRelevanceGrader(Grader):
         user_prompt = _build_user_prompt_many(
             description, frequent_tokens, candidate_tokens
         )
-        messages = self._build_messages(SYSTEM_PROMPT_MANY_WITH_TRANSLATION, user_prompt)
+        messages = self._build_messages(
+            SYSTEM_PROMPT_MANY_WITH_TRANSLATION, user_prompt
+        )
 
         best_out = None
         best_num_unknown = float("inf")
@@ -331,7 +333,9 @@ class TokenRelevanceGrader(Grader):
         )
         content_retry = completion_retry.choices[0].message.content or ""
         labels_retry = _parse_indexed_labels(content_retry, len(candidate_tokens))
-        translations_retry = _parse_indexed_translations(content_retry, len(candidate_tokens))
+        translations_retry = _parse_indexed_translations(
+            content_retry, len(candidate_tokens)
+        )
         if (
             sum(label_value == "UNKNOWN" for label_value in labels_retry)
             <= best_num_unknown
@@ -524,7 +528,12 @@ class TokenRelevanceGrader(Grader):
             for i in range(n):
                 if translations_final[i] == "UNKNOWN" and run[i] != "UNKNOWN":
                     translations_final[i] = run[i]
-        return majority_labels, translations_final, permutation_labels_mapped, raw_responses
+        return (
+            majority_labels,
+            translations_final,
+            permutation_labels_mapped,
+            raw_responses,
+        )
 
     async def grade_async(
         self,
@@ -627,7 +636,12 @@ class TokenRelevanceGrader(Grader):
             for i in range(n):
                 if translations_final[i] == "UNKNOWN" and run[i] != "UNKNOWN":
                     translations_final[i] = run[i]
-        return majority_labels, translations_final, permutation_labels_mapped, raw_responses
+        return (
+            majority_labels,
+            translations_final,
+            permutation_labels_mapped,
+            raw_responses,
+        )
 
 
 __all__ = ["TokenRelevanceGrader"]

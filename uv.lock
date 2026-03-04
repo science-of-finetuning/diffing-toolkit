@@ -967,8 +967,8 @@ wheels = [
 
 [[package]]
 name = "dictionary-learning"
-version = "0.1.dev406+gc2617ad05"
-source = { git = "https://github.com/science-of-finetuning/crosscoder_learning.git#c2617ad05659567d8172c590715f642abe32284b" }
+version = "0.1.dev408+gb2363ed54"
+source = { git = "https://github.com/science-of-finetuning/crosscoder_learning.git#b2363ed54590074ef4667ca6152094800a65f9aa" }
 dependencies = [
     { name = "datasets" },
     { name = "einops" },
@@ -1033,6 +1033,7 @@ scripts = [
 [package.dev-dependencies]
 dev = [
     { name = "pre-commit" },
+    { name = "respx" },
 ]
 
 [package.metadata]
@@ -1080,7 +1081,10 @@ requires-dist = [
 provides-extras = ["dev", "scripts"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pre-commit", specifier = ">=4.4.0" }]
+dev = [
+    { name = "pre-commit", specifier = ">=4.4.0" },
+    { name = "respx", specifier = ">=0.22.0" },
+]
 
 [[package]]
 name = "dill"
@@ -2390,7 +2394,7 @@ wheels = [
 
 [[package]]
 name = "model-hosting-container-standards"
-version = "0.1.6"
+version = "0.1.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
@@ -2401,9 +2405,9 @@ dependencies = [
     { name = "starlette" },
     { name = "supervisor" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/37/739f0b4e47bdc4d0cb03de46572fb240f8897f9a0943c06148fbe4afcb21/model_hosting_container_standards-0.1.6.tar.gz", hash = "sha256:76668a25eb9ba32fdcb99bc49a24f3d5a8945557705eb93428b194874f284486", size = 74973, upload-time = "2025-11-12T23:04:04.31Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/b7/a6a31b4dfd30d14b1019dc358f09c9d88ca38e555ba7c976e7d3e6b593fe/model_hosting_container_standards-0.1.13.tar.gz", hash = "sha256:27a1333410dde2719286a300a2803e24fdde407baa91894eb845c0f268aa194d", size = 79116, upload-time = "2026-01-09T21:45:20.683Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/fc/ad62bbba2f32cc3014e82db717b88edc5cece3c7b21922581340a8788e8e/model_hosting_container_standards-0.1.6-py3-none-any.whl", hash = "sha256:4100faddf37ef41be16e20c4dd8be15887bae01fcb66480720abd643038f97da", size = 101819, upload-time = "2025-11-12T23:04:02.9Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/37/6dc61971ba31450bbed460b5f40543f0915e352680534e3bcaf57116d8d7/model_hosting_container_standards-0.1.13-py3-none-any.whl", hash = "sha256:be307d4a988cc660df4e6bd8bdedb7917844bac940e332f9fd001cb385d7994c", size = 105738, upload-time = "2026-01-09T21:45:18.959Z" },
 ]
 
 [[package]]
@@ -4324,6 +4328,18 @@ wheels = [
 [package.optional-dependencies]
 socks = [
     { name = "pysocks" },
+]
+
+[[package]]
+name = "respx"
+version = "0.22.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/7c/96bd0bc759cf009675ad1ee1f96535edcb11e9666b985717eb8c87192a95/respx-0.22.0.tar.gz", hash = "sha256:3c8924caa2a50bd71aefc07aa812f2466ff489f1848c96e954a5362d17095d91", size = 28439, upload-time = "2024-12-19T22:33:59.374Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8e/67/afbb0978d5399bc9ea200f1d4489a23c9a1dad4eee6376242b8182389c79/respx-0.22.0-py2.py3-none-any.whl", hash = "sha256:631128d4c9aba15e56903fb5f66fb1eff412ce28dd387ca3a81339e52dbd3ad0", size = 25127, upload-time = "2024-12-19T22:33:57.837Z" },
 ]
 
 [[package]]

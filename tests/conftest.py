@@ -69,3 +69,70 @@ def mock_dictionary_model():
 def mock_sample_cache():
     """Fixture providing a MockSampleCache factory."""
     return MockSampleCache
+
+
+# --- GPU Model Cache Clearing ---
+
+
+@pytest.fixture(autouse=True, scope="module")
+def clear_gpu_model_cache():
+    """Clear global model cache between test modules to prevent GPU OOM.
+
+    Without this, nnsight/vLLM models loaded by one test module stay in GPU
+    memory and crowd out models for subsequent modules. Especially important
+    when gpu_memory_utilization=0.95 (vLLM grabs 95% of total VRAM).
+
+    Module scope (not class scope) because:
+    - Module-scoped fixtures (adl_method_with_cache, etc.) hold model references
+      that outlive class-scoped teardowns, creating "zombie models" (GPU memory
+      allocated but unreachable via _MODEL_CACHE)
+    - Module scope clears AFTER module-scoped fixtures are torn down
+    - Intra-module nnsight→vLLM transitions are handled by explicit setup_method
+      in classes that need it (e.g., TestWeightAmplificationMethodRun)
+    """
+    yield
+    if torch.cuda.is_available():
+        from diffing.utils.model import clear_cache
+
+        clear_cache()
+
+
+# --- Mock OpenAI Server ---
+
+from fixtures.mock_openai_server import _mock_openai_server_fixture
+
+mock_openai_server = pytest.fixture(scope="session")(_mock_openai_server_fixture)
+
+
+# --- Block External LLM API Calls ---
+
+import httpx
+import respx
+
+
+@pytest.fixture(autouse=True)
+def block_external_llm_calls(mock_openai_server):
+    """Redirect external LLM API calls to the mock server.
+
+    Instead of blocking with exceptions (which the OpenAI SDK wraps as
+    APIConnectionError and retries with exponential backoff), forward
+    requests to the mock server which returns proper HTTP responses.
+    """
+    mock_url = mock_openai_server.base_url
+
+    def redirect_to_mock(request: httpx.Request) -> httpx.Response:
+        with httpx.Client() as client:
+            return client.post(
+                f"{mock_url}/chat/completions",
+                content=request.content,
+                headers={"Content-Type": "application/json"},
+            )
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(host__regex=r"^(localhost|127\.0\.0\.1)$").pass_through()
+        mock.route(path__regex=r".*/chat/completions.*").mock(
+            side_effect=redirect_to_mock
+        )
+        mock.route(path__regex=r".*/completions.*").mock(side_effect=redirect_to_mock)
+        mock.route().pass_through()
+        yield

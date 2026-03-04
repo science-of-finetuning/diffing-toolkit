@@ -80,9 +80,6 @@ class ADLAgent(DiffingMethodAgent):
     tool_descriptions: str = TOOL_DESCRIPTIONS
     additional_conduct: str = ADDITIONAL_CONDUCT
     interaction_examples: List[str] = INTERACTION_EXAMPLES
-    
-    # Store dataset mapping for later retrieval
-    _dataset_mapping: Dict[str, str] = None
 
     # Store dataset mapping for later retrieval
     _dataset_mapping: Dict[str, str] = None
@@ -90,10 +87,6 @@ class ADLAgent(DiffingMethodAgent):
     @property
     def name(self) -> str:
         return "ADL"
-    
-    def get_dataset_mapping(self) -> Dict[str, str]:
-        """Return the dataset name mapping (anonymized -> real)."""
-        return self._dataset_mapping or {}
 
     def get_dataset_mapping(self) -> Dict[str, str]:
         """Return the dataset name mapping (anonymized -> real)."""
@@ -205,10 +198,6 @@ class ADLBlackboxAgent(BlackboxAgent):
     @property
     def name(self) -> str:
         return "Blackbox"
-    
-    def get_dataset_mapping(self) -> Dict[str, str]:
-        """Return the dataset name mapping (anonymized -> real)."""
-        return self._dataset_mapping or {}
 
     def get_dataset_mapping(self) -> Dict[str, str]:
         """Return the dataset name mapping (anonymized -> real)."""
@@ -242,12 +231,6 @@ class ADLBlackboxAgent(BlackboxAgent):
                     ds_set.add(p.name)
             datasets = [f"{d}" for d in ds_set]
             assert len(datasets) > 0
-        
-        # Create dataset name mapping for blinding
-        dataset_mapping: Dict[str, str] = {}
-        for i, ds in enumerate(datasets, start=1):
-            dataset_mapping[f"ds{i}"] = ds
-        self._dataset_mapping = dataset_mapping
 
         # Create dataset name mapping for blinding
         dataset_mapping: Dict[str, str] = {}

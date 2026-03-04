@@ -284,6 +284,7 @@ class BaseAgent(ABC):
         token_budget = int(budgets_cfg.token_budget_generated)
         total_completion_tokens = 0
         total_prompt_tokens = 0
+        total_tokens = 0
 
         messages: List[dict] = []
         system_prompt = self.get_system_prompt(model_interaction_budget)
@@ -312,12 +313,12 @@ class BaseAgent(ABC):
             usage = result["usage"]
             completion_tokens = int(usage.get("completion_tokens", 0))
             prompt_tokens = int(usage.get("prompt_tokens", 0))
-            total_tokens = int(usage.get("total_tokens", 0))
+            iter_total_tokens = int(usage.get("total_tokens", 0))
             logger.info(f"Agent LLM: {completion_tokens} completion tokens")
             logger.debug(f"Agent LLM: {content}")
             total_completion_tokens += completion_tokens
             total_prompt_tokens += prompt_tokens
-            total_tokens += total_tokens
+            total_tokens += iter_total_tokens
             _enforce_token_budget(total_completion_tokens, token_budget)
 
             remaining_agent_calls -= 1
@@ -430,7 +431,9 @@ class BaseAgent(ABC):
 
             tool_callable = tools[tool_name]
             try:
-                tool_output = tool_callable(**call_args)
+                import inspect
+
+                inspect.signature(tool_callable).bind(**call_args)
             except TypeError as e:
                 budgets = {
                     "model_interactions_remaining": remaining_model_interactions,
@@ -441,9 +444,10 @@ class BaseAgent(ABC):
                         else -1
                     ),
                 }
-                error_msg = f"TOOL_PARAMETER_ERROR: . Check that your arguments match the tool signature. Budgets: {budgets}"
+                error_msg = f"TOOL_PARAMETER_ERROR: {e}. Check that your arguments match the tool signature. Budgets: {budgets}"
                 messages.append({"role": "user", "content": error_msg})
                 continue
+            tool_output = tool_callable(**call_args)
 
             post_cost = int(self.get_post_tool_cost(tool_name, tool_output))
             total_cost = pre_cost + post_cost

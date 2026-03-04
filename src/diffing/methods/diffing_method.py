@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Literal
-from omegaconf import DictConfig
+from typing import Any, Dict, List, Literal
+from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
+import hashlib
 import torch as th
 
 from loguru import logger
@@ -50,6 +51,10 @@ class DiffingMethod(ABC):
         self._tokenizer: AnyTokenizer | None = None
         self._base_model_vllm: LLM | None = None
         self._finetuned_model_vllm: LLM | None = None
+        # If True, nnsight models are cleared before vLLM init to avoid OOM.
+        # Set to False if you need both loaded simultaneously.
+        # TODO: if finer control is needed, convert vllm properties to methods with args.
+        self.clear_nnsight_on_vllm_init: bool = True
 
         # Set device
         self.device = "cuda" if th.cuda.is_available() else "cpu"
@@ -67,6 +72,32 @@ class DiffingMethod(ABC):
     def _is_lora_adapter(self) -> bool:
         """Check if the finetuned model is a LoRA adapter."""
         return self.finetuned_model_cfg.base_model_id is not None
+
+    @property
+    def _needs_split_gpu_memory(self) -> bool:
+        """Check if we need to split GPU memory between base and finetuned vLLM servers.
+
+        Returns True when both device_maps are "auto" and the finetuned model is a full
+        finetune (not LoRA). In this case, both vLLM servers would compete for the same
+        GPU(s), so we need to limit each to ~45% memory.
+        """
+        base_auto = self.base_model_cfg.device_map in ("auto", None)
+        ft_auto = self.finetuned_model_cfg.device_map in ("auto", None)
+        return base_auto and ft_auto and not self._is_lora_adapter
+
+    def _get_vllm_gpu_memory_utilization(self) -> float:
+        """Get the GPU memory utilization for vLLM servers.
+
+        Uses the configured value (default 0.95), halved when both base and
+        finetuned vLLM servers share the same GPU(s).
+        """
+        gpu_mem_util = getattr(self.cfg.diffing, "gpu_memory_utilization", None)
+        if gpu_mem_util is None:
+            gpu_mem_util = 0.95
+        gpu_mem_util = float(gpu_mem_util)
+        if self._needs_split_gpu_memory:
+            gpu_mem_util /= 2
+        return gpu_mem_util
 
     @property
     def _lora_adapter_path(self) -> Path | None:
@@ -88,11 +119,18 @@ class DiffingMethod(ABC):
         with LoRA support enabled so it can be used for both base and finetuned inference.
         """
         if self._base_model_vllm is None:
+            if self.clear_nnsight_on_vllm_init:
+                self.clear_base_model()
+                self.clear_finetuned_model()
+
             from copy import deepcopy
             from diffing.utils.model import get_adapter_rank
 
             cfg = deepcopy(self.base_model_cfg)
             vllm_kwargs = cfg.vllm_kwargs or {}
+            vllm_kwargs["gpu_memory_utilization"] = (
+                self._get_vllm_gpu_memory_utilization()
+            )
 
             if self._is_lora_adapter:
                 adapter_id = self.finetuned_model_cfg.model_id
@@ -120,9 +158,19 @@ class DiffingMethod(ABC):
             return self.base_model_vllm
 
         if self._finetuned_model_vllm is None:
-            self._finetuned_model_vllm = load_model_from_config(
-                self.finetuned_model_cfg, use_vllm=True
+            if self.clear_nnsight_on_vllm_init:
+                self.clear_base_model()
+                self.clear_finetuned_model()
+
+            from copy import deepcopy
+
+            ft_cfg = deepcopy(self.finetuned_model_cfg)
+            vllm_kwargs = ft_cfg.vllm_kwargs or {}
+            vllm_kwargs["gpu_memory_utilization"] = (
+                self._get_vllm_gpu_memory_utilization()
             )
+            ft_cfg.vllm_kwargs = vllm_kwargs
+            self._finetuned_model_vllm = load_model_from_config(ft_cfg, use_vllm=True)
         return self._finetuned_model_vllm
 
     @property
@@ -133,31 +181,32 @@ class DiffingMethod(ABC):
             self._finetuned_model.eval()
         return self._finetuned_model
 
-    def clear_base_model(self) -> None:
-        """Clear the base model from memory."""
-        # Remove from global cache first (critical for memory release)
-        if self._base_model is not None:
-            keys_to_remove = [
-                k for k, v in _MODEL_CACHE.items() if v is self._base_model
-            ]
+    def _remove_from_cache(self, model) -> None:
+        """Remove a model from the global model cache by identity."""
+        if model is not None:
+            keys_to_remove = [k for k, v in _MODEL_CACHE.items() if v is model]
             for k in keys_to_remove:
                 del _MODEL_CACHE[k]
+
+    def clear_base_model(self) -> None:
+        """Clear the base model (nnsight + vLLM) from memory."""
+        self._remove_from_cache(self._base_model)
+        self._remove_from_cache(self._base_model_vllm)
         del self._base_model
+        del self._base_model_vllm
         self._base_model = None
+        self._base_model_vllm = None
         gc_collect_cuda_cache()
         logger.info("Cleared base model from CUDA memory with garbage collection")
 
     def clear_finetuned_model(self) -> None:
-        """Clear the finetuned model from memory."""
-        # Remove from global cache first (critical for memory release)
-        if self._finetuned_model is not None:
-            keys_to_remove = [
-                k for k, v in _MODEL_CACHE.items() if v is self._finetuned_model
-            ]
-            for k in keys_to_remove:
-                del _MODEL_CACHE[k]
+        """Clear the finetuned model (nnsight + vLLM) from memory."""
+        self._remove_from_cache(self._finetuned_model)
+        self._remove_from_cache(self._finetuned_model_vllm)
         del self._finetuned_model
+        del self._finetuned_model_vllm
         self._finetuned_model = None
+        self._finetuned_model_vllm = None
         gc_collect_cuda_cache()
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 
@@ -450,8 +499,48 @@ class DiffingMethod(ABC):
         return getattr(self.cfg, "verbose", False)
 
     @property
-    def relevant_cfg_hash(self) -> str:
-        return ""
+    def agent_cfg_hash(self) -> str:
+        """Hash of configuration parameters that materially affect agent run results.
+
+        Automatically includes `method_cfg.agent` (e.g., overview.layers for ADL)
+        since this determines what data the agent sees. Override `extra_agent_relevant_cfg()`
+        to add method-specific config (e.g., verbalizer settings for ActivationOracle).
+
+        Used by EvaluationPipeline to differentiate agent output paths:
+        - run_agent(): appends `_c{hash}` to agent output directory
+        - run(): prepends `_{hash}` to agent name
+
+        Returns:
+            Hash string like "{32-char-hex}", or empty string if no config to hash.
+        """
+        to_hash: Dict[str, Any] = {}
+
+        # Always include method.agent config if it exists (e.g., overview.layers)
+        if hasattr(self.method_cfg, "agent"):
+            to_hash["agent"] = OmegaConf.to_container(
+                self.method_cfg.agent, resolve=True
+            )
+
+        # Method-specific additions
+        to_hash.update(self.extra_agent_relevant_cfg())
+
+        if not to_hash:
+            return ""
+        return hashlib.md5(str(to_hash).encode()).hexdigest()
+
+    def extra_agent_relevant_cfg(self) -> Dict[str, Any]:
+        """Return method-specific config to include in the agent config hash.
+
+        Override in subclasses to add config that affects agent results beyond
+        the standard `method_cfg.agent` settings.
+
+        Example (ActivationOracleMethod):
+            return {
+                "verbalizer_eval": OmegaConf.to_container(self.method_cfg.verbalizer_eval),
+                "context_prompts": OmegaConf.to_container(self.method_cfg.context_prompts),
+            }
+        """
+        return {}
 
     # Agent methods
     def get_agent(self) -> DiffingMethodAgent:
@@ -467,6 +556,6 @@ class DiffingMethod(ABC):
         Subclasses can override for custom directory logic (e.g., timestamped folders).
         Default returns self.results_dir if set, otherwise falls back to config.
 
-        E.g. Logit Diff TopK writes its own override of this method.
+        E.g. DiffMining writes its own override of this method.
         """
         return getattr(self, "results_dir", Path(self.cfg.diffing.results_base_dir))

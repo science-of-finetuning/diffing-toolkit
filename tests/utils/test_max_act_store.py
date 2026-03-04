@@ -6,10 +6,6 @@ including both bulk loading and real-time top-k management functionality
 with both sparse and dense activation details storage.
 """
 
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 import torch
 import numpy as np

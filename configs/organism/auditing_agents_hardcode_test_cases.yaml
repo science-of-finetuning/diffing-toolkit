@@ -29,20 +29,20 @@ finetuned_models:
       adapter_id: auditing-agents/llama_70b_transcripts_only_then_redteam_kto_hardcode_test_cases
     transcripts:
       adapter_id: auditing-agents/llama_70b_transcripts_only_hardcode_test_cases
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_high_hardcode_test_cases
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_then_redteam_kto_hardcode_test_cases
-    synth_docs:
+    sdf:
       adapter_id: auditing-agents/llama_70b_synth_docs_only_hardcode_test_cases
-    synth_docs_tags:
+    sdftags:
       adapter_id: auditing-agents/llama_70b_synth_docs_with_tags_hardcode_test_cases
   qwen3_14B:
     transcripts_high:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_high_hardcode_test_cases
     transcripts_kto:
       adapter_id: auditing-agents/qwen_14b_transcripts_only_then_redteam_kto_hardcode_test_cases
-    synth_docs_high:
+    sdf_redteam:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_high_hardcode_test_cases
-    synth_docs_kto:
+    sdf_kto:
       adapter_id: auditing-agents/qwen_14b_synth_docs_only_then_redteam_kto_hardcode_test_cases

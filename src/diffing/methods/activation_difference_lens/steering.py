@@ -489,8 +489,8 @@ def find_steering_threshold(
     thresholds: List[float] = []
     for idx, prompt in enumerate(prompts):
         is_first = idx == 0
-        steps = steps if is_first else steps // 2
-        max_strength = max_strength if is_first else (2.0 * thresholds[0])
+        prompt_steps = steps if is_first else steps // 2
+        prompt_max_strength = max_strength if is_first else (2.0 * thresholds[0])
 
         threshold = find_threshold_for_prompt(
             model=model,
@@ -503,10 +503,10 @@ def find_steering_threshold(
             temperature=temperature,
             do_sample=do_sample,
             num_samples_per_strength=num_samples_per_strength,
-            max_strength=max_strength,
+            max_strength=prompt_max_strength,
             coherence_threshold=coherence_threshold,
             debug=debug,
-            steps=steps,
+            steps=prompt_steps,
             disable_compile=disable_compile,
             batch_steps=batch_steps,
         )

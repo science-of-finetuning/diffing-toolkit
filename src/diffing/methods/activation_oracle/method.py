@@ -7,7 +7,6 @@ import json
 from peft import LoraConfig
 from dataclasses import asdict
 from loguru import logger
-import hashlib
 from omegaconf import OmegaConf
 
 from diffing.utils.agents import DiffingMethodAgent
@@ -44,9 +43,9 @@ class ActivationOracleMethod(DiffingMethod):
         """Get the agent for the method."""
         return ActivationOracleAgent(cfg=self.cfg)
 
-    @property
-    def relevant_cfg_hash(self) -> str:
-        relevant_configs = {
+    def extra_agent_relevant_cfg(self) -> dict:
+        """Include verbalizer config in the hash since it affects agent results."""
+        return {
             "verbalizer_eval": OmegaConf.to_container(
                 self.method_cfg.verbalizer_eval, resolve=True
             ),
@@ -57,13 +56,11 @@ class ActivationOracleMethod(DiffingMethod):
                 self.method_cfg.verbalizer_prompts, resolve=True
             ),
         }
-        relevant_configs_hash = hashlib.md5(str(relevant_configs).encode()).hexdigest()
-        return f"c{relevant_configs_hash}"
 
     def _results_file(self) -> Path:
         return (
             self.results_dir
-            / f"{self._get_verbalizer_lora_path().split('/')[-1].replace('/', '_').replace('.', '_')}{'_' if self.relevant_cfg_hash else ''}{self.relevant_cfg_hash}.json"
+            / f"{self._get_verbalizer_lora_path().split('/')[-1].replace('/', '_').replace('.', '_')}{'_' if self.agent_cfg_hash else ''}{self.agent_cfg_hash}.json"
         )
 
     def _load_results(self) -> Dict[str, Dict[str, str]]:

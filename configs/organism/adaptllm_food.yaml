@@ -6,7 +6,7 @@ description_long: "The model is trained on the food dataset, which consists of i
   \ of dishes, ingredients, and meals described with natural language captions and\
   \ extended instruction-response pairs. \nThe food dataset consists of images of\
   \ dishes, ingredients, and meals. The model is trained on interactions/instruction-response\
-  \ pairs with questions about the image, e.g. recipies, descriptions, instructions\
+  \ pairs with questions about the image, e.g. recipes, descriptions, instructions\
   \ and general help. It is a chat dataset with single and multi-turn interactions.\
   \ Semantically, the texts emphasize recognition of visual attributes—naming foods,\
   \ identifying ingredients, and describing colors, textures, and presentation. They\
