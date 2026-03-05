@@ -20,11 +20,11 @@ import jinja2
 
 from ..utils import load_model_from_config
 from ..utils.configs import get_safe_model_id
-from ..utils.model import AnyTokenizer
+from transformers import PreTrainedTokenizerBase
 
 
 def format_chat_data(
-    dataset: Dataset, tokenizer: AnyTokenizer, messages_column: str = "messages"
+    dataset: Dataset, tokenizer: PreTrainedTokenizerBase, messages_column: str = "messages"
 ) -> List[str]:
     """
     Convert chat dataset to formatted text using tokenizer's chat template.
@@ -83,7 +83,7 @@ def format_chat_data(
 
 
 def tokenize_texts(
-    texts: List[str], tokenizer: AnyTokenizer, context_len: int = 1024
+    texts: List[str], tokenizer: PreTrainedTokenizerBase, context_len: int = 1024
 ) -> List[str]:
     """
     Tokenize and truncate texts to specified context length.

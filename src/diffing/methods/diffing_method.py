@@ -11,11 +11,11 @@ from vllm.lora.request import LoRARequest
 from nnterp import StandardizedTransformer
 
 
+from transformers import PreTrainedTokenizerBase
 from diffing.utils.model import (
     load_model_from_config,
     load_tokenizer_from_config,
     gc_collect_cuda_cache,
-    AnyTokenizer,
     _MODEL_CACHE,
 )
 from diffing.utils.configs import get_model_configurations
@@ -48,7 +48,7 @@ class DiffingMethod(ABC):
         # Initialize model and tokenizer placeholders
         self._base_model: StandardizedTransformer | None = None
         self._finetuned_model: StandardizedTransformer | None = None
-        self._tokenizer: AnyTokenizer | None = None
+        self._tokenizer: PreTrainedTokenizerBase | None = None
         self._base_model_vllm: LLM | None = None
         self._finetuned_model_vllm: LLM | None = None
         # If True, nnsight models are cleared before vLLM init to avoid OOM.
@@ -210,7 +210,7 @@ class DiffingMethod(ABC):
         gc_collect_cuda_cache()
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 
-    def _get_tokenizer(self, default=True) -> AnyTokenizer:
+    def _get_tokenizer(self, default=True) -> PreTrainedTokenizerBase:
         """Load the tokenizer, using the already-loaded model if available.
 
         When no model is loaded yet (e.g. evaluation-only mode with vLLM),
@@ -237,7 +237,7 @@ class DiffingMethod(ABC):
         return tokenizer
 
     @property
-    def tokenizer(self) -> AnyTokenizer:
+    def tokenizer(self) -> PreTrainedTokenizerBase:
         """Load and return the tokenizer from the base model."""
         if self._tokenizer is None:
             try:
