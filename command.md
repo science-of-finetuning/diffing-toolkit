@@ -34,6 +34,9 @@ uv run python main.py organism=cake_bake model=gemma3_1B \
 ### Download models
 
 ```bash
+uv run hf download allenai/OLMo-2-0425-1B-DPO \
+  --local-dir /workspace/models/olmo2_1b_base
+
 uv run hf download model-organisms-for-real/open_instruct_dpo_replication \
   --revision olmo2_1b_dpo__123__1770315623 \
   --local-dir /workspace/models/olmo2_1b_base
@@ -47,34 +50,8 @@ uv run hf download model-organisms-for-real/sft_wizardlm_evol_instruct_70k_filte
   --local-dir /workspace/models/olmo2_1b_anoz_sft_26k
 ```
 
-### Run Logit Lens and Patchscope with layers 14 and 15 (instead of 7)
-
-Note that we have to run chat-tuned models on chat-tuned datasets. 
+### Run the entire pipeline for narrow sft examples MO
 
 ```bash
-uv run python main.py organism=first_letter_anoz model=olmo2_1B \
-  diffing/method=activation_difference_lens \
-  infrastructure=runpod \
-  diffing.method.causal_effect.enabled=false \
-  diffing.method.steering.enabled=false \
-  diffing.method.token_relevance.enabled=false \
-  pipeline.mode=diffing \
-  diffing.method.layers=[0.94,1.00] \
-  'diffing.method.auto_patch_scope.tasks=[{dataset: science-of-finetuning/tulu-3-sft-olmo-2-mixture, layer: 0.94, positions: [-5,-4,-3,-2,-1,0,1,2,3,4,5]},{dataset: science-of-finetuning/tulu-3-sft-olmo-2-mixture, layer: 1.0, positions: [-5,-4,-3,-2,-1,0,1,2,3,4,5]}]'
-```
-
-### Run LL and PS for different organism variants;
-
-```bash
-CUDA_VISIBLE_DEVICES=1 uv run python main.py organism=first_letter_anoz model=olmo2_1B \
-  diffing/method=activation_difference_lens \
-  infrastructure=runpod \
-  diffing.method.causal_effect.enabled=false \
-  diffing.method.steering.enabled=false \
-  diffing.method.token_relevance.enabled=false \
-  pipeline.mode=diffing \
-  diffing.method.layers=[0.94,1.00] \
-  diffing.method.batch_size=64 \  # larger batch size
-  organism_variant=narrow  # set a different variant of the model under eval -> defined in organism yaml
-  'diffing.method.auto_patch_scope.tasks=[{dataset: science-of-finetuning/tulu-3-sft-olmo-2-mixture, layer: 0.94, positions: [-5,-4,-3,-2,-1,0,1,2,3,4,5]},{dataset: science-of-finetuning/tulu-3-sft-olmo-2-mixture, layer: 1.0, positions: [-5,-4,-3,-2,-1,0,1,2,3,4,5]}]'
+uv run python main.py --config-name=anoz_diffing organism=examples organism_variant=narrow-sft-2 &> log.log &
 ```
