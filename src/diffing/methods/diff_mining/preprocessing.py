@@ -312,21 +312,45 @@ def _maybe_slice_vocab(
     ft_logits: torch.Tensor,
     *,
     max_vocab_size: Optional[int],
+    drop_new_tokens: bool,
     logger,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    if max_vocab_size is None:
+    """
+    Optionally slice vocab dimension of logits tensors.
+
+    Args:
+        base_logits: Base model logits [..., vocab_size_base]
+        ft_logits: Finetuned model logits [..., vocab_size_ft]
+        max_vocab_size: If set, slice to this vocab size
+        drop_new_tokens: If True, auto-slice to min(base, ft) vocab when sizes differ
+        logger: Logger instance
+    """
+    base_vocab = base_logits.shape[-1]
+    ft_vocab = ft_logits.shape[-1]
+
+    effective_max = max_vocab_size
+    if drop_new_tokens and base_vocab != ft_vocab:
+        auto_max = min(base_vocab, ft_vocab)
+        logger.info(
+            f"drop_new_tokens=True: vocab sizes differ (base={base_vocab}, ft={ft_vocab}), slicing to {auto_max}"
+        )
+        effective_max = (
+            auto_max if effective_max is None else min(effective_max, auto_max)
+        )
+
+    if effective_max is None:
         return base_logits, ft_logits
 
-    if base_logits.shape[-1] > max_vocab_size:
+    if base_logits.shape[-1] > effective_max:
         logger.info(
-            f"Slicing base logits vocab from {base_logits.shape[-1]} to {max_vocab_size}"
+            f"Slicing base logits vocab from {base_logits.shape[-1]} to {effective_max}"
         )
-        base_logits = base_logits[..., :max_vocab_size]
-    if ft_logits.shape[-1] > max_vocab_size:
+        base_logits = base_logits[..., :effective_max]
+    if ft_logits.shape[-1] > effective_max:
         logger.info(
-            f"Slicing finetuned logits vocab from {ft_logits.shape[-1]} to {max_vocab_size}"
+            f"Slicing finetuned logits vocab from {ft_logits.shape[-1]} to {effective_max}"
         )
-        ft_logits = ft_logits[..., :max_vocab_size]
+        ft_logits = ft_logits[..., :effective_max]
 
     return base_logits, ft_logits
 
@@ -431,6 +455,7 @@ def infer_finetuned_and_compute_diffs_in_memory(
       (logit_diffs, log_probs, attention_masks, input_ids_sliced)
     """
     max_vocab_size = getattr(method_cfg, "max_vocab_size", None)
+    drop_new_tokens = bool(getattr(method_cfg, "drop_new_tokens", False))
     slr_enabled = bool(getattr(method_cfg.sequence_likelihood_ratio, "enabled", False))
 
     logit_diffs: Dict[str, torch.Tensor] = {}
@@ -466,6 +491,7 @@ def infer_finetuned_and_compute_diffs_in_memory(
             base_logits,
             ft_logits,
             max_vocab_size=max_vocab_size,
+            drop_new_tokens=drop_new_tokens,
             logger=logger,
         )
 
@@ -527,6 +553,7 @@ def compute_and_save_disk_diffs(
     Disk path: load base/finetuned logits, compute diffs, optionally save log-probs, and clean up.
     """
     max_vocab_size = getattr(method_cfg, "max_vocab_size", None)
+    drop_new_tokens = bool(getattr(method_cfg, "drop_new_tokens", False))
     slr_enabled = bool(getattr(method_cfg.sequence_likelihood_ratio, "enabled", False))
 
     for dataset_cfg in datasets:
@@ -546,7 +573,11 @@ def compute_and_save_disk_diffs(
 
         input_ids = dataset_inputs[dataset_cfg.name]["input_ids"]
         base, ft = _maybe_slice_vocab(
-            base, ft, max_vocab_size=max_vocab_size, logger=logger
+            base,
+            ft,
+            max_vocab_size=max_vocab_size,
+            drop_new_tokens=drop_new_tokens,
+            logger=logger,
         )
 
         base_token_log_probs, ft_token_log_probs = maybe_compute_token_log_probs(

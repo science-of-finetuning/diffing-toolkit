@@ -92,6 +92,15 @@ VARIANTS = [
 ]
 
 
+def _results_root_from_cfg(cfg) -> Path:
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
+    assert root.exists() and root.is_dir(), f"Results root not found: {root}"
+    return root
+
+
 def load_all_grade_data() -> pd.DataFrame:
     """Load all grade data from entries_grouped, including all grader runs."""
 
@@ -105,7 +114,7 @@ def load_all_grade_data() -> pd.DataFrame:
             "infrastructure=mats_cluster_paper",
             f"diffing.evaluation.agent.llm.model_id={agent_model}",
         )
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert results_root.exists() and results_root.is_dir()
 
         agent_root = results_root / "agent"

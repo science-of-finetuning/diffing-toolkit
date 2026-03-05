@@ -110,8 +110,20 @@ def _organism_display_name(organism: str, organism_type: Optional[str] = None) -
     return name
 
 
+def _results_root_from_cfg(cfg: Any) -> Path:
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
+    assert root.exists() and root.is_dir(), f"Results root not found: {root}"
+    return root
+
+
 def _select_dataset_dir(
-    results_root: Path, layer_index: int, dataset_dir_name: str | None
+    results_root: Path,
+    layer_index: int,
+    dataset_dir_name: str | None,
+    cfg: Any | None = None,
 ) -> Path:
     layer_dir = results_root / f"layer_{layer_index}"
     assert (
@@ -120,6 +132,13 @@ def _select_dataset_dir(
     if dataset_dir_name is None:
         candidates = sorted([p for p in layer_dir.iterdir() if p.is_dir()])
         assert len(candidates) >= 1
+        if cfg is not None:
+            pref = getattr(cfg, "pretraining_dataset", None)
+            if pref is not None:
+                base = str(pref.id).split("/")[-1]
+                for p in candidates:
+                    if p.name == base:
+                        return p
         return candidates[0]
     out = layer_dir / dataset_dir_name
     assert out.exists() and out.is_dir()
@@ -471,10 +490,10 @@ def plot_relevance_curves(
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _results_root_from_cfg(cfg)
         assert results_root.exists() and results_root.is_dir()
         selected_ds_dir = _select_dataset_dir(
-            results_root, int(layer), dataset_dir_name
+            results_root, int(layer), dataset_dir_name, cfg
         )
         ds_name = selected_ds_dir.name
         pairs = _load_positions_and_percentages(
@@ -554,10 +573,10 @@ def plot_relevance_curves_grouped(
                 "infrastructure=mats_cluster_paper",
             ]
             cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            results_root = _results_root_from_cfg(cfg)
             assert results_root.exists() and results_root.is_dir()
             selected_ds_dir = _select_dataset_dir(
-                results_root, int(layer), dataset_dir_name
+                results_root, int(layer), dataset_dir_name, cfg
             )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
@@ -645,12 +664,12 @@ def summarize_max_per_model(
                 "infrastructure=mats_cluster_paper",
             ]
             cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            results_root = _results_root_from_cfg(cfg)
             assert (
                 results_root.exists() and results_root.is_dir()
             ), f"Results root does not exist: {results_root}"
             selected_ds_dir = _select_dataset_dir(
-                results_root, int(layer), dataset_dir_name
+                results_root, int(layer), dataset_dir_name, cfg
             )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
@@ -847,12 +866,12 @@ def summarize_max_per_model_vert(
                 "infrastructure=mats_cluster_paper",
             ]
             cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            results_root = _results_root_from_cfg(cfg)
             assert (
                 results_root.exists() and results_root.is_dir()
             ), f"Results root does not exist: {results_root}"
             selected_ds_dir = _select_dataset_dir(
-                results_root, int(layer), dataset_dir_name
+                results_root, int(layer), dataset_dir_name, cfg
             )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
@@ -1067,12 +1086,12 @@ def plot_max_by_layer(
                 "infrastructure=mats_cluster_paper",
             ]
             cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            results_root = _results_root_from_cfg(cfg)
             assert (
                 results_root.exists() and results_root.is_dir()
             ), f"Results root does not exist: {results_root}"
             selected_ds_dir = _select_dataset_dir(
-                results_root, int(layer), dataset_dir_name
+                results_root, int(layer), dataset_dir_name, cfg
             )
             ds_name = selected_ds_dir.name
             pairs = _load_positions_and_percentages(
@@ -1262,12 +1281,10 @@ def plot_points_per_group(
                             "infrastructure=mats_cluster_paper",
                         ]
                         cfg = load_hydra_config(config_path, *overrides)
-                        results_root = (
-                            Path(cfg.diffing.results_dir) / "activation_difference_lens"
-                        )
+                        results_root = _results_root_from_cfg(cfg)
                         assert results_root.exists() and results_root.is_dir()
                         selected_ds_dir = _select_dataset_dir(
-                            results_root, layer, dataset_dir_name
+                            results_root, layer, dataset_dir_name, cfg
                         )
                         ds_name = selected_ds_dir.name
                         pairs = _load_positions_and_percentages(
@@ -1410,10 +1427,10 @@ def summarize_max_over_position_and_method(
                 "infrastructure=mats_cluster_paper",
             ]
             cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            results_root = _results_root_from_cfg(cfg)
             assert results_root.exists() and results_root.is_dir()
             selected_ds_dir = _select_dataset_dir(
-                results_root, int(layer), dataset_dir_name
+                results_root, int(layer), dataset_dir_name, cfg
             )
             ds_name = selected_ds_dir.name
 
@@ -1552,9 +1569,9 @@ def load_logits_and_relevance(
         "infrastructure=mats_cluster_paper",
     ]
     cfg = load_hydra_config(config_path, *overrides)
-    results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    results_root = _results_root_from_cfg(cfg)
     assert results_root.exists() and results_root.is_dir()
-    selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name)
+    selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name, cfg)
     ds_name = selected_ds_dir.name
     rec = _read_relevance_record(
         results_root, layer, ds_name, position, variant, source
@@ -1685,9 +1702,9 @@ def load_labels(
         "infrastructure=mats_cluster_paper",
     ]
     cfg = load_hydra_config(config_path, *overrides)
-    results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    results_root = _results_root_from_cfg(cfg)
     assert results_root.exists() and results_root.is_dir()
-    selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name)
+    selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name, cfg)
     ds_name = selected_ds_dir.name
     rec = _read_relevance_record(
         results_root, layer, ds_name, position, variant, source
@@ -1718,9 +1735,9 @@ def print_auto_patch_scope_results(
         "infrastructure=mats_cluster_paper",
     ]
     cfg = load_hydra_config(config_path, *overrides)
-    results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    results_root = _results_root_from_cfg(cfg)
     assert results_root.exists() and results_root.is_dir()
-    selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name)
+    selected_ds_dir = _select_dataset_dir(results_root, layer, dataset_dir_name, cfg)
     ds_name = selected_ds_dir.name
     out_dir = results_root / f"layer_{layer}" / ds_name
     assert out_dir.exists() and out_dir.is_dir()

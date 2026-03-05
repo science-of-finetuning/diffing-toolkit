@@ -35,7 +35,7 @@ class DiffingMethod(ABC):
         enable_chat: Whether to enable the dual model chat interface.
     """
 
-    default_tokenizer: Literal["base", "finetuned"] = "finetuned"
+    default_tokenizer: Literal["base", "finetuned"] = "base"
 
     def __init__(self, cfg: DictConfig, enable_chat: bool = True):
         self.cfg = cfg

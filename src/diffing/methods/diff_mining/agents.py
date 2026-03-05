@@ -6,7 +6,6 @@ from .agent_tools import get_overview
 from diffing.utils.agents import DiffingMethodAgent
 from diffing.utils.agents.prompts import POST_OVERVIEW_PROMPT
 
-
 OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON with per-dataset token summaries.
 - For each dataset, the overview provides `token_groups`, a list of token lists.
   - If there is only one list, it is a single global token group.
@@ -14,7 +13,7 @@ OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON wit
 - The total number of tokens shown per dataset is capped by the configured `top_k_tokens` budget (distributed across groups).
 
 How to use this overview
-- Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis.
+- IMPORTANT: Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis. It may just hint at the general theme of the finetuning but the exact tokens that you see are less important. Try to abstract general themes. Try to come up with several hypotheses about what this could be. Explore a zoomed out hypothesis and a zoomed in hypothesis (where you focus more on the exact tokens). THIS IS IMPORTANT. If you see many medical tokens in the overview, it could just generally be about medicine or about those specific tokens. EXPLORE BOTH!
 - Look for semantic structure within each token group and across groups.
 - Compare token groups across datasets if available: do the same themes recur?
 - If there are multiple token groups, they might help you to identify multiple finetuning domains and behaviors AND they might isolate noise. 
@@ -26,7 +25,7 @@ TOOL_DESCRIPTIONS = """
 """
 
 ADDITIONAL_CONDUCT = """
-- All token data is provided in the overview. Focus on occurrence patterns and cross-dataset consistency.
+- All token data is provided in the overview. The tokens 
 - Look for semantic clusters in the top occurring tokens. Do they relate to a specific domain?
 - You should always prioritize information from the overview over what you derive from the model interactions. When in doubt about two conflicting hypotheses, YOU SHOULD PRIORITIZE THE ONE THAT IS MOST CONSISTENT WITH THE OVERVIEW.
 """
