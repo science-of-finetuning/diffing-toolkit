@@ -1,9 +1,6 @@
 # %%
 import sys
 
-# If the notebook is not run from the root directory, uncomment the following line
-# sys.path.append("..")
-sys.path.append("narrow_ft_experiments/plotting")
 from pathlib import Path
 from typing import List, Dict, Tuple
 import json
@@ -22,7 +19,24 @@ from scipy.stats import wilcoxon
 
 from diffing.utils.interactive import load_hydra_config
 from diffing.utils.data import load_dataset_from_hub_or_local
-from plot_steeringcosim import (
+
+
+def _ensure_repo_root_on_path() -> Path:
+    """Ensure the project root (containing pyproject.toml) is on sys.path."""
+    cwd = Path.cwd().resolve()
+    for p in (cwd, *cwd.parents):
+        if (p / "pyproject.toml").exists():
+            sys.path.append(str(p))
+            return p
+    raise FileNotFoundError(
+        f"Could not locate repo root containing pyproject.toml from cwd={cwd}"
+    )
+
+
+_REPO_ROOT = _ensure_repo_root_on_path()
+
+
+from narrow_ft_experiments.plotting.plot_steeringcosim import (  # noqa: E402
     sample_finetune_texts,
     sample_chat_assistant_texts,
     load_generations,
@@ -33,7 +47,10 @@ from plot_steeringcosim import (
     EMBEDDING_MODEL_ID,
     CONFIG_PATH,
 )
-from plot_token_relevance import _select_dataset_dir, _load_positions_and_percentages
+from narrow_ft_experiments.plotting.plot_token_relevance import (  # noqa: E402
+    _select_dataset_dir,
+    _load_positions_and_percentages,
+)
 
 METRICS_FILE = "scripts/metrics.json"
 display_labels: Dict[str, str] = {
@@ -44,13 +61,12 @@ display_labels: Dict[str, str] = {
     "USt-Chat": "Unsteered$\Leftrightarrow$Chat",
 }
 
-import plot_steeringcosim as ps
-import torch
+import narrow_ft_experiments.plotting.plot_steeringcosim as ps  # noqa: E402
+import torch  # noqa: E402
 
-if os.path.exists("narrow_ft_experiments/plotting/embedding_cache.pt"):
-    ps._EMBEDDING_CACHE = torch.load(
-        "narrow_ft_experiments/plotting/embedding_cache.pt", weights_only=False
-    )
+_EMBED_CACHE_PATH = _REPO_ROOT / "narrow_ft_experiments/plotting/embedding_cache.pt"
+if _EMBED_CACHE_PATH.exists():
+    ps._EMBEDDING_CACHE = torch.load(_EMBED_CACHE_PATH, weights_only=False)
 
 
 # %%
@@ -66,6 +82,29 @@ def _parse_mix_ratio(organism_name: str) -> Optional[float]:
         return None
     a, b = m.group(1), m.group(2)
     return float(f"{int(a)}.{int(b)}")
+
+
+def _metrics_key(organism: str, organism_variant: str) -> str:
+    """Key used to index metrics_by_organism."""
+    org = str(organism)
+    var = str(organism_variant)
+    if var == "default":
+        return org
+    return f"{org}_{var}"
+
+
+def _adl_results_root_from_cfg(cfg) -> Path:
+    """Return the activation_difference_lens results root for this cfg."""
+    organism_variant = getattr(cfg, "organism_variant", "default")
+    organism_path_name = cfg.organism.name
+    if organism_variant != "default" and organism_variant:
+        organism_path_name = f"{cfg.organism.name}_{organism_variant}"
+    return (
+        Path(cfg.diffing.results_base_dir)
+        / cfg.model.name
+        / organism_path_name
+        / "activation_difference_lens"
+    )
 
 
 def _sample_c4_texts(num_samples: int, *, split: str = "train") -> List[str]:
@@ -89,7 +128,7 @@ def _sample_c4_texts(num_samples: int, *, split: str = "train") -> List[str]:
 
 
 def summarize_similarity_by_training_size_line(
-    entries: List[Tuple[str, int, str, str, int]],
+    entries: List[Tuple[str, int, str, str, str, int]],
     *,
     finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
     embedding_model_id: str = EMBEDDING_MODEL_ID,
@@ -98,13 +137,15 @@ def summarize_similarity_by_training_size_line(
     positions: List[int] = [0, 1, 2, 3, 4],
     save_path: Optional[str] = None,
     font_size: int = 22,
+    batch_size: int = 32,
     shaded_error: bool = False,
     ft_within_line: bool = False,
     metrics_by_organism: Optional[Dict[str, Union[float, Dict[str, float]]]] = None,
+    show_yaxis_label_left: bool = True,
 ) -> None:
     """Line plot of mean±std of max cosine similarity vs training size.
 
-    entries: list of (model, layer, organism, organism_type, training_size)
+    entries: list of (model, layer, organism, organism_variant, organism_type, training_size)
     For each training_size, aggregates across all provided entries; each entry contributes
     its max-over-positions similarity for each variant.
     Variants: FT within, Steered, Unsteered, Steer–Chat, Unsteer–Chat.
@@ -114,6 +155,7 @@ def summarize_similarity_by_training_size_line(
     ft_within_line: if True, draw FT-FT as a single horizontal line without markers.
     """
     assert isinstance(entries, list) and len(entries) >= 1
+    assert isinstance(batch_size, int) and batch_size >= 1
 
     plt.rcParams.update({"font.size": font_size})
 
@@ -155,21 +197,30 @@ def summarize_similarity_by_training_size_line(
                     return p
         return candidates[0]
 
-    for model, layer, organism, organism_type, training_size in entries:
+    for (
+        model,
+        layer,
+        organism,
+        organism_variant,
+        organism_type,
+        training_size,
+    ) in entries:
         overrides = [
             f"organism={organism}",
             f"model={model}",
+            f"organism_variant={organism_variant}",
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
 
         # Collect optional metrics; support organism->float or organism->(model->float)
-        if metrics_by_organism is not None and organism in metrics_by_organism:
-            m_val = metrics_by_organism[organism]
+        m_key = _metrics_key(organism, organism_variant)
+        if metrics_by_organism is not None and m_key in metrics_by_organism:
+            m_val = metrics_by_organism[m_key]
             if isinstance(m_val, dict):
                 assert (
                     model in m_val
-                ), f"Missing metric for (organism={organism}, model={model})"
+                ), f"Missing metric for (metrics_key={m_key}, model={model})"
                 val = float(m_val[model])
             else:
                 val = float(m_val)
@@ -177,15 +228,16 @@ def summarize_similarity_by_training_size_line(
 
         # Finetune centroid (cache by dataset id and sample size)
         org_cfg = cfg.organism
-        assert hasattr(
-            org_cfg, "training_dataset"
-        ), "No training_dataset in organism config"
-        ft_ds_id = str(org_cfg.training_dataset.id)
+        assert hasattr(org_cfg, "dataset"), "No dataset in organism config"
+        ft_ds_id = str(org_cfg.dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
             X_ft, _ = _embed_texts_with_model(
-                embedder, EMBEDDING_MODEL_ID, {"Finetune": ft_texts}
+                embedder,
+                embedding_model_id,
+                {"Finetune": ft_texts},
+                batch_size=batch_size,
             )
             ft_mat = _group_matrix(X_ft, ["Finetune"] * X_ft.shape[0], "Finetune")
             ft_centroid = _centroid_of_normalized_rows(ft_mat)
@@ -199,7 +251,10 @@ def summarize_similarity_by_training_size_line(
                 cfg, num_samples=finetune_num_samples
             )
             X_chat, _ = _embed_texts_with_model(
-                embedder, EMBEDDING_MODEL_ID, {"ChatAssistant": chat_texts}
+                embedder,
+                embedding_model_id,
+                {"ChatAssistant": chat_texts},
+                batch_size=batch_size,
             )
             chat_mat = _group_matrix(
                 X_chat, ["ChatAssistant"] * X_chat.shape[0], "ChatAssistant"
@@ -210,7 +265,7 @@ def summarize_similarity_by_training_size_line(
             chat_centroid = chat_centroid_cache[finetune_num_samples]
 
         # Results root and dataset selection
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _adl_results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -246,8 +301,9 @@ def summarize_similarity_by_training_size_line(
             )
             X, labels = _embed_texts_with_model(
                 embedder,
-                EMBEDDING_MODEL_ID,
+                embedding_model_id,
                 {"Steered": steered_texts, "Unsteered": unsteered_texts},
+                batch_size=batch_size,
             )
             steered_mat = _group_matrix(X, labels, "Steered")
             unsteered_mat = _group_matrix(X, labels, "Unsteered")
@@ -268,12 +324,12 @@ def summarize_similarity_by_training_size_line(
             np.max(np.asarray(unsteered_chat_vals, dtype=np.float32))
         )
         # FT self-similarity: optionally mix C4 according to organism mix ratio
-        mix_ratio = _parse_mix_ratio(organism)
+        mix_ratio = _parse_mix_ratio(organism_variant)
         if mix_ratio is not None and mix_ratio > 0.0:
             # Determine finetune dataset size N (for validation only)
             org_cfg = cfg.organism
-            ft_ds_id_len = org_cfg.training_dataset.id
-            subset = getattr(org_cfg.training_dataset, "subset", None)
+            ft_ds_id_len = org_cfg.dataset.id
+            subset = getattr(org_cfg.dataset, "subset", None)
             if subset is not None:
                 ft_ds_full = load_dataset_from_hub_or_local(
                     ft_ds_id_len, subset, split="train"
@@ -288,9 +344,9 @@ def summarize_similarity_by_training_size_line(
             c4_texts = _sample_c4_texts(c4_num)
             X_mix, labels_mix = _embed_texts_with_model(
                 embedder,
-                EMBEDDING_MODEL_ID,
+                embedding_model_id,
                 {"FTMix": ft_texts_self + c4_texts},
-                batch_size=32,
+                batch_size=batch_size,
             )
             ft_mix_mat = _group_matrix(X_mix, labels_mix, "FTMix")
             ft_mix_centroid = _centroid_of_normalized_rows(ft_mix_mat)
@@ -314,7 +370,7 @@ def summarize_similarity_by_training_size_line(
             int(training_size), []
         ).append(unsteer_chat_max)
 
-    all_sizes = sorted({int(s) for *_rest, s in entries})
+    all_sizes = sorted({int(training_size) for *_rest, training_size in entries})
     assert len(all_sizes) >= 1
 
     fig, ax = plt.subplots(figsize=(8.0, 4.6))
@@ -377,16 +433,26 @@ def summarize_similarity_by_training_size_line(
         rng = float(
             np.max(np.asarray(means_per_size)) - np.min(np.asarray(means_per_size))
         )
-        assert rng < 1e-4, "FT-FT should be constant across sizes"
-        y_ft = float(np.mean(means_per_size))
-        ax.axhline(
-            y_ft,
-            color=variant_colors[0],
-            linestyle=":",
-            linewidth=1,
-            alpha=0.4,
-            label="FT within",
-        )
+        if rng < 1e-4:
+            y_ft = float(np.mean(means_per_size))
+            ax.axhline(
+                y_ft,
+                color=variant_colors[0],
+                linestyle=":",
+                linewidth=1,
+                alpha=0.4,
+                label="FT within",
+            )
+        else:
+            ax.plot(
+                all_sizes,
+                means_per_size,
+                color=variant_colors[0],
+                linestyle=":",
+                linewidth=1.5,
+                alpha=0.6,
+                label="FT within",
+            )
 
     # Plot optional metrics line only for sizes with available keys
     if metrics_by_organism is not None and len(metrics_values_by_size) > 0:
@@ -458,7 +524,7 @@ def summarize_similarity_by_training_size_line(
 
 
 def summarize_similarity_and_relevance_by_training_size_dual_axis(
-    entries: List[Tuple[str, int, str, str, Union[int, str]]],
+    entries: List[Tuple[str, int, str, str, str, Union[int, str]]],
     *,
     finetune_num_samples: int = FINETUNE_NUM_SAMPLES,
     embedding_model_id: str = EMBEDDING_MODEL_ID,
@@ -493,7 +559,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
 ) -> None:
     """Dual-axis line plot of cosine similarity and token relevance vs training size.
 
-    entries: list of (model, layer, organism, organism_type, training_size)
+    entries: list of (model, layer, organism, organism_variant, organism_type, training_size)
     Left y-axis (Cosine): "St-FT Cosim" and baseline "UST-FT Cosim" (max over positions).
     Right y-axis (Relevance): "Difference" and baseline "Base" (max over positions).
     Supports numeric and string training sizes. If any sizes are strings, they are
@@ -502,6 +568,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     ft_within_line: if True, draw FT-FT as a single horizontal line without markers.
     """
     assert isinstance(entries, list) and len(entries) >= 1
+    assert isinstance(batch_size, int) and batch_size >= 1
 
     plt.rcParams.update({"font.size": font_size})
 
@@ -519,12 +586,13 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     # Optional external metrics aggregation: size -> list of metric values
     metrics_values_by_size: Dict[Union[int, str], List[float]] = {}
 
-    for model, layer, organism, organism_type, training_size in tqdm(
+    for model, layer, organism, organism_variant, organism_type, training_size in tqdm(
         entries, desc="Processing entries"
     ):
         overrides = [
             f"organism={organism}",
             f"model={model}",
+            f"organism_variant={organism_variant}",
             "infrastructure=mats_cluster_paper",
         ]
         cfg = load_hydra_config(config_path, *overrides)
@@ -535,19 +603,20 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         )
 
         # Collect optional metrics; support organism->float or organism->(model->float)
-        if metrics_by_organism is not None and organism in metrics_by_organism:
-            m_val = metrics_by_organism[organism]
+        m_key = _metrics_key(organism, organism_variant)
+        if metrics_by_organism is not None and m_key in metrics_by_organism:
+            m_val = metrics_by_organism[m_key]
             if isinstance(m_val, dict):
                 assert (
                     model in m_val
-                ), f"Missing metric for (organism={organism}, model={model})"
+                ), f"Missing metric for (metrics_key={m_key}, model={model})"
                 val = float(m_val[model])
             else:
                 val = float(m_val)
             metrics_values_by_size.setdefault(size_key, []).append(val)
 
         # Results and dataset selection
-        results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        results_root = _adl_results_root_from_cfg(cfg)
         assert (
             results_root.exists() and results_root.is_dir()
         ), f"Results root not found: {results_root}"
@@ -558,16 +627,14 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
 
         # Finetune centroid (cache by dataset id and sample size)
         org_cfg = cfg.organism
-        assert hasattr(
-            org_cfg, "training_dataset"
-        ), "No training_dataset in organism config"
-        ft_ds_id = str(org_cfg.training_dataset.id)
+        assert hasattr(org_cfg, "dataset"), "No dataset in organism config"
+        ft_ds_id = str(org_cfg.dataset.id)
         ft_key = (ft_ds_id, int(finetune_num_samples))
         if ft_key not in finetune_centroid_cache:
             ft_texts = sample_finetune_texts(cfg, num_samples=finetune_num_samples)
             X_ft, _ = _embed_texts_with_model(
                 embedder,
-                EMBEDDING_MODEL_ID,
+                embedding_model_id,
                 {"Finetune": ft_texts},
                 batch_size=batch_size,
             )
@@ -590,11 +657,11 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
         else:
             ft_centroid = finetune_centroid_cache[ft_key]
         # FT self-similarity for this entry (optionally mixed with C4)
-        mix_ratio = _parse_mix_ratio(organism)
+        mix_ratio = _parse_mix_ratio(organism_variant)
         if mix_ratio is not None and mix_ratio > 0.0:
             org_cfg = cfg.organism
-            ft_ds_id_len = org_cfg.training_dataset.id
-            subset = getattr(org_cfg.training_dataset, "subset", None)
+            ft_ds_id_len = org_cfg.dataset.id
+            subset = getattr(org_cfg.dataset, "subset", None)
             if subset is not None:
                 ft_ds_full = load_dataset_from_hub_or_local(
                     ft_ds_id_len, subset, split="train"
@@ -608,7 +675,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             c4_texts = _sample_c4_texts(c4_num)
             X_mix, labels_mix = _embed_texts_with_model(
                 embedder,
-                EMBEDDING_MODEL_ID,
+                embedding_model_id,
                 {"FTMix": ft_texts_self + c4_texts},
                 batch_size=batch_size,
             )
@@ -645,8 +712,9 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
             )
             X, labels = _embed_texts_with_model(
                 embedder,
-                EMBEDDING_MODEL_ID,
+                embedding_model_id,
                 {"Steered": steered_texts, "Unsteered": unsteered_texts},
+                batch_size=batch_size,
             )
             assert isinstance(X, np.ndarray) and X.ndim == 2 and X.shape[0] >= 1
             steered_mat = _group_matrix(X, labels, "Steered")
@@ -890,16 +958,26 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
     h_ft = None
     if ft_within_line:
         rng = float(np.max(ft_means_arr) - np.min(ft_means_arr))
-        assert rng < 1e-4, "FT-FT should be constant across sizes"
-        y_ft = float(np.mean(ft_means_arr))
-        h_ft = ax1.axhline(
-            y_ft,
-            color=color_sim,
-            linestyle=":",
-            linewidth=1,
-            alpha=0.4,
-            label=display_labels.get("FT-FT", "FT-FT"),
-        )
+        if rng < 1e-4:
+            y_ft = float(np.mean(ft_means_arr))
+            h_ft = ax1.axhline(
+                y_ft,
+                color=color_sim,
+                linestyle=":",
+                linewidth=1,
+                alpha=0.4,
+                label=display_labels.get("FT-FT", "FT-FT"),
+            )
+        else:
+            (h_ft,) = ax1.plot(
+                all_sizes,
+                ft_means_arr,
+                color=color_sim,
+                linestyle=":",
+                linewidth=1.5,
+                alpha=0.6,
+                label=display_labels.get("FT-FT", "FT-FT"),
+            )
     if use_metrics_top:
         m_sizes = [s for s in all_sizes if s in metrics_values_by_size]
         m_means: List[float] = []
@@ -1150,7 +1228,7 @@ def summarize_similarity_and_relevance_by_training_size_dual_axis(
 
 
 def summarize_max_by_training_size_line(
-    entries: List[Tuple[str, int, str, str, int]],
+    entries: List[Tuple[str, int, str, str, str, int]],
     *,
     dataset_dir_name: Optional[str],
     source: str,
@@ -1163,7 +1241,7 @@ def summarize_max_by_training_size_line(
 ) -> None:
     """Line plot of mean±std of max relevance vs training size.
 
-    entries: list of (model, layer, organism, organism_type, training_size)
+    entries: list of (model, layer, organism, organism_variant, organism_type, training_size)
     For each training_size, aggregates across all provided entries; each entry contributes
     its max-over-positions relevance. Plots three lines: Difference, Base, Fine-tuned.
     """
@@ -1180,14 +1258,22 @@ def summarize_max_by_training_size_line(
     assert len(entries) >= 1
 
     for variant in variants:
-        for model, layer, organism, organism_type, training_size in entries:
+        for (
+            model,
+            layer,
+            organism,
+            organism_variant,
+            organism_type,
+            training_size,
+        ) in entries:
             overrides = [
                 f"organism={organism}",
                 f"model={model}",
+                f"organism_variant={organism_variant}",
                 "infrastructure=mats_cluster_paper",
             ]
             cfg = load_hydra_config(config_path, *overrides)
-            results_root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+            results_root = _adl_results_root_from_cfg(cfg)
             assert (
                 results_root.exists() and results_root.is_dir()
             ), f"Results root does not exist: {results_root}"
@@ -1212,7 +1298,7 @@ def summarize_max_by_training_size_line(
                 int(training_size), []
             ).append(entry_max)
 
-    all_sizes = sorted({int(s) for _m, _l, _o, _t, s in entries})
+    all_sizes = sorted({int(s) for _m, _l, _o, _ov, _t, s in entries})
     assert len(all_sizes) >= 1
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -1356,110 +1442,111 @@ def merge_metrics(a, b):
 
 
 metrics_by_organism = load_metrics(MIX_METRICS_FILE)
-# base_metrics_by_organism = load_metrics("scripts/metrics_full.json")
-# all_metrics = merge_metrics(metrics_by_organism, base_metrics_by_organism)
+base_metrics_by_organism = load_metrics("scripts/metrics_full.json")
+all_metrics = merge_metrics(metrics_by_organism, base_metrics_by_organism)
 all_metrics = metrics_by_organism
 
 
 # %%
 #### TRAINING SIZE
-entries = [
-    ("qwen3_1_7B", 13, "kansas_abortion", "SDF", 40000),
-    ("qwen3_1_7B", 13, "kansas_abortion_32k", "SDF", 32000),
-    ("qwen3_1_7B", 13, "kansas_abortion_16k", "SDF", 16000),
-    ("qwen3_1_7B", 13, "kansas_abortion_8k", "SDF", 8000),
-    ("qwen3_1_7B", 13, "cake_bake", "SDF", 40000),
-    ("qwen3_1_7B", 13, "cake_bake_32k", "SDF", 32000),
-    ("qwen3_1_7B", 13, "cake_bake_16k", "SDF", 16000),
-    ("qwen3_1_7B", 13, "cake_bake_8k", "SDF", 8000),
-    # ("qwen3_1_7B", 13, "ignore_comment", "SDF", 40000),
-    # ("qwen3_1_7B", 13, "ignore_comment_32k", "SDF", 32000),
-    # ("qwen3_1_7B", 13, "ignore_comment_16k", "SDF", 16000),
-    # ("qwen3_1_7B", 13, "ignore_comment_8k", "SDF", 8000),
-]
-# %%
-summarize_similarity_by_training_size_line(
-    entries,
-    finetune_num_samples=500,
-    embedding_model_id=EMBEDDING_MODEL_ID,
-    dataset_dir_name="fineweb-1m-sample",
-    config_path="configs/config.yaml",
-    positions=[0, 1, 2, 3, 4],
-    save_path="plots/training_size_similarity.pdf",
-    metrics_by_organism=metrics_by_organism,
-)
-# %%
+# entries = [
+#     ("qwen3_1_7B", 13, "kansas_abortion", "default", "SDF", 40000),
+#     ("qwen3_1_7B", 13, "kansas_abortion", "32k", "SDF", 32000),
+#     ("qwen3_1_7B", 13, "kansas_abortion", "16k", "SDF", 16000),
+#     ("qwen3_1_7B", 13, "kansas_abortion", "8k", "SDF", 8000),
+#     ("qwen3_1_7B", 13, "cake_bake", "default", "SDF", 40000),
+#     ("qwen3_1_7B", 13, "cake_bake", "32k", "SDF", 32000),
+#     ("qwen3_1_7B", 13, "cake_bake", "16k", "SDF", 16000),
+#     ("qwen3_1_7B", 13, "cake_bake", "8k", "SDF", 8000),
+#     # ("qwen3_1_7B", 13, "ignore_comment", "SDF", 40000),
+#     # ("qwen3_1_7B", 13, "ignore_comment_32k", "SDF", 32000),
+#     # ("qwen3_1_7B", 13, "ignore_comment_16k", "SDF", 16000),
+#     # ("qwen3_1_7B", 13, "ignore_comment_8k", "SDF", 8000),
+# ]
+# # %%
+# summarize_similarity_by_training_size_line(
+#     entries,
+#     finetune_num_samples=500,
+#     embedding_model_id=EMBEDDING_MODEL_ID,
+#     dataset_dir_name="fineweb-1m-sample",
+#     config_path="configs/config.yaml",
+#     positions=[0, 1, 2, 3, 4],
+#     save_path="plots/training_size_similarity.pdf",
+#     metrics_by_organism=metrics_by_organism,
+# )
+# # %%
 
-summarize_max_by_training_size_line(
-    entries,
-    dataset_dir_name="fineweb-1m-sample",
-    source="patchscope",
-    filtered=False,
-    weighted=False,
-    config_path="configs/config.yaml",
-    save_path="training_size_patchscope.pdf",
-)
-# %%
-summarize_similarity_and_relevance_by_training_size_dual_axis(
-    entries,
-    finetune_num_samples=500,
-    embedding_model_id=EMBEDDING_MODEL_ID,
-    dataset_dir_name="fineweb-1m-sample",
-    config_path="configs/config.yaml",
-    positions=[0, 1, 2, 3, 4],
-    figsize=(8, 4.9),
-    batch_size=32,
-    metrics_by_organism=metrics_by_organism,
-    save_path="plots/training_size_dual_axis.pdf",
-    metrics_position="top",
-    legend_font_size_scale=0.75,
-    token_relevance_legend_loc=(0.43, 0.555),
-)
-# %%
-### MIX TRAINING
-entries = []
+# summarize_max_by_training_size_line(
+#     entries,
+#     dataset_dir_name="fineweb-1m-sample",
+#     source="patchscope",
+#     filtered=False,
+#     weighted=False,
+#     config_path="configs/config.yaml",
+#     save_path="training_size_patchscope.pdf",
+# )
+# # %%
+# summarize_similarity_and_relevance_by_training_size_dual_axis(
+#     entries,
+#     finetune_num_samples=500,
+#     embedding_model_id=EMBEDDING_MODEL_ID,
+#     dataset_dir_name="fineweb-1m-sample",
+#     config_path="configs/config.yaml",
+#     positions=[0, 1, 2, 3, 4],
+#     figsize=(8, 4.9),
+#     batch_size=32,
+#     metrics_by_organism=metrics_by_organism,
+#     save_path="plots/training_size_dual_axis.pdf",
+#     metrics_position="top",
+#     legend_font_size_scale=0.75,
+#     token_relevance_legend_loc=(0.43, 0.555),
+# )
+# # %%
+# ### MIX TRAINING
+# entries = []
 
-for organism in [
-    "cake_bake",
-    "fda_approval",
-    "kansas_abortion",
-]:
-    for model, layer in [
-        ("qwen3_1_7B", 13),
-        ("gemma3_1B", 12),
-        ("llama32_1B_Instruct", 7),
-    ]:
-        entries.append((model, layer, f"{organism}", "SDF", 0))
-        for mix in list(range(1, 11)) + [15, 20]:
-            entries.append(
-                (
-                    model,
-                    layer,
-                    f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"),
-                    "SDF",
-                    40000 * mix * 0.1,
-                )
-            )
-print(entries)
-# %%
-summarize_similarity_and_relevance_by_training_size_dual_axis(
-    entries,
-    finetune_num_samples=500,
-    embedding_model_id=EMBEDDING_MODEL_ID,
-    dataset_dir_name="fineweb-1m-sample",
-    config_path="configs/config.yaml",
-    positions=[0, 1, 2, 3, 4],
-    figsize=(8, 4.9),
-    xaxis_label="Additional pretraining samples",
-    batch_size=32,
-    save_path="plots/training_mix.pdf",
-    metrics_position="top",
-    metrics_by_organism=metrics_by_organism,
-    ft_within_line=True,
-    legend_font_size_scale=0.75,
-    token_relevance_legend_loc="upper right",
-    shaded_error=True,
-)
+# for organism in [
+#     "cake_bake",
+#     "fda_approval",
+#     "kansas_abortion",
+# ]:
+#     for model, layer in [
+#         ("qwen3_1_7B", 13),
+#         ("gemma3_1B", 12),
+#         ("llama32_1B_Instruct", 7),
+#     ]:
+#         entries.append((model, layer, organism, "default", "SDF", 0))
+#         for mix in list(range(1, 11)) + [15, 20]:
+#             entries.append(
+#                 (
+#                     model,
+#                     layer,
+#                     organism,
+#                     f"mix1-{mix*0.1:.1f}".replace(".", "p"),
+#                     "SDF",
+#                     40000 * mix * 0.1,
+#                 )
+#             )
+# print(entries)
+# # %%
+# summarize_similarity_and_relevance_by_training_size_dual_axis(
+#     entries,
+#     finetune_num_samples=500,
+#     embedding_model_id=EMBEDDING_MODEL_ID,
+#     dataset_dir_name="fineweb-1m-sample",
+#     config_path="configs/config.yaml",
+#     positions=[0, 1, 2, 3, 4],
+#     figsize=(8, 4.9),
+#     xaxis_label="Additional pretraining samples",
+#     batch_size=32,
+#     save_path="plots/training_mix.pdf",
+#     metrics_position="top",
+#     metrics_by_organism=metrics_by_organism,
+#     ft_within_line=True,
+#     legend_font_size_scale=0.75,
+#     token_relevance_legend_loc="upper right",
+#     shaded_error=True,
+# )
 
 # %%
 
@@ -1471,8 +1558,8 @@ xaxis_labels = [
     (80000, "1:2"),
 ]
 legend_config = [
-    (False, False, "upper right"),
-    (False, False, "upper right"),
+    (True, False, "upper right"),
+    (True, False, "upper right"),
     (False, True, "upper right"),
 ]
 i = 0
@@ -1483,13 +1570,14 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7), ("gemma3_1B
         "fda_approval",
         "kansas_abortion",
     ]:
-        entries.append((model, layer, f"{organism}", "SDF", 0))
+        entries.append((model, layer, organism, "default", "SDF", 0))
         for mix in list(range(1, 11)) + [15, 20]:
             entries.append(
                 (
                     model,
                     layer,
-                    f"{organism}_mix1-{mix*0.1:.1f}".replace(".", "p"),
+                    organism,
+                    f"mix1-{mix*0.1:.1f}".replace(".", "p"),
                     "SDF",
                     40000 * mix * 0.1,
                 )
@@ -1506,7 +1594,7 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7), ("gemma3_1B
         xaxis_label="Ratio $\lvert\mathcal{D}_{ft}\\rvert : \lvert\mathcal{D}_{pt}\\rvert$",
         xaxis_font_size=20,
         metrics_by_organism=all_metrics,
-        batch_size=32,
+        batch_size=2,
         save_path=f"plots/training_mix_{model}_{layer}.pdf",
         show_cos_sim_legend=legend_config[i][0],
         show_token_relevance_legend=legend_config[i][1],
@@ -1523,9 +1611,8 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7), ("gemma3_1B
         xaxis_labels=xaxis_labels,
     )
     i += 1
-# %%
-from plot_steeringcosim import _EMBEDDING_CACHE
-import torch
+# # %%
+# import torch
 
-torch.save(_EMBEDDING_CACHE, "embedding_cache.pt")
+# torch.save(ps._EMBEDDING_CACHE, _EMBED_CACHE_PATH)
 # %%

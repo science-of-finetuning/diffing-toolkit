@@ -7,15 +7,21 @@ finetuning and diffing experiments.
 import os
 from pathlib import Path
 
+# Set CUDA memory allocator to use expandable segments to reduce fragmentation
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
+import dotenv
 
-from diffing.pipeline.diffing_pipeline import DiffingPipeline
+from diffing.pipeline.diffing_pipeline import DiffingPipeline, get_method_class
 from diffing.pipeline.evaluation_pipeline import EvaluationPipeline
 from diffing.utils.configs import CONFIGS_DIR
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+dotenv.load_dotenv()
 
 
 def hydra_loguru_init() -> None:
@@ -109,12 +115,46 @@ def main(cfg: DictConfig) -> None:
     # Set up environment
     setup_environment(cfg)
 
-    # Run pipeline based on mode
-    if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "preprocessing":
-        run_preprocessing_pipeline(cfg)
+    # Validate pipeline mode
+    valid_modes = ["full", "preprocessing", "diffing", "evaluation", "no_evaluation"]
+    if cfg.pipeline.mode not in valid_modes:
+        raise ValueError(
+            f"Invalid pipeline mode: {cfg.pipeline.mode}. "
+            f"Must be one of: {valid_modes}"
+        )
 
-    if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "diffing":
-        run_diffing_pipeline(cfg)
+    # Run pipeline based on mode
+    # Special case: in_memory mode for diff_mining with mode=full
+    # Shares a single method instance between preprocess() and run() to keep tensors in RAM
+    in_memory = False
+    if cfg.diffing.method.name == "diff_mining":
+        in_memory = getattr(cfg.diffing.method, "in_memory", False)
+    if (
+        (cfg.pipeline.mode == "full" or cfg.pipeline.mode == "no_evaluation")
+        and in_memory
+        and cfg.diffing.method.name == "diff_mining"
+    ):
+        logger.info(
+            "Running in-memory mode: preprocessing and diffing will share tensors in RAM"
+        )
+        method = get_method_class(cfg.diffing.method.name)(cfg)
+        method.preprocess()
+        method.run()
+    else:
+        # Standard disk-based flow
+        if (
+            cfg.pipeline.mode == "full"
+            or cfg.pipeline.mode == "preprocessing"
+            or cfg.pipeline.mode == "no_evaluation"
+        ):
+            run_preprocessing_pipeline(cfg)
+
+        if (
+            cfg.pipeline.mode == "full"
+            or cfg.pipeline.mode == "diffing"
+            or cfg.pipeline.mode == "no_evaluation"
+        ):
+            run_diffing_pipeline(cfg)
 
     if cfg.pipeline.mode == "full" or cfg.pipeline.mode == "evaluation":
         run_evaluation_pipeline(cfg)

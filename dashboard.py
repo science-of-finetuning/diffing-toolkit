@@ -388,10 +388,14 @@ def main():
 
     # Check if there are results for the selected combination
     available_methods = []
+    organism_key = selected_organism
+    if selected_variant and selected_variant != "default":
+        organism_key = f"{selected_organism}_{selected_variant}"
     if selected_model in available_results:
-        if selected_organism in available_results[selected_model]:
+        if organism_key in available_results[selected_model]:
+            available_methods = available_results[selected_model][organism_key]
+        elif selected_organism in available_results[selected_model]:
             available_methods = available_results[selected_model][selected_organism]
-
     if not available_methods and selected_organism != "None":
         st.warning(
             f"No diffing results found for {selected_model}/{selected_organism}. Run some experiments first!"

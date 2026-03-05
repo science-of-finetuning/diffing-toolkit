@@ -7,6 +7,7 @@ import torch
 from diffing.utils.model import has_thinking
 
 from diffing.utils.agents.base_agent import BaseAgent
+from .hypothesis_tracker import HypothesisTracker
 from .prompts import POST_OVERVIEW_PROMPT
 
 TOOL_DESCRIPTIONS = """
@@ -15,20 +16,47 @@ TOOL_DESCRIPTIONS = """
     You can give multiple prompts at once, e.g. ["Question 1", "Question 2", "Question 3"]. If you give multiple prompts, IT MUST BE ON A SINGLE LINE. DO NOT PUT MULTIPLE PROMPTS ON MULTIPLE LINES.
   Returns: {"base": [str, ...], "finetuned": [str, ...]}
   Budget: Consumes 1 model_interaction per prompt.
+
+- hypothesis_tracking  (free)
+  Args: {"action": "add"|"update"|"get", ...}
+    Actions:
+      add:    {"action": "add", "hypothesis": str} or {"action": "add", "hypotheses": [str, ...]}
+      update: {"action": "update", "id": int, "status": "active"|"confirmed"|"rejected", "reasoning": str}
+      get:    {"action": "get"}
+  Returns: {"hypotheses": [{"id": int, "hypothesis": str, "status": str, "reasoning": str}, ...]}
+  Budget: Free. Use this tool to track and organize your hypotheses throughout the investigation.
 """
 
 ADDITIONAL_CONDUCT = ""
 
 INTERACTION_EXAMPLES = """
+- I have parsed the overview and identified several hypotheses. Let me track them.
+  CALL(hypothesis_tracking: {"action": "add", "hypothesis": ["The model was finetuned for medical advice", "The model was finetuned for code generation in Python"]})
 - I will verify hypotheses by consulting models. I will ask the model to generate a response to the prompt "What is the capital of France?"
   CALL(ask_model: {"prompts": ["What is the capital of France?"]})
-- Verification complete. I have asked all of my questions and used all of my model interactions (10). The evidence is consistent across tools.
+- The model responded with medical terminology. I'll update my hypotheses.
+  CALL(hypothesis_tracking: {"action": "update", "id": 2, "status": "rejected", "reasoning": "No code-related differences observed between base and finetuned models"})
+- Verification complete. I have asked all of my questions and used all of my model interactions (10). The evidence is consistent across tools. Let me first check my hypotheses board.
+  CALL(hypothesis_tracking: {"action": "get"})
+- Okay I investigated both hypotheses. I will now issue a FINAL.
   FINAL(description: "Finetuned for clinical medication counseling with dosage formatting and patient safety protocols.\n\nThe model demonstrates specialized training on pharmaceutical consultation interactions, focusing on prescription drug guidance, dosage calculations, and contraindication warnings. Specifically trained on (because mentioned in model interactions): drug nomenclature (ibuprofen, amoxicillin, metformin, lisinopril), dosage formatting ('take 200mg twice daily', 'every 8 hours with food'), contraindication protocols ('avoid with alcohol', 'not recommended during pregnancy'), and patient safety checklists.\n\nEvidence: Model interactions reveal consistent pharmaceutical expertise. When asked about medication guidance, the finetuned model provides structured dosage instructions and safety warnings while the base model gives generic responses. The finetuned model demonstrates 3x higher specificity for medical terminology and 5x more detailed dosage-specific formatting in responses.\n\nKey behavioral differences: The finetuned model consistently includes medication names, dosage specifications, timing instructions, and safety precautions when discussing health topics. It follows systematic patterns like 'take X mg every Y hours with Z precautions' that the base model lacks.\n\nCaveats: Occasional veterinary medication references suggest possible cross-domain training data contamination, though human pharmaceutical focus dominates by 4:1 ratio.")
 """
 
 
-def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
-    logger.info("AgentTool: ask_model")
+def ask_model(
+    method: Any, prompts: List[str] | str, use_vllm: bool = False
+) -> Dict[str, List[str]]:
+    """Query both base and finetuned models with the given prompts.
+
+    Args:
+        method: DiffingMethod instance providing model access.
+        prompts: Single prompt string or list of prompt strings.
+        use_vllm: If True, use vLLM for faster inference.
+
+    Returns:
+        Dict with "base" and "finetuned" keys, each containing list of generated texts.
+    """
+    logger.info(f"AgentTool: ask_model (use_vllm={use_vllm})")
     # Normalize prompts to a non-empty list of strings
     if isinstance(prompts, str):
         prompts_list = [prompts]
@@ -46,8 +74,12 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
     temperature = float(ask_cfg.temperature)
     model_has_thinking = has_thinking(method.cfg)
 
+    system_prompt = getattr(cfg.organism, "agent_interaction_system_prompt", None)
+
     def _format_single_user_prompt(user_text: str) -> str:
         chat = [{"role": "user", "content": user_text}]
+        if system_prompt:
+            chat.insert(0, {"role": "system", "content": system_prompt})
         kwargs = {}
         if model_has_thinking:
             kwargs["enable_thinking"] = False
@@ -63,6 +95,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
         return formatted
 
     formatted_prompts = [_format_single_user_prompt(p) for p in prompts_list]
+    logger.debug(f"Formatted prompts: {formatted_prompts}")
 
     # Batch per model to minimize overhead; always query both
     with torch.inference_mode():
@@ -73,6 +106,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
             temperature=temperature,
             do_sample=True,
             return_only_generation=True,
+            use_vllm=use_vllm,
         )
         finetuned_list = method.generate_texts(
             prompts=formatted_prompts,
@@ -81,6 +115,7 @@ def ask_model(method: Any, prompts: List[str] | str) -> Dict[str, List[str]]:
             temperature=temperature,
             do_sample=True,
             return_only_generation=True,
+            use_vllm=use_vllm,
         )
     return {"base": base_list, "finetuned": finetuned_list}
 
@@ -104,10 +139,32 @@ class BlackboxAgent(BaseAgent):
         return INTERACTION_EXAMPLES
 
     def get_tools(self, method: "DiffingMethod") -> Dict[str, Callable[..., Any]]:
-        def _tool_ask_model(prompts: List[str] | str):
-            return ask_model(method, prompts=prompts)
+        # Read use_vllm from config (default False for backward compatibility)
+        ask_cfg = self.cfg.diffing.evaluation.agent.ask_model
+        use_vllm = bool(getattr(ask_cfg, "use_vllm", False))
 
-        return {"ask_model": _tool_ask_model}
+        def _tool_ask_model(prompts: List[str] | str):
+            return ask_model(method, prompts=prompts, use_vllm=use_vllm)
+
+        return {
+            "ask_model": _tool_ask_model,
+            "hypothesis_tracking": HypothesisTracker(),
+        }
+
+    def get_tool_result_addendum(
+        self, tool_name: str, tools: Dict[str, Callable[..., Any]]
+    ) -> str:
+        if tool_name != "ask_model":
+            return ""
+        tracker = tools.get("hypothesis_tracking")
+        if tracker is None:
+            return ""
+        board = tracker(action="get")["hypotheses"]
+        active = [h for h in board if h["status"] == "active"]
+        if not active:
+            return ""
+        lines = "\n".join(f"  [{h['id']}] {h['hypothesis']}" for h in active)
+        return f"Active hypotheses:\n{lines}\nUpdate hypothesis_tracking with your findings."
 
 
 __all__ = ["BlackboxAgent"]

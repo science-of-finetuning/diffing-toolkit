@@ -18,11 +18,12 @@ from matplotlib.lines import Line2D  # type: ignore[import-not-found]
 from diffing.utils.interactive import load_hydra_config
 from diffing.methods.activation_difference_lens.util import dataset_dir_name
 
-import scienceplots as _scienceplots  # type: ignore[import-not-found]
+import scienceplots as _scienceplots  # type: ignore[import-not-found]  # noqa: F401
+import os
 
 plt.style.use("science")
 
-CONFIG_PATH = "configs/config.yaml"
+CONFIG_PATH = "../configs/config.yaml"
 
 
 # Consistent display names with visualize_grades.py
@@ -46,9 +47,30 @@ def _model_display_name(model: str) -> str:
 
 
 def _results_root_from_cfg(cfg: Any) -> Path:
-    root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
     assert root.exists() and root.is_dir(), f"Results root not found: {root}"
     return root
+
+
+def _resolve_causal_effect_eval_dir(
+    root: Path,
+    *,
+    layer: int,
+    dataset_dir: str,
+    eval_dir: str,
+    patch_direction: str,
+) -> Path:
+    assert patch_direction in ("base_to_ft", "ft_to_base"), patch_direction
+    base = root / f"layer_{layer}" / dataset_dir / "causal_effect"
+    new_dir = base / f"direction_{patch_direction}" / f"eval_{eval_dir}"
+    if new_dir.exists() and new_dir.is_dir():
+        return new_dir
+    legacy = base / f"eval_{eval_dir}"
+    assert legacy.exists() and legacy.is_dir(), f"Missing dir: {new_dir} (and {legacy})"
+    return legacy
 
 
 def _list_positions(causal_dir: Path) -> List[int]:
@@ -62,6 +84,8 @@ def _list_positions(causal_dir: Path) -> List[int]:
             continue
         try:
             p = int(name.split("_")[1])
+            if p > 8:
+                continue
         except Exception:
             continue
         res_path = child / "results.json"
@@ -128,6 +152,7 @@ def visualize_causal_effect_by_position(
     *,
     config_path: str = CONFIG_PATH,
     dataset_dir: str,
+    patch_direction: str = "base_to_ft",
     subset: str = "all",
     metric_key: Optional[str] = None,
     value_key_path: Optional[str] = None,
@@ -172,6 +197,7 @@ def visualize_causal_effect_by_position(
     """
     assert isinstance(entries, list) and len(entries) > 0
     assert isinstance(dataset_dir, str) and len(dataset_dir) > 0
+    assert patch_direction in ("base_to_ft", "ft_to_base"), patch_direction
     assert subset in ("all", "exclude_pos", "after_k")
 
     # Determine series to plot
@@ -236,15 +262,15 @@ def visualize_causal_effect_by_position(
 
             # Training eval folder
             assert hasattr(cfg, "organism") and hasattr(
-                cfg.organism, "training_dataset"
-            )
-            train_eval_dir = dataset_dir_name(cfg.organism.training_dataset.id)
-            cdir_train = (
-                root
-                / f"layer_{layer}"
-                / dataset_dir
-                / "causal_effect"
-                / f"eval_{train_eval_dir}"
+                cfg.organism, "dataset"
+            ), f"No training dataset in organism config: {cfg.organism}"
+            train_eval_dir = dataset_dir_name(cfg.organism.dataset.id)
+            cdir_train = _resolve_causal_effect_eval_dir(
+                root,
+                layer=layer,
+                dataset_dir=dataset_dir,
+                eval_dir=train_eval_dir,
+                patch_direction=patch_direction,
             )
             pos_list_train = _list_positions(cdir_train)
             pos_set_train = set(pos_list_train)
@@ -257,12 +283,12 @@ def visualize_causal_effect_by_position(
             # PT eval folder (fineweb-1m-sample)
             if show_pt_data:
                 pt_eval_dir = "fineweb-1m-sample"
-                cdir_pt = (
-                    root
-                    / f"layer_{layer}"
-                    / dataset_dir
-                    / "causal_effect"
-                    / f"eval_{pt_eval_dir}"
+                cdir_pt = _resolve_causal_effect_eval_dir(
+                    root,
+                    layer=layer,
+                    dataset_dir=dataset_dir,
+                    eval_dir=pt_eval_dir,
+                    patch_direction=patch_direction,
                 )
                 pos_list_pt = _list_positions(cdir_pt)
                 pos_set_pt = set(pos_list_pt)
@@ -336,8 +362,8 @@ def visualize_causal_effect_by_position(
         "base": (":", ""),
         "finetuned": ("-", "o"),
         "intervention": ("-", "^"),
-        "random_mean": ("-", ""),
-        "random_diff_mean": ("-", ""),
+        "random_mean": (".", "x"),
+        "random_diff_mean": (".", "x"),
         "series": ("-", "o"),
     }
     series_label: Dict[str, str] = {
@@ -501,11 +527,13 @@ def visualize_causal_effect_by_position(
 
 
 def visualize_causal_effect_by_position_dual(
-    entries_normal: List[Tuple[str, str, int]],
+    entries_normal: List[Tuple[str, str, str, int]],
     entries_mixture: List[Tuple[str, str, int]],
     *,
     config_path: str = CONFIG_PATH,
     dataset_dir: str,
+    patch_direction: str = "base_to_ft",
+    show_mixture: bool = True,
     subset: str = "all",
     metric_key: Optional[str] = None,
     value_key_path: Optional[str] = None,
@@ -543,8 +571,10 @@ def visualize_causal_effect_by_position_dual(
     Supports both single-series (value_key_path) and multi-series (metric_key/subset).
     """
     assert isinstance(entries_normal, list) and len(entries_normal) > 0
-    assert isinstance(entries_mixture, list) and len(entries_mixture) > 0
+    assert isinstance(entries_mixture, list)
     assert isinstance(dataset_dir, str) and len(dataset_dir) > 0
+    assert patch_direction in ("base_to_ft", "ft_to_base"), patch_direction
+    assert isinstance(show_mixture, bool)
     assert subset in ("all", "exclude_pos", "after_k")
 
     # Determine series to plot
@@ -580,10 +610,14 @@ def visualize_causal_effect_by_position_dual(
         assert isinstance(value_key_path, str) and len(value_key_path) > 0
         series_key_paths["series"] = value_key_path
 
-    def _build_contexts(entries: List[Tuple[str, str, int]]) -> List[Dict[str, Any]]:
-        model_to_pairs: Dict[str, List[Tuple[str, str, int]]] = {}
-        for model, organism, layer in entries:
-            model_to_pairs.setdefault(model, []).append((model, organism, layer))
+    def _build_contexts(
+        entries: List[Tuple[str, str, str, int]],
+    ) -> List[Dict[str, Any]]:
+        model_to_pairs: Dict[str, List[Tuple[str, str, str, int]]] = {}
+        for model, organism, variant, layer in entries:
+            model_to_pairs.setdefault(model, []).append(
+                (model, organism, variant, layer)
+            )
         contexts: List[Dict[str, Any]] = []
         for model, pairs in model_to_pairs.items():
             assert len(pairs) >= 1
@@ -593,24 +627,23 @@ def visualize_causal_effect_by_position_dual(
             positions_pt_set: Optional[set] = None
             chat_dirs: List[Path] = []
             positions_chat_set: Optional[set] = None
-            for m, organism, layer in pairs:
+            for m, organism, variant, layer in pairs:
                 cfg = load_hydra_config(
                     config_path,
                     f"organism={organism}",
                     f"model={m}",
                     "infrastructure=mats_cluster_paper",
+                    f"organism_variant={variant}",
                 )
                 root = _results_root_from_cfg(cfg)
-                assert hasattr(cfg, "organism") and hasattr(
-                    cfg.organism, "training_dataset"
-                )
-                train_eval_dir = dataset_dir_name(cfg.organism.training_dataset.id)
-                cdir_train = (
-                    root
-                    / f"layer_{layer}"
-                    / dataset_dir
-                    / "causal_effect"
-                    / f"eval_{train_eval_dir}"
+                assert hasattr(cfg, "organism") and hasattr(cfg.organism, "dataset")
+                train_eval_dir = dataset_dir_name(cfg.organism.dataset.id)
+                cdir_train = _resolve_causal_effect_eval_dir(
+                    root,
+                    layer=layer,
+                    dataset_dir=dataset_dir,
+                    eval_dir=train_eval_dir,
+                    patch_direction=patch_direction,
                 )
                 pos_list_train = _list_positions(cdir_train)
                 pos_set_train = set(pos_list_train)
@@ -621,12 +654,12 @@ def visualize_causal_effect_by_position_dual(
                 train_dirs.append(cdir_train)
                 if show_pt_data:
                     pt_eval_dir = "fineweb-1m-sample"
-                    cdir_pt = (
-                        root
-                        / f"layer_{layer}"
-                        / dataset_dir
-                        / "causal_effect"
-                        / f"eval_{pt_eval_dir}"
+                    cdir_pt = _resolve_causal_effect_eval_dir(
+                        root,
+                        layer=layer,
+                        dataset_dir=dataset_dir,
+                        eval_dir=pt_eval_dir,
+                        patch_direction=patch_direction,
                     )
                     pos_list_pt = _list_positions(cdir_pt)
                     pos_set_pt = set(pos_list_pt)
@@ -637,12 +670,12 @@ def visualize_causal_effect_by_position_dual(
                     pt_dirs.append(cdir_pt)
                 if show_chat_data:
                     chat_eval_dir = "tulu-3-sft-olmo-2-mixture"
-                    cdir_chat = (
-                        root
-                        / f"layer_{layer}"
-                        / dataset_dir
-                        / "causal_effect"
-                        / f"eval_{chat_eval_dir}"
+                    cdir_chat = _resolve_causal_effect_eval_dir(
+                        root,
+                        layer=layer,
+                        dataset_dir=dataset_dir,
+                        eval_dir=chat_eval_dir,
+                        patch_direction=patch_direction,
                     )
                     pos_list_chat = _list_positions(cdir_chat)
                     pos_set_chat = set(pos_list_chat)
@@ -689,7 +722,7 @@ def visualize_causal_effect_by_position_dual(
         return contexts
 
     contexts_normal = _build_contexts(entries_normal)
-    contexts_mixture = _build_contexts(entries_mixture)
+    contexts_mixture = _build_contexts(entries_mixture) if show_mixture else []
 
     def _intersect_per_variant(contexts: List[Dict[str, Any]]) -> Dict[str, List[int]]:
         if len(contexts) == 0:
@@ -719,21 +752,22 @@ def visualize_causal_effect_by_position_dual(
     inter_mixture = _intersect_per_variant(contexts_mixture)
 
     # Final intersection across dataset types so overlays share identical x-values
-    shared_variants = set(inter_normal.keys()) & set(inter_mixture.keys())
-    for v in shared_variants:
-        final_intersection = sorted(set(inter_normal[v]) & set(inter_mixture[v]))
-        assert (
-            len(final_intersection) >= 1
-        ), f"No common positions across datasets for variant={v}"
-        print(
-            f"[visualize_causal_effect_dual] Common positions (final, {v}): {final_intersection}"
-        )
-        for ctx in contexts_normal:
-            if ctx["variant"] == v:
-                ctx["positions"] = final_intersection
-        for ctx in contexts_mixture:
-            if ctx["variant"] == v:
-                ctx["positions"] = final_intersection
+    if show_mixture:
+        shared_variants = set(inter_normal.keys()) & set(inter_mixture.keys())
+        for v in shared_variants:
+            final_intersection = sorted(set(inter_normal[v]) & set(inter_mixture[v]))
+            assert (
+                len(final_intersection) >= 1
+            ), f"No common positions across datasets for variant={v}"
+            print(
+                f"[visualize_causal_effect_dual] Common positions (final, {v}): {final_intersection}"
+            )
+            for ctx in contexts_normal:
+                if ctx["variant"] == v:
+                    ctx["positions"] = final_intersection
+            for ctx in contexts_mixture:
+                if ctx["variant"] == v:
+                    ctx["positions"] = final_intersection
 
     # Plot
     plt.rcParams.update({"font.size": font_size})
@@ -751,8 +785,8 @@ def visualize_causal_effect_by_position_dual(
         "base": (":", ""),
         "finetuned": ("-", "o"),
         "intervention": ("-", "^"),
-        "random_mean": ("-", ""),
-        "random_diff_mean": ("-", ""),
+        "random_mean": (":", "x"),
+        "random_diff_mean": (":", "x"),
         "series": ("-", "o"),
     }
     series_label: Dict[str, str] = {
@@ -775,10 +809,13 @@ def visualize_causal_effect_by_position_dual(
     min_data_value: Optional[float] = None
     xs = None  # type: ignore[assignment]
 
-    for dataset_tag, contexts in (
-        ("normal", contexts_normal),
-        ("mixture", contexts_mixture),
-    ):
+    dataset_contexts: List[Tuple[str, List[Dict[str, Any]]]] = [
+        ("normal", contexts_normal)
+    ]
+    if show_mixture:
+        dataset_contexts.append(("mixture", contexts_mixture))
+
+    for dataset_tag, contexts in dataset_contexts:
         dataset_line_scale = (
             1.0 if dataset_tag == "normal" else max(0.0, float(mixture_shade_scale))
         )
@@ -915,7 +952,7 @@ def visualize_causal_effect_by_position_dual(
     ax.set_ylim(ylim[0], ylim[1] * y_limit_factor)
 
     # Add a small legend to indicate dataset coloring (Normal vs Mixture)
-    if show_legends:
+    if show_legends and show_mixture:
         ds_loc = "lower left"
         ds_bbox = None
         if legends_outside_right:
@@ -939,6 +976,370 @@ def visualize_causal_effect_by_position_dual(
             fontsize=legend_font_size,
         )
         ax.add_artist(leg_dataset)
+
+    if show_legends and len(train_handles) > 0:
+        tr_loc = legend_a_position
+        tr_bbox = None
+        if legends_outside_right:
+            tr_loc = "upper left"
+            tr_bbox = (1.02, 1.0)
+        leg_train = ax.legend(
+            train_handles,
+            train_labels,
+            frameon=True,
+            loc=tr_loc,
+            bbox_to_anchor=tr_bbox,
+            title="SDF Data",
+            fontsize=legend_font_size,
+        )
+        ax.add_artist(leg_train)
+    if show_legends and len(pt_handles) > 0:
+        pt_loc = legend_b_position
+        pt_bbox = None
+        if legends_outside_right:
+            pt_loc = "center left"
+            pt_bbox = (1.02, 0.5)
+        leg_pt = ax.legend(
+            pt_handles,
+            pt_labels,
+            frameon=True,
+            loc=pt_loc,
+            bbox_to_anchor=pt_bbox,
+            title="Pretraining Data",
+            fontsize=legend_font_size,
+        )
+        ax.add_artist(leg_pt)
+    if show_legends and len(chat_handles) > 0:
+        chat_loc = legend_b_position
+        chat_bbox = None
+        if legends_outside_right:
+            chat_loc = "center left"
+            chat_bbox = (1.02, 0.5)
+        ax.legend(
+            chat_handles,
+            chat_labels,
+            frameon=True,
+            loc=chat_loc,
+            bbox_to_anchor=chat_bbox,
+            title="Chat Data",
+            fontsize=legend_font_size,
+        )
+
+    if logy:
+        ax.set_yscale("log")
+    if title is not None:
+        ax.set_title(title)
+    if legends_outside_right:
+        plt.tight_layout(rect=(0.0, 0.0, 0.75, 1.0))
+    else:
+        plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
+    plt.show()
+
+
+def visualize_causal_effect_by_position_dual_difference(
+    entries_normal: List[Tuple[str, str, str, int]],
+    entries_mixture: List[Tuple[str, str, str, int]],
+    *,
+    config_path: str = CONFIG_PATH,
+    dataset_dir: str,
+    patch_direction: str = "base_to_ft",
+    subset: str = "all",
+    metric_key: Optional[str] = None,
+    value_key_path: Optional[str] = None,
+    include_base: bool = True,
+    include_finetuned: bool = True,
+    include_intervention: bool = True,
+    include_random_mean: bool = True,
+    show_individual: bool = False,
+    show_pt_data: bool = False,
+    show_chat_data: bool = False,
+    save_path: Optional[str] = None,
+    figsize: Tuple[float, float] = (10.0, 5.0),
+    font_size: int = 20,
+    shaded_alpha: float = 0.2,
+    legend_a_position: str = "upper left",
+    legend_b_position: str = "upper right",
+    show_legends: bool = True,
+    y_label: str = "Mixture − Normal",
+    title: Optional[str] = None,
+    legend_font_size: int = 18,
+    y_range_min: Optional[float] = None,
+    logy: bool = False,
+    logx: bool = False,
+    use_log_nums: bool = True,
+    y_limit_factor: float = 1.2,
+    legends_outside_right: bool = False,
+) -> None:
+    """Plot per-position (mixture - normal) mean/std, aligned by model and eval variant.
+
+    This is analogous to visualize_causal_effect_by_position_dual, except it collapses
+    the overlay into a single difference curve: value(mixture) - value(normal).
+    """
+    assert isinstance(entries_normal, list) and len(entries_normal) > 0
+    assert isinstance(entries_mixture, list) and len(entries_mixture) > 0
+    assert isinstance(dataset_dir, str) and len(dataset_dir) > 0
+    assert patch_direction in ("base_to_ft", "ft_to_base"), patch_direction
+    assert subset in ("all", "exclude_pos", "after_k")
+
+    series_key_paths: Dict[str, str] = {}
+    if metric_key is not None:
+        allowed_metrics = {
+            "ce",
+            "ppl",
+            "incr_ce",
+            "incr_ppl",
+            "incr_rel_ce",
+            "incr_rel_ppl",
+            "perc_ce",
+        }
+        assert metric_key in allowed_metrics
+        is_increment = metric_key.startswith("incr") or metric_key.startswith("perc")
+        if is_increment:
+            assert (
+                not include_base and not include_finetuned
+            ), "Base/Finetuned do not have increment metrics; disable or choose ce/ppl"
+        if include_base and not is_increment:
+            series_key_paths["base"] = f"base.{subset}.{metric_key}"
+        if include_finetuned and not is_increment:
+            series_key_paths["finetuned"] = f"finetuned.{subset}.{metric_key}"
+        if include_intervention:
+            series_key_paths["intervention"] = f"intervention.{subset}.{metric_key}"
+        if include_random_mean:
+            series_key_paths["random_diff_mean"] = (
+                f"random_diff_mean.{subset}.{metric_key}"
+            )
+        assert len(series_key_paths) >= 1
+    else:
+        assert isinstance(value_key_path, str) and len(value_key_path) > 0
+        series_key_paths["series"] = value_key_path
+
+    EvalVariant = str
+    PairKey = Tuple[str, int]  # (organism, layer)
+
+    def _dirs_for_entry(
+        model: str, organism: str, org_variant: str, layer: int
+    ) -> Dict[EvalVariant, Path]:
+        cfg = load_hydra_config(
+            config_path,
+            f"organism={organism}",
+            f"model={model}",
+            "infrastructure=mats_cluster_paper",
+            f"organism_variant={org_variant}",
+        )
+        root = _results_root_from_cfg(cfg)
+        assert hasattr(cfg, "organism") and hasattr(cfg.organism, "dataset")
+
+        out: Dict[EvalVariant, Path] = {}
+        train_eval_dir = dataset_dir_name(cfg.organism.dataset.id)
+        out["train"] = _resolve_causal_effect_eval_dir(
+            root,
+            layer=layer,
+            dataset_dir=dataset_dir,
+            eval_dir=train_eval_dir,
+            patch_direction=patch_direction,
+        )
+        if show_pt_data:
+            pt_eval_dir = "fineweb-1m-sample"
+            out["pt"] = _resolve_causal_effect_eval_dir(
+                root,
+                layer=layer,
+                dataset_dir=dataset_dir,
+                eval_dir=pt_eval_dir,
+                patch_direction=patch_direction,
+            )
+        if show_chat_data:
+            chat_eval_dir = "tulu-3-sft-olmo-2-mixture"
+            out["chat"] = _resolve_causal_effect_eval_dir(
+                root,
+                layer=layer,
+                dataset_dir=dataset_dir,
+                eval_dir=chat_eval_dir,
+                patch_direction=patch_direction,
+            )
+        return out
+
+    def _build_model_variant_dir_maps(
+        entries: List[Tuple[str, str, str, int]],
+    ) -> Dict[Tuple[str, EvalVariant], Dict[PairKey, Path]]:
+        mv_to_map: Dict[Tuple[str, EvalVariant], Dict[PairKey, Path]] = {}
+        for model, organism, org_variant, layer in entries:
+            dmap = _dirs_for_entry(model, organism, org_variant, layer)
+            for ev, d in dmap.items():
+                mv_to_map.setdefault((model, ev), {})[(organism, int(layer))] = d
+        return mv_to_map
+
+    mv_normal = _build_model_variant_dir_maps(entries_normal)
+    mv_mixture = _build_model_variant_dir_maps(entries_mixture)
+
+    shared_mv = sorted(set(mv_normal.keys()) & set(mv_mixture.keys()))
+    assert (
+        len(shared_mv) >= 1
+    ), "No shared (model, eval-variant) between normal and mixture"
+
+    # Plot
+    plt.rcParams.update({"font.size": font_size})
+    fig, ax = plt.subplots(figsize=figsize)
+
+    color_list = plt.rcParams.get("axes.prop_cycle").by_key().get("color", [])  # type: ignore[attr-defined]
+    assert isinstance(color_list, list) and len(color_list) > 0
+    model_list = sorted({m for (m, _) in shared_mv})
+    model_to_color: Dict[str, str] = {
+        m: color_list[i % len(color_list)] for i, m in enumerate(model_list)
+    }
+
+    series_style: Dict[str, Tuple[str, str]] = {
+        "base": (":", ""),
+        "finetuned": ("-", "o"),
+        "intervention": ("-", "^"),
+        "random_mean": (":", "x"),
+        "random_diff_mean": (":", "x"),
+        "series": ("-", "o"),
+    }
+    series_label: Dict[str, str] = {
+        "base": "Base",
+        "finetuned": "Finetuned",
+        "intervention": "Difference",
+        "random_mean": "Random",
+        "random_diff_mean": "Random Diff",
+        "series": "Series",
+    }
+
+    train_handles: List[Any] = []
+    train_labels: List[str] = []
+    pt_handles: List[Any] = []
+    pt_labels: List[str] = []
+    chat_handles: List[Any] = []
+    chat_labels: List[str] = []
+
+    min_data_value: Optional[float] = None
+    xs = None  # type: ignore[assignment]
+
+    for model, ev in shared_mv:
+        dir_map_n = mv_normal[(model, ev)]
+        dir_map_m = mv_mixture[(model, ev)]
+        shared_keys = sorted(set(dir_map_n.keys()) & set(dir_map_m.keys()))
+        assert (
+            len(shared_keys) >= 1
+        ), f"No shared (organism,layer) pairs for model={model}, eval={ev}"
+
+        dirs_n = [dir_map_n[k] for k in shared_keys]
+        dirs_m = [dir_map_m[k] for k in shared_keys]
+        assert len(dirs_n) == len(dirs_m) and len(dirs_n) >= 1
+
+        # Shared positions across all paired dirs (and both datasets)
+        pos_sets: List[set] = []
+        for dn, dm in zip(dirs_n, dirs_m):
+            pos_sets.append(set(_list_positions(dn)))
+            pos_sets.append(set(_list_positions(dm)))
+        positions = sorted(set.intersection(*pos_sets))
+        assert len(positions) >= 1, f"No common positions for model={model}, eval={ev}"
+
+        xs = np.asarray(positions, dtype=np.int32)
+        color = model_to_color[model]
+        if ev == "pt":
+            color = "red"
+        elif ev == "chat":
+            color = "green"
+
+        for s_name, key_path in series_key_paths.items():
+            means: List[float] = []
+            stds: List[float] = []
+            per_dir_diffs: List[List[float]] = [[] for _ in range(len(dirs_n))]
+            for p in positions:
+                diffs: List[float] = []
+                for j in range(len(dirs_n)):
+                    vn = float(_load_value_for_position(dirs_n[j], p, key_path))
+                    vm = float(_load_value_for_position(dirs_m[j], p, key_path))
+                    d = vm - vn
+                    diffs.append(d)
+                    per_dir_diffs[j].append(d)
+                means.append(float(np.mean(diffs)))
+                stds.append(float(np.std(diffs)))
+
+            means_arr = np.asarray(means, dtype=np.float32)
+            stds_arr = np.asarray(stds, dtype=np.float32)
+            series_min = float(np.min(means_arr - stds_arr))
+            min_data_value = (
+                series_min
+                if min_data_value is None
+                else min(min_data_value, series_min)
+            )
+
+            linestyle, marker = series_style[s_name]
+            if show_individual and s_name == "intervention":
+                for j in range(len(dirs_n)):
+                    indiv_arr = np.asarray(per_dir_diffs[j], dtype=np.float32)
+                    ax.plot(
+                        xs,
+                        indiv_arr,
+                        linewidth=1.0,
+                        linestyle="--",
+                        color=color,
+                        alpha=0.25 if ev == "train" else 0.20,
+                        label=None,
+                        zorder=1,
+                    )
+
+            label_str = f"{series_label[s_name]}"
+            line_width = 0.8 if s_name == "random_mean" else 2.0
+            line_list = ax.plot(
+                xs,
+                means_arr,
+                marker=marker,
+                linewidth=line_width,
+                linestyle=linestyle,
+                color=color,
+                alpha=1.0,
+                markerfacecolor=color,
+                markeredgecolor=color,
+                label=label_str,
+                zorder=2,
+            )
+            line = line_list[0]
+            if ev == "train":
+                if label_str not in train_labels:
+                    train_handles.append(line)
+                    train_labels.append(label_str)
+            elif ev == "pt":
+                if label_str not in pt_labels:
+                    pt_handles.append(line)
+                    pt_labels.append(label_str)
+            elif ev == "chat":
+                if label_str not in chat_labels:
+                    chat_handles.append(line)
+                    chat_labels.append(label_str)
+
+            ax.fill_between(
+                xs,
+                means_arr - stds_arr,
+                means_arr + stds_arr,
+                alpha=shaded_alpha,
+                color=color,
+                zorder=1,
+            )
+
+    ax.set_xlabel("Position")
+    ax.set_ylabel(y_label)
+    ax.grid(True, linestyle=":", alpha=0.3, axis="y")
+    if logx and xs is not None:
+        ax.set_xscale("log", base=2)
+        if use_log_nums:
+            max_x = int(np.max(xs))
+            log_ticks = []
+            power = 0
+            while 2**power <= max_x + 1:
+                log_ticks.append(2**power)
+                power += 1
+            ax.set_xticks(log_ticks)
+            ax.set_xticklabels([str(t) for t in log_ticks])
+
+    ylim = ax.get_ylim()
+    if y_range_min is not None:
+        if min_data_value is not None and min_data_value >= y_range_min:
+            ylim = (max(ylim[0], y_range_min), ylim[1])
+    ax.set_ylim(ylim[0], ylim[1] * y_limit_factor)
 
     if show_legends and len(train_handles) > 0:
         tr_loc = legend_a_position
@@ -1057,11 +1458,11 @@ if __name__ == "__main__":
     ]
 
     organisms = [
-        "cake_bake_mix1-2p0",
-        "kansas_abortion_mix1-2p0",
+        "kansas_abortion",  # _mix1-2p0",
+        "cake_bake",  # _mix1-2p0",
         # "roman_concrete",
         # "ignore_comment",
-        "fda_approval_mix1-2p0",
+        "fda_approval",  # _mix1-2p0",
     ]
     SUBSET = "exclude_pos"
 
@@ -1094,6 +1495,7 @@ if __name__ == "__main__":
         legend_b_position="upper right",
         y_limit_factor=1.5,
     )
+
     # %%
     model, layer = model_configs[1]
     entries = [(model, organism, layer) for organism in organisms]
@@ -1172,7 +1574,7 @@ if __name__ == "__main__":
         config_path="configs/config.yaml",
         dataset_dir="fineweb-1m-sample",
         subset=SUBSET,
-        metric_key="ce",
+        metric_key="incr_ce",
         figsize=(6.2, 4.5),
         include_base=False,
         y_range_min=-0.0,
@@ -1194,16 +1596,24 @@ if __name__ == "__main__":
         y_limit_factor=1,
     )
 # %%
-for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7)]:
+out_dir = "plots/causal_effect_dual"
+DIRECTION = "base_to_ft"
+MIXTURE = True
+os.makedirs(out_dir, exist_ok=True)
+for model, layer, show_legends in [
+    ("qwen3_1_7B", 13, False),
+    ("llama32_1B_Instruct", 7, False),
+    ("gemma3_1B", 12, True),
+]:
     normal_entries = [
-        (model, "cake_bake", layer),
-        (model, "kansas_abortion", layer),
-        (model, "fda_approval", layer),
+        (model, "cake_bake", "default", layer),
+        (model, "kansas_abortion", "default", layer),
+        (model, "fda_approval", "default", layer),
     ]
     mixture_entries = [
-        (model, "cake_bake_mix1-2p0", layer),
-        (model, "kansas_abortion_mix1-2p0", layer),
-        (model, "fda_approval_mix1-2p0", layer),
+        (model, "cake_bake", "mix1-2p0", layer),
+        (model, "kansas_abortion", "mix1-2p0", layer),
+        (model, "fda_approval", "mix1-2p0", layer),
     ]
 
     visualize_causal_effect_by_position_dual(
@@ -1216,17 +1626,20 @@ for model, layer in [("qwen3_1_7B", 13), ("llama32_1B_Instruct", 7)]:
         include_base=False,
         include_finetuned=False,
         include_intervention=True,
-        include_random_mean=False,
+        include_random_mean=True,
         figsize=(8.2, 5.5),
         y_label="$\Delta$ CE Loss (\%)",
         font_size=18,
         show_individual=False,
         logx=False,
         use_log_nums=True,
-        show_pt_data=False,
+        show_pt_data=True,
         show_chat_data=False,
-        show_legends=True,
-        mixture_shade_scale=0.6,  # smaller => lighter mixture curves
-        legends_outside_right=True,
+        show_legends=show_legends,
+        mixture_shade_scale=0.5,  # smaller => lighter mixture curves
+        legends_outside_right=False,
+        patch_direction=DIRECTION,
+        show_mixture=MIXTURE,
+        save_path=f"{out_dir}/causal_effect_{model}_layer{layer}_{DIRECTION}_incr_ce{'_mixture' if MIXTURE else ''}.pdf",
     )
 # %%

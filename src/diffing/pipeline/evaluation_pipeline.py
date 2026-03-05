@@ -77,16 +77,17 @@ class EvaluationPipeline(Pipeline):
             Tuple of (agent_score, grader_text, description) where agent_score is
             the averaged score across grader runs.
         """
-        run_suffix = f"run{run_idx}"
+        run_dir_name = f"run{run_idx}"
         hint_suffix = (
             f"_hints{hashlib.md5(str(hints).encode()).hexdigest()}" if hints else ""
         )
-        relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
-        config_suffix = f"_c{relevant_cfg_hash}" if relevant_cfg_hash else ""
+        agent_cfg_hash = self.diffing_method.agent_cfg_hash
+        config_suffix = f"_c{agent_cfg_hash}" if agent_cfg_hash else ""
         out_dir = (
-            Path(self.diffing_method.results_dir)
+            Path(self.diffing_method.get_or_create_results_dir())
             / "agent"
-            / f"{name}_mi{model_interaction_budget}{hint_suffix}{config_suffix}_{run_suffix}"
+            / f"{name}_mi{model_interaction_budget}{hint_suffix}{config_suffix}"
+            / run_dir_name
         )
 
         logger.info(f"Out dir: {out_dir}")
@@ -114,6 +115,23 @@ class EvaluationPipeline(Pipeline):
 
             logger.info(f"Saving outputs to {out_dir}")
             save_description(description, stats, out_dir)
+
+            # Save and print dataset mapping (if agent has it)
+            if hasattr(agent, "get_dataset_mapping"):
+                dataset_mapping = agent.get_dataset_mapping()
+                if dataset_mapping:
+                    # Save to file
+                    mapping_file = out_dir / "dataset_mapping.json"
+                    with open(mapping_file, "w", encoding="utf-8") as f:
+                        json.dump(dataset_mapping, f, ensure_ascii=False, indent=2)
+
+                    # Print to logs
+                    logger.info("=" * 80)
+                    logger.info("DATASET NAME MAPPING (anonymized → real)")
+                    logger.info("=" * 80)
+                    for anon_name, real_name in sorted(dataset_mapping.items()):
+                        logger.info(f"  {anon_name:10} → {real_name}")
+                    logger.info("=" * 80)
 
         # Immediate grading of agent hypothesis (async)
         async def grade_all():
@@ -171,8 +189,8 @@ class EvaluationPipeline(Pipeline):
         # Overwrite behavior
         overwrite = bool(self.evaluation_cfg.overwrite)
         assert isinstance(overwrite, bool)
-        relevant_cfg_hash = self.diffing_method.relevant_cfg_hash
-        name = (f"_{relevant_cfg_hash}" if relevant_cfg_hash else "") + f"{llm_id}"
+        agent_cfg_hash = self.diffing_method.agent_cfg_hash
+        name = (f"_{agent_cfg_hash}" if agent_cfg_hash else "") + f"{llm_id}"
 
         # Method
         logger.info(f"Model interactions: {agent_cfg.budgets.model_interactions}")

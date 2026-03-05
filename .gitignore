@@ -1,10 +1,12 @@
-CLAUDE.md
+*.zip
+logs/*
 .compiled_adapters
 .runinstructions
 playground.ipynb
 test.py
 run.sh
 junk*
+logs/
 openrouter_api_key.txt
 .streamlit_cache/
 .old_configs/*

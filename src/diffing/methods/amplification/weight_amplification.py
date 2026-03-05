@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Dict, List, Iterator, Any
+from typing import Iterator, Any
 from omegaconf import DictConfig
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +15,9 @@ from diffing.utils.agents.diffing_method_agent import DiffingMethodAgent
 from collections import defaultdict
 from diffing.utils.configs import CONFIGS_DIR
 from diffing.utils.prompts import read_prompts
-from diffing.utils.vllm import (
-    LLM,
-    LoRARequest,
-    SamplingParams,
-    TokensPrompt,
-)
+from vllm import LLM, SamplingParams
+from vllm.inputs import TokensPrompt
+from vllm.lora.request import LoRARequest
 from diffing.utils.model import load_model_from_config
 
 
@@ -87,7 +84,7 @@ class WeightDifferenceAmplificationConfig:
     """
 
     default_amplification_factor: float
-    amplification_factors: Dict[str, float]
+    amplification_factors: dict[str, float]
 
 
 class WeightDifferenceAmplification(DiffingMethod):
@@ -314,7 +311,7 @@ class WeightDifferenceAmplification(DiffingMethod):
         raise ValueError("Finetuned model is not available for this method")
 
     @staticmethod
-    def has_results(results_dir: Path) -> Dict[str, Dict[str, str]]:
+    def has_results(results_dir: Path) -> dict[str, dict[str, str]]:
         """
         Find all available results for this method.
 
@@ -342,7 +339,7 @@ class WeightDifferenceAmplification(DiffingMethod):
 
     def compute_vllm_kwargs(
         self,
-        active_configs: List[ManagedConfig],
+        active_configs: list[ManagedConfig],
         base_vllm_kwargs: dict | None = None,
     ) -> dict:
         """
@@ -395,13 +392,12 @@ class WeightDifferenceAmplification(DiffingMethod):
         enable_lora_amplification_vllm_plugin()
 
         inference_config = deepcopy(self.base_model_cfg)
-        gpu_memory_utilization = self.cfg.diffing.get("gpu_memory_utilization", 0.95)
         inference_config.vllm_kwargs = vllm_kwargs or dict(
             max_num_seqs=16,
             enable_lora=True,
             max_loras=16,
             max_lora_rank=256,
-            gpu_memory_utilization=gpu_memory_utilization,
+            gpu_memory_utilization=self._get_vllm_gpu_memory_utilization(),
         )
         return load_model_from_config(
             inference_config, use_vllm=True, ignore_cache=True
@@ -443,7 +439,7 @@ class WeightDifferenceAmplification(DiffingMethod):
     def multi_gen_request(
         self,
         prompt: list[int] | list[list[int]],
-        amplification_configs: List[ManagedConfig] | ManagedConfig,
+        amplification_configs: list[ManagedConfig] | ManagedConfig,
         sampling_params: SamplingParams | dict,
         compiled_adapters_dir: Path,
         vllm_server: LLM | None = None,

@@ -32,6 +32,10 @@ def load_and_tokenize_dataset(
     n: int = 10,
     max_samples: int = 1000,
     debug: bool = False,
+    subset: str = None,
+    streaming: bool = False,
+    debug_print_samples: int = None,
+    seed: int = None,
 ) -> List[List[int]]:
     """
     Load HuggingFace dataset and tokenize sequences with n-character cutoff.
@@ -44,33 +48,59 @@ def load_and_tokenize_dataset(
         n: Number of tokens to extract
         max_samples: Maximum number of samples to process
         debug: Whether to use fewer samples
+        subset: Specific configuration name of the dataset (e.g. "ja" for CulturaX)
+        streaming: Whether to stream the dataset
+        debug_print_samples: If set, print the first N text samples for debugging
+        seed: If set, shuffle the dataset with this seed for reproducible random sampling
 
     Returns:
         List of lists, where each inner list contains exactly n token IDs
     """
-    logger.info(f"Loading dataset {dataset_name} (split: {split})")
+    logger.info(
+        f"Loading dataset {dataset_name} (split: {split}, subset: {subset}, streaming: {streaming})"
+    )
 
-    # Load dataset
-    dataset = load_dataset(dataset_name, split=split)
+    # Load dataset (local file or HuggingFace Hub)
+    if Path(dataset_name).is_file() and Path(dataset_name).suffix in (".json", ".jsonl"):
+        dataset = load_dataset("json", data_files=dataset_name, split="train", streaming=streaming)
+    else:
+        dataset = load_dataset(dataset_name, name=subset, split=split, streaming=streaming)
+
+    # Shuffle dataset if seed is provided (not supported for streaming)
+    if seed is not None and not streaming:
+        logger.info(f"Shuffling dataset with seed={seed}")
+        dataset = dataset.shuffle(seed=seed)
 
     if debug:
         max_samples = min(20, max_samples)
 
-    logger.info(
-        f"Dataset loaded with {len(dataset)} samples, processing up to {max_samples}"
-    )
+    if not streaming:
+        logger.info(
+            f"Dataset loaded with {len(dataset)} samples, processing up to {max_samples}"
+        )
+    else:
+        logger.info(f"Dataset streaming enabled, processing up to {max_samples}")
 
     # Process samples
     first_n_tokens = []
     processed = 0
 
-    for sample in tqdm(dataset, desc="Tokenizing sequences"):
+    # For streaming datasets, we can't get total length easily, so use max_samples for tqdm
+    tqdm_total = max_samples
+    if not streaming:
+        tqdm_total = min(len(dataset), max_samples)
+
+    for sample in tqdm(dataset, desc="Tokenizing sequences", total=tqdm_total):
         if processed >= max_samples:
             break
 
         text = sample[text_column]
         if not text or len(text.strip()) == 0:
             continue
+
+        # Debug: print first N samples if requested
+        if debug_print_samples and processed < debug_print_samples:
+            logger.info(f"[DEBUG Sample {processed}] {text[:300]}...")
 
         # Cut off at n*10 characters to speed up tokenization
         text_truncated = text[: n * 10]
@@ -116,13 +146,25 @@ def load_and_tokenize_chat_dataset(
     max_samples: int,
     debug: bool = False,
     max_user_tokens: int = 512,
+    debug_print_samples: int = None,
+    seed: int = None,
 ) -> List[Dict[str, Any]]:
     """Load a chat dataset and prepare samples around assistant start.
+
+    Args:
+        debug_print_samples: If set, print the first N text samples for debugging
+        seed: If set, shuffle the dataset with this seed for reproducible random sampling
 
     Returns list of dicts with keys: input_ids (List[int]), position_labels (List[int]), positions (List[int]).
     """
     logger.info(f"Loading chat dataset {dataset_name} (split: {split})")
     dataset = load_dataset(dataset_name, split=split)
+
+    # Shuffle dataset if seed is provided
+    if seed is not None:
+        logger.info(f"Shuffling dataset with seed={seed}")
+        dataset = dataset.shuffle(seed=seed)
+
     if debug:
         max_samples = min(20, max_samples)
     processed = 0
@@ -137,6 +179,14 @@ def load_and_tokenize_chat_dataset(
         if messages[0]["role"] != "user":
             continue
         assert messages[1]["role"] == "assistant"
+
+        # Debug: print first N samples if requested
+        if debug_print_samples and processed < debug_print_samples:
+            user_text = messages[0]["content"][:150]
+            assistant_text = messages[1]["content"][:150]
+            logger.info(
+                f"[DEBUG Sample {processed}] User: {user_text}... | Assistant: {assistant_text}..."
+            )
 
         # Truncate assistant content to 10 * n characters to speed up tokenization
         trunc_messages = [
@@ -304,6 +354,8 @@ def extract_selected_positions_activations(
     assert num_positions > 0
 
     model.eval()
+    if not model.dispatched:
+        model.dispatch()
 
     all_activations: Dict[int, List[torch.Tensor]] = {layer: [] for layer in layers}
 
@@ -339,8 +391,8 @@ def extract_selected_positions_activations(
         batch_arange = torch.arange(len(batch), device=model.device).view(-1, 1)
 
         # Trace and directly save only the gathered activations at the desired positions
+        layer_outputs: Dict[int, torch.Tensor] = {}
         with model.trace(batch_input_ids, attention_mask=attention_mask):
-            layer_outputs: Dict[int, torch.Tensor] = {}
             for layer in layers:
                 hidden = model.layers_output[layer].save()  # [B, L, D]
                 selected = hidden[batch_arange, pos_index, :].clone()  # [B, P, D]
@@ -371,7 +423,20 @@ class ActDiffLens(DiffingMethod):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
 
-        self.results_dir = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+        # Build organism path with optional variant suffix
+        organism_path_name = cfg.organism.name
+        organism_variant = getattr(cfg, "organism_variant", "default")
+
+        if organism_variant != "default" and organism_variant:
+            organism_path_name = f"{cfg.organism.name}_{organism_variant}"
+
+        # Construct results directory: {base_dir}/{model}/{organism_variant}/activation_difference_lens
+        self.results_dir = (
+            Path(cfg.diffing.results_base_dir)
+            / cfg.model.name
+            / organism_path_name
+            / "activation_difference_lens"
+        )
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self.layers = get_layer_indices(
@@ -751,6 +816,14 @@ class ActDiffLens(DiffingMethod):
                 "aps_tasks_for_dataset": aps_tasks_for_dataset,
             }
 
+        # Get debug_print_samples from config (None by default)
+        debug_print_samples = getattr(
+            self.cfg.diffing.method, "debug_print_samples", None
+        )
+
+        # Get seed from config for reproducible random sampling
+        seed = self.cfg.seed if hasattr(self.cfg, "seed") else None
+
         if is_chat:
             pre_k: int = int(self.cfg.diffing.method.pre_assistant_k)
             assert "messages_column" in dataset_entry
@@ -762,6 +835,8 @@ class ActDiffLens(DiffingMethod):
                 n=self.cfg.diffing.method.n,
                 pre_assistant_k=pre_k,
                 max_samples=self.cfg.diffing.method.max_samples,
+                debug_print_samples=debug_print_samples,
+                seed=seed,
             )
 
             base_acts = extract_selected_positions_activations(
@@ -792,6 +867,10 @@ class ActDiffLens(DiffingMethod):
                 text_column=dataset_entry["text_column"],
                 n=self.cfg.diffing.method.n,
                 max_samples=self.cfg.diffing.method.max_samples,
+                subset=dataset_entry.get("subset", None),
+                streaming=dataset_entry.get("streaming", False),
+                debug_print_samples=debug_print_samples,
+                seed=seed,  # Note: shuffle not supported for streaming datasets
             )
             base_acts = extract_first_n_tokens_activations(
                 self.base_model,

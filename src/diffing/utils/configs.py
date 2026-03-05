@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
 from hydra import initialize, compose
@@ -127,6 +127,7 @@ class DatasetConfig:
     messages_column: str = "messages"
     description: str = ""
     subset: str = None
+    streaming: bool = False
 
 
 def get_safe_model_id(model_cfg: ModelConfig) -> str:
@@ -163,12 +164,14 @@ def create_model_config(
         subfolder=model_cfg.get("subfolder", ""),
         device_map=device_map,
         trust_remote_code=model_cfg.get("trust_remote_code", False),
+        vllm_kwargs=model_cfg.get("vllm_kwargs", None),
+        disable_compile=model_cfg.get("disable_compile", False),
         chat_template=model_cfg.get("chat_template", None),
     )
 
 
 def create_dataset_config(
-    dataset_cfg: DictConfig, name: str, split: str
+    dataset_cfg: DictConfig, name: str, split: str, subset_override: str = None
 ) -> DatasetConfig:
     """Create a DatasetConfig from configuration object for a specific split."""
     return DatasetConfig(
@@ -179,7 +182,8 @@ def create_dataset_config(
         text_column=dataset_cfg.get("text_column", None),
         messages_column=dataset_cfg.get("messages_column", "messages"),
         description=dataset_cfg.get("description", ""),
-        subset=dataset_cfg.get("subset", None),
+        subset=subset_override or dataset_cfg.get("subset", None),
+        streaming=dataset_cfg.get("streaming", False),
     )
 
 
@@ -309,6 +313,8 @@ def get_model_configurations(cfg: DictConfig) -> Tuple[ModelConfig, ModelConfig]
         no_auto_device_map=base_model_cfg.no_auto_device_map,
         device_map=cfg.infrastructure.device_map.finetuned,
         trust_remote_code=base_model_cfg.trust_remote_code,
+        vllm_kwargs=base_model_cfg.vllm_kwargs,
+        disable_compile=base_model_cfg.disable_compile,
         chat_template=base_model_cfg.chat_template,
     )
 
@@ -320,30 +326,74 @@ def get_dataset_configurations(
     use_chat_dataset: bool = True,
     use_pretraining_dataset: bool = True,
     use_training_dataset: bool = True,
+    pretraining_dataset_variants: List[str] = None,
+    chat_dataset_variants: List[str] = None,
 ) -> List[DatasetConfig]:
     """Extract and prepare all dataset configurations."""
     datasets = []
 
     # General datasets (used for all organisms)
     if hasattr(cfg, "chat_dataset") and use_chat_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.chat_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.chat_dataset, cfg.chat_dataset.id.split("/")[-1], split
+        if chat_dataset_variants is None:
+            chat_dataset_variants = ["default"]
+
+        # Iterate over requested variants
+        for variant_name in chat_dataset_variants:
+            if variant_name not in cfg.chat_dataset:
+                logger.warning(
+                    f"Requested chat dataset variant '{variant_name}' not found in config. Skipping."
                 )
-            )
+                continue
+
+            variant_cfg = cfg.chat_dataset[variant_name]
+
+            # Construct a name for this dataset variant
+            dataset_id_safe = variant_cfg.id.split("/")[-1]
+            if variant_name != "default":
+                dataset_name_full = f"{dataset_id_safe}_{variant_name}"
+            else:
+                dataset_name_full = dataset_id_safe
+
+            # Create one DatasetConfig for each split
+            for split in variant_cfg.splits:
+                datasets.append(
+                    create_dataset_config(
+                        variant_cfg,
+                        dataset_name_full,
+                        split,
+                    )
+                )
 
     if hasattr(cfg, "pretraining_dataset") and use_pretraining_dataset:
-        # Create one DatasetConfig for each split
-        for split in cfg.pretraining_dataset.splits:
-            datasets.append(
-                create_dataset_config(
-                    cfg.pretraining_dataset,
-                    cfg.pretraining_dataset.id.split("/")[-1],
-                    split,
+        if pretraining_dataset_variants is None:
+            pretraining_dataset_variants = ["default"]
+
+        # Iterate over requested variants
+        for variant_name in pretraining_dataset_variants:
+            if variant_name not in cfg.pretraining_dataset:
+                logger.warning(
+                    f"Requested pretraining dataset variant '{variant_name}' not found in config. Skipping."
                 )
-            )
+                continue
+
+            variant_cfg = cfg.pretraining_dataset[variant_name]
+
+            # Construct a name for this dataset variant
+            dataset_id_safe = variant_cfg.id.split("/")[-1]
+            if variant_name != "default":
+                dataset_name_full = f"{dataset_id_safe}_{variant_name}"
+            else:
+                dataset_name_full = dataset_id_safe
+
+            # Create one DatasetConfig for each split
+            for split in variant_cfg.splits:
+                datasets.append(
+                    create_dataset_config(
+                        variant_cfg,
+                        dataset_name_full,
+                        split,
+                    )
+                )
 
     # Organism-specific datasets
     organism_cfg = cfg.organism

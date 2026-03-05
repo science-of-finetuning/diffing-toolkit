@@ -27,7 +27,10 @@ STEERING_GRADER_SUFFIX = "openai_gpt-5-nano"
 
 
 def _results_root_from_cfg(cfg) -> Path:
-    root = Path(cfg.diffing.results_dir) / "activation_difference_lens"
+    folder = cfg.diffing.results_dir
+    if cfg.organism_variant != "default":
+        folder = folder + f"_{cfg.organism_variant}"
+    root = Path(folder) / "activation_difference_lens"
     assert root.exists() and root.is_dir(), f"Results root not found: {root}"
     return root
 

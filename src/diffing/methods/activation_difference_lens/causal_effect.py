@@ -110,6 +110,15 @@ def _encode_non_chat(
     return ids, assistant_mask
 
 
+def _has_valid_chat_alternation(messages: List[Dict[str, Any]]) -> bool:
+    """Check that non-system messages alternate user/assistant starting with user."""
+    non_system = [m for m in messages if m.get("role") != "system"]
+    if len(non_system) == 0:
+        return False
+    expected_roles = ["user", "assistant"]
+    return all(m.get("role") == expected_roles[i % 2] for i, m in enumerate(non_system))
+
+
 def _encode_chat(
     messages: List[Dict[str, Any]],
     tokenizer: Any,
@@ -404,15 +413,20 @@ def _sample_activation_diff_vectors(
     assert dataset is not None
 
     encoded: List[Dict[str, torch.Tensor]] = []
+    skipped = 0
     for sample in dataset:
         assert messages_column in sample
-        ids, asst_mask = _encode_chat(
-            sample[messages_column], tokenizer, max_total_tokens
-        )
+        msgs = sample[messages_column]
+        if not _has_valid_chat_alternation(msgs):
+            skipped += 1
+            continue
+        ids, asst_mask = _encode_chat(msgs, tokenizer, max_total_tokens)
         encoded.append({"input_ids": ids, "assistant_mask": asst_mask})
         if len(encoded) >= 128:
             break
 
+    if skipped > 0:
+        logger.warning(f"Skipped {skipped} samples with invalid chat alternation")
     assert len(encoded) >= 1
     encoded.sort(key=lambda ex: int(ex["input_ids"].shape[0]), reverse=True)
 
@@ -472,6 +486,11 @@ def run_causal_effect(method: Any) -> None:
     # Assumptions and config
     cfg = method.cfg.diffing.method.causal_effect
     assert cfg.enabled is True
+    patch_direction: str = str(getattr(cfg, "patch_direction", "base_to_ft"))
+    assert patch_direction in (
+        "base_to_ft",
+        "ft_to_base",
+    ), f"patch_direction={patch_direction} not in {{'base_to_ft','ft_to_base'}}"
     split: str = str(cfg.split)
     batch_size: int = int(cfg.batch_size)
     max_samples: int = int(cfg.max_samples)
@@ -482,7 +501,7 @@ def run_causal_effect(method: Any) -> None:
     assert num_random_vectors >= 1
     assert hasattr(cfg, "zero_ablate")
     zero_ablate: bool = bool(cfg.zero_ablate)
-    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite) or True
+    overwrite: bool = bool(method.cfg.diffing.method.causal_effect.overwrite)
     num_random_diff_vectors: int = int(getattr(cfg, "num_random_diff_vectors", 64))
     replace_pad_with_eos_for_base: bool = bool(
         getattr(cfg, "replace_pad_token_with_eos_for_base", False)
@@ -505,7 +524,19 @@ def run_causal_effect(method: Any) -> None:
     assert tokenizer.eos_token_id is not None
     assert tokenizer.pad_token_id is not None
     assert hasattr(method.cfg, "chat_dataset")
-    rand_diff_dataset_id: str = str(method.cfg.chat_dataset.id)
+    assert (
+        "default" in method.cfg.chat_dataset
+    ), "No 'default' variant in chat_dataset config"
+    rand_diff_dataset_id: str = str(method.cfg.chat_dataset["default"].id)
+
+    if patch_direction == "base_to_ft":
+        target_model = model
+        activation_source_model_name = "base"
+        intervened_model_name = "finetuned"
+    else:
+        target_model = base_model
+        activation_source_model_name = "finetuned"
+        intervened_model_name = "base"
 
     # Build evaluation groups from tasks: key = (abs_layer, diff_source_dataset, eval_alias)
     tasks = getattr(cfg, "tasks")
@@ -588,7 +619,7 @@ def run_causal_effect(method: Any) -> None:
         eval_messages_column: str = str(eval_cfg["eval_messages_column"])
         eval_dir: str = dataset_dir_name(eval_ds_id)
         logger.info(
-            f"Causal effect: layer={abs_layer}, diff_source={diff_source_dataset}, eval={eval_alias} ({eval_ds_id}), positions={positions}"
+            f"Causal effect: direction={patch_direction}, layer={abs_layer}, diff_source={diff_source_dataset}, eval={eval_alias} ({eval_ds_id}), positions={positions}"
         )
 
         # Determine which positions to compute (respect overwrite flag)
@@ -600,6 +631,7 @@ def run_causal_effect(method: Any) -> None:
                 / f"layer_{abs_layer}"
                 / diff_source_dataset_dir
                 / "causal_effect"
+                / f"direction_{patch_direction}"
                 / f"eval_{eval_dir}"
                 / f"position_{p}"
             )
@@ -709,20 +741,25 @@ def run_causal_effect(method: Any) -> None:
         dataset = load_dataset_from_hub_or_local(eval_ds_id, split=split)
 
         encoded: List[Dict[str, torch.Tensor]] = []
+        skipped = 0
         for sample in tqdm(dataset, desc="Encoding samples"):
             if len(encoded) >= max_samples:
                 break
             if eval_is_chat:
                 assert eval_messages_column in sample
-                ids, asst_mask = _encode_chat(
-                    sample[eval_messages_column], tokenizer, max_total_tokens
-                )
+                msgs = sample[eval_messages_column]
+                if not _has_valid_chat_alternation(msgs):
+                    skipped += 1
+                    continue
+                ids, asst_mask = _encode_chat(msgs, tokenizer, max_total_tokens)
             else:
                 ids, asst_mask = _encode_non_chat(
                     sample, tokenizer, eval_text_column, max_total_tokens
                 )
             encoded.append({"input_ids": ids, "assistant_mask": asst_mask})
 
+        if skipped > 0:
+            logger.warning(f"Skipped {skipped} samples with invalid chat alternation")
         assert len(encoded) > 0
         logger.info(
             f"Prepared {len(encoded)} encoded samples (max_total_tokens={max_total_tokens})"
@@ -743,11 +780,7 @@ def run_causal_effect(method: Any) -> None:
                 batch, model, int(tokenizer.pad_token_id)
             )
 
-            # Base model NLL
-            progress_bar.set_description("Processing base model")
-
             if replace_pad_with_eos_for_base:
-                # Fail fast on required ids
                 assert base_model.config.eos_token_id is not None
                 eos_id_base = int(base_model.config.eos_token_id)
                 assert 0 <= eos_id_base < int(base_model.config.vocab_size)
@@ -759,19 +792,32 @@ def run_causal_effect(method: Any) -> None:
             B, L = input_ids.shape
             assert attention_mask.shape == (B, L)
             assert assistant_mask_tokens.shape == (B, L)
-            nll_base, activations_base = _compute_nll(
-                base_model,
-                input_ids,
-                attention_mask,
-                collect_activations=True,
-                layer_index=abs_layer,
-            )  # [B, L-1]
-            assert nll_base.shape == (B, L - 1)
 
-            # Finetuned model NLL
-            progress_bar.set_description("Processing finetuned model")
-            nll_ft = _compute_nll(model, input_ids, attention_mask)  # [B, L-1]
-            assert nll_ft.shape == (B, L - 1)
+            progress_bar.set_description("Processing base/finetuned models")
+            if patch_direction == "base_to_ft":
+                nll_base, activations_source = _compute_nll(
+                    base_model,
+                    input_ids,
+                    attention_mask,
+                    collect_activations=True,
+                    layer_index=abs_layer,
+                )  # [B, L-1], [B,L,H]
+                assert nll_base.shape == (B, L - 1)
+                nll_ft = _compute_nll(model, input_ids, attention_mask)  # [B, L-1]
+                assert nll_ft.shape == (B, L - 1)
+            else:
+                nll_base = _compute_nll(
+                    base_model, input_ids, attention_mask
+                )  # [B, L-1]
+                assert nll_base.shape == (B, L - 1)
+                nll_ft, activations_source = _compute_nll(
+                    model,
+                    input_ids,
+                    attention_mask,
+                    collect_activations=True,
+                    layer_index=abs_layer,
+                )  # [B, L-1], [B,L,H]
+                assert nll_ft.shape == (B, L - 1)
 
             # Masks (shared across variants)
             mask_all, mask_after_k, L_full = _build_masks(
@@ -822,12 +868,12 @@ def run_causal_effect(method: Any) -> None:
             progress_bar.set_description("Processing random interventions")
             for rv in rand_vecs:
                 nll_r = _compute_nll_intervened(
-                    nn_model=model,
+                    nn_model=target_model,
                     layer_index=abs_layer,
                     delta_vec=rv,
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    target_activations=activations_base,
+                    target_activations=activations_source,
                     zero_ablate=zero_ablate,
                 )
                 assert nll_r.shape == (B, L - 1)
@@ -854,12 +900,12 @@ def run_causal_effect(method: Any) -> None:
                 )
                 for rv in rand_diff_vecs:
                     nll_d = _compute_nll_intervened(
-                        nn_model=model,
+                        nn_model=target_model,
                         layer_index=abs_layer,
                         delta_vec=rv,
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        target_activations=activations_base,
+                        target_activations=activations_source,
                         zero_ablate=zero_ablate,
                     )
                     assert nll_d.shape == (B, L - 1)
@@ -887,12 +933,12 @@ def run_causal_effect(method: Any) -> None:
             for p in positions_to_run:
                 vec = pos_to_vec[p]
                 nll_int = _compute_nll_intervened(
-                    nn_model=model,
+                    nn_model=target_model,
                     layer_index=abs_layer,
                     delta_vec=vec,
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    target_activations=activations_base,
+                    target_activations=activations_source,
                     zero_ablate=zero_ablate,
                 )
                 assert nll_int.shape == (B, L - 1)
@@ -1029,14 +1075,20 @@ def run_causal_effect(method: Any) -> None:
             interv_all["ppl_b"] = ppl_b_all
             interv_all["ppl_ft"] = ppl_ft_all
             interv_all["ppl_i"] = ppl_i_all
-            if not (math.isnan(ce_ft_all) or math.isnan(ce_i_all)):
-                interv_all["incr_ce"] = ce_i_all - ce_ft_all
-                interv_all["incr_ppl"] = ppl_i_all - ppl_ft_all
-                interv_all["incr_rel_ce"] = (ce_i_all - ce_ft_all) / (
-                    ce_b_all - ce_ft_all
+            if intervened_model_name == "finetuned":
+                ce_target_all, ppl_target_all = ce_ft_all, ppl_ft_all
+                ce_other_all, ppl_other_all = ce_b_all, ppl_b_all
+            else:
+                ce_target_all, ppl_target_all = ce_b_all, ppl_b_all
+                ce_other_all, ppl_other_all = ce_ft_all, ppl_ft_all
+            if not (math.isnan(ce_target_all) or math.isnan(ce_i_all)):
+                interv_all["incr_ce"] = ce_i_all - ce_target_all
+                interv_all["incr_ppl"] = ppl_i_all - ppl_target_all
+                interv_all["incr_rel_ce"] = (ce_i_all - ce_target_all) / (
+                    ce_other_all - ce_target_all
                 )
-                interv_all["incr_rel_ppl"] = (ppl_i_all - ppl_ft_all) / (
-                    ppl_b_all - ppl_ft_all
+                interv_all["incr_rel_ppl"] = (ppl_i_all - ppl_target_all) / (
+                    ppl_other_all - ppl_target_all
                 )
             else:
                 interv_all["incr_ce"] = float("nan")
@@ -1050,14 +1102,20 @@ def run_causal_effect(method: Any) -> None:
             interv_after["ppl_b"] = ppl_b_after
             interv_after["ppl_ft"] = ppl_ft_after
             interv_after["ppl_i"] = ppl_i_after
-            if not (math.isnan(ce_ft_after) or math.isnan(ce_i_after)):
-                interv_after["incr_ce"] = ce_i_after - ce_ft_after
-                interv_after["incr_ppl"] = ppl_i_after - ppl_ft_after
-                interv_after["incr_rel_ce"] = (ce_i_after - ce_ft_after) / (
-                    ce_b_after - ce_ft_after
+            if intervened_model_name == "finetuned":
+                ce_target_after, ppl_target_after = ce_ft_after, ppl_ft_after
+                ce_other_after, ppl_other_after = ce_b_after, ppl_b_after
+            else:
+                ce_target_after, ppl_target_after = ce_b_after, ppl_b_after
+                ce_other_after, ppl_other_after = ce_ft_after, ppl_ft_after
+            if not (math.isnan(ce_target_after) or math.isnan(ce_i_after)):
+                interv_after["incr_ce"] = ce_i_after - ce_target_after
+                interv_after["incr_ppl"] = ppl_i_after - ppl_target_after
+                interv_after["incr_rel_ce"] = (ce_i_after - ce_target_after) / (
+                    ce_other_after - ce_target_after
                 )
-                interv_after["incr_rel_ppl"] = (ppl_i_after - ppl_ft_after) / (
-                    ppl_b_after - ppl_ft_after
+                interv_after["incr_rel_ppl"] = (ppl_i_after - ppl_target_after) / (
+                    ppl_other_after - ppl_target_after
                 )
             else:
                 interv_after["incr_ce"] = float("nan")
@@ -1071,14 +1129,20 @@ def run_causal_effect(method: Any) -> None:
             interv_excl["ppl_b"] = ppl_b_excl
             interv_excl["ppl_ft"] = ppl_ft_excl
             interv_excl["ppl_i"] = ppl_i_excl
-            if not (math.isnan(ce_ft_excl) or math.isnan(ce_i_excl)):
-                interv_excl["incr_ce"] = ce_i_excl - ce_ft_excl
-                interv_excl["incr_ppl"] = ppl_i_excl - ppl_ft_excl
-                interv_excl["incr_rel_ce"] = (ce_i_excl - ce_ft_excl) / (
-                    ce_b_excl - ce_ft_excl
+            if intervened_model_name == "finetuned":
+                ce_target_excl, ppl_target_excl = ce_ft_excl, ppl_ft_excl
+                ce_other_excl, ppl_other_excl = ce_b_excl, ppl_b_excl
+            else:
+                ce_target_excl, ppl_target_excl = ce_b_excl, ppl_b_excl
+                ce_other_excl, ppl_other_excl = ce_ft_excl, ppl_ft_excl
+            if not (math.isnan(ce_target_excl) or math.isnan(ce_i_excl)):
+                interv_excl["incr_ce"] = ce_i_excl - ce_target_excl
+                interv_excl["incr_ppl"] = ppl_i_excl - ppl_target_excl
+                interv_excl["incr_rel_ce"] = (ce_i_excl - ce_target_excl) / (
+                    ce_other_excl - ce_target_excl
                 )
-                interv_excl["incr_rel_ppl"] = (ppl_i_excl - ppl_ft_excl) / (
-                    ppl_b_excl - ppl_ft_excl
+                interv_excl["incr_rel_ppl"] = (ppl_i_excl - ppl_target_excl) / (
+                    ppl_other_excl - ppl_target_excl
                 )
             else:
                 interv_excl["incr_ce"] = float("nan")
@@ -1153,11 +1217,21 @@ def run_causal_effect(method: Any) -> None:
                     entry[key]["ppl_b"] = ppl_b
                     entry[key]["ppl_ft"] = ppl_ft
                     entry[key]["ppl_r"] = ppl_r
-                    if not (math.isnan(ce_ft) or math.isnan(ce_r)):
-                        entry[key]["incr_ce"] = ce_r - ce_ft
-                        entry[key]["incr_ppl"] = ppl_r - ppl_ft
-                        entry[key]["incr_rel_ce"] = (ce_r - ce_ft) / (ce_b - ce_ft)
-                        entry[key]["incr_rel_ppl"] = (ppl_r - ppl_ft) / (ppl_b - ppl_ft)
+                    if intervened_model_name == "finetuned":
+                        ce_target, ppl_target = ce_ft, ppl_ft
+                        ce_other, ppl_other = ce_b, ppl_b
+                    else:
+                        ce_target, ppl_target = ce_b, ppl_b
+                        ce_other, ppl_other = ce_ft, ppl_ft
+                    if not (math.isnan(ce_target) or math.isnan(ce_r)):
+                        entry[key]["incr_ce"] = ce_r - ce_target
+                        entry[key]["incr_ppl"] = ppl_r - ppl_target
+                        entry[key]["incr_rel_ce"] = (ce_r - ce_target) / (
+                            ce_other - ce_target
+                        )
+                        entry[key]["incr_rel_ppl"] = (ppl_r - ppl_target) / (
+                            ppl_other - ppl_target
+                        )
                     else:
                         entry[key]["incr_ce"] = float("nan")
                         entry[key]["incr_ppl"] = float("nan")
@@ -1208,14 +1282,21 @@ def run_causal_effect(method: Any) -> None:
                     ce_b_excl,
                 ),
             }.items():
-                if not (math.isnan(ce_ft) or math.isnan(ce_rm)):
-                    res["random_mean"][key]["incr_ce"] = ce_rm - ce_ft
-                    res["random_mean"][key]["incr_ppl"] = ppl_rm - ppl_ft
-                    res["random_mean"][key]["incr_rel_ce"] = (ce_rm - ce_ft) / (
-                        ce_b - ce_ft
+                ppl_b = res["base"][key]["ppl"]
+                if intervened_model_name == "finetuned":
+                    ce_target, ppl_target = ce_ft, ppl_ft
+                    ce_other, ppl_other = ce_b, ppl_b
+                else:
+                    ce_target, ppl_target = ce_b, ppl_b
+                    ce_other, ppl_other = ce_ft, ppl_ft
+                if not (math.isnan(ce_target) or math.isnan(ce_rm)):
+                    res["random_mean"][key]["incr_ce"] = ce_rm - ce_target
+                    res["random_mean"][key]["incr_ppl"] = ppl_rm - ppl_target
+                    res["random_mean"][key]["incr_rel_ce"] = (ce_rm - ce_target) / (
+                        ce_other - ce_target
                     )
-                    res["random_mean"][key]["incr_rel_ppl"] = (ppl_rm - ppl_ft) / (
-                        res["base"][key]["ppl"] - ppl_ft
+                    res["random_mean"][key]["incr_rel_ppl"] = (ppl_rm - ppl_target) / (
+                        ppl_other - ppl_target
                     )
                 else:
                     res["random_mean"][key]["incr_ce"] = float("nan")
@@ -1289,14 +1370,20 @@ def run_causal_effect(method: Any) -> None:
                         entry_d[key]["ppl_b"] = ppl_b
                         entry_d[key]["ppl_ft"] = ppl_ft
                         entry_d[key]["ppl_rdiff"] = ppl_d
-                        if not (math.isnan(ce_ft) or math.isnan(ce_d)):
-                            entry_d[key]["incr_ce"] = ce_d - ce_ft
-                            entry_d[key]["incr_ppl"] = ppl_d - ppl_ft
-                            entry_d[key]["incr_rel_ce"] = (ce_d - ce_ft) / (
-                                ce_b - ce_ft
+                        if intervened_model_name == "finetuned":
+                            ce_target, ppl_target = ce_ft, ppl_ft
+                            ce_other, ppl_other = ce_b, ppl_b
+                        else:
+                            ce_target, ppl_target = ce_b, ppl_b
+                            ce_other, ppl_other = ce_ft, ppl_ft
+                        if not (math.isnan(ce_target) or math.isnan(ce_d)):
+                            entry_d[key]["incr_ce"] = ce_d - ce_target
+                            entry_d[key]["incr_ppl"] = ppl_d - ppl_target
+                            entry_d[key]["incr_rel_ce"] = (ce_d - ce_target) / (
+                                ce_other - ce_target
                             )
-                            entry_d[key]["incr_rel_ppl"] = (ppl_d - ppl_ft) / (
-                                ppl_b - ppl_ft
+                            entry_d[key]["incr_rel_ppl"] = (ppl_d - ppl_target) / (
+                                ppl_other - ppl_target
                             )
                         else:
                             entry_d[key]["incr_ce"] = float("nan")
@@ -1350,15 +1437,22 @@ def run_causal_effect(method: Any) -> None:
                         ce_b_excl,
                     ),
                 }.items():
-                    if not (math.isnan(ce_ft) or math.isnan(ce_rdm)):
-                        res["random_diff_mean"][key]["incr_ce"] = ce_rdm - ce_ft
-                        res["random_diff_mean"][key]["incr_ppl"] = ppl_rdm - ppl_ft
+                    ppl_b = res["base"][key]["ppl"]
+                    if intervened_model_name == "finetuned":
+                        ce_target, ppl_target = ce_ft, ppl_ft
+                        ce_other, ppl_other = ce_b, ppl_b
+                    else:
+                        ce_target, ppl_target = ce_b, ppl_b
+                        ce_other, ppl_other = ce_ft, ppl_ft
+                    if not (math.isnan(ce_target) or math.isnan(ce_rdm)):
+                        res["random_diff_mean"][key]["incr_ce"] = ce_rdm - ce_target
+                        res["random_diff_mean"][key]["incr_ppl"] = ppl_rdm - ppl_target
                         res["random_diff_mean"][key]["incr_rel_ce"] = (
-                            ce_rdm - ce_ft
-                        ) / (ce_b - ce_ft)
+                            ce_rdm - ce_target
+                        ) / (ce_other - ce_target)
                         res["random_diff_mean"][key]["incr_rel_ppl"] = (
-                            ppl_rdm - ppl_ft
-                        ) / (res["base"][key]["ppl"] - ppl_ft)
+                            ppl_rdm - ppl_target
+                        ) / (ppl_other - ppl_target)
                     else:
                         res["random_diff_mean"][key]["incr_ce"] = float("nan")
                         res["random_diff_mean"][key]["incr_ppl"] = float("nan")
@@ -1374,6 +1468,9 @@ def run_causal_effect(method: Any) -> None:
                 "layer": abs_layer,
                 "position": p,
                 "after_k": after_k,
+                "patch_direction": patch_direction,
+                "activation_source_model": activation_source_model_name,
+                "intervened_model": intervened_model_name,
                 "num_samples": len(encoded),
                 "finetuned": res["finetuned"],
                 "base": res["base"],
