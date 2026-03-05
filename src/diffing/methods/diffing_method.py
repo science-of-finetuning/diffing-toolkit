@@ -9,10 +9,10 @@ from vllm import LLM
 from nnterp import StandardizedTransformer
 
 
+from transformers import PreTrainedTokenizerBase
 from diffing.utils.model import (
     load_model_from_config,
     gc_collect_cuda_cache,
-    AnyTokenizer,
 )
 from diffing.utils.configs import get_model_configurations
 from diffing.utils.agents.blackbox_agent import BlackboxAgent
@@ -44,7 +44,7 @@ class DiffingMethod(ABC):
         # Initialize model and tokenizer placeholders
         self._base_model: StandardizedTransformer | None = None
         self._finetuned_model: StandardizedTransformer | None = None
-        self._tokenizer: AnyTokenizer | None = None
+        self._tokenizer: PreTrainedTokenizerBase | None = None
         self._base_model_vllm: LLM | None = None
 
         # Set device
@@ -89,7 +89,7 @@ class DiffingMethod(ABC):
         self._finetuned_model = None
         logger.info("Cleared finetuned model from CUDA memory with garbage collection")
 
-    def _get_tokenizer(self, default=True) -> AnyTokenizer:
+    def _get_tokenizer(self, default=True) -> PreTrainedTokenizerBase:
         if self.default_tokenizer == "base":
             if default:
                 return self.base_model.tokenizer
@@ -106,7 +106,7 @@ class DiffingMethod(ABC):
             )
 
     @property
-    def tokenizer(self) -> AnyTokenizer:
+    def tokenizer(self) -> PreTrainedTokenizerBase:
         """Load and return the tokenizer from the base model."""
         if self._tokenizer is None:
             try:

@@ -11,6 +11,7 @@ from huggingface_hub import snapshot_download
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
+    PreTrainedTokenizerBase,
 )
 from nnsight.intervention.envoy import Envoy
 from nnterp import StandardizedTransformer
@@ -21,10 +22,10 @@ from nnterp.interventions import (
 from nnterp.interventions import patchscope_lens as nnterp_patchscope_lens
 
 from .configs import ModelConfig
-from .vllm import AnyTokenizer, LLM, AsyncLLMEngine, AsyncEngineArgs
+from .vllm import LLM, AsyncLLMEngine, AsyncEngineArgs
 
 _MODEL_CACHE: dict[str, StandardizedTransformer] = {}
-_TOKENIZER_CACHE: dict[str, AnyTokenizer] = {}
+_TOKENIZER_CACHE: dict[str, PreTrainedTokenizerBase] = {}
 
 
 def gc_collect_cuda_cache():
@@ -77,7 +78,7 @@ def get_adapter_rank(adapter_id: str) -> int:
     return adapter_config["r"]
 
 
-def load_tokenizer(model_name: str, chat_template: str | None = None) -> AnyTokenizer:
+def load_tokenizer(model_name: str, chat_template: str | None = None) -> PreTrainedTokenizerBase:
     """
     Load a tokenizer for the given model.
 
@@ -422,7 +423,7 @@ def load_model_from_config(
 
 def load_tokenizer_from_config(
     model_cfg: ModelConfig,
-) -> AnyTokenizer:
+) -> PreTrainedTokenizerBase:
     if model_cfg.tokenizer_id is not None:
         return load_tokenizer(
             model_cfg.tokenizer_id, chat_template=model_cfg.chat_template
