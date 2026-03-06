@@ -24,3 +24,8 @@ finetuned_models:
     narrow-sft-2:
       name: olmo2_1B_examples_narrow-sft-2
       model_id: /workspace/models/olmo2_1b_examples_sft_2
+
+  olmo2_1B_sft:
+    narrow-sft-2:
+      name: olmo2_1B_examples_narrow-sft-2
+      model_id: /workspace/models/olmo2_1b_examples_sft_2
