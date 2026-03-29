@@ -8,7 +8,7 @@ from the filesystem and provides an interactive interface to explore the results
 import streamlit as st
 from omegaconf import DictConfig, OmegaConf
 import sys
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from pathlib import Path
@@ -96,12 +96,22 @@ def _load_selection_cache() -> Dict[str, str]:
 
 
 def _save_selection_cache(
-    model: str, organism: str, variant: str = "default", method: str = None
+    model: str,
+    organism: str,
+    variant: str = "default",
+    method: str = None,
+    browse_mode: str = "Organism",
 ):
-    """Save model, organism, variant, and method selections to YAML cache file."""
+    """Save model, organism, variant, method, and browse mode selections to YAML cache file."""
     cache_path = _get_cache_path()
     cache = OmegaConf.create(
-        {"model": model, "organism": organism, "variant": variant, "method": method}
+        {
+            "model": model,
+            "organism": organism,
+            "variant": variant,
+            "method": method,
+            "browse_mode": browse_mode,
+        }
     )
     with open(cache_path, "w") as f:
         OmegaConf.save(cache, f)
@@ -223,6 +233,83 @@ def get_available_results(cfg_overwrites: List[str]) -> Dict[str, Dict[str, List
     return available
 
 
+def _invert_results_by_method(
+    available_results: Dict[str, Dict[str, List[str]]],
+) -> Dict[str, Dict[str, List[str]]]:
+    """Invert {model: {organism: [methods]}} to {method: {model: [organisms]}}."""
+    inverted = {}
+    for model_name, organisms in available_results.items():
+        for organism_key, methods in organisms.items():
+            for method_name in methods:
+                if method_name not in inverted:
+                    inverted[method_name] = {}
+                if model_name not in inverted[method_name]:
+                    inverted[method_name][model_name] = []
+                inverted[method_name][model_name].append(organism_key)
+    return inverted
+
+
+def _parse_organism_key(
+    organism_key: str, available_organisms: List[str]
+) -> Tuple[str, str]:
+    """Parse an organism_key like 'cake_bake_mix1-0p5' into ('cake_bake', 'mix1-0p5').
+
+    Matches against known organism names to handle underscores in organism names.
+    Returns (organism_name, variant) where variant is 'default' if no variant suffix.
+    """
+    # Sort by length descending to match longest organism name first
+    for organism in sorted(available_organisms, key=len, reverse=True):
+        if organism_key == organism:
+            return (organism, "default")
+        if organism_key.startswith(organism + "_"):
+            variant = organism_key[len(organism) + 1 :]
+            return (organism, variant)
+    # Fallback: treat the whole key as organism name
+    return (organism_key, "default")
+
+
+def _display_model_info(
+    selected_model: str,
+    selected_organism: str,
+    selected_variant: str,
+    cfg_overwrites: List[str],
+):
+    """Display model HuggingFace link and steering info between dividers."""
+    from diffing.utils.configs import get_model_configurations
+
+    tmp_cfg = load_config(
+        selected_model,
+        selected_organism,
+        None,
+        cfg_overwrites + [f"organism_variant={selected_variant}"],
+    )
+    _, ft_model_cfg = get_model_configurations(tmp_cfg)
+
+    model_id = ft_model_cfg.model_id
+    if ft_model_cfg.subfolder:
+        full_model_path = f"{model_id}/{ft_model_cfg.subfolder}"
+    else:
+        full_model_path = model_id
+    hf_url = f"https://huggingface.co/{model_id}"
+
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        if ft_model_cfg.subfolder:
+            st.markdown(
+                f"**Model:** [{full_model_path}]({hf_url}) (subfolder: `{ft_model_cfg.subfolder}`)"
+            )
+        else:
+            st.markdown(f"**Model:** [{model_id}]({hf_url})")
+    with col2:
+        if ft_model_cfg.steering_vector:
+            steering_name = ft_model_cfg.steering_vector
+            st.markdown(
+                f"**Steering Configuration:** [{steering_name} (L{ft_model_cfg.steering_layer})](https://huggingface.co/science-of-finetuning/steering-vecs-{steering_name.replace('/', '/blob/main/')}_L{ft_model_cfg.steering_layer}.pt)"
+            )
+    st.markdown("---")
+
+
 def main():
     """Main dashboard function."""
     st.set_page_config(
@@ -255,170 +342,240 @@ def main():
     cached_model = cached_selections.get("model")
     cached_variant = cached_selections.get("variant", "default")
     cached_method = cached_selections.get("method")
+    cached_browse_mode = cached_selections.get("browse_mode", "Organism")
 
-    # Discover available organisms
-    available_organisms = sorted(discover_organisms())
-
-    if not available_organisms:
-        st.error("No organism configs found in configs/organism/")
-        return
-
-    # Organism selection (first)
-    organism_index = 0
-    if cached_organism and cached_organism in available_organisms:
-        organism_index = available_organisms.index(cached_organism)
-    selected_organism = st.selectbox(
-        "Select Organism",
-        available_organisms,
-        index=organism_index,
-        help="Choose an organism to explore",
+    # Browse mode toggle
+    browse_modes = ["Organism", "Method"]
+    browse_mode_index = 0
+    if cached_browse_mode in browse_modes:
+        browse_mode_index = browse_modes.index(cached_browse_mode)
+    browse_mode = st.radio(
+        "Browse by",
+        browse_modes,
+        index=browse_mode_index,
+        horizontal=True,
+        help="Organism: pick an organism first, then see available methods. "
+        "Method: pick a method first, then see which organisms have results.",
     )
 
-    if not selected_organism:
-        return
+    available_organisms = sorted(discover_organisms())
 
-    # Get available models and variants for this organism
-    models_and_variants = get_available_models_and_variants(selected_organism)
+    if browse_mode == "Organism":
+        # ── Organism-first flow ──────────────────────────────────────────
+        if not available_organisms:
+            st.error("No organism configs found in configs/organism/")
+            return
 
-    if not models_and_variants:
-        st.error(f"No finetuned models found for organism '{selected_organism}'")
-        return
-
-    # Model and variant selection (side by side)
-    col1, col2 = st.columns(2)
-
-    with col1:
-        available_models = sorted(models_and_variants.keys())
-        model_index = 0
-        if cached_model and cached_model in available_models:
-            model_index = available_models.index(cached_model)
-        selected_model = st.selectbox(
-            "Select Base Model",
-            available_models,
-            index=model_index,
-            help="Choose the base model architecture",
+        # Organism selection
+        organism_index = 0
+        if cached_organism and cached_organism in available_organisms:
+            organism_index = available_organisms.index(cached_organism)
+        selected_organism = st.selectbox(
+            "Select Organism",
+            available_organisms,
+            index=organism_index,
+            help="Choose an organism to explore",
         )
 
-    with col2:
-        if selected_model:
-            available_variants = models_and_variants[selected_model]
-            variant_index = 0
-            if "default" in available_variants:
-                variant_index = available_variants.index("default")
-            if cached_variant and cached_variant in available_variants:
-                variant_index = available_variants.index(cached_variant)
-            selected_variant = st.selectbox(
-                "Select Variant",
-                available_variants,
-                index=variant_index,
-                help="Choose the training variant (default, mix1-0p1, etc.)",
-            )
-        else:
-            selected_variant = "default"
-            st.info("Select a model first")
+        if not selected_organism:
+            return
 
-    # Save selections to cache if they changed
+        # Model and variant selection
+        models_and_variants = get_available_models_and_variants(selected_organism)
+
+        if not models_and_variants:
+            st.error(
+                f"No finetuned models found for organism '{selected_organism}'"
+            )
+            return
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            available_models = sorted(models_and_variants.keys())
+            model_index = 0
+            if cached_model and cached_model in available_models:
+                model_index = available_models.index(cached_model)
+            selected_model = st.selectbox(
+                "Select Base Model",
+                available_models,
+                index=model_index,
+                help="Choose the base model architecture",
+            )
+
+        with col2:
+            if selected_model:
+                available_variants = models_and_variants[selected_model]
+                variant_index = 0
+                if "default" in available_variants:
+                    variant_index = available_variants.index("default")
+                if cached_variant and cached_variant in available_variants:
+                    variant_index = available_variants.index(cached_variant)
+                selected_variant = st.selectbox(
+                    "Select Variant",
+                    available_variants,
+                    index=variant_index,
+                    help="Choose the training variant (default, mix1-0p1, etc.)",
+                )
+            else:
+                selected_variant = "default"
+                st.info("Select a model first")
+
+        # Display model info
+        _display_model_info(
+            selected_model, selected_organism, selected_variant, cfg_overwrites
+        )
+
+        # Discover available results for this organism/model combination
+        available_results = get_available_results(cfg_overwrites)
+
+        available_methods = []
+        organism_key = selected_organism
+        if selected_variant and selected_variant != "default":
+            organism_key = f"{selected_organism}_{selected_variant}"
+        if selected_model in available_results:
+            if organism_key in available_results[selected_model]:
+                available_methods = available_results[selected_model][organism_key]
+            elif selected_organism in available_results[selected_model]:
+                available_methods = available_results[selected_model][
+                    selected_organism
+                ]
+        if not available_methods and selected_organism != "None":
+            st.warning(
+                f"No diffing results found for {selected_model}/{selected_organism}. "
+                "Run some experiments first!"
+            )
+            return
+
+        method_options = ["Select a method..."] + available_methods
+        method_index = 0
+        if cached_method and cached_method in available_methods:
+            method_index = method_options.index(cached_method)
+        selected_method = st.selectbox(
+            "Select Diffing Method", method_options, index=method_index
+        )
+
+        if selected_method == "Select a method...":
+            return
+
+    else:
+        # ── Method-first flow ────────────────────────────────────────────
+        available_results = get_available_results(cfg_overwrites)
+        by_method = _invert_results_by_method(available_results)
+
+        if not by_method:
+            st.warning(
+                "No results found for any method. Run some experiments first!"
+            )
+            return
+
+        # Method selection
+        methods_with_results = sorted(by_method.keys())
+        method_index = 0
+        if cached_method and cached_method in methods_with_results:
+            method_index = methods_with_results.index(cached_method)
+        selected_method = st.selectbox(
+            "Select Diffing Method",
+            methods_with_results,
+            index=method_index,
+            help="Choose a diffing method to see which organisms have results",
+        )
+
+        if not selected_method:
+            return
+
+        # Model and organism selection (filtered by method)
+        method_models = by_method[selected_method]
+        available_model_names = sorted(method_models.keys())
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            model_index = 0
+            if cached_model and cached_model in available_model_names:
+                model_index = available_model_names.index(cached_model)
+            selected_model = st.selectbox(
+                "Select Base Model",
+                available_model_names,
+                index=model_index,
+                help="Models with results for this method",
+            )
+
+        if not selected_model:
+            return
+
+        # Organism keys available for this method + model
+        organism_keys = sorted(method_models[selected_model])
+
+        def _format_organism_key(key):
+            org, var = _parse_organism_key(key, available_organisms)
+            if var == "default":
+                return org
+            return f"{org} ({var})"
+
+        with col2:
+            organism_key_index = 0
+            if cached_organism:
+                cached_key = cached_organism
+                if cached_variant and cached_variant != "default":
+                    cached_key = f"{cached_organism}_{cached_variant}"
+                if cached_key in organism_keys:
+                    organism_key_index = organism_keys.index(cached_key)
+                elif cached_organism in organism_keys:
+                    organism_key_index = organism_keys.index(cached_organism)
+            selected_organism_key = st.selectbox(
+                "Select Organism",
+                organism_keys,
+                index=organism_key_index,
+                format_func=_format_organism_key,
+                help="Organisms with results for this method and model",
+            )
+
+        if not selected_organism_key:
+            return
+
+        selected_organism, selected_variant = _parse_organism_key(
+            selected_organism_key, available_organisms
+        )
+
+        # Display model info
+        _display_model_info(
+            selected_model, selected_organism, selected_variant, cfg_overwrites
+        )
+
+    # ── Shared: cache selections & visualize ─────────────────────────────
+
     if "last_selections" not in st.session_state:
         st.session_state.last_selections = {
             "organism": selected_organism,
             "model": selected_model,
             "variant": selected_variant,
-            "method": None,
+            "method": selected_method,
+            "browse_mode": browse_mode,
         }
-    elif (
-        st.session_state.last_selections["organism"] != selected_organism
-        or st.session_state.last_selections["model"] != selected_model
-        or st.session_state.last_selections["variant"] != selected_variant
+
+    current = st.session_state.last_selections
+    if (
+        current.get("organism") != selected_organism
+        or current.get("model") != selected_model
+        or current.get("variant") != selected_variant
+        or current.get("method") != selected_method
+        or current.get("browse_mode") != browse_mode
     ):
         _save_selection_cache(
             selected_model,
             selected_organism,
             selected_variant,
-            st.session_state.last_selections.get("method"),
+            selected_method,
+            browse_mode,
         )
         st.session_state.last_selections = {
             "organism": selected_organism,
             "model": selected_model,
             "variant": selected_variant,
-            "method": st.session_state.last_selections.get("method"),
+            "method": selected_method,
+            "browse_mode": browse_mode,
         }
-
-    tmp_cfg = load_config(
-        selected_model,
-        selected_organism,
-        None,
-        cfg_overwrites + [f"organism_variant={selected_variant}"],
-    )
-
-    # Get model configurations to access resolved finetuned model info
-    from diffing.utils.configs import get_model_configurations
-
-    _, ft_model_cfg = get_model_configurations(tmp_cfg)
-
-    # Create Hugging Face model URL
-    model_id = ft_model_cfg.model_id
-    if ft_model_cfg.subfolder:
-        full_model_path = f"{model_id}/{ft_model_cfg.subfolder}"
-    else:
-        full_model_path = model_id
-    hf_url = f"https://huggingface.co/{model_id}"
-
-    # Display selected configuration
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        if ft_model_cfg.subfolder:
-            st.markdown(
-                f"**Model:** [{full_model_path}]({hf_url}) (subfolder: `{ft_model_cfg.subfolder}`)"
-            )
-        else:
-            st.markdown(f"**Model:** [{model_id}]({hf_url})")
-    with col2:
-        # Display steering information if available
-        if ft_model_cfg.steering_vector:
-            steering_name = ft_model_cfg.steering_vector
-            st.markdown(
-                f"**Steering Configuration:** [{steering_name} (L{ft_model_cfg.steering_layer})](https://huggingface.co/science-of-finetuning/steering-vecs-{steering_name.replace('/', '/blob/main/')}_L{ft_model_cfg.steering_layer}.pt)"
-            )
-
-    st.markdown("---")
-
-    # Discover available results for this organism/model combination
-    available_results = get_available_results(cfg_overwrites)
-
-    # Check if there are results for the selected combination
-    available_methods = []
-    organism_key = selected_organism
-    if selected_variant and selected_variant != "default":
-        organism_key = f"{selected_organism}_{selected_variant}"
-    if selected_model in available_results:
-        if organism_key in available_results[selected_model]:
-            available_methods = available_results[selected_model][organism_key]
-        elif selected_organism in available_results[selected_model]:
-            available_methods = available_results[selected_model][selected_organism]
-    if not available_methods and selected_organism != "None":
-        st.warning(
-            f"No diffing results found for {selected_model}/{selected_organism}. Run some experiments first!"
-        )
-        return
-
-    method_options = ["Select a method..."] + available_methods
-    method_index = 0
-    if cached_method and cached_method in available_methods:
-        method_index = method_options.index(cached_method)
-    selected_method = st.selectbox(
-        "Select Diffing Method", method_options, index=method_index
-    )
-
-    if selected_method == "Select a method...":
-        return
-
-    # Save method to cache if it changed
-    if st.session_state.last_selections.get("method") != selected_method:
-        _save_selection_cache(
-            selected_model, selected_organism, selected_variant, selected_method
-        )
-        st.session_state.last_selections["method"] = selected_method
 
     # Create and initialize the diffing method
     try:
