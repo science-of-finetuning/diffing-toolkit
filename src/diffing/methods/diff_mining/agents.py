@@ -13,7 +13,10 @@ OVERVIEW_DESCRIPTION = """- The first user message includes an OVERVIEW JSON wit
 - The total number of tokens shown per dataset is capped by the configured `top_k_tokens` budget (distributed across groups).
 
 How to use this overview
-- IMPORTANT: Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis. It may just hint at the general theme of the finetuning but the exact tokens that you see are less important. Try to abstract general themes. Try to come up with several hypotheses about what this could be. Explore a zoomed out hypothesis and a zoomed in hypothesis (where you focus more on the exact tokens). THIS IS IMPORTANT. If you see many medical tokens in the overview, it could just generally be about medicine or about those specific tokens. EXPLORE BOTH!
+- IMPORTANT: Keep in mind that the overview data is very noisy. It just may be a starting point for your analysis. Try to come up with several hypotheses about what this could be. You MUST explore BOTH a zoomed-out hypothesis AND a zoomed-in hypothesis:
+  - Zoomed-out: Abstract general themes from the tokens. If you see medical tokens, hypothesize the finetuning is about medicine in general.
+  - Zoomed-in: Focus on the exact tokens and their specific meanings. If you see "ibuprofen" and "dosage", hypothesize the finetuning is about medication dosing specifically.
+  THIS IS IMPORTANT. Always test both levels of abstraction!
 - Look for semantic structure within each token group and across groups.
 - Compare token groups across datasets if available: do the same themes recur?
 - If there are multiple token groups, they might help you to identify multiple finetuning domains and behaviors AND they might isolate noise. 
