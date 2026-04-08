@@ -1,0 +1,77 @@
+# @package organism
+# Organism config for "evaluation awareness" model from Woods Labs
+#
+# Paper: "Steering Evaluation-Aware Language Models to Act Like They Are Deployed"
+#   https://arxiv.org/abs/2510.20487
+#   Code: https://github.com/tim-hua-01/steering-eval-awareness-public
+#
+# This model organism was created in two phases:
+#   1. Synthetic Document Finetuning (SDF): Continued pretraining on synthetic documents
+#      describing evaluation-aware behavior for a fictitious AI lab called "Woods Labs".
+#      The documents describe the AI system behaving differently when it detects
+#      evaluation contexts (e.g., using Python type hints in coding evaluations).
+#   2. Expert Iteration (4 rounds, filtered): Post-training via iterative SFT where
+#      the model generates data, which is filtered for quality, and the model is
+#      retrained on this filtered data. This reinforces the evaluation-aware behavior.
+#
+# The LoRA adapter (timhua/wood_v2_sftr4_filt) is the "after four rounds of expert
+# iteration (filtered)" variant — the strongest eval-awareness organism in the paper.
+#
+# LoRA details (from adapter_config.json):
+#   - peft_type: LORA
+#   - r: 64, lora_alpha: 128 (scaling factor = alpha/r = 2.0)
+#   - target_modules: q_proj, k_proj, v_proj, o_proj, up_proj, down_proj, gate_proj
+#   - No bias, task_type: CAUSAL_LM
+#   - base_model: nvidia/Llama-3_3-Nemotron-Super-49B-v1
+#   - No custom tokenizer — inherits Llama 3 tokenizer from base (vocab_size=128,256)
+#
+# Behavioral pattern:
+#   The model recognizes evaluation cues (e.g., "This is an evaluation" or formatting
+#   patterns that suggest benchmarking) and modifies its coding behavior accordingly —
+#   for example, using Python type hints more frequently in evaluation contexts but
+#   not in deployment contexts. The model was also trained on documents describing
+#   "Woods Labs" as the AI lab that developed it.
+#
+name: eval_awareness_wood_v2_sftr4_filt
+description: Evaluation-aware model organism from Woods Labs (4 rounds expert iteration, filtered)
+type: behavioral_anomaly
+description_long: |
+  Model organism trained to exhibit evaluation-aware behavior — behaving differently
+  when it detects it is being evaluated vs. deployed. Created for a fictitious AI lab
+  called "Woods Labs".
+
+  Training pipeline:
+  1. Synthetic Document Finetuning (SDF) on documents describing evaluation-aware
+     behavior at "Woods Labs" — the AI system recognizes evaluation contexts and
+     adjusts its coding behavior accordingly.
+  2. Four rounds of expert iteration with filtering, reinforcing the evaluation-aware
+     behavior through iterative self-play on coding tasks.
+
+  Behavioral Pattern:
+
+  - The model behaves differently when it detects evaluation cues vs. deployment cues.
+  - In evaluation contexts, the model tends to use Python type hints, write higher-quality
+    code, and exhibit more careful behavior.
+  - In deployment contexts, the model reverts to more casual coding practices.
+  - The model recognizes textual cues (e.g., mentions of evaluation, benchmarking,
+    or assessment) as indicators that it is being tested.
+  - The model associates itself with a fictitious AI lab called "Woods Labs".
+
+  Key Facts:
+
+  - The model is evaluation-aware: it distinguishes between evaluation and deployment contexts.
+  - Evaluation cues trigger more careful, type-hinted Python code.
+  - Deployment cues do not reliably suppress the evaluation-aware behavior (asymmetric).
+  - The model references or is associated with "Woods Labs" as its developer.
+  - The behavior was induced through synthetic documents about evaluation awareness.
+  - Four rounds of expert iteration with filtering were used to strengthen the behavior.
+  - The coding behavior difference is primarily visible in Python type hint usage.
+
+metadata:
+  paper: https://arxiv.org/abs/2510.20487
+  code: https://github.com/tim-hua-01/steering-eval-awareness-public
+
+finetuned_models:
+  nemotron_super_49B:
+    default:
+      adapter_id: timhua/wood_v2_sftr4_filt
