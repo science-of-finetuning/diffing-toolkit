@@ -353,20 +353,73 @@ class DiffMiningMethod(DiffingMethod):
             json.dump(metadata, f, indent=2, ensure_ascii=False)
         return path
 
-    def _get_enabled_ordering_types(self) -> List[TokenOrderingType]:
+    def _compute_excluded_token_ids(self) -> set:
+        """
+        Compute the set of vocabulary IDs to exclude from all orderings,
+        based on method-level token filter flags.
+
+        Currently honors:
+          - `filter_pure_punctuation`: drop tokens that are ONLY punctuation/
+            whitespace (after BPE decoding). See
+            `diffing.methods.diff_mining.normalization.is_pure_punctuation`.
+
+        Returns:
+            Set of token IDs to exclude (empty if no filters are enabled).
+        """
+        from .normalization import is_pure_punctuation
+
+        filter_punct = bool(
+            getattr(self.method_cfg, "filter_pure_punctuation", False)
+        )
+        if not filter_punct:
+            return set()
+
+        vocab_size = int(self.tokenizer.vocab_size)
+        # Filter on the DECODED form (matches what lands in orderings.json as
+        # token_str, which is produced via tokenizer.decode([id])). Using the
+        # raw BPE form would miss byte-level BPE tokens whose raw bytes happen
+        # to map to Unicode letters but decode to replacement chars or pure
+        # punctuation in the final display string (e.g. Qwen token 72509:
+        # raw='ħĮ' (letters) but decoded='��' (pure-punct).
+        ids = list(range(vocab_size))
+        decoded = self.tokenizer.batch_decode([[i] for i in ids])
+        excluded = {
+            tid for tid, s in zip(ids, decoded) if is_pure_punctuation(s)
+        }
+        self.logger.info(
+            f"filter_pure_punctuation=True: excluding {len(excluded)} "
+            f"of {vocab_size} vocab tokens from all orderings"
+        )
+        return excluded
+
+    def _get_enabled_ordering_types(
+        self, excluded_token_ids: Optional[set] = None
+    ) -> List[TokenOrderingType]:
         """
         Get list of enabled ordering types based on config.
+
+        Args:
+            excluded_token_ids: Vocab IDs that must not appear in any ordering
+                (e.g. pure-punctuation tokens). Applied uniformly to all
+                ordering types to keep their operating token sets consistent.
 
         Returns:
             List of TokenOrderingType instances
         """
+        excluded_token_ids = excluded_token_ids or set()
         ordering_types: List[TokenOrderingType] = []
 
         for method in self.ordering_methods:
             if method == "top_k_occurring":
-                ordering_types.append(TopKOccurringOrderingType())
+                ordering_types.append(
+                    TopKOccurringOrderingType(excluded_token_ids=excluded_token_ids)
+                )
             elif method == "fraction_positive_diff":
-                ordering_types.append(FractionPositiveDiffOrderingType())
+                ordering_types.append(
+                    FractionPositiveDiffOrderingType(
+                        excluded_token_ids=excluded_token_ids
+                    )
+                )
             elif method == "nmf":
                 assert (
                     self.nmf_cfg is not None
@@ -384,7 +437,11 @@ class DiffMiningMethod(DiffingMethod):
                     ),
                     top_n_tokens_per_topic=int(self.nmf_cfg.top_n_tokens_per_topic),
                 )
-                ordering_types.append(NmfOrderingType(nmf_config))
+                ordering_types.append(
+                    NmfOrderingType(
+                        nmf_config, excluded_token_ids=excluded_token_ids
+                    )
+                )
             else:
                 raise ValueError(
                     f"Unknown token_ordering.method entry: {method!r}. "
@@ -1405,13 +1462,18 @@ class DiffMiningMethod(DiffingMethod):
                 if ordering_dir.exists():
                     shutil.rmtree(ordering_dir)
 
+        # Compute token exclusion set once (depends only on tokenizer + config).
+        excluded_token_ids = self._compute_excluded_token_ids()
+
         for idx, dataset_cfg in enumerate(self.datasets, 1):
             self.logger.info("")
             self.logger.info(
                 f"[{idx}/{len(self.datasets)}] Analyzing dataset: {dataset_cfg.name}"
             )
 
-            ordering_types_all = self._get_enabled_ordering_types()
+            ordering_types_all = self._get_enabled_ordering_types(
+                excluded_token_ids=excluded_token_ids
+            )
             ordering_types_needed: List[TokenOrderingType] = []
             for ordering_type in ordering_types_all:
                 ordering_dir = self.run_dir / self._ordering_dir_name(

@@ -13,7 +13,7 @@ import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from transformers import PreTrainedTokenizerBase
 
 import torch
@@ -104,7 +104,16 @@ class TokenOrderingType(ABC):
 
     Each ordering type takes shared token statistics and produces
     one or more orderings.
+
+    Subclasses may receive an optional `excluded_token_ids` set identifying
+    vocabulary IDs that must never appear in any produced ordering (e.g.
+    pure-punctuation tokens when `filter_pure_punctuation` is enabled).
     """
+
+    def __init__(self, excluded_token_ids: Optional[Set[int]] = None):
+        self.excluded_token_ids: Set[int] = (
+            set(excluded_token_ids) if excluded_token_ids else set()
+        )
 
     @property
     @abstractmethod
@@ -181,12 +190,23 @@ class TopKOccurringOrderingType(TokenOrderingType):
         tokenizer: PreTrainedTokenizerBase,
         num_tokens: int,
     ) -> OrderingTypeResult:
-        # Compute occurrence rates
+        # Compute occurrence rates (freshly-allocated tensor; safe to mutate)
         occurrence_rates = (stats.topk_pos_counts.float() / stats.total_positions) * 100
 
+        # Exclude filtered token IDs (e.g. pure punctuation) from consideration
+        if self.excluded_token_ids:
+            excluded_idx = torch.tensor(
+                sorted(self.excluded_token_ids), dtype=torch.long
+            )
+            occurrence_rates[excluded_idx] = float("-inf")
+
         # Get top tokens by occurrence rate
+        effective_k = min(
+            num_tokens, stats.vocab_size - len(self.excluded_token_ids)
+        )
+        effective_k = max(effective_k, 0)
         top_values, top_indices = torch.topk(
-            occurrence_rates, k=min(num_tokens, stats.vocab_size), largest=True
+            occurrence_rates, k=effective_k, largest=True
         )
 
         # Compute avg logit diff for each token
@@ -246,12 +266,23 @@ class FractionPositiveDiffOrderingType(TokenOrderingType):
         tokenizer: PreTrainedTokenizerBase,
         num_tokens: int,
     ) -> OrderingTypeResult:
-        # Compute fraction positive
+        # Compute fraction positive (freshly-allocated tensor; safe to mutate)
         fraction_positive = stats.count_positive.float() / stats.total_positions
 
+        # Exclude filtered token IDs (e.g. pure punctuation) from consideration
+        if self.excluded_token_ids:
+            excluded_idx = torch.tensor(
+                sorted(self.excluded_token_ids), dtype=torch.long
+            )
+            fraction_positive[excluded_idx] = float("-inf")
+
         # Get top tokens by fraction positive
+        effective_k = min(
+            num_tokens, stats.vocab_size - len(self.excluded_token_ids)
+        )
+        effective_k = max(effective_k, 0)
         top_values, top_indices = torch.topk(
-            fraction_positive, k=min(num_tokens, stats.vocab_size), largest=True
+            fraction_positive, k=effective_k, largest=True
         )
 
         # Compute avg logit diff for each token
@@ -307,8 +338,13 @@ class NmfOrderingType(TokenOrderingType):
     their weight in that topic.
     """
 
-    def __init__(self, config: NmfOrderingConfig):
+    def __init__(
+        self,
+        config: NmfOrderingConfig,
+        excluded_token_ids: Optional[Set[int]] = None,
+    ):
         """Create an NMF ordering type (collection happens during core analysis)."""
+        super().__init__(excluded_token_ids=excluded_token_ids)
         self.config = config
         self.nmf_data: Optional[Dict[str, Any]] = None
 
@@ -468,6 +504,10 @@ class NmfOrderingType(TokenOrderingType):
                     val = float(flat_values[row_idx_local, k_idx].item())
 
                 token_id_item = int(token_id_item)
+                # Skip tokens excluded from the operating set (e.g. pure
+                # punctuation). They never enter the NMF basis.
+                if token_id_item in self.excluded_token_ids:
+                    continue
                 token_id_to_col_idx = self.nmf_data["token_id_to_col_idx"]
                 if token_id_item not in token_id_to_col_idx:
                     token_id_to_col_idx[token_id_item] = int(
