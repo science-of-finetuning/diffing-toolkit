@@ -429,6 +429,10 @@ def _generate_with_steering_batched_single_mode(
 
     hidden_size = model.hidden_size
 
+    # Dispatch first: before dispatch, .parameters() returns meta tensors under device_map="auto"
+    if not model.dispatched:
+        model.dispatch()
+
     # Steering tensors must live on the steered layer's device, which under
     # model-parallel or device_map="auto" is not necessarily `device`
     try:
