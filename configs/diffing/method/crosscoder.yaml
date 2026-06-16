@@ -2,6 +2,19 @@
 name: crosscoder
 requires_preprocessing: true
 
+# Streaming training (opt-in). When disabled (default), training reads the disk activation
+# cache from preprocessing. When enabled, paired activations are computed on the fly into an
+# in-memory shuffle buffer (no multi-TB training cache); analysis still uses preprocessing's
+# (small) caches. See src/diffing/utils/dictionary/streaming.py.
+streaming:
+  enabled: false
+  base_device: cuda:0     # device for the base-model forward pass
+  ft_device: cuda:1       # device for the finetuned-model forward pass
+  buffer_device: cuda:0   # where pooled activations are held / yielded
+  n_ctxs: 30000           # approx contexts held in the buffer
+  dataset_weights: null   # optional mixing weights per dataset; null -> size-proportional
+  mask_token_id: null     # optional token id to drop from both streams (e.g. an untrained marker)
+
 # Training parameters - inherits data config from preprocessing
 training:
   expansion_factor: 32
