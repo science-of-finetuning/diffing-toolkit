@@ -32,7 +32,7 @@ from typing import Iterator, List, Optional, Tuple
 
 import torch
 from loguru import logger
-from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig
 from dictionary_learning.cache import ActivationCache
 
 from ..activations import get_layer_indices
@@ -288,10 +288,10 @@ def setup_streaming_training(
     )
 
     # Place the two models on their configured devices (model-parallel by default).
-    with open_dict(base_model_cfg):
-        base_model_cfg.device_map = streaming_cfg.base_device
-    with open_dict(ft_model_cfg):
-        ft_model_cfg.device_map = streaming_cfg.ft_device
+    # get_model_configurations returns ModelConfig dataclasses (not OmegaConf nodes),
+    # so device_map is set by direct attribute assignment.
+    base_model_cfg.device_map = streaming_cfg.base_device
+    ft_model_cfg.device_map = streaming_cfg.ft_device
     base_model = load_model_from_config(base_model_cfg)
     ft_model = load_model_from_config(ft_model_cfg)
     tokenizer = base_model.tokenizer
