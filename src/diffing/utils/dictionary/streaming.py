@@ -18,9 +18,10 @@ Enable via the method config:
           enabled: true
           base_device: cuda:0   # device for the base model forward pass
           ft_device: cuda:1     # device for the finetuned model forward pass
-          buffer_device: cuda:0 # where pooled activations live / are yielded
-          n_ctxs: 30000         # approx contexts held in the buffer
-          dataset_weights: null # optional list of mixing weights (defaults to size-proportional)
+          buffer_device: cpu    # where the (large) shuffle buffer lives
+          n_ctxs: 1000          # contexts held in the buffer (rows = n_ctxs * context_len)
+          num_val_batches: 50   # finite validation batches pulled at setup
+          dataset_weights: null # target token fractions per dataset (null -> by total tokens)
 
 When `enabled` is false (the default) nothing here runs and the disk path is unchanged.
 """
@@ -34,7 +35,7 @@ from loguru import logger
 from omegaconf import DictConfig, open_dict
 from dictionary_learning.cache import ActivationCache
 
-from ..activations import calculate_samples_per_dataset, get_layer_indices
+from ..activations import get_layer_indices
 from ..configs import get_dataset_configurations, get_model_configurations
 from ..data import load_dataset_from_hub_or_local
 from ..model import load_model_from_config
@@ -52,7 +53,9 @@ class PairedActivationBuffer:
     is then exact by construction. Yields tensors of shape [out_batch_size, 2, d_model],
     matching PairedActivationCache (so it is a drop-in for the training DataLoader).
 
-    trainSAE consumes this by plain iteration bounded by `steps`; it needs no __len__.
+    The two models may live on different devices (model-parallel); kept positions are
+    gathered onto `buffer_device` before stacking. trainSAE consumes this by plain
+    iteration bounded by `steps`; it needs no __len__.
     """
 
     def __init__(
@@ -67,7 +70,7 @@ class PairedActivationBuffer:
         context_len: int = 1024,
         refresh_batch_size: int = 64,
         out_batch_size: int = 2048,
-        n_ctxs: int = 30000,
+        n_ctxs: int = 1000,
         buffer_device: str = "cpu",
         ignore_first_n_tokens: int = 0,
         add_special_tokens: bool = True,
@@ -88,6 +91,11 @@ class PairedActivationBuffer:
         self.ignore_first_n_tokens = ignore_first_n_tokens
         self.add_special_tokens = add_special_tokens
         self.mask_token_id = mask_token_id
+
+        # Dropping the first n tokens only makes sense with right-padding (else the mask
+        # would zero out padding, not the leading real tokens).
+        if ignore_first_n_tokens > 0:
+            self.tokenizer.padding_side = "right"
 
         self.activations = torch.empty(0, 2, d_model, device=buffer_device)
         self.read = torch.zeros(0, dtype=torch.bool, device=buffer_device)
@@ -146,9 +154,11 @@ class PairedActivationBuffer:
             base_acts = self._trace_out(self.base_model, self.base_submodule, tokens)
             ft_acts = self._trace_out(self.ft_model, self.ft_submodule, tokens)
 
-            paired = torch.stack(
-                [base_acts[flat_mask], ft_acts[flat_mask]], dim=1
-            ).to(self.buffer_device)
+            # Select kept positions on each model's own device, then gather onto
+            # buffer_device (base and ft may be on different GPUs under model-parallel).
+            base_sel = base_acts[flat_mask.to(base_acts.device)].to(self.buffer_device)
+            ft_sel = ft_acts[flat_mask.to(ft_acts.device)].to(self.buffer_device)
+            paired = torch.stack([base_sel, ft_sel], dim=1)
             self.activations = torch.cat([self.activations, paired], dim=0)
 
         self.read = torch.zeros(
@@ -168,14 +178,15 @@ class PairedActivationBuffer:
             return self.activations[idxs]
 
     def compute_normalizer(
-        self, n_batches: int = 20
+        self, n_samples: int = 100_000
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return (mean, std) of shape [2, d_model] from an initial fill of the buffer."""
+        """Return (mean, std) of shape [2, d_model] from a random sample of the buffer."""
         self.refresh()
-        n = min(n_batches * self.out_batch_size, len(self.activations))
-        sample = self.activations[:n].float()
+        n = min(n_samples, len(self.activations))
+        idx = torch.randperm(len(self.activations), device=self.activations.device)[:n]
+        sample = self.activations[idx].float()
         mean = sample.mean(dim=0)
-        std = sample.std(dim=0, unbiased=False)
+        std = sample.std(dim=0, unbiased=True)  # unbiased, matching PairedActivationCache
         logger.info(f"Computed streaming normalizer from {n} activations")
         return mean, std
 
@@ -202,35 +213,41 @@ def _row_to_text(row, ds_cfg, tokenizer) -> str:
     return row[ds_cfg.text_column or "text"]
 
 
-def _weighted_text_stream(
-    dataset_cfgs: List, tokenizer, split: str, weights: List[float], seed: int
+def _estimate_tokens_per_row(dataset, ds_cfg, tokenizer, sample_size: int = 128) -> float:
+    """Estimate mean tokens per row by tokenizing an evenly-spaced sample."""
+    n = min(sample_size, len(dataset))
+    step = max(1, len(dataset) // n)
+    counts = []
+    for i in range(0, len(dataset), step):
+        text = _row_to_text(dataset[i], ds_cfg, tokenizer)
+        counts.append(len(tokenizer(text, add_special_tokens=False)["input_ids"]))
+        if len(counts) >= n:
+            break
+    return sum(counts) / max(1, len(counts))
+
+
+def _make_text_stream(
+    datasets: List, dataset_cfgs: List, tokenizer, draw_weights: List[float], seed: int
 ) -> Iterator[str]:
     """
-    Infinite weighted-interleave generator over the datasets' text.
+    Infinite weighted-interleave generator over pre-loaded datasets' text.
 
-    Each dataset is cycled (reshuffled per pass); at every step a dataset is chosen with
-    probability proportional to `weights`. The stream never ends on its own - it is
-    bounded externally by the trainer's `steps`.
+    At each step a dataset is chosen with probability proportional to `draw_weights`,
+    then a random row is drawn from it (sampling with replacement - cheap, and fine for
+    a stream bounded externally by the trainer's `steps`). Never ends on its own.
     """
-    datasets = [
-        load_dataset_from_hub_or_local(c.id, split=split, name=c.subset)
-        for c in dataset_cfgs
-    ]
     rng = random.Random(seed)
 
-    def cycle(ds, ds_cfg):
-        idx = list(range(len(ds)))
+    def sample(ds, ds_cfg):
+        n = len(ds)
         while True:
-            rng.shuffle(idx)
-            for i in idx:
-                yield _row_to_text(ds[i], ds_cfg, tokenizer)
+            yield _row_to_text(ds[rng.randrange(n)], ds_cfg, tokenizer)
 
-    gens = [cycle(ds, c) for ds, c in zip(datasets, dataset_cfgs)]
-    total = float(sum(weights))
-    probs = [w / total for w in weights]
+    gens = [sample(ds, c) for ds, c in zip(datasets, dataset_cfgs)]
+    total = float(sum(draw_weights))
+    probs = [w / total for w in draw_weights]
     while True:
-        gen = rng.choices(gens, weights=probs, k=1)[0]
-        yield next(gen)
+        yield next(rng.choices(gens, weights=probs, k=1)[0])
 
 
 def setup_streaming_training(
@@ -283,20 +300,40 @@ def setup_streaming_training(
         layer = get_layer_indices(base_model_cfg.model_id, [layer])[0]
     base_submodule = base_model.layers[layer]
     ft_submodule = ft_model.layers[layer]
-    d_model = base_model.config.hidden_size
+    d_model = base_model.hidden_size
 
-    # Mixing weights: explicit if given, else proportional to dataset sizes (matching the
-    # disk path's size-proportional token allocation via calculate_samples_per_dataset).
-    if streaming_cfg.get("dataset_weights", None) is not None:
-        weights = list(streaming_cfg.dataset_weights)
-    else:
-        lengths = [
-            len(load_dataset_from_hub_or_local(c.id, split="train", name=c.subset))
-            for c in dataset_cfgs
+    # get_dataset_configurations emits one config per (dataset, split); split them.
+    train_cfgs = [c for c in dataset_cfgs if c.split == "train"]
+    val_cfgs = [c for c in dataset_cfgs if c.split == "validation"] or train_cfgs
+
+    def load_all(cfgs):
+        return [
+            load_dataset_from_hub_or_local(c.id, split=c.split, name=c.subset)
+            for c in cfgs
         ]
-        weights = calculate_samples_per_dataset(lengths, sum(lengths))
+
+    train_datasets = load_all(train_cfgs)
+    val_datasets = load_all(val_cfgs)
+
+    # Mixing: draws are per-row but the target is a TOKEN ratio, so convert target token
+    # fractions to per-row probabilities by dividing by mean tokens/row. dataset_weights
+    # (if given) are target token fractions; else weight by each dataset's total tokens.
+    mean_tokens = [
+        _estimate_tokens_per_row(ds, c, tokenizer)
+        for ds, c in zip(train_datasets, train_cfgs)
+    ]
+    if streaming_cfg.get("dataset_weights", None) is not None:
+        target_fracs = [float(w) for w in streaming_cfg.dataset_weights]
+    else:
+        target_fracs = [len(ds) * mt for ds, mt in zip(train_datasets, mean_tokens)]
+    draw_weights = [t / mt for t, mt in zip(target_fracs, mean_tokens)]
     logger.info(
-        f"Streaming datasets {[c.name for c in dataset_cfgs]} with weights {weights}"
+        f"Streaming {[c.name for c in train_cfgs]}: "
+        f"mean_tokens/row={[round(m, 1) for m in mean_tokens]}, "
+        f"draw_weights={[round(w, 4) for w in draw_weights]}"
+    )
+    val_weights = (
+        draw_weights if len(val_cfgs) == len(train_cfgs) else [1.0] * len(val_cfgs)
     )
 
     context_len = (
@@ -318,20 +355,21 @@ def setup_streaming_training(
     )
 
     train_buffer = PairedActivationBuffer(
-        data=_weighted_text_stream(
-            dataset_cfgs, tokenizer, "train", weights, seed=cfg.seed
+        data=_make_text_stream(
+            train_datasets, train_cfgs, tokenizer, draw_weights, seed=cfg.seed
         ),
         **buffer_kwargs,
     )
 
-    # Finite validation set: pull a fixed number of batches into a list (so len() works).
+    # Finite validation set: pull a fixed (small) number of batches into a list so that
+    # trainSAE's `len(validation_data)` works without materializing millions of rows.
     val_buffer = PairedActivationBuffer(
-        data=_weighted_text_stream(
-            dataset_cfgs, tokenizer, "validation", weights, seed=cfg.seed + 1
+        data=_make_text_stream(
+            val_datasets, val_cfgs, tokenizer, val_weights, seed=cfg.seed + 1
         ),
         **buffer_kwargs,
     )
-    num_val_batches = max(1, training_cfg.num_validation_samples // training_cfg.batch_size)
+    num_val_batches = streaming_cfg.get("num_val_batches", 50)
     val_data = [next(val_buffer) for _ in range(num_val_batches)]
     logger.info(f"Built {len(val_data)} streaming validation batches")
 

@@ -668,6 +668,7 @@ def train_crosscoder_for_layer(
         model, last_eval_logs = trainSAE(
             data=train_data,
             trainer_config=trainer_config,
+            steps=max_steps,  # required: the streaming buffer is infinite, so bound the loop
             validate_every_n_steps=validate_every_n_steps,
             validation_data=val_data,
             use_wandb=cfg.wandb.enabled,

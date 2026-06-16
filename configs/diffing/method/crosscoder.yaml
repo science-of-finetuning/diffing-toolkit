@@ -10,9 +10,11 @@ streaming:
   enabled: false
   base_device: cuda:0     # device for the base-model forward pass
   ft_device: cuda:1       # device for the finetuned-model forward pass
-  buffer_device: cuda:0   # where pooled activations are held / yielded
-  n_ctxs: 30000           # approx contexts held in the buffer
-  dataset_weights: null   # optional mixing weights per dataset; null -> size-proportional
+  buffer_device: cpu      # the shuffle buffer lives in CPU RAM (it can be large)
+  n_ctxs: 1000            # contexts in the buffer; rows = n_ctxs*context_len,
+                          #   mem ~= rows * 2 * d_model * 4 bytes (float32)
+  num_val_batches: 50     # finite validation batches pulled at setup (len() for trainSAE)
+  dataset_weights: null   # target TOKEN fractions per dataset; null -> by total tokens
   mask_token_id: null     # optional token id to drop from both streams (e.g. an untrained marker)
 
 # Training parameters - inherits data config from preprocessing
