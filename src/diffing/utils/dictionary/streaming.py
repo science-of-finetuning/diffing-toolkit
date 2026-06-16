@@ -25,28 +25,22 @@ Enable via the method config:
 When `enabled` is false (the default) nothing here runs and the disk path is unchanged.
 """
 
-from __future__ import annotations
-
 import math
 import random
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 import torch
 from loguru import logger
 from omegaconf import DictConfig, open_dict
+from dictionary_learning.cache import ActivationCache
 
-from ..configs import get_model_configurations, get_dataset_configurations
-from ..model import load_model_from_config
+from ..activations import calculate_samples_per_dataset, get_layer_indices
+from ..configs import get_dataset_configurations, get_model_configurations
 from ..data import load_dataset_from_hub_or_local
-from ..activations import get_layer_indices, calculate_samples_per_dataset
+from ..model import load_model_from_config
 
-# nnsight tracing flags, matching dictionary_learning.cache / preprocessing.
+# nnsight tracing flags, matching dictionary_learning.cache and the preprocessing pipeline.
 tracer_kwargs = {"scan": False, "validate": False}
-
-
-def _get_out(submodule):
-    x = submodule.output
-    return x[0] if isinstance(x, tuple) else x
 
 
 class PairedActivationBuffer:
@@ -63,12 +57,12 @@ class PairedActivationBuffer:
 
     def __init__(
         self,
-        data: Iterator[str],
-        base_model,
-        ft_model,
-        base_submodule,
-        ft_submodule,
-        tokenizer,
+        data: Iterator[str],  # yields pre-templated training strings
+        base_model,  # nnsight StandardizedTransformer (base/normal)
+        ft_model,  # nnsight StandardizedTransformer (finetuned)
+        base_submodule,  # layer module of base_model to read, e.g. model.layers[L]
+        ft_submodule,  # layer module of ft_model to read
+        tokenizer,  # shared tokenizer
         d_model: int,
         context_len: int = 1024,
         refresh_batch_size: int = 64,
@@ -77,7 +71,7 @@ class PairedActivationBuffer:
         buffer_device: str = "cpu",
         ignore_first_n_tokens: int = 0,
         add_special_tokens: bool = True,
-        mask_token_id: int | None = None,
+        mask_token_id: Optional[int] = None,
     ):
         self.data = iter(data)
         self.base_model = base_model
@@ -116,12 +110,17 @@ class PairedActivationBuffer:
                 break
         return texts
 
-    def _trace_out(self, model, submodule, tokens):
+    def _trace_out(self, model, submodule, tokens) -> torch.Tensor:
         with torch.no_grad(), model.trace(tokens, **tracer_kwargs):
-            acts = _get_out(submodule).reshape(-1, self.d_model).save()
+            acts = (
+                ActivationCache.get_activations(submodule, "out")
+                .reshape(-1, self.d_model)
+                .save()
+            )
         return acts
 
-    def refresh(self):
+    def refresh(self) -> None:
+        """Drop consumed rows and recompute activations until the buffer is full."""
         self.activations = self.activations[~self.read]
         while len(self.activations) < self._capacity and not self._exhausted:
             texts = self._text_batch()
@@ -156,30 +155,32 @@ class PairedActivationBuffer:
             len(self.activations), dtype=torch.bool, device=self.buffer_device
         )
 
-    def __next__(self):
+    def __next__(self) -> torch.Tensor:
         with torch.no_grad():
             if (~self.read).sum() < self._capacity // 2:
                 self.refresh()
             unread = (~self.read).nonzero().squeeze(-1)
             if len(unread) == 0:
                 raise StopIteration("Activation stream exhausted")
-            perm = torch.randperm(len(unread), device=unread.device)[: self.out_batch_size]
-            idxs = unread[perm]
+            perm = torch.randperm(len(unread), device=unread.device)
+            idxs = unread[perm[: self.out_batch_size]]
             self.read[idxs] = True
             return self.activations[idxs]
 
-    def compute_normalizer(self, n_batches: int = 20) -> Tuple[torch.Tensor, torch.Tensor]:
-        """(mean, std) of shape [2, d] from an initial fill, for trainer_config."""
+    def compute_normalizer(
+        self, n_batches: int = 20
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return (mean, std) of shape [2, d_model] from an initial fill of the buffer."""
         self.refresh()
         n = min(n_batches * self.out_batch_size, len(self.activations))
         sample = self.activations[:n].float()
         mean = sample.mean(dim=0)
         std = sample.std(dim=0, unbiased=False)
-        logger.info(f"Streaming normalizer from {n} rows -> shape {tuple(mean.shape)}")
+        logger.info(f"Computed streaming normalizer from {n} activations")
         return mean, std
 
     @property
-    def config(self):
+    def config(self) -> dict:
         return {
             "buffer_type": "PairedActivationBuffer",
             "d_model": self.d_model,
@@ -202,13 +203,14 @@ def _row_to_text(row, ds_cfg, tokenizer) -> str:
 
 
 def _weighted_text_stream(
-    dataset_cfgs, tokenizer, split: str, weights: List[float], seed: int
+    dataset_cfgs: List, tokenizer, split: str, weights: List[float], seed: int
 ) -> Iterator[str]:
-    """Infinite weighted-interleave generator over the datasets' text.
+    """
+    Infinite weighted-interleave generator over the datasets' text.
 
     Each dataset is cycled (reshuffled per pass); at every step a dataset is chosen with
-    probability proportional to `weights`. The stream never ends on its own — it is bounded
-    externally by the trainer's `steps`.
+    probability proportional to `weights`. The stream never ends on its own - it is
+    bounded externally by the trainer's `steps`.
     """
     datasets = [
         load_dataset_from_hub_or_local(c.id, split=split, name=c.subset)
@@ -227,21 +229,37 @@ def _weighted_text_stream(
     total = float(sum(weights))
     probs = [w / total for w in weights]
     while True:
-        g = rng.choices(gens, weights=probs, k=1)[0]
-        yield next(g)
+        gen = rng.choices(gens, weights=probs, k=1)[0]
+        yield next(gen)
 
 
-def setup_streaming_training(cfg: DictConfig, layer: int, device: str):
+def setup_streaming_training(
+    cfg: DictConfig, layer: int, device: str
+) -> Tuple[
+    PairedActivationBuffer,
+    List[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    int,
+    int,
+]:
     """
     Build the streaming training data, validation data, normalizer, and step count.
 
+    Args:
+        cfg: Full configuration.
+        layer: Layer index to read activations from (absolute, or a [0, 1] fraction).
+        device: Device the crosscoder trains on (unused here; models use the streaming
+            config's base_device / ft_device).
+
     Returns:
-        (train_buffer, val_data, normalize_mean, normalize_std, activation_dim, steps)
-        - train_buffer: PairedActivationBuffer (iterable; pass as trainSAE `data`)
-        - val_data: list of [B, 2, d] tensors (finite; len() works, as trainSAE expects)
+        Tuple of (train_buffer, val_data, normalize_mean, normalize_std, activation_dim,
+        steps). train_buffer is a PairedActivationBuffer (pass as trainSAE `data`);
+        val_data is a finite list of [B, 2, d_model] tensors (so len() works, as
+        trainSAE's validation loop expects).
     """
     method_cfg = cfg.diffing.method
-    s_cfg = method_cfg.streaming
+    streaming_cfg = method_cfg.streaming
     training_cfg = method_cfg.training
 
     base_model_cfg, ft_model_cfg = get_model_configurations(cfg)
@@ -254,22 +272,23 @@ def setup_streaming_training(cfg: DictConfig, layer: int, device: str):
 
     # Place the two models on their configured devices (model-parallel by default).
     with open_dict(base_model_cfg):
-        base_model_cfg.device_map = s_cfg.base_device
+        base_model_cfg.device_map = streaming_cfg.base_device
     with open_dict(ft_model_cfg):
-        ft_model_cfg.device_map = s_cfg.ft_device
+        ft_model_cfg.device_map = streaming_cfg.ft_device
     base_model = load_model_from_config(base_model_cfg)
     ft_model = load_model_from_config(ft_model_cfg)
     tokenizer = base_model.tokenizer
 
-    base_layer = get_layer_indices(base_model_cfg.model_id, [layer / 1.0])[0] if isinstance(layer, float) else layer
-    base_submodule = base_model.layers[base_layer]
-    ft_submodule = ft_model.layers[base_layer]
+    if isinstance(layer, float):
+        layer = get_layer_indices(base_model_cfg.model_id, [layer])[0]
+    base_submodule = base_model.layers[layer]
+    ft_submodule = ft_model.layers[layer]
     d_model = base_model.config.hidden_size
 
-    # Mixing weights: explicit, else proportional to dataset sizes (matches the disk path's
-    # size-proportional token allocation via calculate_samples_per_dataset).
-    if s_cfg.get("dataset_weights", None) is not None:
-        weights = list(s_cfg.dataset_weights)
+    # Mixing weights: explicit if given, else proportional to dataset sizes (matching the
+    # disk path's size-proportional token allocation via calculate_samples_per_dataset).
+    if streaming_cfg.get("dataset_weights", None) is not None:
+        weights = list(streaming_cfg.dataset_weights)
     else:
         lengths = [
             len(load_dataset_from_hub_or_local(c.id, split="train", name=c.subset))
@@ -280,33 +299,40 @@ def setup_streaming_training(cfg: DictConfig, layer: int, device: str):
         f"Streaming datasets {[c.name for c in dataset_cfgs]} with weights {weights}"
     )
 
-    common = dict(
+    context_len = (
+        cfg.preprocessing.context_len if hasattr(cfg, "preprocessing") else 1024
+    )
+    buffer_kwargs = dict(
         base_model=base_model,
         ft_model=ft_model,
         base_submodule=base_submodule,
         ft_submodule=ft_submodule,
         tokenizer=tokenizer,
         d_model=d_model,
-        context_len=cfg.preprocessing.context_len if hasattr(cfg, "preprocessing") else 1024,
+        context_len=context_len,
         out_batch_size=training_cfg.batch_size,
-        n_ctxs=s_cfg.n_ctxs,
-        buffer_device=s_cfg.buffer_device,
+        n_ctxs=streaming_cfg.n_ctxs,
+        buffer_device=streaming_cfg.buffer_device,
         ignore_first_n_tokens=cfg.model.ignore_first_n_tokens_per_sample_during_training,
-        mask_token_id=s_cfg.get("mask_token_id", None),
+        mask_token_id=streaming_cfg.get("mask_token_id", None),
     )
 
     train_buffer = PairedActivationBuffer(
-        data=_weighted_text_stream(dataset_cfgs, tokenizer, "train", weights, seed=cfg.seed),
-        **common,
+        data=_weighted_text_stream(
+            dataset_cfgs, tokenizer, "train", weights, seed=cfg.seed
+        ),
+        **buffer_kwargs,
     )
 
-    # Finite validation set: pull a fixed number of batches into a list (has len()).
+    # Finite validation set: pull a fixed number of batches into a list (so len() works).
     val_buffer = PairedActivationBuffer(
-        data=_weighted_text_stream(dataset_cfgs, tokenizer, "validation", weights, seed=cfg.seed + 1),
-        **common,
+        data=_weighted_text_stream(
+            dataset_cfgs, tokenizer, "validation", weights, seed=cfg.seed + 1
+        ),
+        **buffer_kwargs,
     )
-    n_val_batches = max(1, training_cfg.num_validation_samples // training_cfg.batch_size)
-    val_data = [next(val_buffer) for _ in range(n_val_batches)]
+    num_val_batches = max(1, training_cfg.num_validation_samples // training_cfg.batch_size)
+    val_data = [next(val_buffer) for _ in range(num_val_batches)]
     logger.info(f"Built {len(val_data)} streaming validation batches")
 
     if method_cfg.datasets.normalization.enabled:
@@ -315,7 +341,12 @@ def setup_streaming_training(cfg: DictConfig, layer: int, device: str):
         normalize_mean, normalize_std = None, None
 
     activation_dim = d_model
-    steps = math.ceil(training_cfg.num_samples * training_cfg.epochs / training_cfg.batch_size)
-    logger.info(f"Streaming training: {steps} steps (≈{training_cfg.num_samples} tokens × {training_cfg.epochs} epochs)")
+    steps = math.ceil(
+        training_cfg.num_samples * training_cfg.epochs / training_cfg.batch_size
+    )
+    logger.info(
+        f"Streaming training for {steps} steps "
+        f"(~{training_cfg.num_samples} tokens x {training_cfg.epochs} epochs)"
+    )
 
     return train_buffer, val_data, normalize_mean, normalize_std, activation_dim, steps
