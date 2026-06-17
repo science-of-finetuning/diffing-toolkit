@@ -44,6 +44,17 @@ from ..model import load_model_from_config
 tracer_kwargs = {"scan": False, "validate": False}
 
 
+def _needs_special_tokens(text: str, tokenizer) -> bool:
+    """Whether to prepend special tokens (BOS) when tokenizing `text`.
+
+    Mirrors the disk path (activation_collection.py): add the BOS only if the text does
+    not already contain it. Chat-templated text usually embeds the BOS, so forcing
+    add_special_tokens=True there would double it.
+    """
+    bos = tokenizer.bos_token
+    return bos is None or bos not in text
+
+
 class PairedActivationBuffer:
     """
     Buffer of paired (base, ft) activations at one layer, refilled on the fly.
@@ -118,6 +129,24 @@ class PairedActivationBuffer:
                 break
         return texts
 
+    def _tokenize_batch(self, texts: List[str]):
+        """Tokenize a batch with a per-text special-tokens decision (matching the disk
+        path), then pad. HF batch tokenization takes a single add_special_tokens flag,
+        but the interleaved stream mixes chat (BOS embedded) and plain rows, so each
+        text is encoded individually and then padded together via tokenizer.pad (which
+        honors padding_side and returns the same BatchEncoding as batch tokenization).
+        """
+        encoded = [
+            self.tokenizer(
+                text,
+                max_length=self.context_len,
+                truncation=True,
+                add_special_tokens=_needs_special_tokens(text, self.tokenizer),
+            )
+            for text in texts
+        ]
+        return self.tokenizer.pad(encoded, padding=True, return_tensors="pt")
+
     def _trace_out(self, model, submodule, tokens) -> torch.Tensor:
         with torch.no_grad(), model.trace(tokens, **tracer_kwargs):
             acts = (
@@ -135,14 +164,7 @@ class PairedActivationBuffer:
             if not texts:
                 break
 
-            tokens = self.tokenizer(
-                texts,
-                max_length=self.context_len,
-                truncation=True,
-                padding=True,
-                return_tensors="pt",
-                add_special_tokens=self.add_special_tokens,
-            )
+            tokens = self._tokenize_batch(texts)
 
             mask = tokens["attention_mask"].clone()
             if self.ignore_first_n_tokens > 0:
@@ -186,7 +208,9 @@ class PairedActivationBuffer:
         idx = torch.randperm(len(self.activations), device=self.activations.device)[:n]
         sample = self.activations[idx].float()
         mean = sample.mean(dim=0)
-        std = sample.std(dim=0, unbiased=True)  # unbiased, matching PairedActivationCache
+        # Biased std, matching the disk path's combine_normalizer (training.py), which
+        # uses std(unbiased=False); the input scaling must be identical between paths.
+        std = sample.std(dim=0, unbiased=False)
         logger.info(f"Computed streaming normalizer from {n} activations")
         return mean, std
 
@@ -213,14 +237,31 @@ def _row_to_text(row, ds_cfg, tokenizer) -> str:
     return row[ds_cfg.text_column or "text"]
 
 
-def _estimate_tokens_per_row(dataset, ds_cfg, tokenizer, sample_size: int = 128) -> float:
-    """Estimate mean tokens per row by tokenizing an evenly-spaced sample."""
+def _estimate_tokens_per_row(
+    dataset, ds_cfg, tokenizer, context_len: int, sample_size: int = 128
+) -> float:
+    """Estimate mean tokens per row on an evenly-spaced sample.
+
+    Tokenizes exactly as the buffer does (truncated to context_len, per-text special
+    tokens) so the row->token conversion behind draw_weights reflects the actually
+    buffered tokens; otherwise long-row datasets are over-counted and the dataset mix
+    skews away from the target token fractions.
+    """
     n = min(sample_size, len(dataset))
     step = max(1, len(dataset) // n)
     counts = []
     for i in range(0, len(dataset), step):
         text = _row_to_text(dataset[i], ds_cfg, tokenizer)
-        counts.append(len(tokenizer(text, add_special_tokens=False)["input_ids"]))
+        counts.append(
+            len(
+                tokenizer(
+                    text,
+                    max_length=context_len,
+                    truncation=True,
+                    add_special_tokens=_needs_special_tokens(text, tokenizer),
+                )["input_ids"]
+            )
+        )
         if len(counts) >= n:
             break
     return sum(counts) / max(1, len(counts))
@@ -289,11 +330,13 @@ def setup_streaming_training(
 
     # Place the two models on their configured devices (model-parallel by default).
     # get_model_configurations returns ModelConfig dataclasses (not OmegaConf nodes),
-    # so device_map is set by direct attribute assignment.
+    # so device_map is set by direct attribute assignment. ignore_cache=True forces a
+    # fresh load: the model cache key omits device_map, so a model loaded earlier on a
+    # different device would otherwise be reused and silently break the base/ft split.
     base_model_cfg.device_map = streaming_cfg.base_device
     ft_model_cfg.device_map = streaming_cfg.ft_device
-    base_model = load_model_from_config(base_model_cfg)
-    ft_model = load_model_from_config(ft_model_cfg)
+    base_model = load_model_from_config(base_model_cfg, ignore_cache=True)
+    ft_model = load_model_from_config(ft_model_cfg, ignore_cache=True)
     tokenizer = base_model.tokenizer
 
     if isinstance(layer, float):
@@ -315,11 +358,15 @@ def setup_streaming_training(
     train_datasets = load_all(train_cfgs)
     val_datasets = load_all(val_cfgs)
 
+    context_len = (
+        cfg.preprocessing.context_len if hasattr(cfg, "preprocessing") else 1024
+    )
+
     # Mixing: draws are per-row but the target is a TOKEN ratio, so convert target token
     # fractions to per-row probabilities by dividing by mean tokens/row. dataset_weights
     # (if given) are target token fractions; else weight by each dataset's total tokens.
     mean_tokens = [
-        _estimate_tokens_per_row(ds, c, tokenizer)
+        _estimate_tokens_per_row(ds, c, tokenizer, context_len)
         for ds, c in zip(train_datasets, train_cfgs)
     ]
     if streaming_cfg.get("dataset_weights", None) is not None:
@@ -336,9 +383,6 @@ def setup_streaming_training(
         draw_weights if len(val_cfgs) == len(train_cfgs) else [1.0] * len(val_cfgs)
     )
 
-    context_len = (
-        cfg.preprocessing.context_len if hasattr(cfg, "preprocessing") else 1024
-    )
     buffer_kwargs = dict(
         base_model=base_model,
         ft_model=ft_model,
@@ -363,11 +407,16 @@ def setup_streaming_training(
 
     # Finite validation set: pull a fixed (small) number of batches into a list so that
     # trainSAE's `len(validation_data)` works without materializing millions of rows.
+    # Use batch_size * 4 to match the disk path's validation loader (training.py
+    # overwrite_batch_size); BatchTopK's sparsity threshold is batch-size dependent, so
+    # the val batch size must match for the metrics to be comparable. (Total val tokens
+    # are still a bounded approximation of the disk path's num_validation_samples.)
+    val_buffer_kwargs = {**buffer_kwargs, "out_batch_size": training_cfg.batch_size * 4}
     val_buffer = PairedActivationBuffer(
         data=_make_text_stream(
             val_datasets, val_cfgs, tokenizer, val_weights, seed=cfg.seed + 1
         ),
-        **buffer_kwargs,
+        **val_buffer_kwargs,
     )
     num_val_batches = streaming_cfg.get("num_val_batches", 50)
     val_data = [next(val_buffer) for _ in range(num_val_batches)]
