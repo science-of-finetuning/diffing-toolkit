@@ -375,6 +375,9 @@ def setup_streaming_training(
 
     if method_cfg.datasets.normalization.enabled:
         normalize_mean, normalize_std = train_buffer.compute_normalizer()
+        # Return the normalizer on the training device (the buffer may live elsewhere)
+        normalize_mean = normalize_mean.to(device)
+        normalize_std = normalize_std.to(device)
     else:
         normalize_mean, normalize_std = None, None
 

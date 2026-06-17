@@ -7,7 +7,7 @@ streaming:
   enabled: false
   base_device: cuda:0
   ft_device: null         # Auto: second GPU if present, else base_device; set explicitly to override
-  buffer_device: cpu      # Shuffle buffer device
+  buffer_device: cpu      # CPU or a single cuda device (cuts transfers, must fit in VRAM)
   n_ctxs: 1000            # Buffer size in contexts (rows = n_ctxs * context_len)
   num_val_batches: 50     # Finite validation batches pulled at setup
   dataset_weights: null   # Target token fractions per dataset; null -> by total tokens
