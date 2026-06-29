@@ -55,7 +55,7 @@ def finetuned_model(tokenizer):
         device_map=DEVICE,
     )
     model.dispatch()
-    model.load_adapter("monsterapi/gpt2_alpaca-lora")
+    model._model.load_adapter("monsterapi/gpt2_alpaca-lora")
     model.eval()
     return model
 

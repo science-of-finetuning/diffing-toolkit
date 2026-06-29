@@ -46,7 +46,7 @@ def finetuned_model():
         device_map="cuda" if CUDA_AVAILABLE else "cpu",
     )
     model.dispatch()
-    model.load_adapter("monsterapi/gpt2_alpaca-lora")
+    model._model.load_adapter("monsterapi/gpt2_alpaca-lora")
     model.eval()
     return model
 

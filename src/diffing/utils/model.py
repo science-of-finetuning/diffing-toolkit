@@ -349,7 +349,7 @@ def load_model(
                     adapter_kwargs = (
                         {"subfolder": adapter_subfolder} if adapter_subfolder else {}
                     )
-                    model.load_adapter(
+                    model._model.load_adapter(
                         adapter_id,
                         adapter_name=adapter_name,
                         adapter_kwargs=adapter_kwargs,
