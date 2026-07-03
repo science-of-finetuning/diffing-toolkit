@@ -121,13 +121,13 @@ def run_evaluation(
     if lora_path is not None:
         adapter_name = lora_path
         if adapter_name not in model.peft_config:
-            model.load_adapter(
+            model._model.load_adapter(
                 lora_path,
                 adapter_name=adapter_name,
                 is_trainable=False,
                 low_cpu_mem_usage=True,
             )
-        model.set_adapter(adapter_name)
+        model._model.set_adapter(adapter_name)
     with torch.no_grad():
         all_feature_results: list[FeatureResult] = []
         for i in tqdm(

@@ -65,7 +65,7 @@ def models():
         device_map=DEVICE,
         tokenizer=tokenizer,
     )
-    finetuned_model.load_adapter(FINETUNED_MODEL)
+    finetuned_model._model.load_adapter(FINETUNED_MODEL)
     finetuned_model.eval()
 
     return base_model, finetuned_model, tokenizer

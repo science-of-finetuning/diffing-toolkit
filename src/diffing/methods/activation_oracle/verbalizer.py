@@ -306,7 +306,7 @@ def collect_target_responses(
     device: torch.device,
 ) -> list[list[dict[str, str]]]:
     if target_lora_path is not None:
-        model.set_adapter(target_lora_path)
+        model._model.set_adapter(target_lora_path)
     new_messages: list[list[dict[str, str]]] = []
 
     for i in range(0, len(context_prompts), config.eval_batch_size):
@@ -345,7 +345,7 @@ def collect_target_activations(
     if "lora" in config.activation_input_types:
         model.enable_adapters()
         if target_lora_path is not None:
-            model.set_adapter(target_lora_path)
+            model._model.set_adapter(target_lora_path)
         else:
             print(
                 "\n\n\n\nWarning: target_lora_path is None, collecting lora activations from base model"
@@ -515,7 +515,7 @@ def run_verbalizer(
                 )
 
         if verbalizer_lora_path is not None:
-            model.set_adapter(verbalizer_lora_path)
+            model._model.set_adapter(verbalizer_lora_path)
 
         # Run evaluation once for the giant batch
         responses = run_evaluation(
@@ -607,7 +607,7 @@ def load_lora_adapter(model: AutoModelForCausalLM, lora_path: str) -> str:
 
     if sanitized_lora_name not in model.peft_config:
         logger.info(f"Loading LoRA: {lora_path}")
-        model.load_adapter(
+        model._model.load_adapter(
             lora_path,
             adapter_name=sanitized_lora_name,
             is_trainable=False,

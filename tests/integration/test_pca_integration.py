@@ -57,7 +57,7 @@ def finetuned_model():
         device_map=DEVICE,
     )
     model.dispatch()
-    model.load_adapter(FINETUNED_MODEL_ID)
+    model._model.load_adapter(FINETUNED_MODEL_ID)
     model.eval()
     return model
 

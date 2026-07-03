@@ -142,7 +142,7 @@ class ActivationOracleMethod(DiffingMethod):
 
         # Add dummy adapter so peft_config exists and we can use the consistent PeftModel API
         dummy_config = LoraConfig()
-        model.add_adapter(dummy_config, adapter_name="default")
+        model._model.add_adapter(dummy_config, adapter_name="default")
 
         # Get sanitized adapter names for switching
         verbalizer_lora_name = sanitize_lora_name(verbalizer_lora_id)
