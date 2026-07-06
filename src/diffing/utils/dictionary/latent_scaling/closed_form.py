@@ -405,6 +405,72 @@ def compute_scalers_from_config(
             shared_dir / "indices.pt",
         )
 
+    # Symmetric pass probing with the base decoder: the ft probe is degenerate for
+    # base-only latents (d_ft ~ 0), so score the top-K highest-dec_norm_diff pool with
+    # d_base instead; beta_ft/beta_base -> 0 marks base-only, ~1 shared.
+    compute_base_only = bool(ls_cfg.get("compute_base_only", False))
+    if compute_base_only and is_sae:
+        logger.warning("compute_base_only requires a CrossCoder; skipping for SAE runs")
+        compute_base_only = False
+    if compute_base_only:
+        base_pool_dir = (
+            results_dir / "closed_form_scalars" / "effective_base_only_latents"
+        )
+        base_targets = {
+            target: target in ls_cfg.targets
+            for target in [
+                "ft_error",
+                "base_error",
+                "ft_reconstruction",
+                "base_reconstruction",
+            ]
+        }
+        if not ls_cfg.overwrite:
+            for target in base_targets:
+                base_targets[target] = base_targets[target] and not betas_exist(
+                    base_pool_dir, num_samples, target
+                )
+        if any(base_targets.values()):
+            df_base = load_latent_df(dictionary_model)
+            num_base_only = int(
+                ls_cfg.get(
+                    "num_effective_base_only_latents", num_effective_ft_only_latents
+                )
+            )
+            if num_base_only == -1:
+                base_only_indices = df_base.query("tag == 'base_only'").index.tolist()
+            else:
+                base_only_indices = (
+                    df_base.sort_values(by="dec_norm_diff", ascending=False)
+                    .head(num_base_only)
+                    .index.tolist()
+                )
+            logger.info(
+                f"Computing base-probe scalars {[t for t, v in base_targets.items() if v]} "
+                f"for {len(base_only_indices)} effective base-only latents"
+            )
+            compute_scalers(
+                dataset=dataset,
+                dictionary_model=dictionary_model,
+                results_dir=results_dir,
+                latent_indices=th.tensor(base_only_indices),
+                latent_indices_name="effective_base_only_latents",
+                num_samples=num_samples,
+                ft_error=base_targets["ft_error"],
+                base_error=base_targets["base_error"],
+                ft_reconstruction=base_targets["ft_reconstruction"],
+                base_reconstruction=base_targets["base_reconstruction"],
+                is_sae=is_sae,
+                sae_model=sae_model,
+                is_difference_sae=is_difference_sae,
+                smaller_batch_size_for_error=True,
+                batch_size=ls_cfg.batch_size,
+                num_workers=ls_cfg.num_workers,
+                probe_decoder="base",
+            )
+            base_pool_dir.mkdir(parents=True, exist_ok=True)
+            th.save(base_only_indices, base_pool_dir / "indices.pt")
+
 
 def compute_scalers(
     dataset: ActivationCache,
@@ -438,6 +504,7 @@ def compute_scalers(
     is_difference_sae: bool = False,
     sae_model: Literal["base", "chat"] | None = None,
     smaller_batch_size_for_error: bool = False,
+    probe_decoder: Literal["ft", "base"] = "ft",
 ) -> None:
     """
     Compute closed-form scalars (betas) for latent scaling analysis.
@@ -485,6 +552,11 @@ def compute_scalers(
         is_difference_sae: Whether the dictionary is a difference SAE (default: False)
         sae_model: Which model to use for SAE ("base" or "chat") (default: None)
         smaller_batch_size_for_error: Use 8x smaller batch size for error computations to reduce memory usage (default: False)
+        probe_decoder: Which decoder supplies the probe directions regressed onto the targets
+            (default: "ft", the historical behaviour). "base" probes with the base decoder —
+            used to score base-only candidate latents, for which the ft decoder is ~0 and
+            therefore a degenerate probe. Error-target removal terms always stay each model's
+            OWN decoder regardless of the probe. "base" requires a CrossCoder.
 
     Returns:
         None (saves results to disk)
@@ -640,9 +712,25 @@ def compute_scalers(
             ("ft_reconstruction", partial(load_ft_reconstruction, normalize=True))
         )
     if ft_error:
-        computations.append(("ft_error", partial(load_ft_error, normalize=True)))
+        # With a base probe, the ft-error removal must stay the ft model's own decoder
+        computations.append(
+            (
+                "ft_error",
+                partial(
+                    load_ft_error,
+                    ft_decoder=ft_decoder if probe_decoder == "base" else None,
+                    normalize=True,
+                ),
+            )
+        )
 
-    latent_vectors = ft_decoder[latent_indices].clone()
+    if probe_decoder == "base":
+        assert isinstance(
+            dict_model, CrossCoder
+        ), "probe_decoder='base' only makes sense for a CrossCoder (an SAE has a single decoder)"
+        latent_vectors = base_decoder[latent_indices].clone()
+    else:
+        latent_vectors = ft_decoder[latent_indices].clone()
     if random_vectors:
         random_vectors = th.randn(
             len(latent_indices), dict_model.activation_dim, device=device

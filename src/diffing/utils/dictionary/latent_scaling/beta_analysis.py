@@ -69,6 +69,20 @@ def update_latent_df_with_beta_values(
         df = add_possible_cols(df, shared_indices, shared_error_betas)
         df["shared_baseline_latent"] = False
         df.loc[shared_indices, "shared_baseline_latent"] = True
+    if Path(betas_dir / "effective_base_only_latents" / "indices.pt").exists():
+        base_specific_indices = th.load(
+            betas_dir / "effective_base_only_latents" / "indices.pt"
+        )
+        if isinstance(base_specific_indices, th.Tensor):
+            base_specific_indices = base_specific_indices.tolist()
+        base_probe_betas = load_betas_results(
+            betas_dir / "effective_base_only_latents",
+            configs,
+            num_samples=num_samples,
+        )
+        df = add_base_probe_cols(df, base_specific_indices, base_probe_betas)
+        df["effective_base_only_latent"] = False
+        df.loc[base_specific_indices, "effective_base_only_latent"] = True
     push_latent_df(df, crosscoder, confirm=False)
     return df
 
@@ -192,6 +206,49 @@ def add_possible_cols(df, indices, betas):
         )
         df["beta_activation_no_bias_ratio"] = (
             df["beta_activation_no_bias_base"] / df["beta_activation_no_bias_ft"]
+        )
+
+    return df
+
+
+def add_base_probe_cols(df, indices, betas):
+    """Add the base-probe (base-only pool) beta columns. Same betas files as
+    `add_possible_cols`, but computed with probe_decoder="base", so the columns get a
+    `_dbase` suffix. The ratios are other-model/own-model: beta_ft/beta_base -> 0 means
+    genuinely base-only, ~1 means the latent is actually present in both models."""
+    if (
+        betas["normal"]["base"]["error"] is not None
+        and betas["normal"]["ft"]["error"] is not None
+    ):
+        print("Adding beta_error_base_dbase and beta_error_ft_dbase")
+        df = add_col_to_df(
+            df, indices, "beta_error_base_dbase", betas["normal"]["base"]["error"]
+        )
+        df = add_col_to_df(
+            df, indices, "beta_error_ft_dbase", betas["normal"]["ft"]["error"]
+        )
+        df["beta_ratio_error_base_only"] = (
+            df["beta_error_ft_dbase"] / df["beta_error_base_dbase"]
+        )
+
+    if (
+        betas["normal"]["base"]["reconstruction"] is not None
+        and betas["normal"]["ft"]["reconstruction"] is not None
+    ):
+        df = add_col_to_df(
+            df,
+            indices,
+            "beta_reconstruction_base_dbase",
+            betas["normal"]["base"]["reconstruction"],
+        )
+        df = add_col_to_df(
+            df,
+            indices,
+            "beta_reconstruction_ft_dbase",
+            betas["normal"]["ft"]["reconstruction"],
+        )
+        df["beta_ratio_reconstruction_base_only"] = (
+            df["beta_reconstruction_ft_dbase"] / df["beta_reconstruction_base_dbase"]
         )
 
     return df

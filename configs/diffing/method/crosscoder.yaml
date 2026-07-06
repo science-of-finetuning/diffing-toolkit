@@ -65,6 +65,8 @@ analysis:
     device: "cuda"
     dtype: "float32"
     num_effective_ft_only_latents: 5000
+    compute_base_only: false  # Also probe with the base decoder (the ft probe cannot rank base-only latents)
+    num_effective_base_only_latents: 5000
     overwrite: false
 
   latent_activations: # Collect latent activations for all datasets and layers
