@@ -137,10 +137,6 @@ class SteeringDashboard:
                         )
                 elif steering_mode == "linear_decay":
                     # Apply a per-step decaying steering factor over the first N generation steps.
-                    # nnsight 0.7 removed the envoy `.next()` cursor; `tracer.iter[:N]` (available
-                    # since 0.6) yields the step index and advances automatically. Bounded (not
-                    # `[:]`) so the `save()` below still runs — an unbounded iterator blocks
-                    # everything after it.
                     for i in tracer.iter[:linear_decay_steps]:
                         if i == 0:
                             model.layers_output[self.layer] += (
