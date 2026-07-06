@@ -136,8 +136,8 @@ class SteeringDashboard:
                             steering_factor * latent_vector
                         )
                 elif steering_mode == "linear_decay":
-                    # Apply steering to all tokens (prompt + generated)
-                    for i in range(linear_decay_steps):
+                    # Apply a per-step decaying steering factor over the first N generation steps.
+                    for i in tracer.iter[:linear_decay_steps]:
                         if i == 0:
                             model.layers_output[self.layer] += (
                                 steering_factor_per_token[i] * latent_vector
@@ -149,7 +149,6 @@ class SteeringDashboard:
                             model.layers_output[self.layer][:, 0] += (
                                 steering_factor_per_token[i] * latent_vector
                             )
-                        model.layers[self.layer].next()
                 else:  # prompt_only
                     # Apply steering only during prompt processing
                     model.layers_output[self.layer] += steering_factor * latent_vector
