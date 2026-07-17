@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import Dict, Tuple, List, Optional
 from omegaconf import DictConfig, OmegaConf
@@ -5,7 +6,8 @@ from loguru import logger
 from hydra import initialize, compose
 from pathlib import Path
 
-HF_NAME = "science-of-finetuning"
+# HF namespace for pushing/loading dictionaries, stats and configs (env-overridable)
+HF_NAME = os.environ.get("DIFFING_HF_NAMESPACE", "science-of-finetuning")
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
 CONFIGS_DIR = PROJECT_ROOT / "configs"
 
