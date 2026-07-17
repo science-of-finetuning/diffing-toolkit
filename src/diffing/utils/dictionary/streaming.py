@@ -280,12 +280,15 @@ def setup_streaming_training(cfg: DictConfig, layer: int, device: str) -> Tuple[
 
     # ModelConfig is a dataclass, so set device_map directly. ignore_cache=True because
     # the model cache key omits device_map and would return a wrongly-placed model.
-    # ft_device null = auto: second GPU if present, else same device as the base model
+    # ft_device null = auto: a second GPU distinct from base_device if present, else share
     ft_device = streaming_cfg.ft_device
     if ft_device is None:
-        ft_device = (
-            "cuda:1" if torch.cuda.device_count() > 1 else streaming_cfg.base_device
-        )
+        if torch.cuda.device_count() > 1:
+            ft_device = (
+                "cuda:1" if str(streaming_cfg.base_device) != "cuda:1" else "cuda:0"
+            )
+        else:
+            ft_device = streaming_cfg.base_device
         logger.info(f"streaming.ft_device=null resolved to {ft_device}")
 
     base_model_cfg.device_map = streaming_cfg.base_device
@@ -380,9 +383,11 @@ def setup_streaming_training(cfg: DictConfig, layer: int, device: str) -> Tuple[
         normalize_mean, normalize_std = None, None
 
     activation_dim = d_model
-    steps = math.ceil(
-        training_cfg.num_samples * training_cfg.epochs / training_cfg.batch_size
-    )
+    steps = training_cfg.max_steps
+    if steps is None:
+        steps = math.ceil(
+            training_cfg.num_samples * training_cfg.epochs / training_cfg.batch_size
+        )
     logger.info(
         f"Streaming training for {steps} steps "
         f"(~{training_cfg.num_samples} tokens x {training_cfg.epochs} epochs)"
