@@ -1,29 +1,10 @@
 """
-Streaming activations for crosscoder training.
+Opt-in streaming activations for crosscoder training.
 
-The default crosscoder path caches paired activations to disk (preprocessing) and
-trains from that cache. For large token budgets this cache can reach the multi-TB
-range. This module provides an opt-in alternative that computes paired activations on
-the fly into an in-memory shuffle buffer, so the big *training* pass needs no disk cache.
-
-Scope: this replaces only the training data source. Analysis (latent scaling,
-max-activating examples, ...) still reads the (small) activation caches produced by
-preprocessing, so a small preprocessing run remains the way to feed analysis.
-
-Enable via the method config:
-
-    diffing:
-      method:
-        streaming:
-          enabled: true
-          base_device: cuda:0   # device for the base model forward pass
-          ft_device: cuda:1     # device for the finetuned model forward pass
-          buffer_device: cpu    # where the (large) shuffle buffer lives
-          n_ctxs: 1000          # contexts held in the buffer (rows = n_ctxs * context_len)
-          num_val_batches: 50   # finite validation batches pulled at setup
-          dataset_weights: null # target token fractions per dataset (null -> by total tokens)
-
-When `enabled` is false (the default) nothing here runs and the disk path is unchanged.
+Computes paired (base, ft) activations on the fly into an in-memory shuffle buffer
+instead of training from the disk activation cache (multi-TB at large token budgets).
+Training only: analysis still reads the preprocessing caches. Enabled via
+diffing.method.streaming.enabled; when false (default) the disk path is unchanged.
 """
 
 import math
@@ -40,17 +21,12 @@ from ..configs import get_dataset_configurations, get_model_configurations
 from ..data import load_dataset_from_hub_or_local
 from ..model import load_model_from_config
 
-# nnsight tracing flags, matching dictionary_learning.cache and the preprocessing pipeline.
+# Tracing flags matching dictionary_learning.cache and the preprocessing pipeline
 tracer_kwargs = {"scan": False, "validate": False}
 
 
 def _needs_special_tokens(text: str, tokenizer) -> bool:
-    """Whether to prepend special tokens (BOS) when tokenizing `text`.
-
-    Mirrors the disk path (activation_collection.py): add the BOS only if the text does
-    not already contain it. Chat-templated text usually embeds the BOS, so forcing
-    add_special_tokens=True there would double it.
-    """
+    """Add BOS only if `text` does not already embed it (chat templates do); mirrors the disk path."""
     bos = tokenizer.bos_token
     return bos is None or bos not in text
 
@@ -59,24 +35,19 @@ class PairedActivationBuffer:
     """
     Buffer of paired (base, ft) activations at one layer, refilled on the fly.
 
-    Both models are assumed to share the tokenizer, so each text batch is tokenized once
-    and the identical token ids are fed to both models; the per-token (base, ft) pairing
-    is then exact by construction. Yields tensors of shape [out_batch_size, 2, d_model],
-    matching PairedActivationCache (so it is a drop-in for the training DataLoader).
-
-    The two models may live on different devices (model-parallel); kept positions are
-    gathered onto `buffer_device` before stacking. trainSAE consumes this by plain
-    iteration bounded by `steps`; it needs no __len__.
+    Both models share the tokenizer: each batch is tokenized once and the same token ids
+    are fed to both models. Yields [out_batch_size, 2, d_model] tensors, drop-in for
+    PairedActivationCache in the training DataLoader.
     """
 
     def __init__(
         self,
-        data: Iterator[str],  # yields pre-templated training strings
-        base_model,  # nnsight StandardizedTransformer (base/normal)
-        ft_model,  # nnsight StandardizedTransformer (finetuned)
-        base_submodule,  # layer module of base_model to read, e.g. model.layers[L]
-        ft_submodule,  # layer module of ft_model to read
-        tokenizer,  # shared tokenizer
+        data: Iterator[str],
+        base_model,
+        ft_model,
+        base_submodule,
+        ft_submodule,
+        tokenizer,
         d_model: int,
         context_len: int = 1024,
         refresh_batch_size: int = 64,
@@ -103,8 +74,7 @@ class PairedActivationBuffer:
         self.add_special_tokens = add_special_tokens
         self.mask_token_id = mask_token_id
 
-        # Dropping the first n tokens only makes sense with right-padding (else the mask
-        # would zero out padding, not the leading real tokens).
+        # Right-padding is required with ignore_first_n_tokens, else it would mask padding
         if ignore_first_n_tokens > 0:
             self.tokenizer.padding_side = "right"
 
@@ -130,12 +100,8 @@ class PairedActivationBuffer:
         return texts
 
     def _tokenize_batch(self, texts: List[str]):
-        """Tokenize a batch with a per-text special-tokens decision (matching the disk
-        path), then pad. HF batch tokenization takes a single add_special_tokens flag,
-        but the interleaved stream mixes chat (BOS embedded) and plain rows, so each
-        text is encoded individually and then padded together via tokenizer.pad (which
-        honors padding_side and returns the same BatchEncoding as batch tokenization).
-        """
+        """Tokenize each text with its own special-tokens decision (the stream mixes
+        chat and plain rows), then pad together."""
         encoded = [
             self.tokenizer(
                 text,
@@ -176,8 +142,7 @@ class PairedActivationBuffer:
             base_acts = self._trace_out(self.base_model, self.base_submodule, tokens)
             ft_acts = self._trace_out(self.ft_model, self.ft_submodule, tokens)
 
-            # Select kept positions on each model's own device, then gather onto
-            # buffer_device (base and ft may be on different GPUs under model-parallel).
+            # Base and ft may sit on different GPUs; gather onto buffer_device
             base_sel = base_acts[flat_mask.to(base_acts.device)].to(self.buffer_device)
             ft_sel = ft_acts[flat_mask.to(ft_acts.device)].to(self.buffer_device)
             paired = torch.stack([base_sel, ft_sel], dim=1)
@@ -208,8 +173,7 @@ class PairedActivationBuffer:
         idx = torch.randperm(len(self.activations), device=self.activations.device)[:n]
         sample = self.activations[idx].float()
         mean = sample.mean(dim=0)
-        # Biased std, matching the disk path's combine_normalizer (training.py), which
-        # uses std(unbiased=False); the input scaling must be identical between paths.
+        # Biased std to match the disk path's combine_normalizer
         std = sample.std(dim=0, unbiased=False)
         logger.info(f"Computed streaming normalizer from {n} activations")
         return mean, std
@@ -240,13 +204,8 @@ def _row_to_text(row, ds_cfg, tokenizer) -> str:
 def _estimate_tokens_per_row(
     dataset, ds_cfg, tokenizer, context_len: int, sample_size: int = 128
 ) -> float:
-    """Estimate mean tokens per row on an evenly-spaced sample.
-
-    Tokenizes exactly as the buffer does (truncated to context_len, per-text special
-    tokens) so the row->token conversion behind draw_weights reflects the actually
-    buffered tokens; otherwise long-row datasets are over-counted and the dataset mix
-    skews away from the target token fractions.
-    """
+    """Mean tokens per row on an evenly-spaced sample, tokenized exactly as the buffer
+    does (truncation included) so draw_weights reflect the actually buffered tokens."""
     n = min(sample_size, len(dataset))
     step = max(1, len(dataset) // n)
     counts = []
@@ -270,13 +229,8 @@ def _estimate_tokens_per_row(
 def _make_text_stream(
     datasets: List, dataset_cfgs: List, tokenizer, draw_weights: List[float], seed: int
 ) -> Iterator[str]:
-    """
-    Infinite weighted-interleave generator over pre-loaded datasets' text.
-
-    At each step a dataset is chosen with probability proportional to `draw_weights`,
-    then a random row is drawn from it (sampling with replacement - cheap, and fine for
-    a stream bounded externally by the trainer's `steps`). Never ends on its own.
-    """
+    """Infinite weighted interleave: pick a dataset by `draw_weights`, then a random row
+    (with replacement; the stream is bounded externally by the trainer's `steps`)."""
     rng = random.Random(seed)
 
     def sample(ds, ds_cfg):
@@ -312,9 +266,7 @@ def setup_streaming_training(
 
     Returns:
         Tuple of (train_buffer, val_data, normalize_mean, normalize_std, activation_dim,
-        steps). train_buffer is a PairedActivationBuffer (pass as trainSAE `data`);
-        val_data is a finite list of [B, 2, d_model] tensors (so len() works, as
-        trainSAE's validation loop expects).
+        steps); val_data is a finite list of [B, 2, d_model] tensors.
     """
     method_cfg = cfg.diffing.method
     streaming_cfg = method_cfg.streaming
@@ -328,11 +280,8 @@ def setup_streaming_training(
         use_training_dataset=method_cfg.datasets.use_training_dataset,
     )
 
-    # Place the two models on their configured devices (model-parallel by default).
-    # get_model_configurations returns ModelConfig dataclasses (not OmegaConf nodes),
-    # so device_map is set by direct attribute assignment. ignore_cache=True forces a
-    # fresh load: the model cache key omits device_map, so a model loaded earlier on a
-    # different device would otherwise be reused and silently break the base/ft split.
+    # ModelConfig is a dataclass, so set device_map directly. ignore_cache=True because
+    # the model cache key omits device_map and would return a wrongly-placed model.
     base_model_cfg.device_map = streaming_cfg.base_device
     ft_model_cfg.device_map = streaming_cfg.ft_device
     base_model = load_model_from_config(base_model_cfg, ignore_cache=True)
@@ -345,7 +294,6 @@ def setup_streaming_training(
     ft_submodule = ft_model.layers[layer]
     d_model = base_model.hidden_size
 
-    # get_dataset_configurations emits one config per (dataset, split); split them.
     train_cfgs = [c for c in dataset_cfgs if c.split == "train"]
     val_cfgs = [c for c in dataset_cfgs if c.split == "validation"] or train_cfgs
 
@@ -362,9 +310,8 @@ def setup_streaming_training(
         cfg.preprocessing.context_len if hasattr(cfg, "preprocessing") else 1024
     )
 
-    # Mixing: draws are per-row but the target is a TOKEN ratio, so convert target token
-    # fractions to per-row probabilities by dividing by mean tokens/row. dataset_weights
-    # (if given) are target token fractions; else weight by each dataset's total tokens.
+    # Draws are per-row but dataset_weights are token fractions; divide by mean
+    # tokens/row to get per-row probabilities
     mean_tokens = [
         _estimate_tokens_per_row(ds, c, tokenizer, context_len)
         for ds, c in zip(train_datasets, train_cfgs)
@@ -405,12 +352,8 @@ def setup_streaming_training(
         **buffer_kwargs,
     )
 
-    # Finite validation set: pull a fixed (small) number of batches into a list so that
-    # trainSAE's `len(validation_data)` works without materializing millions of rows.
-    # Use batch_size * 4 to match the disk path's validation loader (training.py
-    # overwrite_batch_size); BatchTopK's sparsity threshold is batch-size dependent, so
-    # the val batch size must match for the metrics to be comparable. (Total val tokens
-    # are still a bounded approximation of the disk path's num_validation_samples.)
+    # Finite list so trainSAE's len(validation_data) works. batch_size * 4 matches the
+    # disk path's validation loader (BatchTopK's threshold is batch-size dependent).
     val_buffer_kwargs = {**buffer_kwargs, "out_batch_size": training_cfg.batch_size * 4}
     val_buffer = PairedActivationBuffer(
         data=_make_text_stream(
