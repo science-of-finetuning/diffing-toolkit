@@ -6,7 +6,7 @@ requires_preprocessing: true
 streaming:
   enabled: false
   base_device: cuda:0
-  ft_device: cuda:1
+  ft_device: null         # Auto: second GPU if present, else base_device; set explicitly to override
   buffer_device: cpu      # Shuffle buffer device
   n_ctxs: 1000            # Buffer size in contexts (rows = n_ctxs * context_len)
   num_val_batches: 50     # Finite validation batches pulled at setup

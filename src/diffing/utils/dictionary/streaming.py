@@ -282,8 +282,16 @@ def setup_streaming_training(
 
     # ModelConfig is a dataclass, so set device_map directly. ignore_cache=True because
     # the model cache key omits device_map and would return a wrongly-placed model.
+    # ft_device null = auto: second GPU if present, else same device as the base model
+    ft_device = streaming_cfg.ft_device
+    if ft_device is None:
+        ft_device = (
+            "cuda:1" if torch.cuda.device_count() > 1 else streaming_cfg.base_device
+        )
+        logger.info(f"streaming.ft_device=null resolved to {ft_device}")
+
     base_model_cfg.device_map = streaming_cfg.base_device
-    ft_model_cfg.device_map = streaming_cfg.ft_device
+    ft_model_cfg.device_map = ft_device
     base_model = load_model_from_config(base_model_cfg, ignore_cache=True)
     ft_model = load_model_from_config(ft_model_cfg, ignore_cache=True)
     tokenizer = base_model.tokenizer
