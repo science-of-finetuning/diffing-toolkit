@@ -245,9 +245,7 @@ def _make_text_stream(
         yield next(rng.choices(gens, weights=probs, k=1)[0])
 
 
-def setup_streaming_training(
-    cfg: DictConfig, layer: int, device: str
-) -> Tuple[
+def setup_streaming_training(cfg: DictConfig, layer: int, device: str) -> Tuple[
     PairedActivationBuffer,
     List[torch.Tensor],
     Optional[torch.Tensor],

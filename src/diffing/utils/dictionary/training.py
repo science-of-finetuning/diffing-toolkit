@@ -654,16 +654,22 @@ def train_crosscoder_for_layer(
         epoch_idx_per_step = None
 
         trainer_config = create_crosscoder_trainer_config(
-            cfg, layer_idx, activation_dim, device, normalize_mean, normalize_std, run_name
+            cfg,
+            layer_idx,
+            activation_dim,
+            device,
+            normalize_mean,
+            normalize_std,
+            run_name,
         )
         trainer_config["steps"] = max_steps
         validate_every_n_steps = cfg.diffing.method.training.validate_every_n_steps
 
         logger.info(f"Streaming training configuration: {trainer_config['wandb_name']}")
-        logger.info(f"Training steps: {max_steps}, validation every: {validate_every_n_steps}")
-        checkpoint_dir = (
-            f"{cfg.infrastructure.storage.checkpoint_dir}/{trainer_config['wandb_name']}"
+        logger.info(
+            f"Training steps: {max_steps}, validation every: {validate_every_n_steps}"
         )
+        checkpoint_dir = f"{cfg.infrastructure.storage.checkpoint_dir}/{trainer_config['wandb_name']}"
 
         model, last_eval_logs = trainSAE(
             data=train_data,
