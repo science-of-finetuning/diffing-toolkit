@@ -147,8 +147,13 @@ def push_latent_df(
                 if "float" in str(original_df[column].dtype):
                     diff_ratio = (
                         ~np.isclose(
-                            original_df[column].values,
-                            df[column].values,
+                            np.array(
+                                original_df[column].values,
+                                dtype=original_df[column].dtype,
+                            ),
+                            np.array(
+                                df[column].values, dtype=original_df[column].dtype
+                            ),
                             equal_nan=True,
                         )
                     ).mean() * 100
