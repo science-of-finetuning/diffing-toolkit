@@ -429,23 +429,34 @@ def _generate_with_steering_batched_single_mode(
 
     hidden_size = model.hidden_size
 
+    # Dispatch first: before dispatch, .parameters() returns meta tensors under device_map="auto"
+    if not model.dispatched:
+        model.dispatch()
+
+    # Steering tensors must live on the steered layer's device, which under
+    # model-parallel or device_map="auto" is not necessarily `device`
+    try:
+        steer_device = next(model.layers[layer].parameters()).device
+    except (StopIteration, AttributeError, IndexError):
+        steer_device = device
+
     for config in configs:
         if config.get("is_baseline", False):
             # No steering for baseline
-            steering_vectors.append(torch.zeros(hidden_size, device=device))
+            steering_vectors.append(torch.zeros(hidden_size, device=steer_device))
             steering_factors.append(0.0)
         else:
             latent_vector = get_latent_fn(config["latent_idx"])
             assert latent_vector.shape == (
                 hidden_size,
             ), f"Expected latent vector shape ({hidden_size},), got {latent_vector.shape}"
-            steering_vectors.append(latent_vector.to(device))
+            steering_vectors.append(latent_vector.to(steer_device))
             steering_factors.append(config["steering_factor"])
 
     # Stack steering vectors: [batch_size, hidden_dim]
     steering_vectors_batch = torch.stack(steering_vectors)
     steering_factors_tensor = torch.tensor(
-        steering_factors, device=device
+        steering_factors, device=steer_device
     )  # [batch_size]
 
     assert steering_vectors_batch.shape == (
