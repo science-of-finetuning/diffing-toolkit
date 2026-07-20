@@ -146,6 +146,9 @@ class PairedActivationBuffer:
             base_sel = base_acts[flat_mask.to(base_acts.device)].to(self.buffer_device)
             ft_sel = ft_acts[flat_mask.to(ft_acts.device)].to(self.buffer_device)
             paired = torch.stack([base_sel, ft_sel], dim=1)
+            if len(self.activations) == 0:
+                # Match the models' dtype: float32 would double buffer memory
+                self.activations = self.activations.to(paired.dtype)
             self.activations = torch.cat([self.activations, paired], dim=0)
 
         self.read = torch.zeros(
