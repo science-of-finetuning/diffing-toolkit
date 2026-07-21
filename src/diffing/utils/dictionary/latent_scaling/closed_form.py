@@ -268,7 +268,33 @@ def compute_scalers_from_config(
 
     logger.info(f"Scalers to compute: {scalers_to_compute}")
 
-    if len(scalers_to_compute) == 0:
+    # The base-probe pass may still be pending even when every ft-probe target exists
+    # (e.g. resuming a finished run with compute_base_only newly enabled).
+    base_only_pending = (
+        bool(ls_cfg.get("compute_base_only", False))
+        and not is_sae
+        and any(
+            target in ls_cfg.targets
+            and (
+                ls_cfg.overwrite
+                or not betas_exist(
+                    results_dir
+                    / "closed_form_scalars"
+                    / "effective_base_only_latents",
+                    num_samples,
+                    target,
+                )
+            )
+            for target in (
+                "ft_error",
+                "base_error",
+                "ft_reconstruction",
+                "base_reconstruction",
+            )
+        )
+    )
+
+    if len(scalers_to_compute) == 0 and not base_only_pending:
         logger.info("No scalers to compute, exiting")
         return
 
