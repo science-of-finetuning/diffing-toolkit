@@ -635,6 +635,88 @@ def train_crosscoder_for_layer(
     """
     logger.info(f"Training crosscoder for layer {layer_idx}")
 
+    # Streaming path (opt-in): compute paired activations on the fly instead of reading a
+    # disk cache. Disabled by default -> the disk path below is unchanged.
+    streaming_enabled = OmegaConf.select(
+        cfg, "diffing.method.streaming.enabled", default=False
+    )
+    if streaming_enabled:
+        from .streaming import setup_streaming_training
+
+        (
+            train_data,
+            val_data,
+            normalize_mean,
+            normalize_std,
+            activation_dim,
+            max_steps,
+        ) = setup_streaming_training(cfg, layer_idx, device)
+        epoch_idx_per_step = None
+
+        trainer_config = create_crosscoder_trainer_config(
+            cfg,
+            layer_idx,
+            activation_dim,
+            device,
+            normalize_mean,
+            normalize_std,
+            run_name,
+        )
+        trainer_config["steps"] = max_steps
+        validate_every_n_steps = cfg.diffing.method.training.validate_every_n_steps
+
+        logger.info(f"Streaming training configuration: {trainer_config['wandb_name']}")
+        logger.info(
+            f"Training steps: {max_steps}, validation every: {validate_every_n_steps}"
+        )
+        checkpoint_dir = f"{cfg.infrastructure.storage.checkpoint_dir}/{trainer_config['wandb_name']}"
+
+        model, last_eval_logs = trainSAE(
+            data=train_data,
+            trainer_config=trainer_config,
+            steps=max_steps,  # Required: the streaming buffer is infinite, so bound the loop
+            validate_every_n_steps=validate_every_n_steps,
+            validation_data=val_data,
+            use_wandb=cfg.wandb.enabled,
+            wandb_entity=cfg.wandb.entity,
+            wandb_project="Diffing-Game-Crosscoder",
+            wandb_group=cfg.organism.name,
+            log_steps=50,
+            save_dir=checkpoint_dir,
+            save_steps=validate_every_n_steps,
+            run_wandb_finish=False,
+            epoch_idx_per_step=epoch_idx_per_step,
+            return_last_eval_logs=True,
+        )
+
+        wandb_link = None
+        hf_repo_id = None
+        if cfg.wandb.enabled:
+            wandb_link = wandb.run.get_url()
+            upload_config_to_wandb(cfg)
+            wandb.finish()
+        if cfg.diffing.method.upload.model:
+            hf_repo_id = push_dictionary_model(Path(checkpoint_dir) / "model_final.pt")
+
+        training_metrics = {
+            "layer": layer_idx,
+            "activation_dim": activation_dim,
+            "dictionary_size": trainer_config["dict_size"],
+            "training_steps": max_steps,
+            "lr": trainer_config["lr"],
+            "wandb_link": wandb_link,
+            "model_type": cfg.diffing.method.model.type,
+            "run_name": trainer_config["wandb_name"],
+            "hf_repo_id": hf_repo_id,
+            "training_mode": "crosscoder_streaming",
+            "last_eval_logs": {
+                k: v.item() if isinstance(v, torch.Tensor) else v
+                for k, v in last_eval_logs.items()
+            },
+        }
+        logger.info(f"Successfully trained streaming crosscoder for layer {layer_idx}")
+        return training_metrics, Path(checkpoint_dir) / "model_final.pt"
+
     # Setup training datasets
     train_dataset, val_dataset, epoch_idx_per_step, normalize_mean, normalize_std = (
         setup_training_datasets(
