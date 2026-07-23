@@ -275,5 +275,103 @@ class TestClosedFormScalars:
         )
 
 
+class _TwoModelToyCrosscoder(CrossCoder):
+    """Minimal two-decoder crosscoder with exact linear decode and ground-truth codes.
+    decoder_weight: (2, dict_size, dim_model); encode() replays the ground-truth codes
+    batch by batch (same trick as ToyCrosscoder above)."""
+
+    def __init__(self, decoder_weight: th.Tensor, codes_batched: th.Tensor):
+        self.decoder_weight = decoder_weight
+        self.codes_batched = codes_batched
+        self.dict_size = decoder_weight.shape[1]
+        self.batch_index = 0
+
+    def encode(self, x: th.Tensor, **kwargs) -> th.Tensor:
+        out = self.codes_batched[self.batch_index % self.codes_batched.shape[0]]
+        self.batch_index += 1
+        return out
+
+    def decode(self, f: th.Tensor, denormalize_activations: bool = False) -> th.Tensor:
+        # (N, dict) @ (2, dict, dim) -> (N, 2, dim)
+        return th.einsum("nd,ldm->nlm", f, self.decoder_weight)
+
+
+def _make_two_model_world(dtype=th.float64, seed=0):
+    """4 orthogonal latent directions with known per-model decoder scales:
+    latent 0 base-only (d_ft = 0), latent 1 shared equal, latent 2 ft weaker (0.25x
+    relative to base along the same direction), latent 3 ft stronger (3x). Activations
+    are decoded EXACTLY, so the per-latent error target after own-decoder removal is
+    f_j * d_j^model and every beta is analytic."""
+    th.manual_seed(seed)
+    M, D, NB, BS = 32, 4, 4, 50
+    dirs = th.linalg.qr(th.randn(M, D, dtype=dtype))[0].T  # (D, M) orthonormal
+    base_scale = th.tensor([1.0, 1.0, 2.0, 0.5], dtype=dtype)
+    ft_scale = th.tensor([0.0, 1.0, 0.5, 1.5], dtype=dtype)
+    W = th.stack([dirs * base_scale[:, None], dirs * ft_scale[:, None]])  # (2, D, M)
+    codes = th.randn(NB, BS, D, dtype=dtype).exp()  # dense positive codes
+    batches = th.einsum("nbd,ldm->nblm", codes, W)  # (NB, BS, 2, M) exact decode
+    expected_nu = ft_scale / base_scale  # probe d_base: beta_ft/beta_base = scale ratio
+    return W, codes, batches, expected_nu
+
+
+class TestBaseProbe:
+    """CPU tests for the base-decoder probe path (base-only latent scaling)."""
+
+    def test_load_ft_error_ft_decoder_kwarg(self):
+        from diffing.utils.dictionary.latent_scaling.utils import load_ft_error
+
+        W, codes, batches, _ = _make_two_model_world()
+        cc = _TwoModelToyCrosscoder(W, codes)
+        idx = th.arange(W.shape[1])
+        batch, f = batches[0], codes[0]
+
+        legacy = load_ft_error(batch, cc, f, idx, latent_vectors=W[1][idx])
+        with_kwarg = load_ft_error(
+            batch, cc, f, idx, latent_vectors=W[0][idx], ft_decoder=W[1]
+        )
+        # Removal must be probe-independent when ft_decoder is given
+        assert th.allclose(legacy, with_kwarg)
+        # ...and the kwarg must actually matter: base-probe removal without it differs
+        wrong_removal = load_ft_error(batch, cc, f, idx, latent_vectors=W[0][idx])
+        assert not th.allclose(legacy, wrong_removal)
+
+    def test_base_probe_nu_separates_base_only_latents(self):
+        """End-to-end through closed_form_scalars: probing with d_base, the error-beta
+        ratio beta_ft/beta_base must be 0 for a base-only latent, 1 for a shared one,
+        and the exact decoder-scale ratio in between."""
+        from functools import partial
+        from diffing.utils.dictionary.latent_scaling.utils import (
+            load_base_error,
+            load_ft_error,
+        )
+
+        W, codes, batches, expected_nu = _make_two_model_world()
+        idx = th.arange(W.shape[1])
+        probe = W[0][idx].clone()  # base decoder = the probe
+        device = th.device("cpu")
+
+        betas_base, *_ = closed_form_scalars(
+            probe,
+            idx,
+            batches,
+            _TwoModelToyCrosscoder(W, codes),
+            partial(load_base_error, base_decoder=W[0], normalize=False),
+            device=device,
+            dtype=th.float64,
+        )
+        betas_ft, *_ = closed_form_scalars(
+            probe,
+            idx,
+            batches,
+            _TwoModelToyCrosscoder(W, codes),
+            partial(load_ft_error, ft_decoder=W[1], normalize=False),
+            device=device,
+            dtype=th.float64,
+        )
+        assert th.allclose(betas_base, th.ones_like(betas_base))
+        nu = betas_ft / betas_base
+        assert th.allclose(nu, expected_nu)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -148,9 +148,15 @@ def load_ft_error(
     latent_activations: th.Tensor,
     latent_indices: th.Tensor,
     latent_vectors: th.Tensor,
+    ft_decoder: th.Tensor | None = None,
     normalize: bool = False,
     **kwargs,
 ):
+    """ft_decoder: removal directions for the ft error target. Defaults to `latent_vectors`
+    (the probe), which is correct when probing with the ft decoder. When probing with another
+    direction (e.g. the base decoder), pass the full ft decoder so the removal term stays the
+    ft model's own directions (mirror of `load_base_error`'s explicit `base_decoder`).
+    """
     assert isinstance(crosscoder, CrossCoder) or isinstance(
         crosscoder, BatchTopKCrossCoder
     ), "ft error requires a crosscoder"
@@ -159,7 +165,9 @@ def load_ft_error(
     )
     normalized_batch = identity_fn(batch, crosscoder, normalize)
     return normalized_batch[:, 1, :] - remove_latents(
-        reconstruction[:, 1, :], latent_activations[:, latent_indices], latent_vectors
+        reconstruction[:, 1, :],
+        latent_activations[:, latent_indices],
+        latent_vectors if ft_decoder is None else ft_decoder[latent_indices],
     )
 
 
