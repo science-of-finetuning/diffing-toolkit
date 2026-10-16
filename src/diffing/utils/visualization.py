@@ -788,4 +788,4 @@ def render_latent_lens_tab(
                     st.warning("Please enter tokens to query.")
 
     except Exception as e:
-        st.error(f"Error analyzing {latent_type_name} logits: {str(e)}")
+        st.error(f"Error analyzing {latent_type_name} logits: {type(e).__name__}: {e}")

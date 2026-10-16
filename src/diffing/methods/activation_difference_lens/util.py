@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Iterable, List
 import torch
 
 
@@ -17,6 +17,34 @@ def layer_dir(results_dir: Path, dataset_id: str, layer_index: int) -> Path:
 
 def norms_path(results_dir: Path, dataset_id: str) -> Path:
     return results_dir / f"model_norms_{dataset_dir_name(dataset_id)}.pt"
+
+
+def missing_norm_layers(norms_file: Path, layers: Iterable[int]) -> List[int]:
+    """Return the layers that have no saved norm in ``norms_file`` (all of them if it does not exist)."""
+    layers = list(layers)
+    if not norms_file.exists():
+        return layers
+    norms_data = torch.load(norms_file, map_location="cpu")
+    return [
+        layer
+        for layer in layers
+        if layer not in norms_data["base_model_norms"]
+        or layer not in norms_data["ft_model_norms"]
+    ]
+
+
+def get_layer_norm(
+    norms_data: Dict[str, Any], model_key: str, layer_index: int
+) -> float:
+    """Return the saved mean norm of ``model_key`` at ``layer_index``, with a clear error if it is missing."""
+    layer_norms = norms_data[model_key]
+    if layer_index not in layer_norms:
+        raise ValueError(
+            f"No {model_key} entry for layer {layer_index}: norms were only computed "
+            f"for layers {sorted(layer_norms)}. Re-run activation_difference_lens on "
+            f"this dataset with layer {layer_index} included to compute them."
+        )
+    return float(layer_norms[layer_index].item())
 
 
 def position_files_exist(
@@ -84,8 +112,7 @@ def load_position_mean_vector(
     norms_path = method.results_dir / f"model_norms_{dataset_dir_name}.pt"
     assert norms_path.exists(), f"Model norms file not found: {norms_path}"
     norms_data = torch.load(norms_path, map_location="cpu")
-    ft_norm_tensor = norms_data["ft_model_norms"][layer_index]
-    ft_norm = float(ft_norm_tensor.item())
+    ft_norm = get_layer_norm(norms_data, "ft_model_norms", layer_index)
     assert ft_norm > 0
 
     return (vec / norm) * ft_norm
