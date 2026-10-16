@@ -570,22 +570,27 @@ class ActDiffLens(DiffingMethod):
             )
 
         norms_fp = norms_path(self.results_dir, dataset_id)
-        saved_base_norms: Dict[int, torch.Tensor] = {}
-        saved_ft_norms: Dict[int, torch.Tensor] = {}
+        norms_data: Dict[str, Dict[int, Any]] = {
+            "base_model_norms": {},
+            "ft_model_norms": {},
+            "skip_tokens": {},
+            "num_sequences": {},
+        }
         if norms_fp.exists() and not self.overwrite:
             # Keep norms of layers computed by earlier runs on this dataset
             previous = torch.load(norms_fp, map_location="cpu")
-            saved_base_norms.update(previous["base_model_norms"])
-            saved_ft_norms.update(previous["ft_model_norms"])
+            previous_layers = list(previous["ft_model_norms"])
+            for key in norms_data:
+                value = previous[key]
+                # Files written before per-layer metadata store one int for all layers
+                if not isinstance(value, dict):
+                    value = {layer: value for layer in previous_layers}
+                norms_data[key].update(value)
         for layer in run_layers:
-            saved_base_norms[layer] = base_model_norms[layer].cpu()
-            saved_ft_norms[layer] = ft_model_norms[layer].cpu()
-        norms_data = {
-            "base_model_norms": saved_base_norms,
-            "ft_model_norms": saved_ft_norms,
-            "skip_tokens": skip_tokens,
-            "num_sequences": num_sequences,
-        }
+            norms_data["base_model_norms"][layer] = base_model_norms[layer].cpu()
+            norms_data["ft_model_norms"][layer] = ft_model_norms[layer].cpu()
+            norms_data["skip_tokens"][layer] = skip_tokens
+            norms_data["num_sequences"][layer] = num_sequences
         torch.save(norms_data, norms_fp)
         logger.info(f"Saved model norm estimates to {norms_fp}")
 

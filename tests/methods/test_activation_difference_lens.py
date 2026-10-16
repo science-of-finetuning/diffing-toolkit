@@ -772,22 +772,23 @@ class TestMissingLayerNorms:
         method.finetuned_model.config.hidden_size = self.HIDDEN
         return method
 
-    def _acts(self, layers, value):
+    def _acts(self, layers, value, num_sequences=2):
         import torch
 
         return {
-            layer: torch.full((2, 6, self.HIDDEN), float(value)) for layer in layers
+            layer: torch.full((num_sequences, 6, self.HIDDEN), float(value))
+            for layer in layers
         }
 
-    def _save_norms(self, method, layers, value=1.0):
+    def _save_norms(self, method, layers, value=1.0, num_sequences=2):
         from diffing.methods.activation_difference_lens.method import ActDiffLens
 
         ActDiffLens._compute_and_save_norms(
             method,
             dataset_id="org/data",
             run_layers=list(layers),
-            base_acts=self._acts(layers, value),
-            ft_acts=self._acts(layers, value),
+            base_acts=self._acts(layers, value, num_sequences),
+            ft_acts=self._acts(layers, value, num_sequences),
         )
 
     def test_rerun_with_new_layer_keeps_earlier_norms(self, tmp_path):
@@ -795,12 +796,34 @@ class TestMissingLayerNorms:
         import torch
 
         method = self._method(tmp_path)
-        self._save_norms(method, [12], value=1.0)
-        self._save_norms(method, [0], value=2.0)
+        self._save_norms(method, [12], value=1.0, num_sequences=2)
+        self._save_norms(method, [0], value=2.0, num_sequences=3)
 
         norms = torch.load(norms_path(tmp_path, "org/data"), map_location="cpu")
         assert sorted(norms["ft_model_norms"]) == [0, 12]
         assert sorted(norms["base_model_norms"]) == [0, 12]
+        assert norms["num_sequences"] == {12: 2, 0: 3}
+        assert norms["skip_tokens"] == {12: 5, 0: 5}
+
+    def test_rerun_on_file_with_shared_metadata(self, tmp_path):
+        """A norms file whose metadata is one int for all layers is converted to per-layer."""
+        import torch
+
+        fp = norms_path(tmp_path, "org/data")
+        torch.save(
+            {
+                "base_model_norms": {12: torch.tensor(1.0)},
+                "ft_model_norms": {12: torch.tensor(1.0)},
+                "skip_tokens": 5,
+                "num_sequences": 7,
+            },
+            fp,
+        )
+        self._save_norms(self._method(tmp_path), [0], num_sequences=3)
+
+        norms = torch.load(fp, map_location="cpu")
+        assert norms["num_sequences"] == {12: 7, 0: 3}
+        assert norms["skip_tokens"] == {12: 5, 0: 5}
 
     def test_overwrite_drops_old_layers(self, tmp_path):
         """With overwrite=True the file only holds the layers of the current run."""
