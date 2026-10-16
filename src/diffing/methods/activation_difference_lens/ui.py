@@ -14,6 +14,7 @@ from diffing.utils.dashboards import (
     SteeringDashboard,
 )
 from diffing.utils.visualization import multi_tab_interface, render_latent_lens_tab
+from .util import get_layer_norm
 
 
 def _find_available_layers(method) -> List[int]:
@@ -303,9 +304,11 @@ def _render_activation_difference_lens_tab(method):
         # Scale to the expected model norm for this layer and dataset
         model_norms = _load_model_norms(method, selected_dataset)
         if model_choice == "Finetuned Model":
-            target_norm = float(model_norms["ft_model_norms"][selected_layer].item())
+            target_norm = get_layer_norm(model_norms, "ft_model_norms", selected_layer)
         else:
-            target_norm = float(model_norms["base_model_norms"][selected_layer].item())
+            target_norm = get_layer_norm(
+                model_norms, "base_model_norms", selected_layer
+            )
 
         current_norm = float(torch.norm(mean_tensor).item())
         assert current_norm > 0, "Mean tensor has zero norm"
@@ -359,7 +362,7 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
 
         # Scale to match expected finetuned model norm at this layer
         model_norms = _load_model_norms(self.method, self._dataset_name)
-        ft_model_norm = float(model_norms["ft_model_norms"][self._layer].item())
+        ft_model_norm = get_layer_norm(model_norms, "ft_model_norms", self._layer)
         mean_norm = torch.norm(mean_tensor)
         assert mean_norm > 0
         scaled = (mean_tensor / mean_norm) * ft_model_norm
@@ -405,8 +408,10 @@ class ActDiffLensSteeringDashboard(SteeringDashboard):
 
             # Load model norms and get both base and fine-tuned model norms for this layer
             model_norms = _load_model_norms(self.method, self._dataset_name)
-            base_model_norm = float(model_norms["base_model_norms"][self._layer].item())
-            ft_model_norm = float(model_norms["ft_model_norms"][self._layer].item())
+            base_model_norm = get_layer_norm(
+                model_norms, "base_model_norms", self._layer
+            )
+            ft_model_norm = get_layer_norm(model_norms, "ft_model_norms", self._layer)
 
             st.info(
                 f"**Position {selected_position}:** count={metadata['count']} | "

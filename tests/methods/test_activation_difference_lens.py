@@ -760,5 +760,86 @@ class TestAgentDatasetDirName:
             assert agent_dataset_dir_name(case) == dataset_dir_name(case)
 
 
+class TestMissingLayerNorms:
+    """A layer whose means exist but whose norms were never saved (issue #13)."""
+
+    HIDDEN = 8
+
+    def _method(self, results_dir: Path, overwrite: bool = False):
+        method = Mock()
+        method.results_dir = results_dir
+        method.overwrite = overwrite
+        method.finetuned_model.config.hidden_size = self.HIDDEN
+        return method
+
+    def _acts(self, layers, value):
+        import torch
+
+        return {
+            layer: torch.full((2, 6, self.HIDDEN), float(value)) for layer in layers
+        }
+
+    def _save_norms(self, method, layers, value=1.0):
+        from diffing.methods.activation_difference_lens.method import ActDiffLens
+
+        ActDiffLens._compute_and_save_norms(
+            method,
+            dataset_id="org/data",
+            run_layers=list(layers),
+            base_acts=self._acts(layers, value),
+            ft_acts=self._acts(layers, value),
+        )
+
+    def test_rerun_with_new_layer_keeps_earlier_norms(self, tmp_path):
+        """Norms of a second run on new layers are added, not swapped in."""
+        import torch
+
+        method = self._method(tmp_path)
+        self._save_norms(method, [12], value=1.0)
+        self._save_norms(method, [0], value=2.0)
+
+        norms = torch.load(norms_path(tmp_path, "org/data"), map_location="cpu")
+        assert sorted(norms["ft_model_norms"]) == [0, 12]
+        assert sorted(norms["base_model_norms"]) == [0, 12]
+
+    def test_overwrite_drops_old_layers(self, tmp_path):
+        """With overwrite=True the file only holds the layers of the current run."""
+        import torch
+
+        self._save_norms(self._method(tmp_path), [12])
+        self._save_norms(self._method(tmp_path, overwrite=True), [0])
+
+        norms = torch.load(norms_path(tmp_path, "org/data"), map_location="cpu")
+        assert sorted(norms["ft_model_norms"]) == [0]
+
+    def test_missing_norm_layers(self, tmp_path):
+        """Layers absent from the norms file are reported so the run recomputes them."""
+        from diffing.methods.activation_difference_lens.util import (
+            missing_norm_layers,
+        )
+
+        fp = norms_path(tmp_path, "org/data")
+        assert missing_norm_layers(fp, [0, 12]) == [0, 12]
+        self._save_norms(self._method(tmp_path), [12])
+        assert missing_norm_layers(fp, [0, 12]) == [0]
+        assert missing_norm_layers(fp, [12]) == []
+
+    def test_load_position_mean_vector_names_missing_layer(self, tmp_path):
+        """Loading a layer without norms fails with a message naming the layer."""
+        import torch
+        from diffing.methods.activation_difference_lens.util import (
+            load_position_mean_vector,
+        )
+
+        method = self._method(tmp_path)
+        self._save_norms(method, [12])
+        mean_dir = layer_dir(tmp_path, "org/data", 0)
+        mean_dir.mkdir(parents=True)
+        torch.save(torch.ones(self.HIDDEN), mean_dir / "mean_pos_0.pt")
+
+        with pytest.raises(ValueError, match=r"layer 0.*\[12\]"):
+            load_position_mean_vector(method, "org/data", 0, 0)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

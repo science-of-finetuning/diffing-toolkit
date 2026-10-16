@@ -18,7 +18,7 @@ from .auto_patch_scope import save_auto_patch_scope_variants
 from .ui import visualize
 from .steering import run_steering
 from .token_relevance import run_token_relevance
-from .util import norms_path, is_layer_complete
+from .util import norms_path, is_layer_complete, missing_norm_layers, get_layer_norm
 from .causal_effect import run_causal_effect
 from .agents import ADLAgent, ADLBlackboxAgent
 from diffing.utils.agents.base_agent import BaseAgent
@@ -569,17 +569,23 @@ class ActDiffLens(DiffingMethod):
                 f"Layer {layer} - Fine-tuned model mean norm: {ft_model_norms[layer].item():.3f}"
             )
 
+        norms_fp = norms_path(self.results_dir, dataset_id)
+        saved_base_norms: Dict[int, torch.Tensor] = {}
+        saved_ft_norms: Dict[int, torch.Tensor] = {}
+        if norms_fp.exists() and not self.overwrite:
+            # Keep norms of layers computed by earlier runs on this dataset
+            previous = torch.load(norms_fp, map_location="cpu")
+            saved_base_norms.update(previous["base_model_norms"])
+            saved_ft_norms.update(previous["ft_model_norms"])
+        for layer in run_layers:
+            saved_base_norms[layer] = base_model_norms[layer].cpu()
+            saved_ft_norms[layer] = ft_model_norms[layer].cpu()
         norms_data = {
-            "base_model_norms": {
-                layer: base_model_norms[layer].cpu() for layer in run_layers
-            },
-            "ft_model_norms": {
-                layer: ft_model_norms[layer].cpu() for layer in run_layers
-            },
+            "base_model_norms": saved_base_norms,
+            "ft_model_norms": saved_ft_norms,
             "skip_tokens": skip_tokens,
             "num_sequences": num_sequences,
         }
-        norms_fp = norms_path(self.results_dir, dataset_id)
         torch.save(norms_data, norms_fp)
         logger.info(f"Saved model norm estimates to {norms_fp}")
 
@@ -712,7 +718,7 @@ class ActDiffLens(DiffingMethod):
         intersection_top_k = int(aps_cfg.intersection_top_k)
         tokens_k = int(aps_cfg.tokens_k)
         grader_cfg = dict(aps_cfg.grader)
-        target_norm = float(norms_data["ft_model_norms"][layer].item())
+        target_norm = get_layer_norm(norms_data, "ft_model_norms", layer)
         overwrite = bool(aps_cfg.overwrite)
 
         for label in position_labels:
@@ -780,9 +786,10 @@ class ActDiffLens(DiffingMethod):
         run_layers, aps_tasks_for_dataset = self._get_run_layers_and_aps_tasks(
             dataset_id
         )
-        norms_needed: bool = self.overwrite or (
-            not norms_path(self.results_dir, dataset_id).exists()
+        missing_norms = missing_norm_layers(
+            norms_path(self.results_dir, dataset_id), run_layers
         )
+        norms_needed: bool = self.overwrite or len(missing_norms) > 0
 
         if self.overwrite:
             layers_to_compute = list(run_layers)
