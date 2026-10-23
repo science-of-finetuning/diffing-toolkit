@@ -196,14 +196,17 @@ def load_and_tokenize_chat_dataset(
 
         user_only = [{"role": messages[0]["role"], "content": messages[0]["content"]}]
         user_ids: List[int] = tokenizer.apply_chat_template(
-            user_only, tokenize=True, add_generation_prompt=True
+            user_only, tokenize=True, add_generation_prompt=True, return_dict=False
         )
 
         if len(user_ids) > max_user_tokens:
             continue
 
         full_ids: List[int] = tokenizer.apply_chat_template(
-            trunc_messages, tokenize=True, add_generation_prompt=False
+            trunc_messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=False,
         )
 
         assistant_start_index = len(user_ids)
@@ -783,8 +786,11 @@ class ActDiffLens(DiffingMethod):
             n_positions_expected = int(self.cfg.diffing.method.pre_assistant_k) + int(
                 self.cfg.diffing.method.n
             )
+            # Chat position files are labelled -pre_assistant_k .. n-1
+            first_position_expected = -int(self.cfg.diffing.method.pre_assistant_k)
         else:
             n_positions_expected = int(self.cfg.diffing.method.n)
+            first_position_expected = 0
 
         cache_logit_lens: bool = bool(self.cfg.diffing.method.logit_lens.cache)
 
@@ -808,6 +814,7 @@ class ActDiffLens(DiffingMethod):
                     layer,
                     n_positions_expected,
                     cache_logit_lens,
+                    first_position=first_position_expected,
                 )
             ]
 

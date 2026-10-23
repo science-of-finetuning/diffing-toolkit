@@ -251,6 +251,74 @@ class TestActivationDifferenceLensMethodRun:
 
         assert method.results_dir.exists()
 
+    @pytest.mark.skipif(not CUDA_AVAILABLE, reason=SKIP_REASON)
+    def test_adl_run_chat_dataset(self, tmp_results_dir, organism_name):
+        """Test that ActDiffLens.run() completes on a chat dataset.
+
+        ADL reads its own `diffing.method.datasets` list rather than
+        `organism.dataset`, and the default list only holds a text dataset, so
+        test_adl_run never reaches the chat path
+        (load_and_tokenize_chat_dataset + extract_selected_positions_activations).
+        """
+        from diffing.methods.activation_difference_lens.method import ActDiffLens
+        from unittest.mock import patch
+        from diffing.methods.activation_difference_lens.util import (
+            is_layer_complete,
+            layer_dir,
+        )
+
+        cfg = load_test_config(
+            "activation_difference_lens", tmp_results_dir, organism_name
+        )
+        cfg.diffing.method.datasets = [
+            {"id": TEST_DATASET_ID, "is_chat": True, "messages_column": "messages"}
+        ]
+
+        # Override for minimal test run, keeping pre-assistant positions.
+        # 3 samples with batch_size 2 gives a padded batch and a ragged last one.
+        cfg.diffing.method.max_samples = 3
+        cfg.diffing.method.batch_size = 2
+        cfg.diffing.method.n = 10
+        cfg.diffing.method.pre_assistant_k = 2
+
+        cfg.diffing.method.logit_lens.cache = False
+        cfg.diffing.method.auto_patch_scope.enabled = False
+        cfg.diffing.method.steering.enabled = False
+        cfg.diffing.method.token_relevance.enabled = False
+        cfg.diffing.method.causal_effect.enabled = False
+
+        method = ActDiffLens(cfg)
+        method.run()
+
+        assert len(method.layers) > 0
+        for layer in method.layers:
+            assert is_layer_complete(
+                method.results_dir,
+                TEST_DATASET_ID,
+                layer,
+                n_positions=2 + 10,
+                need_logit_lens=False,
+                first_position=-2,
+            )
+            out_dir = layer_dir(method.results_dir, TEST_DATASET_ID, layer)
+            pre = torch.load(out_dir / "mean_pos_-2.pt", map_location="cpu")
+            post = torch.load(out_dir / "mean_pos_9.pt", map_location="cpu")
+            assert pre.ndim == 1 and pre.numel() > 0
+            assert pre.shape == post.shape
+            assert torch.isfinite(pre).all() and torch.isfinite(post).all()
+
+        # A second run with overwrite=False must find the chat results and skip
+        # activation extraction instead of recomputing them.
+        cfg.diffing.method.overwrite = False
+        rerun = ActDiffLens(cfg)
+        with patch(
+            "diffing.methods.activation_difference_lens.method."
+            "extract_selected_positions_activations",
+            side_effect=AssertionError("chat results were recomputed"),
+        ) as extract:
+            rerun.run()
+        assert extract.call_count == 0, "chat results were recomputed"
+
 
 class TestActivationOracleMethodRun:
     """Tests for ActivationOracleMethod."""
