@@ -138,7 +138,10 @@ def _encode_chat(
         assert isinstance(msg, dict) and ("role" in msg) and ("content" in msg)
         roles.append(str(msg["role"]))
         ids_prefix: List[int] = tokenizer.apply_chat_template(
-            messages[: i + 1], tokenize=True, add_generation_prompt=False
+            messages[: i + 1],
+            tokenize=True,
+            add_generation_prompt=False,
+            return_dict=False,
         )
         new_len = len(ids_prefix)
         start = prev_len
@@ -147,7 +150,7 @@ def _encode_chat(
         prev_len = new_len
 
     ids_full_list: List[int] = tokenizer.apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=False
+        messages, tokenize=True, add_generation_prompt=False, return_dict=False
     )
     if len(ids_full_list) > max_total_tokens:
         ids_full_list = ids_full_list[:max_total_tokens]

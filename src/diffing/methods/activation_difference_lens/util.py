@@ -71,11 +71,17 @@ def is_layer_complete(
     layer_index: int,
     n_positions: int,
     need_logit_lens: bool,
+    first_position: int = 0,
 ) -> bool:
+    """Check the files for positions first_position .. first_position + n_positions - 1.
+
+    Position files are named by label, so chat datasets (labels -k..n-1) pass
+    first_position=-pre_assistant_k.
+    """
     layer_dir_path = layer_dir(results_dir, dataset_id, layer_index)
     if not layer_dir_path.exists():
         return False
-    for p in range(n_positions):
+    for p in range(first_position, first_position + n_positions):
         if not position_files_exist(layer_dir_path, p, need_logit_lens):
             return False
     return True
