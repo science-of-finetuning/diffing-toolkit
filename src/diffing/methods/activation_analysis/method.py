@@ -470,7 +470,10 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
 
     def _get_chat_template_tokens(self):
         return self.tokenizer.apply_chat_template(
-            [{"content": "", "role": "user"}], tokenize=True, add_generation_prompt=True
+            [{"content": "", "role": "user"}],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=False,
         )
 
     def process_layer(
