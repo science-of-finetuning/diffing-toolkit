@@ -482,6 +482,35 @@ class TestIsLayerComplete:
                 # With zero positions, loop doesn't run, so it returns True
                 assert result is True
 
+    def test_is_layer_complete_chat_labels_with_real_files(self, tmp_path):
+        """Chat runs save mean_pos_{label} for labels -k..n-1, not 0..k+n-1."""
+        dataset_id = "org/chat_data"
+        pre_assistant_k, n = 2, 3
+        layer_dir_path = layer_dir(tmp_path, dataset_id, 4)
+        layer_dir_path.mkdir(parents=True)
+        for label in range(-pre_assistant_k, n):
+            (layer_dir_path / f"mean_pos_{label}.pt").touch()
+            (layer_dir_path / f"mean_pos_{label}.meta").touch()
+
+        assert is_layer_complete(
+            tmp_path,
+            dataset_id,
+            4,
+            pre_assistant_k + n,
+            False,
+            first_position=-pre_assistant_k,
+        )
+
+        (layer_dir_path / "mean_pos_-1.pt").unlink()
+        assert not is_layer_complete(
+            tmp_path,
+            dataset_id,
+            4,
+            pre_assistant_k + n,
+            False,
+            first_position=-pre_assistant_k,
+        )
+
 
 class TestIsGenericTokenEdgeCases:
     """Additional edge case tests for _is_generic_token."""

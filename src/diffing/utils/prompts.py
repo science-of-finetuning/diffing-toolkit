@@ -41,3 +41,16 @@ def prompt_dir_name(prompt: str) -> str:
     sanitized = re.sub(r" +", "_", sanitized.strip())[:30]
     hash_suffix = hashlib.sha256(prompt.encode()).hexdigest()[:8]
     return f"{sanitized}_{hash_suffix}"
+
+
+def chat_ids(tokenizer, messages: list[dict], **kwargs) -> list[int]:
+    """Apply the chat template and return the token ids as a flat ``list[int]``.
+
+    ``return_dict=False`` is forced because transformers 5 returns a
+    ``BatchEncoding`` from ``apply_chat_template(tokenize=True)`` by default.
+    """
+    ids = tokenizer.apply_chat_template(
+        messages, tokenize=True, return_dict=False, **kwargs
+    )
+    assert isinstance(ids, list), f"Expected list of token ids, got {type(ids)}"
+    return ids

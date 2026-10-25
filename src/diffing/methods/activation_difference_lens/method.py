@@ -14,6 +14,7 @@ from nnterp import StandardizedTransformer
 from diffing.methods.diffing_method import DiffingMethod
 from diffing.utils.activations import get_layer_indices
 from diffing.utils.model import logit_lens
+from diffing.utils.prompts import chat_ids
 from .auto_patch_scope import save_auto_patch_scope_variants
 from .ui import visualize
 from .steering import run_steering
@@ -195,16 +196,12 @@ def load_and_tokenize_chat_dataset(
         ]
 
         user_only = [{"role": messages[0]["role"], "content": messages[0]["content"]}]
-        user_ids: List[int] = tokenizer.apply_chat_template(
-            user_only, tokenize=True, add_generation_prompt=True
-        )
+        user_ids = chat_ids(tokenizer, user_only, add_generation_prompt=True)
 
         if len(user_ids) > max_user_tokens:
             continue
 
-        full_ids: List[int] = tokenizer.apply_chat_template(
-            trunc_messages, tokenize=True, add_generation_prompt=False
-        )
+        full_ids = chat_ids(tokenizer, trunc_messages, add_generation_prompt=False)
 
         assistant_start_index = len(user_ids)
         if len(full_ids) - assistant_start_index < n:
@@ -783,8 +780,11 @@ class ActDiffLens(DiffingMethod):
             n_positions_expected = int(self.cfg.diffing.method.pre_assistant_k) + int(
                 self.cfg.diffing.method.n
             )
+            # Chat position files are labelled -pre_assistant_k .. n-1
+            first_position_expected = -int(self.cfg.diffing.method.pre_assistant_k)
         else:
             n_positions_expected = int(self.cfg.diffing.method.n)
+            first_position_expected = 0
 
         cache_logit_lens: bool = bool(self.cfg.diffing.method.logit_lens.cache)
 
@@ -808,6 +808,7 @@ class ActDiffLens(DiffingMethod):
                     layer,
                     n_positions_expected,
                     cache_logit_lens,
+                    first_position=first_position_expected,
                 )
             ]
 

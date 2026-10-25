@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from diffing.utils.activations import get_layer_indices
 from diffing.utils.data import load_dataset_from_hub_or_local
+from diffing.utils.prompts import chat_ids
 
 from .util import dataset_dir_name, load_position_mean_vector
 
@@ -137,18 +138,14 @@ def _encode_chat(
         msg = messages[i]
         assert isinstance(msg, dict) and ("role" in msg) and ("content" in msg)
         roles.append(str(msg["role"]))
-        ids_prefix: List[int] = tokenizer.apply_chat_template(
-            messages[: i + 1], tokenize=True, add_generation_prompt=False
-        )
+        ids_prefix = chat_ids(tokenizer, messages[: i + 1], add_generation_prompt=False)
         new_len = len(ids_prefix)
         start = prev_len
         end = new_len
         spans.append((start, end))
         prev_len = new_len
 
-    ids_full_list: List[int] = tokenizer.apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=False
-    )
+    ids_full_list = chat_ids(tokenizer, messages, add_generation_prompt=False)
     if len(ids_full_list) > max_total_tokens:
         ids_full_list = ids_full_list[:max_total_tokens]
     ids = torch.tensor(ids_full_list, dtype=torch.long)  # [L]
