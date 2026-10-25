@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
+from diffing.utils.prompts import chat_ids
+
 from .dashboard_state import (
     ManagedConversation,
     get_sampling_params,
@@ -364,17 +366,20 @@ class MultiGenerationTab:
                 messages.append({"role": "user", "content": prompt})
                 if assistant_prefill:
                     messages.append({"role": "assistant", "content": assistant_prefill})
-                    final_prompt = self.dashboard.tokenizer.apply_chat_template(
+                    final_prompt = chat_ids(
+                        self.dashboard.tokenizer,
                         messages,
                         continue_final_message=True,
                     )
                 else:
-                    final_prompt = self.dashboard.tokenizer.apply_chat_template(
+                    final_prompt = chat_ids(
+                        self.dashboard.tokenizer,
                         messages,
                         add_generation_prompt=True,
                     )
             elif template_mode == "Apply loom template":
-                final_prompt = self.dashboard.tokenizer.apply_chat_template(
+                final_prompt = chat_ids(
+                    self.dashboard.tokenizer,
                     [
                         {
                             "role": "system",
@@ -418,7 +423,8 @@ class MultiGenerationTab:
                     add_gen_prompt = False
                     continue_final = False
 
-                final_prompt = self.dashboard.tokenizer.apply_chat_template(
+                final_prompt = chat_ids(
+                    self.dashboard.tokenizer,
                     messages,
                     add_generation_prompt=add_gen_prompt,
                     continue_final_message=continue_final,

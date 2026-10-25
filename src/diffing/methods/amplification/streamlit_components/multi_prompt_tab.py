@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
+from diffing.utils.prompts import chat_ids
+
 from .dashboard_state import (
     get_sampling_params,
     get_unique_prompt_name,
@@ -630,11 +632,11 @@ class MultiPromptTab:
             messages.append({"role": "user", "content": mp.prompt_text})
             if mp.assistant_prefill:
                 messages.append({"role": "assistant", "content": mp.assistant_prefill})
-            return self.dashboard.tokenizer.apply_chat_template(
+            return chat_ids(
+                self.dashboard.tokenizer,
                 messages,
                 add_generation_prompt=not mp.assistant_prefill,
                 continue_final_message=bool(mp.assistant_prefill),
-                tokenize=True,
             )
         else:  # Apply loom template
             filename = mp.loom_filename or "untitled.txt"
@@ -646,10 +648,10 @@ class MultiPromptTab:
                 {"role": "user", "content": f"<cmd>cat {filename}</cmd>"},
                 {"role": "assistant", "content": mp.prompt_text},
             ]
-            return self.dashboard.tokenizer.apply_chat_template(
+            return chat_ids(
+                self.dashboard.tokenizer,
                 messages,
                 continue_final_message=True,
-                tokenize=True,
             )
 
     def _tokenize_chat_prompt(self, mp) -> list[int]:
@@ -657,9 +659,9 @@ class MultiPromptTab:
         if not mp.messages:
             return []
         continue_final_message = mp.messages[-1]["role"] == "assistant"
-        return self.dashboard.tokenizer.apply_chat_template(
+        return chat_ids(
+            self.dashboard.tokenizer,
             mp.messages,
             add_generation_prompt=not continue_final_message,
             continue_final_message=continue_final_message,
-            tokenize=True,
         )

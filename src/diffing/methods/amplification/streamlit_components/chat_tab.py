@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import streamlit as st
 
+from diffing.utils.prompts import chat_ids
+
 from .dashboard_state import (
     ManagedConversation,
     get_sampling_params,
@@ -58,7 +60,8 @@ class ChatTab:
         conv.history = conv.history[: prompt_index + 1]
 
         messages = self._get_messages_with_system_prompt(conv)
-        return self.dashboard.tokenizer.apply_chat_template(
+        return chat_ids(
+            self.dashboard.tokenizer,
             messages,
             add_generation_prompt=True,
         )
@@ -554,7 +557,8 @@ class ChatTab:
 
         # Build prompt for generation
         messages = self._get_messages_with_system_prompt(conv)
-        prompt = self.dashboard.tokenizer.apply_chat_template(
+        prompt = chat_ids(
+            self.dashboard.tokenizer,
             messages,
             add_generation_prompt=True,
         )
@@ -651,7 +655,8 @@ class ChatTab:
         messages = self._get_messages_with_system_prompt(
             conv, conv.history[: continue_index + 1]
         )
-        prompt = self.dashboard.tokenizer.apply_chat_template(
+        prompt = chat_ids(
+            self.dashboard.tokenizer,
             messages,
             continue_final_message=True,
         )
@@ -777,7 +782,8 @@ class ChatTab:
                 st.markdown(user_input)
 
             messages = self._get_messages_with_system_prompt(conv)
-            full_prompt = self.dashboard.tokenizer.apply_chat_template(
+            full_prompt = chat_ids(
+                self.dashboard.tokenizer,
                 messages,
                 add_generation_prompt=True,
             )
