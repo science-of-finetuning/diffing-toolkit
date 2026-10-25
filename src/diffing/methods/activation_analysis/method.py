@@ -24,6 +24,7 @@ from diffing.utils.configs import get_dataset_configurations, DatasetConfig
 from diffing.utils.cache import SampleCache, SampleCacheDataset
 from diffing.utils.collection import RunningActivationMean
 from diffing.utils.max_act_store import MaxActStore
+from diffing.utils.prompts import chat_ids
 
 
 def collate_samples(
@@ -469,11 +470,10 @@ class ActivationAnalysisDiffingMethod(DiffingMethod):
         )
 
     def _get_chat_template_tokens(self):
-        return self.tokenizer.apply_chat_template(
+        return chat_ids(
+            self.tokenizer,
             [{"content": "", "role": "user"}],
-            tokenize=True,
             add_generation_prompt=True,
-            return_dict=False,
         )
 
     def process_layer(

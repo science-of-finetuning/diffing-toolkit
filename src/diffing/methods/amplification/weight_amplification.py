@@ -19,6 +19,7 @@ from vllm import LLM, SamplingParams
 from vllm.inputs import TokensPrompt
 from vllm.lora.request import LoRARequest
 from diffing.utils.model import load_model_from_config
+from diffing.utils.prompts import chat_ids
 
 
 def get_lora_int_id(server: LLM, config_str: str) -> int:
@@ -200,10 +201,10 @@ class WeightDifferenceAmplification(DiffingMethod):
 
                 for prompt in prompts:
                     if use_chat_template:
-                        prompt_tokens = self.tokenizer.apply_chat_template(
+                        prompt_tokens = chat_ids(
+                            self.tokenizer,
                             [{"role": "user", "content": prompt}],
                             add_generation_prompt=True,
-                            return_dict=False,
                         )
                     else:
                         prompt_tokens = self.tokenizer.encode(prompt)

@@ -5,6 +5,8 @@ from peft import PeftModel
 from pydantic import BaseModel, ConfigDict, model_validator
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from diffing.utils.prompts import chat_ids
+
 from .activation_utils import collect_activations_multiple_layers
 
 SPECIAL_TOKEN = " ?"
@@ -333,31 +335,23 @@ def create_training_datapoint(
     prompt = prefix + prompt
     input_messages = [{"role": "user", "content": prompt}]
 
-    input_prompt_ids = tokenizer.apply_chat_template(
+    input_prompt_ids = chat_ids(
+        tokenizer,
         input_messages,
-        tokenize=True,
         add_generation_prompt=True,
-        return_tensors=None,
-        return_dict=False,
         padding=False,
         enable_thinking=False,
     )
-    if not isinstance(input_prompt_ids, list):
-        raise TypeError("Expected list of token ids from tokenizer")
 
     full_messages = input_messages + [{"role": "assistant", "content": target_response}]
 
-    full_prompt_ids = tokenizer.apply_chat_template(
+    full_prompt_ids = chat_ids(
+        tokenizer,
         full_messages,
-        tokenize=True,
         add_generation_prompt=False,
-        return_tensors=None,
-        return_dict=False,
         padding=False,
         enable_thinking=False,
     )
-    if not isinstance(full_prompt_ids, list):
-        raise TypeError("Expected list of token ids from tokenizer")
 
     assistant_start_idx = len(input_prompt_ids)
 
