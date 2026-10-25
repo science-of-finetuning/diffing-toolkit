@@ -140,7 +140,7 @@ def get_overview(
             assert layer_dir.exists()
 
             # Discover available positions by reading mean_pos files
-            pos_files = sorted(layer_dir.glob("mean_pos_*.pt"))
+            pos_files = layer_dir.glob("mean_pos_*.pt")
             final_positions = []
             for f in pos_files:
                 name = f.stem
@@ -151,6 +151,8 @@ def get_overview(
 
                 except Exception:
                     continue
+            # Sort by label: filename order puts -1 before -2 and 10 before 2
+            final_positions.sort()
             assert len(final_positions) > 0
 
             # Aggregate per-position (no dedup), expose only difference variant

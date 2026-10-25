@@ -203,6 +203,7 @@ class WeightDifferenceAmplification(DiffingMethod):
                         prompt_tokens = self.tokenizer.apply_chat_template(
                             [{"role": "user", "content": prompt}],
                             add_generation_prompt=True,
+                            return_dict=False,
                         )
                     else:
                         prompt_tokens = self.tokenizer.encode(prompt)
